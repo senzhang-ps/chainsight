@@ -1,0 +1,1082 @@
+import pandas as pd
+import numpy as np
+import os
+from typing import Dict, Tuple, List
+from collections import defaultdict, deque
+from datetime import datetime, timedelta
+
+def load_config(config_path: str) -> Dict[str, pd.DataFrame]:
+    """
+    Load configuration data from Excel file
+    Uses Global_Network's location_type field directly
+    
+    Args:
+        config_path: Path to the configuration Excel file
+        
+    Returns:
+        Dictionary of configuration DataFrames
+    """
+    sheet_mapping = {
+        'M3_SafetyStock': ('safety_stock', pd.DataFrame()),
+        'Global_Network': ('network_config', pd.DataFrame()),
+        'Global_LeadTime': ('lead_time_config', pd.DataFrame())
+    }
+    
+    try:
+        xl = pd.ExcelFile(config_path)
+        loaded_config = {}
+        
+        for sheet_name, (key, default) in sheet_mapping.items():
+            if sheet_name in xl.sheet_names:
+                loaded_config[key] = xl.parse(sheet_name)
+                # Convert date columns if they exist
+                if key in ['safety_stock'] and 'date' in loaded_config[key].columns:
+                    loaded_config[key]['date'] = pd.to_datetime(loaded_config[key]['date'])
+                elif key in ['network_config'] and 'eff_from' in loaded_config[key].columns:
+                    loaded_config[key]['eff_from'] = pd.to_datetime(loaded_config[key]['eff_from'])
+                    loaded_config[key]['eff_to'] = pd.to_datetime(loaded_config[key]['eff_to'])
+            else:
+                loaded_config[key] = default
+                
+        return loaded_config
+    except Exception as e:
+        raise RuntimeError(f"Failed to load module3 config from {config_path}: {e}")
+
+
+def load_module1_daily_outputs(module1_output_dir: str, simulation_date: pd.Timestamp) -> Dict[str, pd.DataFrame]:
+    """
+    Load Module1 daily versioned output data for a specific simulation date
+    Module1 generates daily versioned files - this reads the specific day's version
+    
+    Args:
+        module1_output_dir: Directory containing Module1 daily output files
+        simulation_date: The specific simulation date to load data for
+        
+    Returns:
+        Dictionary containing Module1 daily output DataFrames
+    """
+    try:
+        date_str = simulation_date.strftime('%Y%m%d')
+        
+        # Module1 daily output file naming pattern (adjust based on actual pattern)
+        module1_daily_file = f"{module1_output_dir}/module1_output_{date_str}.xlsx"
+        
+        # Alternative patterns if needed
+        if not os.path.exists(module1_daily_file):
+            module1_daily_file = f"{module1_output_dir}/output_simulation_{date_str}.xlsx"
+        
+        if not os.path.exists(module1_daily_file):
+            print(f"Warning: Module1 output file not found for date {date_str}. Using empty DataFrames.")
+            return {
+                'supply_demand_df': pd.DataFrame(),
+                'shipment_df': pd.DataFrame(),
+                'order_df': pd.DataFrame()
+            }
+        
+        xl = pd.ExcelFile(module1_daily_file)
+        module1_data = {}
+        
+        # Expected sheets from Module1 daily output
+        expected_sheets = {
+            'SupplyDemandLog': 'supply_demand_df',
+            'ShipmentLog': 'shipment_df', 
+            'OrderLog': 'order_df'
+        }
+        
+        for sheet_name, key in expected_sheets.items():
+            if sheet_name in xl.sheet_names:
+                df = xl.parse(sheet_name)
+                
+                # Ensure we have a proper DataFrame
+                if not isinstance(df, pd.DataFrame):
+                    df = pd.DataFrame()
+                
+                # Filter for current simulation date data - 只保留模拟周期内的数据
+                if not df.empty and 'date' in df.columns:
+                    df['date'] = pd.to_datetime(df['date'])
+                    # For OrderLog: get orders where simulation_date == current date
+                    if sheet_name == 'OrderLog' and 'simulation_date' in df.columns:
+                        df['simulation_date'] = pd.to_datetime(df['simulation_date'])
+                        # Get today's generated orders (simulation_date = today)
+                        df = df[df['simulation_date'] == simulation_date].copy()
+                    # For ShipmentLog: get today's shipments (date = today)
+                    elif sheet_name == 'ShipmentLog':
+                        df = df[df['date'] == simulation_date].copy()
+                    # For SupplyDemandLog: get current version (all dates up to today)
+                    # This represents remaining forecast after consumption up to today
+                
+                module1_data[key] = df
+            else:
+                module1_data[key] = pd.DataFrame()
+                
+        return module1_data
+        
+    except Exception as e:
+        print(f"Warning: Error loading Module1 daily outputs for {simulation_date.strftime('%Y-%m-%d')}: {e}")
+        return {
+            'supply_demand_df': pd.DataFrame(),
+            'shipment_df': pd.DataFrame(),
+            'order_df': pd.DataFrame()
+        }
+
+
+def assign_location_layers(network_df: pd.DataFrame) -> pd.DataFrame:
+    """分配供应链网络中各节点的层级 - 自动识别最上层节点
+    
+    Args:
+        network_df: 网络配置数据，包含sourcing和location字段
+        
+    Returns:
+        DataFrame: 包含location和对应layer的映射关系
+    """
+    if network_df.empty:
+        return pd.DataFrame({'location': [], 'layer': []})
+        
+    children = defaultdict(list)
+    parents = defaultdict(list)
+    
+    # 第一步：构建父子关系图
+    for _, row in network_df.iterrows():
+        sourcing_val = row['sourcing']
+        location_val = row['location']
+        
+        # Handle null/nan values properly for both scalar and Series cases
+        sourcing_valid = sourcing_val is not None and pd.notna(sourcing_val) and str(sourcing_val).strip() != ''
+        location_valid = location_val is not None and pd.notna(location_val) and str(location_val).strip() != ''
+        
+        if sourcing_valid and location_valid:
+            children[sourcing_val].append(location_val)
+            parents[location_val].append(sourcing_val)
+    
+    # 第二步：收集所有地点
+    all_locations = set(network_df['location'].dropna()).union(set(network_df['sourcing'].dropna()))
+    
+    # 第三步：自动识别最上层节点（没有父节点的节点）
+    # 这些节点可能是真正的根节点，也可能是配置中缺失上游关系的节点
+    potential_roots = [loc for loc in all_locations if not parents[loc]]
+    
+    # 第四步：智能识别真正的根节点
+    # 策略：如果一个地点在sourcing中出现过，说明它有下游，可能是真正的根节点
+    # 如果一个地点只在location中出现，从未在sourcing中出现，说明它可能是叶子节点
+    true_roots = []
+    for loc in potential_roots:
+        if loc in children:  # 该地点有下游节点
+            true_roots.append(loc)
+        else:
+            # 该地点没有下游，可能是叶子节点，需要进一步分析
+            # 检查是否有其他地点指向它
+            has_incoming = any(loc in parents.get(other_loc, []) for other_loc in all_locations)
+            if not has_incoming:
+                # 如果没有任何其他地点指向它，且它也没有下游，可能是孤立的根节点
+                true_roots.append(loc)
+    
+    # 如果没有找到真正的根节点，使用所有potential_roots
+    if not true_roots:
+        true_roots = potential_roots
+    
+    print(f"🔍 自动识别网络层级:")
+    print(f"  总地点数: {len(all_locations)}")
+    print(f"  潜在根节点: {potential_roots}")
+    print(f"  识别出的根节点: {true_roots}")
+    
+    # 第五步：从根节点开始分配层级
+    layer_dict = {}
+    queue = deque()
+    
+    # 根节点从layer 0开始
+    for root in true_roots:
+        queue.append((root, 0))
+        print(f"  📍 根节点: {root} -> Layer 0")
+    
+    # 广度优先遍历分配层级
+    while queue:
+        loc, layer = queue.popleft()
+        if loc in layer_dict and layer_dict[loc] <= layer:
+            continue
+        layer_dict[loc] = layer
+        
+        # 子节点层级 = 父节点层级 + 1
+        for child in children.get(loc, []):
+            queue.append((child, layer + 1))
+            print(f"  📍 子节点: {child} -> Layer {layer + 1} (父节点: {loc})")
+    
+    # 第六步：处理未连接或孤立的节点
+    unassigned = [loc for loc in all_locations if loc not in layer_dict]
+    if unassigned:
+        max_layer = max(layer_dict.values()) if layer_dict else 0
+        for loc in unassigned:
+            layer_dict[loc] = max_layer + 1
+            print(f"  📍 孤立节点: {loc} -> Layer {max_layer + 1}")
+    
+    # 第七步：生成层级映射DataFrame
+    layer_df = pd.DataFrame([
+        {'location': loc, 'layer': layer} 
+        for loc, layer in layer_dict.items()
+    ])
+    
+    # 按层级排序
+    layer_df = layer_df.sort_values('layer')
+    
+    print(f"  ✅ 层级分配完成，共 {len(layer_df)} 个地点")
+    print(f"  层级范围: {layer_df['layer'].min()} - {layer_df['layer'].max()}")
+    
+    return layer_df
+
+def determine_lead_time(
+    sending: str,
+    receiving: str,
+    location_type: str,
+    lead_time_df: pd.DataFrame
+) -> Tuple[int, str]:
+    """确定两地之间的提前期 - 兼容module1的提前期配置格式
+    使用Global_Network中的location_type字段进行计算
+    
+    Args:
+        sending: 发送地点
+        receiving: 接收地点
+        location_type: 地点类型（来自Global_Network）
+        lead_time_df: 提前期配置数据
+        
+    Returns:
+        Tuple[int, str]: (提前期天数, 错误信息)
+    """
+    if lead_time_df.empty:
+        return 1, 'empty_lead_time_config'
+        
+    row = lead_time_df[
+        (lead_time_df['sending'] == sending) & 
+        (lead_time_df['receiving'] == receiving)
+    ]
+    
+    if row.empty:
+        return 1, 'lead_time_missing'
+    
+    try:
+        PDT = int(row.iloc[0]['PDT']) if pd.notna(row.iloc[0]['PDT']) else 0
+        GR = int(row.iloc[0]['GR']) if pd.notna(row.iloc[0]['GR']) else 0
+        MCT = int(row.iloc[0]['MCT']) if pd.notna(row.iloc[0]['MCT']) else 0
+        
+        if str(location_type).lower() == 'plant':
+            lead_time = max(MCT, PDT + GR)
+        else:  # DC (Distribution Center)
+            lead_time = PDT + GR
+            
+        return max(1, lead_time), ""
+        
+    except Exception as e:
+        return 1, f'lead_time_calculation_error: {e}'
+
+def calculate_daily_net_demand(
+    material: str,
+    location: str,
+    date: pd.Timestamp,
+    supply_demand_df: pd.DataFrame,
+    safety_stock_df: pd.DataFrame,
+    unrestricted_inventory_df: pd.DataFrame,
+    in_transit_df: pd.DataFrame,
+    delivery_gr_df: pd.DataFrame,
+    future_production_df: pd.DataFrame,
+    today_shipment_df: pd.DataFrame,
+    open_deployment_df: pd.DataFrame,
+    downstream_forecast_gap: float,
+    downstream_safety_gap: float,
+    horizon: int
+) -> Tuple[float, float]:
+    """计算每日净需求（forecast gap和safety gap） - 兼容module1的数据格式
+    
+    Args:
+        material: 物料编码
+        location: 地点编码
+        date: 计算日期
+        supply_demand_df: 供需数据 (来自Module1 SupplyDemandLog)
+        safety_stock_df: 安全库存数据
+        unrestricted_inventory_df: 无限制库存数据
+        in_transit_df: 在途数据
+        delivery_gr_df: 收货数据
+        future_production_df: 未来确认生产数据
+        today_shipment_df: 今日发货数据 (来自Module1 ShipmentLog)
+        open_deployment_df: 开放调拨数据
+        downstream_forecast_gap: 下游预测缺口
+        downstream_safety_gap: 下游安全库存缺口
+        horizon: 计算周期天数（提前期天数）
+        
+    Returns:
+        Tuple[float, float]: (forecast_gap, safety_gap)
+    """
+    # 参数验证
+    if not isinstance(date, pd.Timestamp):
+        try:
+            date = pd.to_datetime(date)
+        except:
+            raise TypeError("date must be convertible to pandas Timestamp")
+    
+    if horizon <= 0:
+        horizon = 1
+    
+    try:
+        horizon_end = date + pd.Timedelta(days=horizon)
+    except Exception as e:
+        raise ValueError(f"Invalid date calculation: {e}")
+    
+    try:
+        # 1. 当前无限制库存
+        unrestricted_qty = 0.0
+        if not unrestricted_inventory_df.empty and 'material' in unrestricted_inventory_df.columns:
+            inv_row = unrestricted_inventory_df[
+                (unrestricted_inventory_df['material'] == material) &
+                (unrestricted_inventory_df['location'] == location) &
+                (unrestricted_inventory_df['date'] == date)
+            ]
+            unrestricted_qty = float(inv_row['quantity'].sum()) if not inv_row.empty else 0.0
+        
+        # 2. 在途库存
+        in_transit_qty = 0.0
+        if not in_transit_df.empty and 'material' in in_transit_df.columns:
+            in_transit_rows = in_transit_df[
+                (in_transit_df['material'] == material) &
+                (in_transit_df['receiving'] == location)
+            ]
+            in_transit_qty = float(in_transit_rows['quantity'].sum()) if not in_transit_rows.empty else 0.0
+        
+        # 3. 今日收货
+        delivery_gr_qty = 0.0
+        if not delivery_gr_df.empty and 'material' in delivery_gr_df.columns:
+            delivery_gr_rows = delivery_gr_df[
+                (delivery_gr_df['material'] == material) &
+                (delivery_gr_df['receiving'] == location) &
+                (delivery_gr_df['date'] == date)
+            ]
+            delivery_gr_qty = float(delivery_gr_rows['quantity'].sum()) if not delivery_gr_rows.empty else 0.0
+        
+        # 4a. 当日生产收货 (available_date = today)
+        today_production_gr_qty = 0.0
+        if not future_production_df.empty and 'material' in future_production_df.columns:
+            today_production_rows = future_production_df[
+                (future_production_df['material'] == material) &
+                (future_production_df['location'] == location) &
+                (future_production_df['available_date'] == date)
+            ]
+            today_production_gr_qty = float(today_production_rows['quantity'].sum()) if not today_production_rows.empty else 0.0
+        
+        # 4b. 未来确认生产 (available_date > simulation_date)
+        future_production_qty = 0.0
+        if not future_production_df.empty and 'material' in future_production_df.columns:
+            future_production_rows = future_production_df[
+                (future_production_df['material'] == material) &
+                (future_production_df['location'] == location) &
+                (future_production_df['available_date'] > date) &
+                (future_production_df['available_date'] <= horizon_end)
+            ]
+            future_production_qty = float(future_production_rows['quantity'].sum()) if not future_production_rows.empty else 0.0
+        
+        # 5. 今日客户发货 (从可用量中扣除) - 使用Module1的ShipmentLog
+        today_shipment_qty = 0.0
+        if not today_shipment_df.empty and 'material' in today_shipment_df.columns:
+            today_shipment_rows = today_shipment_df[
+                (today_shipment_df['material'] == material) &
+                (today_shipment_df['location'] == location) &
+                (today_shipment_df['date'] == date)
+            ]
+            today_shipment_qty = float(today_shipment_rows['quantity'].sum()) if not today_shipment_rows.empty else 0.0
+        
+        # 6. 开放调拨 (从可用量中扣除) - 从 orchestrator 读取的已经是当日版本的视图
+        open_deployment_qty = 0.0
+        if not open_deployment_df.empty and 'material' in open_deployment_df.columns:
+            open_deployment_rows = open_deployment_df[
+                (open_deployment_df['material'] == material) &
+                (open_deployment_df['sending'] == location)
+            ]
+            # open_deployment使用deployed_qty字段而不quantity
+            if not open_deployment_rows.empty and 'deployed_qty' in open_deployment_rows.columns:
+                open_deployment_qty = float(open_deployment_rows['deployed_qty'].sum())
+            elif not open_deployment_rows.empty and 'quantity' in open_deployment_rows.columns:
+                open_deployment_qty = float(open_deployment_rows['quantity'].sum())
+        
+        # 总可用量计算
+        total_available = (unrestricted_qty + in_transit_qty + delivery_gr_qty + 
+                          today_production_gr_qty + future_production_qty - 
+                          today_shipment_qty - open_deployment_qty)
+
+        # 计算总预测需求 = 本节点需求 + 下游预测缺口
+        # 使用Module1的SupplyDemandLog数据
+        supply_demand_qty = 0.0
+        if not supply_demand_df.empty and 'material' in supply_demand_df.columns:
+            supply_demand_rows = supply_demand_df[
+                (supply_demand_df['material'] == material) &
+                (supply_demand_df['location'] == location) &
+                (supply_demand_df['date'] >= date) &
+                (supply_demand_df['date'] <= horizon_end)
+            ]
+            # 根据Module1的数据结构，使用quantity字段
+            supply_demand_qty = float(supply_demand_rows['quantity'].sum()) if not supply_demand_rows.empty else 0.0
+        
+        total_forecast_demand = supply_demand_qty + downstream_forecast_gap
+        forecast_gap = max(total_forecast_demand - total_available, 0.0)
+        
+        # 计算安全库存需求缺口
+        safety_stock_qty = 0.0
+        if not safety_stock_df.empty and 'material' in safety_stock_df.columns:
+            safety_row = safety_stock_df[
+                (safety_stock_df['material'] == material) &
+                (safety_stock_df['location'] == location) &
+                (safety_stock_df['date'] == horizon_end)
+            ]
+            safety_stock_qty = float(safety_row['safety_stock_qty'].sum()) if not safety_row.empty else 0.0
+        
+        # 总安全需求 = 预测需求 + 下游安全缺口 + 本地安全库存
+        total_safety_demand = total_forecast_demand + safety_stock_qty + downstream_safety_gap
+        safety_gap = max(total_safety_demand - total_available, 0.0) - forecast_gap
+        
+        return forecast_gap, safety_gap
+        
+    except Exception as e:
+        # 记录错误但返回默认值，避免中断整个流程
+        print(f"Warning: Error calculating net demand for {material}-{location} on {date}: {e}")
+        return 0.0, 0.0
+    
+def run_mrp_layered_simulation_daily(
+    sim_date: pd.Timestamp,
+    daily_supply_demand_df: pd.DataFrame,
+    daily_shipment_df: pd.DataFrame,
+    safety_stock_df: pd.DataFrame,
+    unrestricted_inventory_df: pd.DataFrame,
+    in_transit_df: pd.DataFrame,
+    delivery_gr_df: pd.DataFrame,
+    all_production_df: pd.DataFrame,
+    open_deployment_df: pd.DataFrame,
+    network_df: pd.DataFrame,
+    lead_time_df: pd.DataFrame
+) -> pd.DataFrame:
+    """运行单日MRP模拟 - 使用当日版本的Module1数据
+    使用Global_Network中的location_type字段进行提前期计算
+    支持自动识别的根节点生成netdemand
+    
+    Args:
+        sim_date: 模拟日期
+        daily_supply_demand_df: 当日供需数据 (来自Module1 SupplyDemandLog)
+        daily_shipment_df: 当日发货数据 (来自Module1 ShipmentLog)
+        safety_stock_df: 安全库存数据
+        unrestricted_inventory_df: 无限制库存数据
+        in_transit_df: 在途数据
+        delivery_gr_df: 收货数据
+        all_production_df: 全量生产计划数据
+        open_deployment_df: 开放调拨数据
+        network_df: 网络配置数据 (包含location_type字段)
+        lead_time_df: 提前期数据
+        
+    Returns:
+        pd.DataFrame: 当日净需求记录
+    """
+    if network_df.empty:
+        print(f"Warning: Empty network configuration for date {sim_date}")
+        return pd.DataFrame({'material': [], 'location': [], 'requirement_date': [], 'quantity': [], 'demand_element': [], 'layer': []})
+    
+    # 分配层级
+    location_layer_df = assign_location_layers(network_df)
+    if location_layer_df.empty:
+        print(f"Warning: No location layers assigned for date {sim_date}")
+        return pd.DataFrame({'material': [], 'location': [], 'requirement_date': [], 'quantity': [], 'demand_element': [], 'layer': []})
+    
+    location_layer = dict(zip(location_layer_df['location'], location_layer_df['layer']))
+    all_layers = sorted(set(location_layer.values()), reverse=True)
+    all_net_demand_records = []
+
+    # 🔥 关键修改：扩展material_locations，包含所有层级中的地点
+    # 原来的逻辑：只包含network中明确配置的location
+    # material_locations = network_df[['material', 'location']].drop_duplicates()
+    
+    # 新的逻辑：包含所有层级中的地点，并为缺失的material-location组合添加默认配置
+    all_locations_in_layers = set(location_layer.keys())
+    all_materials_in_network = set(network_df['material'].unique())
+    
+    # 构建完整的material-location组合
+    extended_material_locations = []
+    
+    # 1. 添加network中明确配置的组合
+    for _, row in network_df.iterrows():
+        extended_material_locations.append({
+            'material': str(row['material']),
+            'location': str(row['location'])
+        })
+    
+    # 2. 为自动识别的根节点添加缺失的material组合
+    for location in all_locations_in_layers:
+        for material in all_materials_in_network:
+            # 检查这个组合是否已经存在
+            exists = any(
+                ml['material'] == material and ml['location'] == location 
+                for ml in extended_material_locations
+            )
+            
+            if not exists:
+                # 这是一个缺失的组合，需要添加
+                extended_material_locations.append({
+                    'material': str(material),
+                    'location': str(location)
+                })
+    
+    # 去重并转换为DataFrame
+    material_locations = pd.DataFrame(extended_material_locations).drop_duplicates()
+    
+    print(f"🔍 扩展后的material-location组合:")
+    print(f"  原始network配置: {len(network_df)} 条")
+    print(f"  扩展后组合: {len(material_locations)} 条")
+    print(f"  包含的根节点: {[loc for loc in all_locations_in_layers if location_layer.get(loc, -1) == 0]}")
+    
+    # 每天筛选未来的生产计划：available_date > simulation_date
+    future_production_df = all_production_df[
+        all_production_df['available_date'] > sim_date
+    ].copy() if not all_production_df.empty and 'available_date' in all_production_df.columns else pd.DataFrame()
+    
+    # 下游gap分 forecast_gap、safety_gap
+    downstream_gap_dict = defaultdict(lambda: {'forecast_gap': 0.0, 'safety_gap': 0.0})
+
+    for layer in all_layers:
+        parent_gap_accum = defaultdict(lambda: {'forecast_gap': 0.0, 'safety_gap': 0.0})
+        
+        # 获取当前层级的节点
+        material_locations_df = pd.DataFrame(material_locations)
+        layer_mask = material_locations_df['location'].apply(lambda loc: location_layer.get(loc, -1) == layer)
+        layer_nodes = material_locations_df[layer_mask]
+        
+        print(f"   处理Layer {layer}: {len(layer_nodes)} 个节点")
+        
+        for _, ml in layer_nodes.iterrows():
+            material = str(ml['material'])
+            location = str(ml['location'])
+
+            # 查找有效的网络配置
+            network_candidates = network_df[
+                (network_df['material'] == material) &
+                (network_df['location'] == location) &
+                (network_df['eff_from'] <= sim_date) &
+                (network_df['eff_to'] >= sim_date)
+            ]
+
+            if not network_candidates.empty:
+                network_row = network_candidates.iloc[0]
+                upstream = network_row['sourcing']
+                
+                # 处理upstream为nan或None的情况
+                if pd.isna(upstream) or upstream is None:
+                    upstream = None
+                    location_type = 'DC'
+                    horizon = 1
+                else:
+                    # MCT是微生物检测时间，与sending site相关
+                    # 需要查找sending location的location_type
+                    sending_network_candidates = network_df[
+                        (network_df['material'] == material) &
+                        (network_df['location'] == upstream) &
+                        (network_df['eff_from'] <= sim_date) &
+                        (network_df['eff_to'] >= sim_date)
+                    ]
+                    if not sending_network_candidates.empty:
+                        sending_location_type = sending_network_candidates.iloc[0].get('location_type', 'warehouse')
+                    else:
+                        sending_location_type = 'DC'
+                    
+                    horizon, error_msg = determine_lead_time(
+                        sending=str(upstream), 
+                        receiving=str(location), 
+                        location_type=str(sending_location_type),  # 使用sending location的location_type
+                        lead_time_df=lead_time_df
+                    )
+                    
+                    if error_msg:
+                        print(f"Warning: {error_msg} for {upstream}->{location}, using default horizon=1")
+                        horizon = 1
+            else:
+                # 🔥 新增：处理自动识别的根节点（如plant）
+                # 这些节点在network中没有明确配置，但通过层级分析被识别为根节点
+                upstream = None
+                if location_layer.get(location, -1) == 0:
+                    # 这是根节点（如plant），设置默认值
+                    location_type = 'Plant'
+                    horizon = 1
+                    print(f"     自动识别根节点: {material}@{location} (Layer 0)")
+                else:
+                    # 其他未配置的节点
+                    location_type = 'DC'
+                    horizon = 1
+
+            # 获取下游缺口
+            lower_forecast_gap = downstream_gap_dict[(material, location)]['forecast_gap']
+            lower_safety_gap = downstream_gap_dict[(material, location)]['safety_gap']
+
+            # 计算当前节点的净需求
+            forecast_gap, safety_gap = calculate_daily_net_demand(
+                str(material), str(location), sim_date,
+                daily_supply_demand_df, safety_stock_df,
+                unrestricted_inventory_df, in_transit_df,
+                delivery_gr_df, pd.DataFrame(future_production_df),
+                daily_shipment_df, open_deployment_df,
+                lower_forecast_gap, lower_safety_gap, horizon
+            )
+
+            # gap分别加给父节点
+            if upstream and pd.notna(upstream):
+                parent_gap_accum[(material, upstream)]['forecast_gap'] += forecast_gap
+                parent_gap_accum[(material, upstream)]['safety_gap'] += safety_gap
+                print(f"    📤 传递gap到上游: {material}@{upstream} += forecast:{forecast_gap:.2f}, safety:{safety_gap:.2f}")
+
+            # 记录当日净需求
+            if forecast_gap > 0:
+                all_net_demand_records.append({
+                    'material': str(material),
+                    'location': str(location),
+                    'requirement_date': sim_date + pd.Timedelta(days=1),  # +1天，给第二天的Module4使用
+                    'quantity': -forecast_gap,  # 负值表示需求
+                    'demand_element': 'Distribution Demand - Forecast',
+                    'layer': layer,
+                    'simulation_date': sim_date,
+                    'horizon_days': horizon
+                })
+                
+            if safety_gap > 0:
+                all_net_demand_records.append({
+                    'material': str(material),
+                    'location': str(location),
+                    'requirement_date': sim_date + pd.Timedelta(days=1),  # +1天，给第二天的Module4使用
+                    'quantity': -safety_gap,  # 负值表示需求
+                    'demand_element': 'Distribution Demand - Safety Stock',
+                    'layer': layer,
+                    'simulation_date': sim_date,
+                    'horizon_days': horizon
+                })
+
+        # ★关键：本层所有节点gap聚合后再传递给父层
+        downstream_gap_dict = parent_gap_accum
+        
+        if parent_gap_accum:
+            print(f"    📊 Layer {layer} gap汇总:")
+            for (mat, loc), gaps in parent_gap_accum.items():
+                print(f"      {mat}@{loc}: forecast={gaps['forecast_gap']:.2f}, safety={gaps['safety_gap']:.2f}")
+
+    # 生成最终净需求DataFrame
+    net_demand_df = pd.DataFrame(all_net_demand_records)
+    
+    if not net_demand_df.empty and len(net_demand_df) > 0:
+        # 按关键字段分组聚合
+        group_cols = ['material', 'location', 'requirement_date', 'demand_element', 'layer']
+        net_demand_df = (
+            net_demand_df.groupby(group_cols, as_index=False)
+            .agg({
+                'quantity': 'sum',
+                'simulation_date': 'first',
+                'horizon_days': 'first'
+            })
+        )
+        if not net_demand_df.empty:
+            # 直接返回结果，不强制排序以避免类型问题
+            net_demand_df = net_demand_df.reset_index(drop=True)
+    
+    # 确保返回的是DataFrame类型
+    final_df = pd.DataFrame(net_demand_df) if not isinstance(net_demand_df, pd.DataFrame) else net_demand_df
+    
+    print(f"✅ MRP模拟完成，生成 {len(final_df)} 条netdemand记录")
+    if not final_df.empty:
+        print(f"  涉及地点: {sorted(final_df['location'].unique())}")
+        print(f"  涉及物料: {sorted(final_df['material'].unique())}")
+        print(f"  层级分布: {dict(final_df['layer'].value_counts())}")
+    
+    return final_df
+
+def load_excel_with_sheets(filepath: str) -> Dict[str, pd.DataFrame]:
+    """加载Excel文件的所有sheet
+    
+    Args:
+        filepath: Excel文件路径
+        
+    Returns:
+        Dict[str, pd.DataFrame]: sheet名称到DataFrame的映射
+    """
+    xl = pd.ExcelFile(filepath)
+    result = {}
+    for sheet in xl.sheet_names:
+        result[str(sheet)] = xl.parse(sheet)
+    return result
+
+def run_integrated_simulation(
+    module1_output_dir: str,
+    module4_output_path: str,
+    orchestrator_output_path: str,
+    config_path: str,
+    start_date: str,
+    end_date: str,
+    net_demand_output_prefix: str = 'NetDemandOutput_'
+):
+    """运行集成模拟 - 与Module1完全集成的版本
+    每日动态读取Module1当天的输出数据，只处理模拟周期内的数据
+    
+    Args:
+        module1_output_dir: Module1输出目录(包含每日版本文件)
+        module4_output_path: Module4输出文件路径
+        orchestrator_output_path: Orchestrator输出文件路径
+        config_path: 配置文件路径
+        start_date: 开始日期
+        end_date: 结束日期
+        net_demand_output_prefix: 净需求输出文件前缀
+    """
+    print(f"Starting integrated MRP simulation with daily Module1 data loading...")
+    print(f"📊 模拟模式：所有模块只处理模拟周期内的数据")
+    
+    try:
+        # 加载静态配置数据
+        config_data = load_config(config_path)
+        
+        # 加载其他静态数据
+        module4_data = load_excel_with_sheets(module4_output_path)
+        orchestrator_data = load_excel_with_sheets(orchestrator_output_path)
+        
+        # 提取静态配置和数据
+        safety_stock_df = config_data['safety_stock']
+        network_df = config_data['network_config']
+        lead_time_df = config_data['lead_time_config']
+        
+        all_production_df = module4_data.get('ProductionPlan', pd.DataFrame())
+        unrestricted_inventory_df = orchestrator_data.get('InventoryLog', pd.DataFrame())
+        in_transit_df = orchestrator_data.get('InTransit', pd.DataFrame())
+        delivery_gr_df = orchestrator_data.get('Delivery_GR', pd.DataFrame())
+        open_deployment_df = orchestrator_data.get('OpenDeployment', pd.DataFrame())
+        
+        print(f"Successfully loaded static configuration and orchestrator data")
+        
+        # 数据类型转换静态数据
+        date_columns = [
+            (safety_stock_df, 'date'),
+            (unrestricted_inventory_df, 'date'),
+            (in_transit_df, 'available_date'),
+            (delivery_gr_df, 'date'),
+            (all_production_df, 'available_date'),
+            (open_deployment_df, 'creation_date'),
+            (network_df, 'eff_from'),
+            (network_df, 'eff_to')
+        ]
+        
+        for df, col in date_columns:
+            if not df.empty and col in df.columns:
+                df[col] = pd.to_datetime(df[col])
+        
+        # 生成日期范围
+        date_range = pd.date_range(start_date, end_date, freq='D')
+        
+        print(f"Processing {len(date_range)} days from {start_date} to {end_date}")
+        print(f"Each day will load Module1 data dynamically from: {module1_output_dir}")
+        
+        # 每日运行MRP模拟并生成独立输出文件
+        for i, sim_date in enumerate(date_range, 1):
+            print(f"Processing day {i}/{len(date_range)}: {sim_date.strftime('%Y-%m-%d')}")
+            
+            # 动态加载当日Module1数据（只处理模拟周期内的数据）
+            daily_module1_data = load_module1_daily_outputs(module1_output_dir, sim_date)
+            daily_supply_demand_df = daily_module1_data['supply_demand_df']
+            daily_shipment_df = daily_module1_data['shipment_df']
+            
+            print(f"  Loaded Module1 data: SupplyDemand({len(daily_supply_demand_df)} rows), Shipment({len(daily_shipment_df)} rows)")
+            
+            # 运行单日MRP模拟
+            net_demand_df = run_mrp_layered_simulation_daily(
+                sim_date,
+                daily_supply_demand_df,
+                daily_shipment_df,
+                safety_stock_df,
+                unrestricted_inventory_df,
+                in_transit_df,
+                delivery_gr_df,
+                all_production_df,
+                open_deployment_df,
+                network_df,
+                lead_time_df
+            )
+            
+            # 生成当日输出文件名
+            date_str = sim_date.strftime('%Y%m%d')
+            net_demand_output = f"{net_demand_output_prefix}{date_str}.xlsx"
+            
+            # 输出当日结果
+            try:
+                with pd.ExcelWriter(net_demand_output, engine='openpyxl') as writer:
+                    net_demand_df.to_excel(writer, index=False, sheet_name='NetDemand')
+                
+                print(f"  ✓ Day {sim_date.strftime('%Y-%m-%d')} complete. Output: {net_demand_output} ({len(net_demand_df)} demand records)")
+            except Exception as e:
+                print(f"  ✗ Failed to save {net_demand_output}: {e}")
+        
+        print(f"\n✓ Integrated simulation completed successfully!")
+        print(f"  Total files generated: {len(date_range)}")
+        print(f"  Using daily Module1 data and Global_Network location_type field")
+        print(f"  All modules process only simulation interval data")
+        
+    except Exception as e:
+        print(f"\n✗ Integrated simulation failed: {e}")
+        import traceback
+        traceback.print_exc()
+        raise
+
+
+def run_standalone_simulation(
+    module1_output_path: str,
+    module4_output_path: str,
+    orchestrator_output_path: str,
+    config_path: str,
+    start_date: str,
+    end_date: str,
+    net_demand_output_prefix: str = 'NetDemandOutput_'
+):
+    """运行独立模拟 - 每日生成独立输出文件
+    注意: 这是遗留函数，使用静态Module1数据。建议使用run_integrated_simulation获取每日动态数据。
+    
+    Args:
+        module1_output_path: Module1输出文件路径 (静态文件)
+        module4_output_path: Module4输出文件路径
+        orchestrator_output_path: Orchestrator输出文件路径
+        config_path: 配置文件路径
+        start_date: 开始日期
+        end_date: 结束日期
+        net_demand_output_prefix: 净需求输出文件前缀
+    """
+    print("WARNING: Using standalone simulation with static Module1 data.")
+    print("For daily dynamic Module1 data loading, use run_integrated_simulation() instead.")
+    print("")
+    
+    # 使用静态加载方法保持向后兼容
+    try:
+        xl = pd.ExcelFile(module1_output_path)
+        module1_data = {}
+        
+        expected_sheets = {
+            'SupplyDemandLog': 'supply_demand_df',
+            'ShipmentLog': 'shipment_df', 
+            'OrderLog': 'order_df'
+        }
+        
+        for sheet_name, key in expected_sheets.items():
+            if sheet_name in xl.sheet_names:
+                module1_data[key] = xl.parse(sheet_name)
+                if 'date' in module1_data[key].columns:
+                    module1_data[key]['date'] = pd.to_datetime(module1_data[key]['date'])
+            else:
+                module1_data[key] = pd.DataFrame()
+    except Exception as e:
+        raise RuntimeError(f"Failed to load Module1 outputs from {module1_output_path}: {e}")
+    
+    supply_demand_df = module1_data['supply_demand_df']
+    today_shipment_df = module1_data['shipment_df']
+
+    # 读取Module4输出数据 - 全量生产计划
+    module4_data = load_excel_with_sheets(module4_output_path)
+    all_production_df = module4_data.get('ProductionPlan', pd.DataFrame())
+
+    # 读取Orchestrator输出数据
+    orchestrator_data = load_excel_with_sheets(orchestrator_output_path)
+    unrestricted_inventory_df = orchestrator_data.get('InventoryLog', pd.DataFrame())
+    in_transit_df = orchestrator_data.get('InTransit', pd.DataFrame())
+    delivery_gr_df = orchestrator_data.get('Delivery_GR', pd.DataFrame())
+    open_deployment_df = orchestrator_data.get('OpenDeployment', pd.DataFrame())
+
+    # 读取配置数据
+    config_data = load_config(config_path)
+    safety_stock_df = config_data['safety_stock']
+    network_df = config_data['network_config']
+    lead_time_df = config_data['lead_time_config']
+
+    # 数据类型转换
+    for df, col in [
+        (supply_demand_df, 'date'),
+        (today_shipment_df, 'date'),
+        (safety_stock_df, 'date'),
+        (unrestricted_inventory_df, 'date'),
+        (in_transit_df, 'available_date'),
+        (delivery_gr_df, 'date'),
+        (all_production_df, 'available_date'),
+        (open_deployment_df, 'creation_date'),
+        (network_df, 'eff_from'),
+        (network_df, 'eff_to')
+    ]:
+        if col in df.columns:
+            df[col] = pd.to_datetime(df[col])
+
+    # 生成日期范围
+    date_range = pd.date_range(start_date, end_date, freq='D')
+
+    # 每日运行MRP模拟并生成独立输出文件
+    for sim_date in date_range:
+        print(f"Processing date: {sim_date.strftime('%Y-%m-%d')}")
+        
+        # 运行单日MRP模拟 (使用静态数据但过滤当日)
+        # 从静态数据中过滤当日的shipment数据
+        daily_shipment_df = today_shipment_df[
+            today_shipment_df['date'] == sim_date
+        ].copy() if not today_shipment_df.empty else pd.DataFrame()
+        
+        net_demand_df = run_mrp_layered_simulation_daily(
+            sim_date,
+            supply_demand_df,  # 使用全部supply_demand数据
+            daily_shipment_df,  # 使用当日过滤后的shipment数据
+            safety_stock_df,
+            unrestricted_inventory_df,
+            in_transit_df,
+            delivery_gr_df,
+            all_production_df,
+            open_deployment_df,
+            network_df,
+            lead_time_df
+        )
+
+        # 生成当日输出文件名
+        date_str = sim_date.strftime('%Y%m%d')
+        net_demand_output = f"{net_demand_output_prefix}{date_str}.xlsx"
+        
+        # 输出当日结果
+        with pd.ExcelWriter(net_demand_output) as writer:
+            net_demand_df.to_excel(writer, index=False, sheet_name='NetDemand')
+        
+        print(f"Date {sim_date.strftime('%Y-%m-%d')} complete. Output saved to {net_demand_output}")
+
+    print(f"All dates processed. {len(date_range)} files generated.")
+
+def run_integrated_mode(
+    module1_output_dir: str,
+    orchestrator: object,
+    config_dict: dict,
+    start_date: str,
+    end_date: str,
+    output_dir: str
+) -> dict:
+    """
+    Module3 集成模式运行函数
+    所有模块只处理模拟周期内的数据
+    
+    Args:
+        module1_output_dir: Module1输出目录
+        orchestrator: Orchestrator实例
+        config_dict: 配置数据字典
+        start_date: 仿真开始日期
+        end_date: 仿真结束日期
+        output_dir: 输出目录
+        
+    Returns:
+        dict: 包含输出结果的字典
+    """
+    print(f"🔄 Module3 运行于集成模式")
+    print(f"📊 模拟模式：所有模块只处理模拟周期内的数据")
+    
+    # 加载静态配置数据
+    safety_stock_df = config_dict.get('M3_SafetyStock', pd.DataFrame())
+    network_df = config_dict.get('Global_Network', pd.DataFrame())
+    lead_time_df = config_dict.get('Global_LeadTime', pd.DataFrame())
+    
+    # 数据类型转换
+    if not safety_stock_df.empty and 'date' in safety_stock_df.columns:
+        safety_stock_df['date'] = pd.to_datetime(safety_stock_df['date'])
+    if not network_df.empty:
+        if 'eff_from' in network_df.columns:
+            network_df['eff_from'] = pd.to_datetime(network_df['eff_from'])
+        if 'eff_to' in network_df.columns:
+            network_df['eff_to'] = pd.to_datetime(network_df['eff_to'])
+    
+    # 生成日期范围
+    date_range = pd.date_range(start_date, end_date, freq='D')
+    print(f"处理 {len(date_range)} 天，从 {start_date} 到 {end_date}")
+    
+    all_net_demand = []
+    
+    for current_date in date_range:
+        print(f"\n📅 处理日期: {current_date.strftime('%Y-%m-%d')}")
+        
+        # 从Module1加载每日数据（只处理模拟周期内的数据）
+        try:
+            module1_daily_data = load_module1_daily_outputs(module1_output_dir, current_date)
+            supply_demand_df = module1_daily_data.get('supply_demand_df', pd.DataFrame())
+            today_shipment_df = module1_daily_data.get('shipment_df', pd.DataFrame())
+            print(f"  ✅ 从 Module1 加载了 {len(supply_demand_df)} 条供需记录")
+            print(f"  ✅ 从 Module1 加载了 {len(today_shipment_df)} 条发货记录")
+        except Exception as e:
+            print(f"  ⚠️  Module1数据加载失败: {e}")
+            supply_demand_df = pd.DataFrame()
+            today_shipment_df = pd.DataFrame()
+        
+        # 从 Orchestrator 获取动态数据
+        try:
+            unrestricted_inventory_df = orchestrator.get_unrestricted_inventory_view(current_date.strftime('%Y-%m-%d'))
+            in_transit_df = orchestrator.get_planning_intransit_view(current_date.strftime('%Y-%m-%d'))
+            delivery_gr_df = orchestrator.get_delivery_gr_view(current_date.strftime('%Y-%m-%d'))
+            production_gr_df = orchestrator.get_production_gr_view(current_date.strftime('%Y-%m-%d'))
+            open_deployment_df = orchestrator.get_open_deployment_view(current_date.strftime('%Y-%m-%d'))
+            
+            print(f"  ✅ 从 Orchestrator 加载了 {len(unrestricted_inventory_df)} 条库存记录")
+            print(f"  ✅ 从 Orchestrator 加载了 {len(in_transit_df)} 条在途记录")
+            print(f"  ✅ 从 Orchestrator 加载了 {len(delivery_gr_df)} 条收货记录")
+            print(f"  ✅ 从 Orchestrator 加载了 {len(production_gr_df)} 条生产记录")
+            print(f"  ✅ 从 Orchestrator 加载了 {len(open_deployment_df)} 条开放部署记录")
+        except Exception as e:
+            print(f"  ⚠️  Orchestrator数据加载失败: {e}")
+            unrestricted_inventory_df = pd.DataFrame()
+            in_transit_df = pd.DataFrame()
+            delivery_gr_df = pd.DataFrame()
+            production_gr_df = pd.DataFrame()
+            open_deployment_df = pd.DataFrame()
+        
+        # 计算当日的Net Demand  
+        try:
+            net_demand_df = run_mrp_layered_simulation_daily(
+                current_date,
+                supply_demand_df,
+                today_shipment_df,
+                safety_stock_df,
+                unrestricted_inventory_df,
+                in_transit_df,
+                delivery_gr_df,
+                production_gr_df,  # 使用从Orchestrator获取的生产数据
+                open_deployment_df,
+                network_df,
+                lead_time_df
+            )
+            print(f"  ✅ 计算完成，生成 {len(net_demand_df)} 条净需求记录")
+        except Exception as e:
+            print(f"  ❌ 净需求计算失败: {e}")
+            import traceback
+            traceback.print_exc()
+            net_demand_df = pd.DataFrame()
+        
+        # 保存每日输出
+        daily_output_file = f"{output_dir}/Module3Output_{current_date.strftime('%Y%m%d')}.xlsx"
+        try:
+            with pd.ExcelWriter(daily_output_file, engine='openpyxl') as writer:
+                net_demand_df.to_excel(writer, index=False, sheet_name='NetDemand')
+            print(f"  ✅ 已保存每日输出: {daily_output_file}")
+        except Exception as e:
+            print(f"  ⚠️  保存失败: {e}")
+        
+        all_net_demand.extend(net_demand_df.to_dict('records') if not net_demand_df.empty else [])
+    
+    print(f"\n✅ Module3 集成模式处理完成")
+    print(f"  处理了 {len(date_range)} 天")
+    print(f"  生成了 {len(all_net_demand)} 条Net Demand记录")
+    print(f"  所有模块只处理模拟周期内的数据")
+    
+    return {
+        'net_demand_count': len(all_net_demand),
+        'processed_dates': len(date_range),
+        'output_files': [f"Module3Output_{d.strftime('%Y%m%d')}.xlsx" for d in date_range]
+    }
+
+# 主函数
+if __name__ == "__main__":
+    # Example paths, replace with your actual file locations
+    module1_output_path = r"C:\Users\zhang.s.37\OneDrive - Procter and Gamble\9-unattended planning\ChainSight\V0\output_simulation.xlsx"
+    module4_output_path = "Module4_Output.xlsx"
+    orchestrator_output_path = "Orchestrator_Output.xlsx"
+    config_path = "Config_Module3.xlsx"
+    start_date = "2024-01-01"
+    end_date = "2024-01-07"
+    run_standalone_simulation(
+        module1_output_path, 
+        module4_output_path,
+        orchestrator_output_path,
+        config_path, 
+        start_date, 
+        end_date,
+        net_demand_output_prefix='NetDemandOutput_'
+    )

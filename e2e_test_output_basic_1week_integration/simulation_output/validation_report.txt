@@ -1,0 +1,52 @@
+================================================================================
+SUPPLY CHAIN INTEGRATION VALIDATION REPORT
+================================================================================
+Validation Start Time: 2025-08-28 15:41:12
+Validation End Time: 2025-08-28 15:41:13
+Duration: 0.80 seconds
+Total Errors: 0
+Total Warnings: 6
+Total Infos: 24
+
+⚠️  VALIDATION PASSED WITH WARNINGS
+Simulation can proceed but please review warnings.
+
+WARNINGS:
+----------------------------------------
+[15:41:12] [WARNING] [InventoryBalance] [DataAccess] No production GR data available from orchestrator for 2024-01-01. Using zero production receipts.
+[15:41:12] [WARNING] [InventoryBalance] [DataAccess] No delivery GR data available from orchestrator for 2024-01-01. Using zero delivery receipts.
+[15:41:12] [WARNING] [InventoryBalance] [DataAccess] No production GR data available from orchestrator for 2024-01-02. Using zero production receipts.
+[15:41:12] [WARNING] [InventoryBalance] [DataAccess] No delivery GR data available from orchestrator for 2024-01-02. Using zero delivery receipts.
+[15:41:12] [WARNING] [InventoryBalance] [DataAccess] No production GR data available from orchestrator for 2024-01-05. Using zero production receipts.
+[15:41:12] [WARNING] [InventoryBalance] [DataAccess] No delivery GR data available from orchestrator for 2024-01-06. Using zero delivery receipts.
+
+INFORMATION:
+----------------------------------------
+[15:41:12] [INFO] [InventoryBalance] [ConsistencyCheck] Starting inventory consistency validation from 2024-01-01 to 2024-01-07
+[15:41:12] [INFO] [InventoryBalance] [DailyCheck] Checking inventory balance for 2024-01-01
+[15:41:12] [INFO] [InventoryBalance] [BalanceCheck] [2024-01-01] Inventory balance check passed for all 6 items
+[15:41:12] [INFO] [InventoryBalance] [DailyCheck] Checking inventory balance for 2024-01-02
+[15:41:12] [INFO] [InventoryBalance] [BalanceCheck] [2024-01-02] Inventory balance check passed for all 6 items
+[15:41:12] [INFO] [InventoryBalance] [DailyCheck] Checking inventory balance for 2024-01-03
+[15:41:12] [INFO] [InventoryBalance] [BalanceCheck] [2024-01-03] Inventory balance check passed for all 6 items
+[15:41:12] [INFO] [InventoryBalance] [DailyCheck] Checking inventory balance for 2024-01-04
+[15:41:12] [INFO] [InventoryBalance] [BalanceCheck] [2024-01-04] Inventory balance check passed for all 6 items
+[15:41:12] [INFO] [InventoryBalance] [DailyCheck] Checking inventory balance for 2024-01-05
+[15:41:12] [INFO] [InventoryBalance] [BalanceCheck] [2024-01-05] Inventory balance check passed for all 6 items
+[15:41:12] [INFO] [InventoryBalance] [DailyCheck] Checking inventory balance for 2024-01-06
+[15:41:12] [INFO] [InventoryBalance] [BalanceCheck] [2024-01-06] Inventory balance check passed for all 6 items
+[15:41:12] [INFO] [InventoryBalance] [DailyCheck] Checking inventory balance for 2024-01-07
+[15:41:12] [INFO] [InventoryBalance] [BalanceCheck] [2024-01-07] Inventory balance check passed for all 6 items
+[15:41:12] [INFO] [InventoryBalance] [PeriodSummary] Period 2024-01-01 to 2024-01-07: All 42 inventory transactions balanced
+[15:41:12] [INFO] [InventoryBalance] [NegativeCheck] [2024-01-01] No negative inventory detected
+[15:41:12] [INFO] [InventoryBalance] [NegativeCheck] [2024-01-02] No negative inventory detected
+[15:41:12] [INFO] [InventoryBalance] [NegativeCheck] [2024-01-03] No negative inventory detected
+[15:41:12] [INFO] [InventoryBalance] [NegativeCheck] [2024-01-04] No negative inventory detected
+[15:41:12] [INFO] [InventoryBalance] [NegativeCheck] [2024-01-05] No negative inventory detected
+[15:41:12] [INFO] [InventoryBalance] [NegativeCheck] [2024-01-06] No negative inventory detected
+[15:41:12] [INFO] [InventoryBalance] [NegativeCheck] [2024-01-07] No negative inventory detected
+[15:41:12] [INFO] [InventoryBalance] [ConsistencyResult] Inventory consistency validation passed
+
+================================================================================
+END OF VALIDATION REPORT
+================================================================================

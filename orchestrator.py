@@ -349,6 +349,14 @@ class Orchestrator:
         
         return df
     
+    def get_delivery_shipment_log_view(self, date: str) -> pd.DataFrame:
+        date_obj = pd.to_datetime(date).normalize()
+        rows = [r for r in self.delivery_shipment_log if pd.to_datetime(r['date']).normalize() == date_obj]
+        df = pd.DataFrame(rows)
+        if df.empty:
+            df = pd.DataFrame(columns=['date','material','sending','receiving','quantity','ori_deployment_uid','actual_ship_date','actual_delivery_date','type'])
+        return df
+
     def process_module1_shipments(self, shipment_df: pd.DataFrame, date: str):
         """
         Process Module1 shipment data for the specified date
@@ -480,7 +488,7 @@ class Orchestrator:
             date: Simulation date in YYYY-MM-DD format
         """
         date_obj = pd.to_datetime(date).normalize()
-        
+        print(f"[M6->Orch] incoming rows: {len(delivery_df)}; date={date}")
         # Process each delivery record
         for _, row in delivery_df.iterrows():
             uid = str(row['ori_deployment_uid'])

@@ -89,19 +89,54 @@ class ConfigValidator:
             results.append(False)
         
         # Global_LeadTime 验证
+
         if 'Global_LeadTime' in config_dict:
             leadtime_df = config_dict['Global_LeadTime']
             if not leadtime_df.empty:
-                required_cols = ['sending', 'receiving', 'PDT', 'GR', 'MCT']
+                # ✅ OTD 加入必需列
+                required_cols = ['sending', 'receiving', 'PDT', 'OTD', 'GR', 'MCT']
                 results.append(self.vm.validate_required_columns(
                     leadtime_df, required_cols, 'Global_LeadTime', 'Global'
                 ))
-                
-                # 验证数值为正数
-                numeric_cols = ['PDT', 'GR', 'MCT']
+
+                # 数值列转型
+                for col in ['PDT', 'OTD', 'GR', 'MCT']:
+                    if col in leadtime_df.columns:
+                        leadtime_df[col] = pd.to_numeric(leadtime_df[col], errors='coerce')
+
+                # ✅ OTD/GR 非负（允许 0）；PDT/MCT 可按你原策略（如下：正数）
+                # 若你希望 PDT/MCT 也允许 0，可改成类似的非负校验
+                non_negative_cols = ['OTD', 'GR']
+                for col in non_negative_cols:
+                    if col in leadtime_df.columns:
+                        neg_cnt = leadtime_df[leadtime_df[col] < 0].shape[0]
+                        nan_cnt = leadtime_df[leadtime_df[col].isna()].shape[0]
+                        if neg_cnt > 0:
+                            self.vm.add_error("Global", "InvalidValues",
+                                            f"Global_LeadTime column '{col}' has {neg_cnt} negative values")
+                            results.append(False)
+                        if nan_cnt > 0:
+                            self.vm.add_error("Global", "InvalidValues",
+                                            f"Global_LeadTime column '{col}' has {nan_cnt} NaN/invalid values")
+                            results.append(False)
+
                 results.append(self.vm.validate_positive_numbers(
-                    leadtime_df, numeric_cols, 'Global_LeadTime', 'Global'
+                    leadtime_df, ['PDT', 'MCT'], 'Global_LeadTime', 'Global'
                 ))
+
+                # ✅ 同一路线 OTD 必须唯一
+                if 'OTD' in leadtime_df.columns:
+                    nunique_df = (leadtime_df
+                                .groupby(['sending','receiving'])['OTD']
+                                .nunique(dropna=False)
+                                .reset_index(name='n'))
+                    bad = nunique_df[nunique_df['n'] > 1]
+                    if not bad.empty:
+                        sample = bad.head(10).apply(lambda r: f"{r['sending']}→{r['receiving']}", axis=1).tolist()
+                        self.vm.add_error("Global", "InconsistentOTD",
+                                        f"Global_LeadTime has routes with multiple OTD values: {sample}"
+                                        + (" ..." if len(bad) > 10 else ""))
+                        results.append(False)
             else:
                 self.vm.add_warning("Global", "EmptyConfig", "Global_LeadTime configuration is empty")
         else:
@@ -425,6 +460,29 @@ class ConfigValidator:
                                   f"Global_DemandPriority missing basic demand types: {missing_types}")
         
         return all(results) if results else True
+        # === 验证：M6_TruckReleaseCon 里的所有跨节点路线，必须在 Global_LeadTime 里有 OTD ===
+        if 'M6_TruckReleaseCon' in config_dict and not config_dict['M6_TruckReleaseCon'].empty \
+        and 'Global_LeadTime' in config_dict and not config_dict['Global_LeadTime'].empty:
+            truck_con = config_dict['M6_TruckReleaseCon'][['sending','receiving']].drop_duplicates()
+            truck_con = truck_con[truck_con['sending'] != truck_con['receiving']]
+
+            lt = config_dict['Global_LeadTime'][['sending','receiving','OTD']].copy()
+            # 确保数值化
+            lt['OTD'] = pd.to_numeric(lt['OTD'], errors='coerce')
+
+            merged = truck_con.merge(lt, on=['sending','receiving'], how='left', indicator=True)
+            missing = merged[merged['OTD'].isna()]
+
+            if not missing.empty:
+                routes = (missing[['sending','receiving']]
+                        .astype(str)
+                        .agg('→'.join, axis=1)
+                        .tolist())
+                sample = routes[:10]
+                self.vm.add_error("CrossModule", "MissingOTD",
+                                f"Routes in M6_TruckReleaseCon missing OTD in Global_LeadTime: {sample}"
+                                + (" ..." if len(routes) > 10 else ""))
+                results.append(False)
 
 def run_pre_simulation_validation(config_path: str, output_dir: str) -> tuple:
     """

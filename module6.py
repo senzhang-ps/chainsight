@@ -1038,7 +1038,20 @@ def run_physical_flow_module(
                             PDT = int(lt['PDT'].iloc[0]) if not lt.empty else 0
                             GR  = int(lt['GR'].iloc[0])  if not lt.empty else 0
                             delay = sample_delivery_delay(sending, receiving, delay_dist)
-                            eta   = sub['planned_deployment_date'] + pd.Timedelta(days=PDT+GR+delay)
+                            #actual_delivery_date 的新定义是 actual_ship_date + OTD + GR + delay；
+                            #PDT 的角色从“定义”降级为“计划用估计值”（仅用于 M5 倒排、排程预估，而非实际物流入库时效）。
+                            lt = lead_time[(lead_time['sending']==sending) & (lead_time['receiving']==receiving)]
+                            if lt.empty:
+                                raise ValueError(f"缺少路线 {sending}->{receiving} 的 LeadTime 行")
+
+                            OTD = int(pd.to_numeric(lt['OTD'].iloc[0])) if 'OTD' in lt.columns else 0
+                            GR  = int(pd.to_numeric(lt['GR'].iloc[0]))  if 'GR'  in lt.columns else 0
+
+                            OTD = max(0, OTD)
+                            GR  = max(0, GR)
+
+                            ship_date = sim_date  # 发运日定义
+                            eta = ship_date + pd.Timedelta(days=OTD + GR + delay)
 
                             delivery_plan.append({
                                 'vehicle_uid': vehicle_uid,
@@ -1046,9 +1059,10 @@ def run_physical_flow_module(
                                 'material': sub['material'],
                                 'sending': sending, 'receiving': receiving,
                                 'planned_deployment_date': sub['planned_deployment_date'],
-                                'actual_ship_date': sim_date, 'actual_delivery_date': eta,
+                                'actual_ship_date': ship_date,
+                                'actual_delivery_date': eta,
                                 'delivery_qty': rec['load_qty'], 'truck_type': truck_type,
-                                'truck_load_pct': min(max(wfr, vfr), 1.0),  # 展示值
+                                'truck_load_pct': min(max(wfr, vfr), 1.0),
                                 'WFR': min(wfr, 1.0), 'VFR': min(vfr, 1.0)
                             })
                             
@@ -1148,10 +1162,12 @@ def run_physical_flow_module(
         'unsatisfied_count': len(unsat_log),
         'bypass_count': len(bypass_log)
     }
-
-    print(f"\n🎉 仿真完成! 输出已保存至: {output_file}")
-    print(f"📊 统计: 发运 {statistics['delivery_count']} 明细，车辆 {statistics['vehicle_count']} 车，未满足 {statistics['_count']} 项，bypass 命中 {statistics['bypass_count']} 次")
     
+    print(f"\n🎉 仿真完成! 输出已保存至: {output_file}")
+    try:
+        print(f"📊 统计: 发运 {statistics['delivery_count']} 明细，车辆 {statistics['vehicle_count']} 车，未满足 {statistics['unsatisfied_count']} 项，bypass 命中 {statistics['bypass_count']} 次")
+    except Exception as e:
+        print(f"[WARN] printing statistics failed: {e}")
     # 返回结果用于集成模式
     return {
         'delivery_plan': delivery_plan_df,

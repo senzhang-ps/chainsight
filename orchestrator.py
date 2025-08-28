@@ -978,18 +978,17 @@ class Orchestrator:
         delivery_gr = [gr for gr in self.delivery_gr if pd.to_datetime(gr['date']).normalize() == date_obj]
         shipments = [ship for ship in self.shipment_log if pd.to_datetime(ship['date']).normalize() == date_obj]
         
-        # In-transit（当日发运的）
-        in_transit_today = []
-        for uid, transit in self.in_transit.items():
-            if pd.to_datetime(transit['actual_ship_date']).normalize() == date_obj:
-                in_transit_today.append(transit)
+        # M6 发运（当日实际发运）
+        m6_ship_df = self.get_delivery_shipment_log_view(date)
+        m6_ship_count = len(m6_ship_df)
+        m6_ship_qty_total = int(m6_ship_df['quantity'].sum()) if not m6_ship_df.empty else 0
         
         # 统计汇总
         print(f"期初库存条目: {len(beginning_inv)}")
         print(f"生产入库条目: {len(production_gr)}")
         print(f"交付入库条目: {len(delivery_gr)}")
         print(f"发货出库条目: {len(shipments)}")
-        print(f"发运计划出库条目: {len(in_transit_today)}")
+        print(f"发运出库条目(M6): {m6_ship_count}，数量合计: {m6_ship_qty_total}")
         print(f"期末库存条目: {len(ending_inv)}")
         
         # 重点分析MAT_B@DC_001
@@ -1017,10 +1016,12 @@ class Orchestrator:
                       if ship['material'] == material and ship['location'] == location)
         print(f"发货出库: -{ship_qty}")
         
-        # In-transit
-        transit_qty = sum(transit['quantity'] for transit in in_transit_today 
-                         if transit['material'] == material and transit['sending'] == location)
-        print(f"发运出库: -{transit_qty}")
+        # 发运出库按 M6 发运日志统计
+        transit_qty = 0
+        if not m6_ship_df.empty:
+            mask = (m6_ship_df['material'] == material) & (m6_ship_df['sending'] == location)
+            transit_qty = int(m6_ship_df.loc[mask, 'quantity'].sum())
+        print(f"发运出库(M6): -{transit_qty}")
         
         print(f"期末库存: {end_qty}")
         

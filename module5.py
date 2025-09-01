@@ -137,7 +137,7 @@ def load_orchestrator_open_deployment(orchestrator: object, current_date: pd.Tim
     return pd.DataFrame(columns=['material', 'sending', 'quantity'])
 
 def calculate_available_inventory(
-    unrestricted_inventory: dict,
+    beginning_inventory: dict,
     in_transit: dict, 
     delivery_gr: dict,
     today_production_gr: dict,
@@ -146,26 +146,27 @@ def calculate_available_inventory(
     open_deployment: dict
 ) -> dict:
     """
-    计算可用库存，与Module3逻辑完全一致
+    基于期初库存计算可用库存，避免重复计算
     
-    Formula: available_inventory = unrestricted + in_transit + delivery_gr + 
+    Formula: available_inventory = beginning_inventory + in_transit + delivery_gr + 
              today_production + future_production - today_shipment - open_deployment
     
     Args:
+        beginning_inventory: 期初库存字典，键为(material, location)，值为数量
         各个库存维度的字典，键为(material, location)，值为数量
         
     Returns:
         dict: 可用库存字典 {(material, location): quantity}
     """
     all_keys = set()
-    for d in [unrestricted_inventory, in_transit, delivery_gr, today_production_gr, 
+    for d in [beginning_inventory, in_transit, delivery_gr, today_production_gr, 
               future_production, today_shipment, open_deployment]:
         all_keys.update(d.keys())
     
     available_inventory = {}
     for key in all_keys:
         available_inventory[key] = (
-            unrestricted_inventory.get(key, 0) +
+            beginning_inventory.get(key, 0) +
             in_transit.get(key, 0) +
             delivery_gr.get(key, 0) +
             today_production_gr.get(key, 0) +
@@ -454,12 +455,13 @@ def load_integrated_config(
     if orchestrator and current_date:
         date_str = current_date.strftime('%Y-%m-%d')
         try:
-            config['InventoryLog'] = orchestrator.get_unrestricted_inventory_view(date_str)
+            # 🔄 修改：使用期初库存而不是当前库存状态，避免重复计算
+            config['InventoryLog'] = orchestrator.get_beginning_inventory_view(date_str)
             config['InTransit'] = orchestrator.get_planning_intransit_view(date_str)
             config['DeliveryGR'] = load_orchestrator_delivery_gr(orchestrator, current_date)
             config['OpenDeployment'] = load_orchestrator_open_deployment(orchestrator, current_date)
             config['ReceivingSpace'] = orchestrator.get_space_quota_view(date_str)
-            print(f"  ✅ 从 Orchestrator 加载了动态数据")
+            print(f"  ✅ 从 Orchestrator 加载了动态数据（使用期初库存基础）")
         except Exception as e:
             print(f"  ⚠️  从 Orchestrator 加载动态数据失败: {e}")
             # 使用空数据作为备选
@@ -1039,17 +1041,19 @@ def main(
         print(f"📅 仿真日期: {sim_date.strftime('%Y-%m-%d')}")
         print(f"{'='*60}")
 
-        # ===== 库存计算逻辑重构 (与Module3保持一致) =====
-        # 目标公式: available_inventory = 
-        #   unrestricted_inventory +        # 从orchestrator获取当日无限制库存
-        #   in_transit +                   # 从orchestrator获取当日在途库存
-        #   delivery_gr +                  # 从orchestrator获取当日收货数据
-        #   today_production +             # 从Module4获取当日生产 (available_date = today)
-        #   future_production +            # 从Module4获取未来生产 (available_date > today)  
-        #   - today_shipment -             # 从Module1获取当日发货数据
-        #   - open_deployment              # 从orchestrator获取开放调拨数据
+        # ===== 库存计算逻辑重构 (修复重复计算问题) =====
+        # 🔄 新的库存计算公式: 基于期初库存避免重复计算
+        # available_inventory = 
+        #   beginning_inventory +              # 当日期初库存（未包含当日事务）
+        #   in_transit +                      # 在途库存
+        #   delivery_gr +                     # 当日收货数据  
+        #   today_production +                # 当日生产 (available_date = today)
+        #   future_production +               # 未来生产 (available_date > today)
+        #   - today_shipment -                # 当日发货数据
+        #   - open_deployment                 # 开放调拨数据
         
-        start_soh_dict = soh_dict.copy()
+        # 使用期初库存作为基础，避免重复计算M1 shipment和M4 production
+        beginning_inventory = soh_dict.copy()
         
         # 从 Module4 获取当日和未来生产
         today_production_gr = {}
@@ -1100,11 +1104,9 @@ def main(
                 k = (row['material'], row['sending'])
                 open_deployment[k] = open_deployment.get(k, 0) + int(row['quantity'])
         
-        # 使用统一的多维度库存计算公式
-        unrestricted_inventory = start_soh_dict  # 基础库存
-        
+        # 使用修正后的多维度库存计算公式（基于期初库存）
         dynamic_soh = calculate_available_inventory(
-            unrestricted_inventory=unrestricted_inventory,
+            beginning_inventory=beginning_inventory,
             in_transit=today_intransit, 
             delivery_gr=delivery_gr,
             today_production_gr=today_production_gr,
@@ -1112,6 +1114,8 @@ def main(
             today_shipment=today_shipment,
             open_deployment=open_deployment
         )
+        
+        print(f"🔍 库存计算基础: 期初库存 {len(beginning_inventory)} 项, 动态可用库存 {len([k for k, v in dynamic_soh.items() if v > 0])} 项有库存")
         up_gap_next = {}
 
         for layer in layer_list:
@@ -1135,7 +1139,7 @@ def main(
             for mat, loc in all_pairs:
                 node_key = (mat, loc)
                 current_stock = dynamic_soh.get(node_key, 0)
-                print(f"📍 节点: {mat}@{loc} [当前库存: {current_stock}]")
+                print(f"📍 节点: {mat}@{loc} [可用库存: {current_stock}]")
                 
                 demand_rows = collect_node_demands(mat, loc, sim_date, config, up_gap_buffer)
                 if not demand_rows:
@@ -1283,7 +1287,7 @@ def main(
             deployment_plan_rows.extend(plan_push)
             print(f"\n🔄 Push/Soft-push 补货: 生成 {len(plan_push)} 条补货计划")
 
-        # 更新库存
+        # 更新库存（基于当日事务流水）
         deployed_dict = {}
         df = pd.DataFrame(deployment_plan_rows)
         if not df.empty:
@@ -1293,27 +1297,37 @@ def main(
                 qty = row['deployed_qty_invCon'] if row['sending'] != row['receiving'] else 0
                 deployed_dict[k] = deployed_dict.get(k, 0) + qty
 
-        all_keys = set(list(start_soh_dict.keys()) +
+        # 更新soh_dict为下一日的期初库存
+        all_keys = set(list(beginning_inventory.keys()) +
                        list(today_production_gr.keys()) +
                        list(today_intransit.keys()) +
-                       list(deployed_dict.keys()))
+                       list(deployed_dict.keys()) +
+                       list(today_shipment.keys()) +
+                       list(delivery_gr.keys()))
         
         for (mat, loc) in all_keys:
-            start_soh = start_soh_dict.get((mat, loc), 0)
+            beginning_soh = beginning_inventory.get((mat, loc), 0)
             prod = today_production_gr.get((mat, loc), 0)
             intrans = today_intransit.get((mat, loc), 0)
+            deliv_gr = delivery_gr.get((mat, loc), 0)
             deployed = deployed_dict.get((mat, loc), 0)
-            end_soh = start_soh + prod + intrans - deployed
-            soh_dict[(mat, loc)] = end_soh
+            shipped = today_shipment.get((mat, loc), 0)
+            
+            # 期末库存计算：期初 + 生产 + 在途到货 + 收货 - 发货 - 调拨
+            end_soh = beginning_soh + prod + intrans + deliv_gr - shipped - deployed
+            soh_dict[(mat, loc)] = end_soh  # 作为下一日的期初库存
+            
             stock_on_hand_log.append({
                 'material': mat,
                 'location': loc,
                 'date': sim_date,
-                'start_soh': start_soh,
+                'beginning_soh': beginning_soh,
                 'production': prod,
                 'in_transit': intrans,
+                'delivery_gr': deliv_gr,
+                'today_shipment': shipped,
                 'deployed_qty': deployed,
-                'stock_on_hand': end_soh
+                'ending_soh': end_soh
             })
         
         print(f"\n📊 当日统计:")
@@ -1370,6 +1384,7 @@ def main(
     print(f"💾 调拨计划已保存至: {output_path}")
     print(f"📈 总调拨计划数: {len(deployment_plan_rows_df)}")
     print(f"📝 未满足需求数: {len(unfulfilled_all)}")
+    print(f"✅ 修复重复计算问题: 使用期初库存作为计算基础")
     print(f"{'='*60}")
     
     # 返回结果用于集成模式

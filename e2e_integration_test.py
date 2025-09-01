@@ -78,9 +78,10 @@ class E2ETestCase:
             
             # Lead Time Configuration
             'Global_LeadTime': pd.DataFrame([
-                {'sending': 'PLANT_001', 'receiving': 'DC_001', 'PDT': 1, 'GR': 1, 'MCT': 1},
-                {'sending': 'PLANT_001', 'receiving': 'DC_002', 'PDT': 2, 'GR': 1, 'MCT': 1},
-                {'sending': 'DC_001', 'receiving': 'DC_002', 'PDT': 1, 'GR': 1, 'MCT': 1}
+                {'sending': 'PLANT_001', 'receiving': 'DC_001', 'PDT': 2, 'GR': 1, 'MCT': 1, 'OTD':1},
+                {'sending': 'PLANT_001', 'receiving': 'DC_002', 'PDT': 2, 'GR': 1, 'MCT': 1, 'OTD':1},
+                {'sending': 'DC_001', 'receiving': 'DC_002', 'PDT': 2, 'GR': 1, 'MCT': 1, 'OTD':1},
+                {'sending': 'DC_002', 'receiving': 'DC_001', 'PDT': 2, 'GR': 1, 'MCT': 1, 'OTD':1}
             ]),
             
             # Demand Priority (确保包含所有Module5可能生成的demand_element)

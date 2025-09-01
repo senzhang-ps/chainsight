@@ -1,0 +1,15 @@
+date,material,sending,receiving,quantity,ori_deployment_uid,actual_ship_date,actual_delivery_date,type
+2024-01-02,MAT_B,PLANT_001,DC_001,40,MAT_B|PLANT_001|DC_001|2024-01-03|net demand for forecast|000017,2024-01-02,2024-01-04,delivery_shipment
+2024-01-02,MAT_A,PLANT_001,DC_001,10,MAT_A|PLANT_001|DC_001|2024-01-03|net demand for forecast|000022,2024-01-02,2024-01-04,delivery_shipment
+2024-01-02,MAT_A,PLANT_001,DC_001,47,MAT_A|PLANT_001|DC_001|2024-01-04|net demand for forecast|000010,2024-01-02,2024-01-04,delivery_shipment
+2024-01-02,MAT_B,PLANT_001,DC_001,13,MAT_B|PLANT_001|DC_001|2024-01-04|net demand for forecast|000018,2024-01-02,2024-01-04,delivery_shipment
+2024-01-02,MAT_B,PLANT_001,DC_001,27,MAT_B|PLANT_001|DC_001|2024-01-04|net demand for forecast|000018,2024-01-02,2024-01-04,delivery_shipment
+2024-01-02,MAT_A,PLANT_001,DC_001,10,MAT_A|PLANT_001|DC_001|2024-01-04|net demand for forecast|000023,2024-01-02,2024-01-04,delivery_shipment
+2024-01-02,MAT_B,PLANT_001,DC_001,40,MAT_B|PLANT_001|DC_001|2024-01-05|net demand for forecast|000019,2024-01-02,2024-01-04,delivery_shipment
+2024-01-02,MAT_A,PLANT_001,DC_001,10,MAT_A|PLANT_001|DC_001|2024-01-05|net demand for forecast|000024,2024-01-02,2024-01-04,delivery_shipment
+2024-01-02,MAT_B,PLANT_001,DC_001,33,MAT_B|PLANT_001|DC_001|2024-01-01|net demand for safety|000006,2024-01-02,2024-01-04,delivery_shipment
+2024-01-02,MAT_A,PLANT_001,DC_002,10,MAT_A|PLANT_001|DC_002|2024-01-03|net demand for forecast|000025,2024-01-02,2024-01-05,delivery_shipment
+2024-01-02,MAT_A,PLANT_001,DC_002,30,MAT_A|PLANT_001|DC_002|2024-01-04|net demand for forecast|000014,2024-01-02,2024-01-04,delivery_shipment
+2024-01-02,MAT_A,PLANT_001,DC_002,10,MAT_A|PLANT_001|DC_002|2024-01-04|net demand for forecast|000026,2024-01-02,2024-01-04,delivery_shipment
+2024-01-02,MAT_A,PLANT_001,DC_002,10,MAT_A|PLANT_001|DC_002|2024-01-05|net demand for forecast|000027,2024-01-02,2024-01-05,delivery_shipment
+2024-01-02,MAT_A,PLANT_001,DC_002,42,MAT_A|PLANT_001|DC_002|2024-01-01|net demand for safety|000015,2024-01-02,2024-01-04,delivery_shipment

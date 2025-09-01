@@ -1,0 +1,32 @@
+E2E Integration Test Report
+========================================
+Test Name: basic_1week_integration
+Test Date: 2025-09-01 11:27:22
+Simulation Period: 2024-01-01 to 2024-01-07
+
+Test Results:
+--------------------
+Days Processed: 7
+Output Directory: e2e_test_output_basic_1week_integration\simulation_output
+
+Module Results:
+--------------------
+MODULE1: 7 successful days
+MODULE3: 7 successful days
+MODULE4: 7 successful days
+MODULE5: 7 successful days
+MODULE6: 7 successful days
+
+Final Statistics:
+--------------------
+date: 2024-01-07
+total_inventory_items: 6
+total_inventory_quantity: 286
+open_deployment_count: 39
+in_transit_count: 20
+production_gr_count: 2
+delivery_gr_count: 7
+shipment_count: 4
+
+Validation Results:
+--------------------

@@ -258,52 +258,68 @@ def determine_lead_time(
     except Exception as e:
         return 1, f'lead_time_calculation_error: {str(e)}'
 
-def assign_network_layers(network_df: pd.DataFrame) -> pd.DataFrame:
-    from collections import defaultdict, deque
+def get_sending_location_type(
+    material: str,
+    sending: str,
+    sim_date: pd.Timestamp,
+    network_df: pd.DataFrame,
+    location_layer_map: dict
+) -> str:
+    """
+    与 Module3 一致的口径：
+    1) 先查 network 中 (material, location=sending) 活动行，若存在则用其 location_type
+    2) 若不存在且 sending 是自动识别的最上游（layer=0），则视为 Plant
+    3) 否则默认 DC
+    """
+    if not sending or pd.isna(sending) or str(sending).strip() == "":
+        return 'DC'
 
-    # 1. 原始网络数据处理
-    net = network_df.copy()
-    
-    # 2. 构建父子关系图
+    row = get_active_network(network_df, material, sending, sim_date)
+    if not row.empty:
+        return str(row.iloc[0].get('location_type', 'DC') or 'DC')
+
+    # 未维护但被自动识别为根节点 → Plant
+    if location_layer_map.get(str(sending), None) == 0:
+        return 'Plant'
+
+    return 'DC'
+
+# === 用 module3 的版本替换 ===
+def assign_location_layers(network_df: pd.DataFrame) -> pd.DataFrame:
+    from collections import defaultdict, deque
+    if network_df.empty:
+        return pd.DataFrame({'location': [], 'layer': []})
+
     children = defaultdict(list)
     parents = defaultdict(list)
-    for _, row in net.iterrows():
-        if pd.notna(row['sourcing']):  # 只处理有效的sourcing关系
-            children[row['sourcing']].append(row['location'])
-            parents[row['location']].append(row['sourcing'])
+    for _, row in network_df.iterrows():
+        sourcing_val = row['sourcing']
+        location_val = row['location']
+        sourcing_valid = sourcing_val is not None and pd.notna(sourcing_val) and str(sourcing_val).strip() != ''
+        location_valid = location_val is not None and pd.notna(location_val) and str(location_val).strip() != ''
+        if sourcing_valid and location_valid:
+            children[sourcing_val].append(location_val)
+            parents[location_val].append(sourcing_val)
 
-    # 3. 收集所有涉及的节点
-    all_locations = set()
-    # 添加所有location节点
-    all_locations.update(network_df['location'].dropna().unique())
-    # 添加所有sourcing节点（可能不在location列中）
-    all_locations.update(network_df['sourcing'].dropna().unique())
+    all_locations = set(network_df['location'].dropna()).union(set(network_df['sourcing'].dropna()))
+    potential_roots = [loc for loc in all_locations if not parents[loc]]
 
-    # 4. 自动识别根节点（没有父节点的节点）
-    roots = []
-    for loc in all_locations:
-        if not parents.get(loc):  # 没有父节点或父节点为空
-            roots.append(loc)
-    
-    # 5. 如果没有明确的根节点，使用启发式方法
-    if not roots:
-        # 启发式：寻找在网络中作为sourcing出现但不作为location出现的节点
-        sourcing_only = set(network_df['sourcing'].dropna().unique()) - set(network_df['location'].dropna().unique())
-        if sourcing_only:
-            roots = list(sourcing_only)
+    true_roots = []
+    for loc in potential_roots:
+        if loc in children:
+            true_roots.append(loc)
         else:
-            # 最后手段：使用所有节点中最上游的节点
-            all_sourcing = set(network_df['sourcing'].dropna().unique())
-            all_locations_set = set(network_df['location'].dropna().unique())
-            potential_roots = all_sourcing - all_locations_set
-            roots = list(potential_roots) if potential_roots else list(all_locations)[:1] if all_locations else []
+            has_incoming = any(loc in parents.get(other_loc, []) for other_loc in all_locations)
+            if not has_incoming:
+                true_roots.append(loc)
+    if not true_roots:
+        true_roots = potential_roots
 
-    # 6. 层级分配（BFS）
     layer_dict = {}
+    from collections import deque
     queue = deque()
-    for root in roots:
+    for root in true_roots:
         queue.append((root, 0))
-    
     while queue:
         loc, layer = queue.popleft()
         if loc in layer_dict and layer_dict[loc] <= layer:
@@ -311,17 +327,15 @@ def assign_network_layers(network_df: pd.DataFrame) -> pd.DataFrame:
         layer_dict[loc] = layer
         for child in children.get(loc, []):
             queue.append((child, layer + 1))
-    
-    # 7. 孤立点处理
-    for loc in all_locations:
-        if loc not in layer_dict:
-            layer_dict[loc] = max(layer_dict.values()) + 1 if layer_dict else 0
-    
-    # 8. 反转层级（让消费者层为0，供应商层递增）
+
+    unassigned = [loc for loc in all_locations if loc not in layer_dict]
+    if unassigned:
+        max_layer = max(layer_dict.values()) if layer_dict else 0
+        for loc in unassigned:
+            layer_dict[loc] = max_layer + 1
+
     layer_df = pd.DataFrame([{'location': loc, 'layer': layer} for loc, layer in layer_dict.items()])
-    max_layer = layer_df['layer'].max()
-    layer_df['layer'] = max_layer - layer_df['layer']
-    
+    layer_df = layer_df.sort_values('layer')
     return layer_df
 
 def get_active_network(network_df, material, location, sim_date):
@@ -637,30 +651,28 @@ def collect_node_demands(material, location, sim_date, config, up_gap_buffer):
     network_row = get_active_network(network, material, location, sim_date)
     if not network_row.empty:
         upstream = network_row.iloc[0]['sourcing']
-        
-        # MCT是微生物检测时间，与sending site相关
-        # 需要查找sending location的location_type
-        if upstream:
-            sending_network_row = get_active_network(network, material, upstream, sim_date)
-            if not sending_network_row.empty:
-                sending_location_type = sending_network_row.iloc[0].get('location_type', 'DC')
-            else:
-                sending_location_type = 'DC'
-        else:
-            sending_location_type = 'DC'
     else:
         upstream = None
-        sending_location_type = 'DC'
+
+    # 统一口径：通过层级判根→Plant
+    sending_location_type = get_sending_location_type(
+        material=str(material),
+        sending=str(upstream) if upstream else "",
+        sim_date=sim_date,
+        network_df=network,
+        location_layer_map=config.get('LocationLayerMap', {})
+    )
+
 
     # 使用与Module3一致的提前期计算逻辑
     if upstream and pd.notna(upstream) and str(upstream).strip():
         leadtime, error_msg = determine_lead_time(
             sending=str(upstream),
             receiving=str(location),
-            location_type=str(sending_location_type),  # 使用sending location的location_type
+            location_type=str(sending_location_type),
             lead_time_df=leadtime_df,
             m4_mlcfg_df=config.get('M4_MaterialLocationLineCfg', pd.DataFrame()),
-            material=str(material)  
+            material=str(material)
         )
         if error_msg:
             print(f"Warning: {error_msg} for {upstream}->{location}, using default leadtime=1")
@@ -836,20 +848,19 @@ def push_softpush_allocation(
             # 关键：查leadtime，使用与Module3一致的逻辑
             # MCT是微生物检测时间，与sending site相关
             # 获取sending location的location_type
-            sending_network_row = net[
-                (net['material'] == mat) & (net['location'] == sending)
-            ]
-            if not sending_network_row.empty:
-                sending_location_type = sending_network_row.iloc[0].get('location_type', 'DC')
-            else:
-                sending_location_type = 'DC'
-            
+            sending_location_type = get_sending_location_type(
+                material=str(mat),
+                sending=str(sending),
+                sim_date=sim_date,
+                network_df=net,
+                location_layer_map=config.get('LocationLayerMap', {})
+            )
             leadtime, error_msg = determine_lead_time(
                 sending=str(sending),
                 receiving=str(loc),
-                location_type=str(sending_location_type),  # 使用sending location的location_type
+                location_type=str(sending_location_type),
                 lead_time_df=leadtime_df,
-                m4_mlcfg_df=config.get('M4_MaterialLocationLineCfg', pd.DataFrame()),  
+                m4_mlcfg_df=config.get('M4_MaterialLocationLineCfg', pd.DataFrame()),
                 material=str(mat)
             )
             if error_msg:
@@ -1027,12 +1038,11 @@ def main(
     demand_priority = config['DemandPriority']
     receiving_space = config['ReceivingSpace']
 
-    network_layers = assign_network_layers(network)
+    network_layers = assign_location_layers(network)
     location_to_layer = dict(zip(network_layers['location'], network_layers['layer']))
-    layer_list = sorted(network_layers['layer'].unique())
-
+    layer_list = sorted(network_layers['layer'].unique(), reverse=True)  # 从最大层往上游推进
     demand_priority_map = {row['demand_element']: row['priority'] for _, row in demand_priority.iterrows()}
-
+    config['LocationLayerMap'] = location_to_layer
     # ========== 初始化库存 soh_dict ==========
 
     # 1. 全收集所有material/location
@@ -1043,7 +1053,7 @@ def main(
 
     # 2. 确定仿真开始日期并获取当天的库存
     # 集成模式下使用第一个仿真日期，独立模式下使用sim_start参数
-    actual_sim_start = sim_dates[0] if isinstance(sim_dates, list) and len(sim_dates) > 0 else sim_start
+    actual_sim_start = (sim_dates[0] if hasattr(sim_dates, '__getitem__') else pd.to_datetime(sim_start))
     
     inv_df = inventory_log[inventory_log['date'] == actual_sim_start]
     if inv_df.empty:
@@ -1318,8 +1328,6 @@ def main(
         # push/soft-push再分配
         plan_push = push_softpush_allocation(deployment_plan_rows, config, dynamic_soh, sim_date)
         if plan_push:
-            for plan in plan_push:
-                plan['planned_delivery_date'] = plan['date']
             deployment_plan_rows.extend(plan_push)
             print(f"\n🔄 Push/Soft-push 补货: 生成 {len(plan_push)} 条补货计划")
 
@@ -1436,13 +1444,6 @@ def main(
         }
     }
 
-# 辅助函数（如assign_network_layers、collect_node_demands等）请按你当前最新版粘贴在同一个文件
-# get_upstream需要sim_date参数
-def get_upstream(location, material, network_df, sim_date):
-    row = get_active_network(network_df, material, location, sim_date)
-    if not row.empty:
-        return row.iloc[0]['sourcing']
-    return None
 
 if __name__ == '__main__':
     import argparse

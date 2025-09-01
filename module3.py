@@ -222,6 +222,53 @@ def assign_location_layers(network_df: pd.DataFrame) -> pd.DataFrame:
     
     return layer_df
 
+# === 新增：放在 assign_location_layers 之后 ===
+def infer_sending_location_type(
+    network_df: pd.DataFrame,
+    location_layer_df: pd.DataFrame,
+    sending: str,
+    material: str | None,
+    sim_date: pd.Timestamp
+) -> str:
+    """
+    推断发送端的 location_type：
+    1) 若存在 (material, location==sending) 的显式配置，直接使用其 location_type
+    2) 若 sending 是根节点(layer==0)，判为 'Plant'
+    3) 若 sending 只在 sourcing 列出现、从不在 location 列出现，判为 'Plant'
+    4) 其他情况默认为 'DC'
+    """
+    if sending is None or (isinstance(sending, float) and pd.isna(sending)) or str(sending).strip() == '':
+        return 'DC'
+
+    # ① 显式配置（同物料、有效期内）
+    if material is not None and not network_df.empty:
+        explicit = network_df[
+            (network_df['material'] == material) &
+            (network_df['location'] == sending) &
+            (network_df['eff_from'] <= sim_date) &
+            (network_df['eff_to'] >= sim_date)
+        ]
+        if not explicit.empty:
+            t = explicit.iloc[0].get('location_type', None)
+            if isinstance(t, str) and t.strip():
+                return t
+
+    # ② 根节点（layer==0）→ Plant
+    if not location_layer_df.empty:
+        layer_map = dict(zip(location_layer_df['location'], location_layer_df['layer']))
+        if layer_map.get(sending, None) == 0:
+            return 'Plant'
+
+    # ③ 只在 sourcing 中出现、从不在 location 中出现 → Plant
+    #    （处理“源头 Plant 只维护在 sourcing 列”的常见情况）
+    appears_as_sourcing = network_df['sourcing'].astype(str).eq(str(sending)).any()
+    appears_as_location = network_df['location'].astype(str).eq(str(sending)).any()
+    if appears_as_sourcing and not appears_as_location:
+        return 'Plant'
+
+    # ④ 兜底
+    return 'DC'
+
 def _get_ptf_lsk(material: str, site: str, m4_mlcfg_df: pd.DataFrame | None) -> tuple[int, int]:
     """
     从 M4_MaterialLocationLineCfg 读取 (PTF, LSK)
@@ -603,21 +650,18 @@ def run_mrp_layered_simulation_daily(
                 else:
                     # MCT是微生物检测时间，与sending site相关
                     # 需要查找sending location的location_type
-                    sending_network_candidates = network_df[
-                        (network_df['material'] == material) &
-                        (network_df['location'] == upstream) &
-                        (network_df['eff_from'] <= sim_date) &
-                        (network_df['eff_to'] >= sim_date)
-                    ]
-                    if not sending_network_candidates.empty:
-                        sending_location_type = sending_network_candidates.iloc[0].get('location_type', 'warehouse')
-                    else:
-                        sending_location_type = 'DC'
-                    
+                    sending_location_type = infer_sending_location_type(
+                        network_df=network_df,
+                        location_layer_df=location_layer_df,
+                        sending=str(upstream),
+                        material=str(material),
+                        sim_date=sim_date
+                    )
+
                     horizon, error_msg = determine_lead_time(
-                        sending=str(upstream), 
-                        receiving=str(location), 
-                        location_type=str(sending_location_type),  # 使用sending location的location_type
+                        sending=str(upstream),
+                        receiving=str(location),
+                        location_type=str(sending_location_type),   # ← 现在能正确识别 Plant
                         lead_time_df=lead_time_df,
                         m4_mlcfg_df=m4_mlcfg_df,
                         material=str(material)

@@ -117,7 +117,8 @@ class E2ETestCase:
             'M5_DeployConfig': pd.DataFrame([
                 {'material': 'MAT_A', 'sending': 'PLANT_001', 'receiving': 'DC_001', 'moq': 50, 'rv': 25, 'lsk': 7, 'day': 1},
                 {'material': 'MAT_A', 'sending': 'PLANT_001', 'receiving': 'DC_002', 'moq': 50, 'rv': 25, 'lsk': 7, 'day': 1},
-                {'material': 'MAT_B', 'sending': 'PLANT_001', 'receiving': 'DC_001', 'moq': 40, 'rv': 20, 'lsk': 7, 'day': 1},                {'material': 'MAT_B', 'sending': 'DC_001', 'receiving': 'DC_002', 'moq': 25, 'rv': 12, 'lsk': 3, 'day': 1}   # 新增：DC间调拨
+                {'material': 'MAT_B', 'sending': 'PLANT_001', 'receiving': 'DC_001', 'moq': 40, 'rv': 20, 'lsk': 7, 'day': 1},
+                {'material': 'MAT_B', 'sending': 'DC_001', 'receiving': 'DC_002', 'moq': 25, 'rv': 12, 'lsk': 3, 'day': 1}   # 新增：DC间调拨
             ]),
             
 

@@ -1,10 +1,14 @@
 material,sending,receiving,planned_deployment_date,deployed_qty,demand_element,ori_deployment_uid
 MAT_B,DC_002,DC_002,2024-01-01,15,safety,MAT_B|DC_002|DC_002|2024-01-01|safety|000001
-MAT_A,PLANT_001,PLANT_001,2024-01-01,100,safety,MAT_A|PLANT_001|PLANT_001|2024-01-01|safety|000002
-MAT_A,PLANT_001,DC_002,2024-01-04,30,net demand for forecast,MAT_A|PLANT_001|DC_002|2024-01-04|net demand for forecast|000005
-MAT_A,PLANT_001,DC_002,2024-01-01,42,net demand for safety,MAT_A|PLANT_001|DC_002|2024-01-01|net demand for safety|000006
-MAT_A,PLANT_001,DC_001,2024-01-04,14,net demand for forecast,MAT_A|PLANT_001|DC_001|2024-01-04|net demand for forecast|000009
-MAT_A,PLANT_001,DC_001,2024-01-01,57,net demand for safety,MAT_A|PLANT_001|DC_001|2024-01-01|net demand for safety|000010
-MAT_B,PLANT_001,PLANT_001,2024-01-01,80,safety,MAT_B|PLANT_001|PLANT_001|2024-01-01|safety|000011
-MAT_B,PLANT_001,DC_001,2024-01-04,40,net demand for forecast,MAT_B|PLANT_001|DC_001|2024-01-04|net demand for forecast|000014
-MAT_B,PLANT_001,DC_001,2024-01-01,60,net demand for safety,MAT_B|PLANT_001|DC_001|2024-01-01|net demand for safety|000015
+MAT_A,PLANT_001,PLANT_001,2024-01-01,83,safety,MAT_A|PLANT_001|PLANT_001|2024-01-01|safety|000002
+MAT_A,PLANT_001,DC_002,2024-01-04,3,net demand for forecast,MAT_A|PLANT_001|DC_002|2024-01-04|net demand for forecast|000005
+MAT_A,PLANT_001,DC_002,2024-01-05,41,net demand for forecast,MAT_A|PLANT_001|DC_002|2024-01-05|net demand for forecast|000006
+MAT_A,PLANT_001,DC_002,2024-01-06,41,net demand for forecast,MAT_A|PLANT_001|DC_002|2024-01-06|net demand for forecast|000007
+MAT_A,PLANT_001,DC_001,2024-01-05,41,net demand for forecast,MAT_A|PLANT_001|DC_001|2024-01-05|net demand for forecast|000011
+MAT_A,PLANT_001,DC_001,2024-01-06,41,net demand for forecast,MAT_A|PLANT_001|DC_001|2024-01-06|net demand for forecast|000012
+MAT_B,PLANT_001,PLANT_001,2024-01-01,80,safety,MAT_B|PLANT_001|PLANT_001|2024-01-01|safety|000013
+MAT_B,PLANT_001,DC_001,2024-01-04,24,net demand for forecast,MAT_B|PLANT_001|DC_001|2024-01-04|net demand for forecast|000016
+MAT_B,PLANT_001,DC_001,2024-01-05,40,net demand for forecast,MAT_B|PLANT_001|DC_001|2024-01-05|net demand for forecast|000017
+MAT_B,PLANT_001,DC_001,2024-01-06,40,net demand for forecast,MAT_B|PLANT_001|DC_001|2024-01-06|net demand for forecast|000018
+MAT_B,PLANT_001,DC_001,2024-01-07,40,net demand for forecast,MAT_B|PLANT_001|DC_001|2024-01-07|net demand for forecast|000019
+MAT_B,PLANT_001,DC_001,2024-01-01,60,net demand for safety,MAT_B|PLANT_001|DC_001|2024-01-01|net demand for safety|000020

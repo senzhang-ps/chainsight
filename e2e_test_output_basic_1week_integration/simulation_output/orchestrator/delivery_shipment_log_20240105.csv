@@ -1,8 +1,8 @@
 date,material,sending,receiving,quantity,ori_deployment_uid,actual_ship_date,actual_delivery_date,type
-2024-01-05,MAT_A,PLANT_001,DC_001,12,MAT_A|PLANT_001|DC_001|2024-01-06|net demand for forecast|000059,2024-01-05,2024-01-07,delivery_shipment
-2024-01-05,MAT_A,PLANT_001,DC_001,12,MAT_A|PLANT_001|DC_001|2024-01-07|net demand for forecast|000060,2024-01-05,2024-01-07,delivery_shipment
-2024-01-05,MAT_A,PLANT_001,DC_001,12,MAT_A|PLANT_001|DC_001|2024-01-08|net demand for forecast|000061,2024-01-05,2024-01-07,delivery_shipment
-2024-01-05,MAT_B,PLANT_001,DC_001,8,MAT_B|PLANT_001|DC_001|2024-01-02|net demand for safety|000027,2024-01-05,2024-01-07,delivery_shipment
-2024-01-05,MAT_A,PLANT_001,DC_002,12,MAT_A|PLANT_001|DC_002|2024-01-06|net demand for forecast|000062,2024-01-05,2024-01-07,delivery_shipment
-2024-01-05,MAT_A,PLANT_001,DC_002,12,MAT_A|PLANT_001|DC_002|2024-01-07|net demand for forecast|000063,2024-01-05,2024-01-07,delivery_shipment
-2024-01-05,MAT_A,PLANT_001,DC_002,12,MAT_A|PLANT_001|DC_002|2024-01-08|net demand for forecast|000064,2024-01-05,2024-01-07,delivery_shipment
+2024-01-05,MAT_A,PLANT_001,DC_001,10,MAT_A|PLANT_001|DC_001|2024-01-06|net demand for forecast|000058,2024-01-05,2024-01-07,delivery_shipment
+2024-01-05,MAT_A,PLANT_001,DC_001,10,MAT_A|PLANT_001|DC_001|2024-01-07|net demand for forecast|000059,2024-01-05,2024-01-07,delivery_shipment
+2024-01-05,MAT_A,PLANT_001,DC_001,10,MAT_A|PLANT_001|DC_001|2024-01-08|net demand for forecast|000060,2024-01-05,2024-01-07,delivery_shipment
+2024-01-05,MAT_B,PLANT_001,DC_001,14,MAT_B|PLANT_001|DC_001|2024-01-02|net demand for safety|000020,2024-01-05,2024-01-07,delivery_shipment
+2024-01-05,MAT_A,PLANT_001,DC_002,10,MAT_A|PLANT_001|DC_002|2024-01-06|net demand for forecast|000061,2024-01-05,2024-01-07,delivery_shipment
+2024-01-05,MAT_A,PLANT_001,DC_002,10,MAT_A|PLANT_001|DC_002|2024-01-07|net demand for forecast|000062,2024-01-05,2024-01-07,delivery_shipment
+2024-01-05,MAT_A,PLANT_001,DC_002,10,MAT_A|PLANT_001|DC_002|2024-01-08|net demand for forecast|000063,2024-01-05,2024-01-07,delivery_shipment

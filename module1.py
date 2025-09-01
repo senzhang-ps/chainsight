@@ -3,6 +3,8 @@ import numpy as np
 from scipy.stats import truncnorm
 from scipy.stats import truncnorm
 from datetime import datetime
+import os
+import re
 
 # ----------- 1. LOAD CONFIG (Enhanced) -----------
 def load_config(filename, sheet_mapping=None):
@@ -1412,11 +1414,84 @@ def run_daily_order_generation(
             daily_demand_forecast = demand_forecast.copy()
             print(f"  📊 使用现有日度预测: {len(daily_demand_forecast)}天")
         
-        # 生成当日订单
-        orders_df, consumed_forecast = generate_daily_orders(
+        # 生成当日订单（只包含在今天创建的normal/AO）
+        today_orders_df, consumed_forecast = generate_daily_orders(
             simulation_date, daily_demand_forecast, daily_demand_forecast, 
             ao_config, order_calendar, forecast_error
         )
+
+        # 载入历史订单，并合并形成“当日版本”的订单视图
+        # 目标：满足“每天的订单日志，除了当天产生的，还应包含 requirement_date >= 订单产生日期 的订单”，
+        #      即包含历史天生成但尚未到期或将来到期的AO/普通订单（自然满足 requirement_date >= simulation_date_of_row）。
+        def _load_previous_orders(m1_output_dir: str, current_date: pd.Timestamp) -> pd.DataFrame:
+            try:
+                if not os.path.isdir(m1_output_dir):
+                    return pd.DataFrame()
+                pattern = re.compile(r"module1_output_(\d{8})\.xlsx$")
+                rows = []
+                for fname in os.listdir(m1_output_dir):
+                    m = pattern.match(fname)
+                    if not m:
+                        continue
+                    fdate = pd.to_datetime(m.group(1))
+                    if fdate.normalize() >= current_date.normalize():
+                        # 仅加载当前日之前的版本（历史）
+                        continue
+                    fpath = os.path.join(m1_output_dir, fname)
+                    try:
+                        xl = pd.ExcelFile(fpath)
+                        if 'OrderLog' not in xl.sheet_names:
+                            continue
+                        df = xl.parse('OrderLog')
+                        if df is None or df.empty:
+                            continue
+                        # 标准化字段
+                        if 'date' in df.columns:
+                            df['date'] = pd.to_datetime(df['date'])
+                        if 'simulation_date' in df.columns:
+                            df['simulation_date'] = pd.to_datetime(df['simulation_date'])
+                        rows.append(df)
+                    except Exception:
+                        # 某些文件损坏或打开失败，跳过
+                        continue
+                if not rows:
+                    return pd.DataFrame()
+                prev = pd.concat(rows, ignore_index=True)
+                return prev
+            except Exception:
+                return pd.DataFrame()
+
+        previous_orders_all = _load_previous_orders(output_dir, simulation_date)
+        # 去重：防止从多个历史日文件中重复载入同一订单
+        if not previous_orders_all.empty:
+            dedup_keys = [
+                c for c in ['date','material','location','demand_type','simulation_date','advance_days','quantity']
+                if c in previous_orders_all.columns
+            ]
+            if dedup_keys:
+                previous_orders_all = previous_orders_all.drop_duplicates(subset=dedup_keys)
+
+        # 仅保留历史中“仍在当前及未来生效”的订单，用于供给其他模块的全量视图
+        # 即 requirement_date(=date) >= 今天
+        if not previous_orders_all.empty and 'date' in previous_orders_all.columns:
+            previous_orders_future = previous_orders_all[previous_orders_all['date'] >= simulation_date].copy()
+        else:
+            previous_orders_future = pd.DataFrame()
+
+        # 当日版本订单视图：历史未来订单 + 当天新生成订单
+        if today_orders_df is not None and not today_orders_df.empty:
+            orders_df = pd.concat([previous_orders_future, today_orders_df], ignore_index=True)
+        else:
+            orders_df = previous_orders_future.copy()
+
+        # 规范字段与类型
+        if not orders_df.empty:
+            if 'quantity' in orders_df.columns:
+                orders_df['quantity'] = orders_df['quantity'].astype(int)
+            # 补充字段
+            if 'simulation_date' not in orders_df.columns:
+                # 对缺失simulation_date的历史数据，默认等于其date（保底，不影响当日shipment筛选）
+                orders_df['simulation_date'] = orders_df['date']
         
         # 生成发货数据（基于实际库存限制）
         if orchestrator is not None:

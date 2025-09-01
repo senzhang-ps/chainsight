@@ -1302,10 +1302,27 @@ def main(
                     
                     # 自补货（sending == receiving）不应有leadtime
                     if loc == receiving:
-                        planned_delivery_date = d['plan_deploy_date']  # 本地分配无需leadtime
+                        planned_delivery_date = d['plan_deploy_date']
+                        leadtime_for_row = 0
                     else:
-                        planned_delivery_date = d.get('requirement_date', d['plan_deploy_date'])  # 跨层级调拨使用requirement_date
-                    
+                        planned_delivery_date = d.get('requirement_date', d['plan_deploy_date'])
+                        # 即时计算该行的 lead time：sending=loc, receiving=receiving
+                        sending_location_type = get_sending_location_type(
+                            material=str(mat),
+                            sending=str(loc),
+                            sim_date=sim_date,
+                            network_df=network,
+                            location_layer_map=config.get('LocationLayerMap', {})
+                        )
+                        lt_row, _ = determine_lead_time(
+                            sending=str(loc),
+                            receiving=str(receiving),
+                            location_type=str(sending_location_type),
+                            lead_time_df=config['LeadTime'],
+                            m4_mlcfg_df=config.get('M4_MaterialLocationLineCfg', pd.DataFrame()),
+                            material=str(mat)
+                        )
+                        leadtime_for_row = int(lt_row)
                     plan_row = {
                         'date': d['plan_deploy_date'],
                         'material': mat,
@@ -1316,7 +1333,8 @@ def main(
                         'planned_qty': d['planned_qty'],
                         'deployed_qty_invCon': d['deployed_qty_invCon'],
                         'planned_delivery_date': planned_delivery_date,
-                        'orig_location': d.get('orig_location', d['location'])
+                        'orig_location': d.get('orig_location', d['location']),
+                        'leadtime': leadtime_for_row,
                     }
                     deployment_plan_rows.append(plan_row)
 

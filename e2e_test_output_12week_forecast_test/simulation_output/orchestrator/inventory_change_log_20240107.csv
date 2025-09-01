@@ -1,5 +1,5 @@
 date,material,location,beginning_inventory,production_gr,delivery_gr,shipment,delivery_ship,ending_inventory,calculated_ending,balance_diff
-2024-01-07,MAT_B,PLANT_001,110,0,0,0,0,110,110,0
-2024-01-07,MAT_A,PLANT_001,90,0,0,0,0,90,90,0
 2024-01-07,MAT_B,DC_001,191,0,0,38,0,153,153,0
 2024-01-07,MAT_B,DC_002,15,0,0,0,0,15,15,0
+2024-01-07,MAT_A,PLANT_001,90,0,0,0,0,90,90,0
+2024-01-07,MAT_B,PLANT_001,110,0,0,0,0,110,110,0

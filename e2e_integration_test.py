@@ -167,8 +167,8 @@ class E2ETestCase:
             
             # Module4 Enhanced Configuration (新增生产约束)
             'M4_MaterialLocationLineCfg': pd.DataFrame([
-                {'material': 'MAT_A', 'location': 'PLANT_001', 'delegate_line': 'LINE_A', 'prd_rate': 80, 'min_batch': 20, 'rv': 10, 'lsk': 1, 'ptf': 0, 'day': 1, 'MCT': 1},
-                {'material': 'MAT_B', 'location': 'PLANT_001', 'delegate_line': 'LINE_B', 'prd_rate': 60, 'min_batch': 15, 'rv': 8, 'lsk': 1, 'ptf': 0, 'day': 1, 'MCT': 1}
+                {'material': 'MAT_A', 'location': 'PLANT_001', 'delegate_line': 'LINE_A', 'prd_rate': 80, 'min_batch': 20, 'rv': 10, 'lsk': 1, 'ptf': 2, 'day': 1, 'MCT': 1},
+                {'material': 'MAT_B', 'location': 'PLANT_001', 'delegate_line': 'LINE_B', 'prd_rate': 60, 'min_batch': 15, 'rv': 8, 'lsk': 1, 'ptf': 4, 'day': 1, 'MCT': 1}
             ]),
             
             'M4_LineCapacity': pd.DataFrame([

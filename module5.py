@@ -193,48 +193,68 @@ def apply_moq_rv(qty, moq, rv):
         return moq
     return int(np.ceil(qty / rv)) * rv
 
+def _get_ptf_lsk(material: str, site: str, m4_mlcfg_df: pd.DataFrame | None) -> tuple[int, int]:
+    ptf, lsk = 0, 1
+    if m4_mlcfg_df is None or m4_mlcfg_df.empty:
+        return ptf, lsk
+    ml = m4_mlcfg_df[
+        (m4_mlcfg_df['material'] == material) &
+        (m4_mlcfg_df['location'] == site)
+    ]
+    if ml.empty:
+        return ptf, lsk
+    row = ml.iloc[0]
+    if 'ptf' in ml.columns and pd.notna(row.get('ptf')):
+        ptf = int(row['ptf'])
+    elif 'PTF' in ml.columns and pd.notna(row.get('PTF')):
+        ptf = int(row['PTF'])
+    if 'lsk' in ml.columns and pd.notna(row.get('lsk')):
+        lsk = int(row['lsk'])
+    elif 'LSK' in ml.columns and pd.notna(row.get('LSK')):
+        lsk = int(row['LSK'])
+    return ptf, lsk
+
 def determine_lead_time(
     sending: str,
     receiving: str,
     location_type: str,
-    lead_time_df: pd.DataFrame
+    lead_time_df: pd.DataFrame,
+    m4_mlcfg_df: pd.DataFrame | None = None,   # ← 新增
+    material: str | None = None                # ← 新增
 ) -> tuple[int, str]:
     """
-    确定两地之间的提前期 - 与Module3保持一致
-    使用Global_Network中的location_type字段进行计算
-    
-    Args:
-        sending: 发送地点
-        receiving: 接收地点
-        location_type: 地点类型（来自Global_Network）
-        lead_time_df: 提前期配置数据
-        
-    Returns:
-        tuple[int, str]: (提前期天数, 错误信息)
+    Plant: lead_time = max(MCT, PDT+GR) + PTF + LSK - 1
+    DC:    lead_time = PDT + GR
+    PTF/LSK 来源: M4_MaterialLocationLineCfg（按 material+sending 匹配）
     """
     if lead_time_df.empty:
         return 1, 'empty_lead_time_config'
-        
+
     row = lead_time_df[
-        (lead_time_df['sending'] == sending) & 
+        (lead_time_df['sending'] == sending) &
         (lead_time_df['receiving'] == receiving)
     ]
-    
     if row.empty:
         return 1, 'lead_time_missing'
-    
+
     try:
-        PDT = int(row.iloc[0]['PDT']) if pd.notna(row.iloc[0]['PDT']) else 0
-        GR = int(row.iloc[0]['GR']) if pd.notna(row.iloc[0]['GR']) else 0
-        MCT = int(row.iloc[0]['MCT']) if pd.notna(row.iloc[0]['MCT']) else 0
-        
+        PDT = int(row.iloc[0].get('PDT', 0) or 0)
+        GR  = int(row.iloc[0].get('GR',  0) or 0)
+        MCT = int(row.iloc[0].get('MCT', 0) or 0)
+
+        ptf, lsk = 0, 1
+        if str(location_type).lower() == 'plant' and material is not None:
+            # 与 M3 对齐：按 (material, sending) 取 PTF/LSK
+            ptf, lsk = _get_ptf_lsk(material=material, site=sending, m4_mlcfg_df=m4_mlcfg_df)
+
         if str(location_type).lower() == 'plant':
-            lead_time = max(MCT, PDT + GR)
-        else:  # DC (Distribution Center)
-            lead_time = PDT + GR
-            
-        return max(1, lead_time), ""
-        
+            base_lt  = max(MCT, PDT + GR)
+            leadtime = base_lt + ptf + lsk - 1
+        else:
+            leadtime = PDT + GR
+
+        return max(1, int(leadtime)), ""
+
     except Exception as e:
         return 1, f'lead_time_calculation_error: {str(e)}'
 
@@ -450,7 +470,19 @@ def load_integrated_config(
                     print(f"  ✅ 从 Module4 加载了 {len(m4_production)} 条生产计划数据")
         except Exception as e:
             print(f"  ⚠️  无法从 Module4 加载数据: {e}")
-    
+    # 读取 M4_MaterialLocationLineCfg（用于 PTF/LSK）
+    config['M4_MaterialLocationLineCfg'] = config_dict.get('M4_MaterialLocationLineCfg', pd.DataFrame())
+    if module4_output_path and os.path.exists(module4_output_path):
+        try:
+            xl = pd.ExcelFile(module4_output_path)
+            if 'M4_MaterialLocationLineCfg' in xl.sheet_names:
+                mlcfg = xl.parse('M4_MaterialLocationLineCfg')
+                if not mlcfg.empty:
+                    config['M4_MaterialLocationLineCfg'] = mlcfg
+                    print(f"  ✅ 从 Module4 加载了 {len(mlcfg)} 条 M4_MaterialLocationLineCfg")
+        except Exception as e:
+            print(f"  ⚠️  无法从 Module4 读取 M4_MaterialLocationLineCfg: {e}")
+
     # 4. 从Orchestrator加载动态数据
     if orchestrator and current_date:
         date_str = current_date.strftime('%Y-%m-%d')
@@ -626,7 +658,9 @@ def collect_node_demands(material, location, sim_date, config, up_gap_buffer):
             sending=str(upstream),
             receiving=str(location),
             location_type=str(sending_location_type),  # 使用sending location的location_type
-            lead_time_df=leadtime_df
+            lead_time_df=leadtime_df,
+            m4_mlcfg_df=config.get('M4_MaterialLocationLineCfg', pd.DataFrame()),
+            material=str(material)  
         )
         if error_msg:
             print(f"Warning: {error_msg} for {upstream}->{location}, using default leadtime=1")
@@ -814,7 +848,9 @@ def push_softpush_allocation(
                 sending=str(sending),
                 receiving=str(loc),
                 location_type=str(sending_location_type),  # 使用sending location的location_type
-                lead_time_df=leadtime_df
+                lead_time_df=leadtime_df,
+                m4_mlcfg_df=config.get('M4_MaterialLocationLineCfg', pd.DataFrame()),  
+                material=str(mat)
             )
             if error_msg:
                 print(f"Warning: push/soft push {error_msg} for {sending}->{loc}, using default leadtime=1")

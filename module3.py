@@ -222,49 +222,86 @@ def assign_location_layers(network_df: pd.DataFrame) -> pd.DataFrame:
     
     return layer_df
 
+def _get_ptf_lsk(material: str, site: str, m4_mlcfg_df: pd.DataFrame | None) -> tuple[int, int]:
+    """
+    从 M4_MaterialLocationLineCfg 读取 (PTF, LSK)
+    - 表结构字段：material, location, ..., lsk, ptf, day, MCT
+    - 兼容大小写列名（lsk/LSK, ptf/PTF）
+    - 未命中时默认 PTF=0, LSK=1
+    """
+    ptf, lsk = 0, 1
+    if m4_mlcfg_df is None or m4_mlcfg_df.empty:
+        return ptf, lsk
+
+    ml = m4_mlcfg_df[
+        (m4_mlcfg_df['material'] == material) &
+        (m4_mlcfg_df['location'] == site)
+    ]
+    if ml.empty:
+        return ptf, lsk
+
+    row = ml.iloc[0]
+
+    # PTF
+    if 'ptf' in ml.columns and pd.notna(row.get('ptf')):
+        ptf = int(row['ptf'])
+    elif 'PTF' in ml.columns and pd.notna(row.get('PTF')):
+        ptf = int(row['PTF'])
+
+    # LSK
+    if 'lsk' in ml.columns and pd.notna(row.get('lsk')):
+        lsk = int(row['lsk'])
+    elif 'LSK' in ml.columns and pd.notna(row.get('LSK')):
+        lsk = int(row['LSK'])
+
+    return ptf, lsk
+
 def determine_lead_time(
     sending: str,
     receiving: str,
-    location_type: str,
-    lead_time_df: pd.DataFrame
-) -> Tuple[int, str]:
-    """确定两地之间的提前期 - 兼容module1的提前期配置格式
-    使用Global_Network中的location_type字段进行计算
-    
-    Args:
-        sending: 发送地点
-        receiving: 接收地点
-        location_type: 地点类型（来自Global_Network）
-        lead_time_df: 提前期配置数据
-        
-    Returns:
-        Tuple[int, str]: (提前期天数, 错误信息)
+    location_type: str,                 # 传入“发送端”的类型；Plant 逻辑用它判断
+    lead_time_df: pd.DataFrame,
+    m4_mlcfg_df: pd.DataFrame | None = None,
+    material: str | None = None,
+) -> tuple[int, str]:
+    """
+    提前期：
+      - PDT/GR/MCT 来自 Global_LeadTime（按 sending+receiving 匹配）
+      - 对于 Plant（发送端为 Plant）：lead_time = max(MCT, PDT+GR) + PTF + LSK - 1
+        其中 PTF/LSK 从 M4_MaterialLocationLineCfg 取（列：ptf, lsk；兼容大小写）
+      - 对于 DC：lead_time = PDT + GR
     """
     if lead_time_df.empty:
         return 1, 'empty_lead_time_config'
-        
+
     row = lead_time_df[
-        (lead_time_df['sending'] == sending) & 
+        (lead_time_df['sending'] == sending) &
         (lead_time_df['receiving'] == receiving)
     ]
-    
     if row.empty:
         return 1, 'lead_time_missing'
-    
+
     try:
-        PDT = int(row.iloc[0]['PDT']) if pd.notna(row.iloc[0]['PDT']) else 0
-        GR = int(row.iloc[0]['GR']) if pd.notna(row.iloc[0]['GR']) else 0
-        MCT = int(row.iloc[0]['MCT']) if pd.notna(row.iloc[0]['MCT']) else 0
-        
+        PDT = int(row.iloc[0].get('PDT', 0) or 0)
+        GR  = int(row.iloc[0].get('GR',  0) or 0)
+        MCT = int(row.iloc[0].get('MCT', 0) or 0)
+
+        # 默认不加 PTF/LSK；仅 Plant 时读取
+        ptf, lsk = 0, 1
+        if str(location_type).lower() == 'plant' and material is not None:
+            # 口径：按 (material, sending)匹配
+            ptf, lsk = _get_ptf_lsk(material=material, site=sending, m4_mlcfg_df=m4_mlcfg_df)
+
         if str(location_type).lower() == 'plant':
-            lead_time = max(MCT, PDT + GR)
-        else:  # DC (Distribution Center)
-            lead_time = PDT + GR
-            
-        return max(1, lead_time), ""
-        
+            base_lt  = max(MCT, PDT + GR)
+            leadtime = base_lt + ptf + lsk - 1
+        else:
+            leadtime = PDT + GR
+
+        return max(0, int(leadtime)), ""
+
     except Exception as e:
-        return 1, f'lead_time_calculation_error: {e}'
+        return 0, f'lead_time_calculation_error: {e}'
 
 def calculate_daily_net_demand(
     material: str,
@@ -445,7 +482,8 @@ def run_mrp_layered_simulation_daily(
     all_production_df: pd.DataFrame,
     open_deployment_df: pd.DataFrame,
     network_df: pd.DataFrame,
-    lead_time_df: pd.DataFrame
+    lead_time_df: pd.DataFrame,
+    m4_mlcfg_df: pd.DataFrame | None = None,   
 ) -> pd.DataFrame:
     """运行单日MRP模拟 - 使用当日版本的Module1数据
     使用Global_Network中的location_type字段进行提前期计算
@@ -580,7 +618,9 @@ def run_mrp_layered_simulation_daily(
                         sending=str(upstream), 
                         receiving=str(location), 
                         location_type=str(sending_location_type),  # 使用sending location的location_type
-                        lead_time_df=lead_time_df
+                        lead_time_df=lead_time_df,
+                        m4_mlcfg_df=m4_mlcfg_df,
+                        material=str(material)
                     )
                     
                     if error_msg:
@@ -724,9 +764,8 @@ def run_integrated_simulation(
     try:
         # 加载静态配置数据
         config_data = load_config(config_path)
-        
         # 加载其他静态数据
-        module4_data = load_excel_with_sheets(module4_output_path)
+        module4_data = load_excel_with_sheets(module4_output_path) 
         orchestrator_data = load_excel_with_sheets(orchestrator_output_path)
         
         # 提取静态配置和数据
@@ -735,6 +774,7 @@ def run_integrated_simulation(
         lead_time_df = config_data['lead_time_config']
         
         all_production_df = module4_data.get('ProductionPlan', pd.DataFrame())
+        m4_mlcfg_df = module4_data.get('M4_MaterialLocationLineCfg', pd.DataFrame())
         unrestricted_inventory_df = orchestrator_data.get('InventoryLog', pd.DataFrame())
         in_transit_df = orchestrator_data.get('InTransit', pd.DataFrame())
         delivery_gr_df = orchestrator_data.get('Delivery_GR', pd.DataFrame())
@@ -787,7 +827,8 @@ def run_integrated_simulation(
                 all_production_df,
                 open_deployment_df,
                 network_df,
-                lead_time_df
+                lead_time_df,
+                m4_mlcfg_df
             )
             
             # 生成当日输出文件名
@@ -866,6 +907,7 @@ def run_standalone_simulation(
 
     # 读取Module4输出数据 - 全量生产计划
     module4_data = load_excel_with_sheets(module4_output_path)
+    m4_mlcfg_df = module4_data.get('M4_MaterialLocationLineCfg', pd.DataFrame())
     all_production_df = module4_data.get('ProductionPlan', pd.DataFrame())
 
     # 读取Orchestrator输出数据
@@ -921,7 +963,8 @@ def run_standalone_simulation(
             all_production_df,
             open_deployment_df,
             network_df,
-            lead_time_df
+            lead_time_df,
+            m4_mlcfg_df
         )
 
         # 生成当日输出文件名
@@ -966,7 +1009,7 @@ def run_integrated_mode(
     safety_stock_df = config_dict.get('M3_SafetyStock', pd.DataFrame())
     network_df = config_dict.get('Global_Network', pd.DataFrame())
     lead_time_df = config_dict.get('Global_LeadTime', pd.DataFrame())
-    
+    m4_mlcfg_df = config_dict.get('M4_MaterialLocationLineCfg', pd.DataFrame())
     # 数据类型转换
     if not safety_stock_df.empty and 'date' in safety_stock_df.columns:
         safety_stock_df['date'] = pd.to_datetime(safety_stock_df['date'])
@@ -1031,7 +1074,8 @@ def run_integrated_mode(
                 production_gr_df,  # 使用从Orchestrator获取的生产数据
                 open_deployment_df,
                 network_df,
-                lead_time_df
+                lead_time_df,
+                m4_mlcfg_df
             )
             print(f"  ✅ 计算完成，生成 {len(net_demand_df)} 条净需求记录")
         except Exception as e:

@@ -342,7 +342,8 @@ def calculate_daily_net_demand(
     open_deployment_df: pd.DataFrame,
     downstream_forecast_gap: float,
     downstream_safety_gap: float,
-    horizon: int
+    horizon: int,
+    delivery_shipment_df: pd.DataFrame | None = None
 ) -> Tuple[float, float]:
     """计算每日净需求（forecast gap和safety gap） - 兼容module1的数据格式
     
@@ -440,7 +441,24 @@ def calculate_daily_net_demand(
                 (today_shipment_df['date'] == date)
             ]
             today_shipment_qty = float(today_shipment_rows['quantity'].sum()) if not today_shipment_rows.empty else 0.0
-        
+
+        # 5b. 今日调拨/跨点发运（从可用量侧扣）- ★新增：来自 Orchestrator Delivery_Shipment
+        delivery_shipment_qty = 0.0
+        if delivery_shipment_df is not None and not delivery_shipment_df.empty:
+            # 兼容字段：quantity / shipped_qty；地点字段：sending / location
+            qty_col = 'quantity' if 'quantity' in delivery_shipment_df.columns else ('shipped_qty' if 'shipped_qty' in delivery_shipment_df.columns else None)
+            send_col = 'sending' if 'sending' in delivery_shipment_df.columns else ('location' if 'location' in delivery_shipment_df.columns else None)
+            date_col = 'date' if 'date' in delivery_shipment_df.columns else ('ship_date' if 'ship_date' in delivery_shipment_df.columns else None)
+
+            if qty_col and send_col and date_col:
+                # 过滤“本节点作为发送端 & 当天发运”的跨点发运
+                ds_rows = delivery_shipment_df[
+                    (delivery_shipment_df['material'] == material) &
+                    (delivery_shipment_df[send_col] == location) &
+                    (pd.to_datetime(delivery_shipment_df[date_col]) == date)
+                ]
+                delivery_shipment_qty = float(ds_rows[qty_col].sum()) if not ds_rows.empty else 0.0
+
         # 6. 开放调拨 (从可用量中扣除) - 从 orchestrator 读取的已经是当日版本的视图
         open_deployment_qty = 0.0
         if not open_deployment_df.empty and 'material' in open_deployment_df.columns:
@@ -457,7 +475,7 @@ def calculate_daily_net_demand(
         # 总可用量计算
         total_available = (unrestricted_qty + in_transit_qty + delivery_gr_qty + 
                           today_production_gr_qty + future_production_qty - 
-                          today_shipment_qty - open_deployment_qty)
+                          today_shipment_qty - delivery_shipment_qty - open_deployment_qty)
 
         # 计算总预测需求 = 本节点需求 + 下游预测缺口
         # 使用Module1的SupplyDemandLog数据
@@ -510,6 +528,7 @@ def run_mrp_layered_simulation_daily(
     network_df: pd.DataFrame,
     lead_time_df: pd.DataFrame,
     m4_mlcfg_df: pd.DataFrame | None = None,   
+    delivery_shipment_df: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     """运行单日MRP模拟 - 使用当日版本的Module1数据
     使用Global_Network中的location_type字段进行提前期计算
@@ -614,10 +633,7 @@ def run_mrp_layered_simulation_daily(
     print(f"  扩展后组合: {len(material_locations)} 条")
     print(f"  包含的根节点: {[loc for loc in all_locations_in_layers if location_layer.get(loc, -1) == 0]}")
     
-    # 每天筛选未来的生产计划：available_date > simulation_date
-    future_production_df = all_production_df[
-        all_production_df['available_date'] > sim_date
-    ].copy() if not all_production_df.empty and 'available_date' in all_production_df.columns else pd.DataFrame()
+    future_production_df = all_production_df.copy() if not all_production_df.empty and 'available_date' in all_production_df.columns else pd.DataFrame()
     
     # 下游gap分 forecast_gap、safety_gap
     downstream_gap_dict = defaultdict(lambda: {'forecast_gap': 0.0, 'safety_gap': 0.0})
@@ -701,7 +717,8 @@ def run_mrp_layered_simulation_daily(
                 unrestricted_inventory_df, in_transit_df,
                 delivery_gr_df, pd.DataFrame(future_production_df),
                 daily_shipment_df, open_deployment_df,
-                lower_forecast_gap, lower_safety_gap, horizon
+                lower_forecast_gap, lower_safety_gap, horizon,
+                delivery_shipment_df=delivery_shipment_df
             )
 
             # gap分别加给父节点
@@ -787,250 +804,6 @@ def load_excel_with_sheets(filepath: str) -> Dict[str, pd.DataFrame]:
         result[str(sheet)] = xl.parse(sheet)
     return result
 
-def run_integrated_simulation(
-    module1_output_dir: str,
-    module4_output_path: str,
-    orchestrator_output_path: str,
-    config_path: str,
-    start_date: str,
-    end_date: str,
-    net_demand_output_prefix: str = 'NetDemandOutput_'
-):
-    """运行集成模拟 - 与Module1完全集成的版本
-    每日动态读取Module1当天的输出数据，只处理模拟周期内的数据
-    
-    Args:
-        module1_output_dir: Module1输出目录(包含每日版本文件)
-        module4_output_path: Module4输出文件路径
-        orchestrator_output_path: Orchestrator输出文件路径
-        config_path: 配置文件路径
-        start_date: 开始日期
-        end_date: 结束日期
-        net_demand_output_prefix: 净需求输出文件前缀
-    """
-    print(f"Starting integrated MRP simulation with daily Module1 data loading...")
-    print(f"📊 模拟模式：所有模块只处理模拟周期内的数据")
-    
-    try:
-        # 加载静态配置数据
-        config_data = load_config(config_path)
-        # 加载其他静态数据
-        module4_data = load_excel_with_sheets(module4_output_path) 
-        orchestrator_data = load_excel_with_sheets(orchestrator_output_path)
-        
-        # 提取静态配置和数据
-        safety_stock_df = config_data['safety_stock']
-        network_df = config_data['network_config']
-        lead_time_df = config_data['lead_time_config']
-        
-        all_production_df = module4_data.get('ProductionPlan', pd.DataFrame())
-        m4_mlcfg_df = module4_data.get('M4_MaterialLocationLineCfg', pd.DataFrame())
-        unrestricted_inventory_df = orchestrator_data.get('InventoryLog', pd.DataFrame())
-        in_transit_df = orchestrator_data.get('InTransit', pd.DataFrame())
-        delivery_gr_df = orchestrator_data.get('Delivery_GR', pd.DataFrame())
-        open_deployment_df = orchestrator_data.get('OpenDeployment', pd.DataFrame())
-        
-        print(f"Successfully loaded static configuration and orchestrator data")
-        
-        # 数据类型转换静态数据
-        date_columns = [
-            (safety_stock_df, 'date'),
-            (unrestricted_inventory_df, 'date'),
-            (in_transit_df, 'available_date'),
-            (delivery_gr_df, 'date'),
-            (all_production_df, 'available_date'),
-            (open_deployment_df, 'creation_date'),
-            (network_df, 'eff_from'),
-            (network_df, 'eff_to')
-        ]
-        
-        for df, col in date_columns:
-            if not df.empty and col in df.columns:
-                df[col] = pd.to_datetime(df[col])
-        
-        # 生成日期范围
-        date_range = pd.date_range(start_date, end_date, freq='D')
-        
-        print(f"Processing {len(date_range)} days from {start_date} to {end_date}")
-        print(f"Each day will load Module1 data dynamically from: {module1_output_dir}")
-        
-        # 每日运行MRP模拟并生成独立输出文件
-        for i, sim_date in enumerate(date_range, 1):
-            print(f"Processing day {i}/{len(date_range)}: {sim_date.strftime('%Y-%m-%d')}")
-            
-            # 动态加载当日Module1数据（只处理模拟周期内的数据）
-            daily_module1_data = load_module1_daily_outputs(module1_output_dir, sim_date)
-            daily_supply_demand_df = daily_module1_data['supply_demand_df']
-            daily_shipment_df = daily_module1_data['shipment_df']
-            
-            print(f"  Loaded Module1 data: SupplyDemand({len(daily_supply_demand_df)} rows), Shipment({len(daily_shipment_df)} rows)")
-            
-            # 运行单日MRP模拟
-            net_demand_df = run_mrp_layered_simulation_daily(
-                sim_date,
-                daily_supply_demand_df,
-                daily_module1_data.get('order_df', pd.DataFrame()),
-                daily_shipment_df,
-                safety_stock_df,
-                unrestricted_inventory_df,
-                in_transit_df,
-                delivery_gr_df,
-                all_production_df,
-                open_deployment_df,
-                network_df,
-                lead_time_df,
-                m4_mlcfg_df
-            )
-            
-            # 生成当日输出文件名
-            date_str = sim_date.strftime('%Y%m%d')
-            net_demand_output = f"{net_demand_output_prefix}{date_str}.xlsx"
-            
-            # 输出当日结果
-            try:
-                with pd.ExcelWriter(net_demand_output, engine='openpyxl') as writer:
-                    net_demand_df.to_excel(writer, index=False, sheet_name='NetDemand')
-                
-                print(f"  ✓ Day {sim_date.strftime('%Y-%m-%d')} complete. Output: {net_demand_output} ({len(net_demand_df)} demand records)")
-            except Exception as e:
-                print(f"  ✗ Failed to save {net_demand_output}: {e}")
-        
-        print(f"\n✓ Integrated simulation completed successfully!")
-        print(f"  Total files generated: {len(date_range)}")
-        print(f"  Using daily Module1 data and Global_Network location_type field")
-        print(f"  All modules process only simulation interval data")
-        
-    except Exception as e:
-        print(f"\n✗ Integrated simulation failed: {e}")
-        import traceback
-        traceback.print_exc()
-        raise
-
-
-def run_standalone_simulation(
-    module1_output_path: str,
-    module4_output_path: str,
-    orchestrator_output_path: str,
-    config_path: str,
-    start_date: str,
-    end_date: str,
-    net_demand_output_prefix: str = 'NetDemandOutput_'
-):
-    """运行独立模拟 - 每日生成独立输出文件
-    注意: 这是遗留函数，使用静态Module1数据。建议使用run_integrated_simulation获取每日动态数据。
-    
-    Args:
-        module1_output_path: Module1输出文件路径 (静态文件)
-        module4_output_path: Module4输出文件路径
-        orchestrator_output_path: Orchestrator输出文件路径
-        config_path: 配置文件路径
-        start_date: 开始日期
-        end_date: 结束日期
-        net_demand_output_prefix: 净需求输出文件前缀
-    """
-    print("WARNING: Using standalone simulation with static Module1 data.")
-    print("For daily dynamic Module1 data loading, use run_integrated_simulation() instead.")
-    print("")
-    
-    # 使用静态加载方法保持向后兼容
-    try:
-        xl = pd.ExcelFile(module1_output_path)
-        module1_data = {}
-        
-        expected_sheets = {
-            'SupplyDemandLog': 'supply_demand_df',
-            'ShipmentLog': 'shipment_df', 
-            'OrderLog': 'order_df'
-        }
-        
-        for sheet_name, key in expected_sheets.items():
-            if sheet_name in xl.sheet_names:
-                module1_data[key] = xl.parse(sheet_name)
-                if 'date' in module1_data[key].columns:
-                    module1_data[key]['date'] = pd.to_datetime(module1_data[key]['date'])
-            else:
-                module1_data[key] = pd.DataFrame()
-    except Exception as e:
-        raise RuntimeError(f"Failed to load Module1 outputs from {module1_output_path}: {e}")
-    
-    supply_demand_df = module1_data['supply_demand_df']
-    today_shipment_df = module1_data['shipment_df']
-
-    # 读取Module4输出数据 - 全量生产计划
-    module4_data = load_excel_with_sheets(module4_output_path)
-    m4_mlcfg_df = module4_data.get('M4_MaterialLocationLineCfg', pd.DataFrame())
-    all_production_df = module4_data.get('ProductionPlan', pd.DataFrame())
-
-    # 读取Orchestrator输出数据
-    orchestrator_data = load_excel_with_sheets(orchestrator_output_path)
-    unrestricted_inventory_df = orchestrator_data.get('InventoryLog', pd.DataFrame())
-    in_transit_df = orchestrator_data.get('InTransit', pd.DataFrame())
-    delivery_gr_df = orchestrator_data.get('Delivery_GR', pd.DataFrame())
-    open_deployment_df = orchestrator_data.get('OpenDeployment', pd.DataFrame())
-
-    # 读取配置数据
-    config_data = load_config(config_path)
-    safety_stock_df = config_data['safety_stock']
-    network_df = config_data['network_config']
-    lead_time_df = config_data['lead_time_config']
-
-    # 数据类型转换
-    for df, col in [
-        (supply_demand_df, 'date'),
-        (today_shipment_df, 'date'),
-        (safety_stock_df, 'date'),
-        (unrestricted_inventory_df, 'date'),
-        (in_transit_df, 'available_date'),
-        (delivery_gr_df, 'date'),
-        (all_production_df, 'available_date'),
-        (open_deployment_df, 'creation_date'),
-        (network_df, 'eff_from'),
-        (network_df, 'eff_to')
-    ]:
-        if col in df.columns:
-            df[col] = pd.to_datetime(df[col])
-
-    # 生成日期范围
-    date_range = pd.date_range(start_date, end_date, freq='D')
-
-    # 每日运行MRP模拟并生成独立输出文件
-    for sim_date in date_range:
-        print(f"Processing date: {sim_date.strftime('%Y-%m-%d')}")
-        
-        # 运行单日MRP模拟 (使用静态数据但过滤当日)
-        # 从静态数据中过滤当日的shipment数据
-        daily_shipment_df = today_shipment_df[
-            today_shipment_df['date'] == sim_date
-        ].copy() if not today_shipment_df.empty else pd.DataFrame()
-        
-        net_demand_df = run_mrp_layered_simulation_daily(
-            sim_date,
-            supply_demand_df,  # 使用全部supply_demand数据
-            module1_data.get('order_df', pd.DataFrame()),
-            daily_shipment_df,  # 使用当日过滤后的shipment数据
-            safety_stock_df,
-            unrestricted_inventory_df,
-            in_transit_df,
-            delivery_gr_df,
-            all_production_df,
-            open_deployment_df,
-            network_df,
-            lead_time_df,
-            m4_mlcfg_df
-        )
-
-        # 生成当日输出文件名
-        date_str = sim_date.strftime('%Y%m%d')
-        net_demand_output = f"{net_demand_output_prefix}{date_str}.xlsx"
-        
-        # 输出当日结果
-        with pd.ExcelWriter(net_demand_output) as writer:
-            net_demand_df.to_excel(writer, index=False, sheet_name='NetDemand')
-        
-        print(f"Date {sim_date.strftime('%Y-%m-%d')} complete. Output saved to {net_demand_output}")
-
-    print(f"All dates processed. {len(date_range)} files generated.")
-
 def run_integrated_mode(
     module1_output_dir: str,
     orchestrator: object,
@@ -1098,13 +871,16 @@ def run_integrated_mode(
             in_transit_df = orchestrator.get_planning_intransit_view(current_date.strftime('%Y-%m-%d'))
             delivery_gr_df = orchestrator.get_delivery_gr_view(current_date.strftime('%Y-%m-%d'))
             production_gr_df = orchestrator.get_production_gr_view(current_date.strftime('%Y-%m-%d'))
+            production_gr_df = production_gr_df.rename(columns={'date': 'available_date'})
             open_deployment_df = orchestrator.get_open_deployment_view(current_date.strftime('%Y-%m-%d'))
-            
+            delivery_shipment_df = orchestrator.get_delivery_shipment_log_view(current_date.strftime('%Y-%m-%d'))
+
             print(f"  ✅ 从 Orchestrator 加载了 {len(unrestricted_inventory_df)} 条库存记录")
             print(f"  ✅ 从 Orchestrator 加载了 {len(in_transit_df)} 条在途记录")
             print(f"  ✅ 从 Orchestrator 加载了 {len(delivery_gr_df)} 条收货记录")
             print(f"  ✅ 从 Orchestrator 加载了 {len(production_gr_df)} 条生产记录")
             print(f"  ✅ 从 Orchestrator 加载了 {len(open_deployment_df)} 条开放部署记录")
+            print(f"  ✅ 从 Orchestrator 加载了 {len(delivery_shipment_df)} 条发运记录")
         except Exception as e:
             print(f"  ⚠️  Orchestrator数据加载失败: {e}")
             unrestricted_inventory_df = pd.DataFrame()
@@ -1112,6 +888,7 @@ def run_integrated_mode(
             delivery_gr_df = pd.DataFrame()
             production_gr_df = pd.DataFrame()
             open_deployment_df = pd.DataFrame()
+            delivery_shipment_df = pd.DataFrame()
         
         # 计算当日的Net Demand  
         try:
@@ -1128,7 +905,8 @@ def run_integrated_mode(
                 open_deployment_df,
                 network_df,
                 lead_time_df,
-                m4_mlcfg_df
+                m4_mlcfg_df,
+                delivery_shipment_df=delivery_shipment_df
             )
             print(f"  ✅ 计算完成，生成 {len(net_demand_df)} 条净需求记录")
         except Exception as e:
@@ -1158,22 +936,3 @@ def run_integrated_mode(
         'processed_dates': len(date_range),
         'output_files': [f"Module3Output_{d.strftime('%Y%m%d')}.xlsx" for d in date_range]
     }
-
-# 主函数
-if __name__ == "__main__":
-    # Example paths, replace with your actual file locations
-    module1_output_path = r"C:\Users\zhang.s.37\OneDrive - Procter and Gamble\9-unattended planning\ChainSight\V0\output_simulation.xlsx"
-    module4_output_path = "Module4_Output.xlsx"
-    orchestrator_output_path = "Orchestrator_Output.xlsx"
-    config_path = "Config_Module3.xlsx"
-    start_date = "2024-01-01"
-    end_date = "2024-01-07"
-    run_standalone_simulation(
-        module1_output_path, 
-        module4_output_path,
-        orchestrator_output_path,
-        config_path, 
-        start_date, 
-        end_date,
-        net_demand_output_prefix='NetDemandOutput_'
-    )

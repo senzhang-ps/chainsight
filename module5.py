@@ -42,6 +42,43 @@ def load_module1_daily_shipment(module1_output_dir: str, current_date: pd.Timest
     # 返回空DataFrame
     return pd.DataFrame(columns=['date', 'material', 'location', 'quantity'])
 
+def load_module1_daily_orders(module1_output_dir: str, current_date: pd.Timestamp) -> pd.DataFrame:
+    """
+    从Module1输出加载“当日版本”的订单日志（包含历史天生成但尚未来到期的订单 + 当天新生成）
+    仅按 requirement_date>=current_date 过滤，不按 simulation_date 过滤
+    返回列: [date, material, location, demand_type, quantity, simulation_date]
+    """
+    cols = ['date', 'material', 'location', 'demand_type', 'quantity', 'simulation_date']
+    try:
+        date_str = current_date.strftime('%Y%m%d')
+        module1_file = f"{module1_output_dir}/module1_output_{date_str}.xlsx"
+        if not os.path.exists(module1_file):
+            print(f"⚠️  Module1输出文件不存在: {module1_file}")
+            return pd.DataFrame(columns=cols)
+
+        xl = pd.ExcelFile(module1_file)
+        if 'OrderLog' not in xl.sheet_names:
+            print(f"⚠️  Module1输出文件中无OrderLog表: {module1_file}")
+            return pd.DataFrame(columns=cols)
+
+        df = xl.parse('OrderLog')
+        for c in ['date', 'simulation_date']:
+            if c in df.columns:
+                df[c] = pd.to_datetime(df[c])
+        # 只保留 requirement_date(=date) >= today 的订单行
+        if 'date' in df.columns:
+            df = df[df['date'] >= current_date]
+
+        # 规范列
+        for c in cols:
+            if c not in df.columns:
+                df[c] = pd.NaT if c in ['date','simulation_date'] else np.nan
+        return df[cols].copy()
+
+    except Exception as e:
+        print(f"⚠️  加载Module1订单数据失败: {e}")
+        return pd.DataFrame(columns=cols)
+
 def load_orchestrator_delivery_gr(orchestrator: object, current_date: pd.Timestamp) -> pd.DataFrame:
     """
     从Orchestrator加载当日收货数据
@@ -384,36 +421,6 @@ def compute_horizon(dt, lsk, day):
         return dt, window_end
     raise ValueError(f"Unknown LSK: {lsk}")
 
-
-def allocate_by_priority_and_weight(demand_rows, available_stock, demand_priority_map):
-    demand_rows_sorted = sorted(demand_rows, key=lambda d: demand_priority_map.get(d['demand_type'], 99))
-    grouped = {}
-    for d in demand_rows_sorted:
-        p = demand_priority_map.get(d['demand_type'], 99)
-        grouped.setdefault(p, []).append(d)
-    stock_left = available_stock
-    for priority in sorted(grouped):
-        group = grouped[priority]
-        total = sum(d['planned_qty'] for d in group)
-        if total == 0:
-            for d in group:
-                d['deployed_qty_invCon'] = 0
-            continue
-        if stock_left >= total:
-            for d in group:
-                d['deployed_qty_invCon'] = d['planned_qty']
-            stock_left -= total
-        else:
-            allocated = 0
-            for d in group:
-                weight = d['planned_qty'] / total
-                d['deployed_qty_invCon'] = int(stock_left * weight)
-                allocated += d['deployed_qty_invCon']
-            stock_left -= allocated
-            for d in group:
-                d['deployed_qty_invCon'] = min(d['deployed_qty_invCon'], d['planned_qty'])
-    return stock_left
-
 def load_integrated_config(
     config_dict: dict,
     module1_output_dir: str,
@@ -448,6 +455,12 @@ def load_integrated_config(
     # 2. 从Module1加载当日数据
     config['SupplyDemandLog'] = config_dict.get('M5_SupplyDemandLog', pd.DataFrame())  # 从测试配置加载
     
+    # 从Module1加载当日“订单池”
+    if module1_output_dir and current_date:
+        config['OrderLog'] = load_module1_daily_orders(module1_output_dir, current_date)
+    else:
+        config['OrderLog'] = pd.DataFrame()
+
     # 实际从 Module1 输出加载当日数据
     if module1_output_dir and current_date:
         try:
@@ -538,6 +551,7 @@ def load_integrated_config(
         'SafetyStock': ['date'],
         'ReceivingSpace': ['date'],
         'Network': ['eff_from', 'eff_to'],
+        'OrderLog': ['date', 'simulation_date'],
     }
     
     for sheet, fields in date_fields.items():
@@ -580,6 +594,7 @@ def load_config(input_path: str):
         'SafetyStock': ['date'],
         'ReceivingSpace': ['date'],
         'Network': ['eff_from', 'eff_to'],
+        'OrderLog': ['date', 'simulation_date'],
     }
     for sheet, fields in date_fields.items():
         if sheet in config and not config[sheet].empty:
@@ -590,7 +605,6 @@ def load_config(input_path: str):
     return config
 
 def validate_config_before_run(config, validation_log):
-    # 检查leadtime缺失，pushpull缺失，demand_priority缺失
     deploy_cfg = config['DeployConfig']
     leadtime_df = config['LeadTime']
     pushpull = config['PushPullModel']
@@ -621,12 +635,35 @@ def validate_config_before_run(config, validation_log):
         ].empty:
             validation_log.append({'No': len(validation_log)+1,
                 'Issue': f"Missing PushPullModel for {row['material']}/{row['sending']}"})
-    # 校验demand_priority
-    demand_types = set(config['SupplyDemandLog']['demand_element'].unique()) if not config['SupplyDemandLog'].empty else set()
-    for dt in demand_types:
-        if demand_priority[demand_priority['demand_element'] == dt].empty:
-            validation_log.append({'No': len(validation_log)+1,
-                                   'Issue': f"DemandPriority not defined for {dt}"})
+    # ======= 校验/补充 DemandPriority ==========
+    dp = demand_priority.copy()
+
+    # 既看 SupplyDemandLog 的 demand_element，也看 OrderLog 的 demand_type（AO/normal）
+    sdl_types = set(config['SupplyDemandLog']['demand_element'].unique()) if not config['SupplyDemandLog'].empty else set()
+    ol = config.get('OrderLog', pd.DataFrame())
+    ol_types = set(ol['demand_type'].unique()) if ('demand_type' in ol.columns and not ol.empty) else set()
+
+    # 把 AO/normal 映射为 demand_element 字段里的值（我们后续用 demand_element 做优先级）
+    needed = sdl_types | ol_types  # AO/normal 也在其中
+
+    # 缺啥补啥（默认：AO=1，normal=2，其余给个较低优先级 9）
+    def _ensure_priority(elem, default_p):
+        if dp[dp['demand_element'] == elem].empty:
+            dp.loc[len(dp)] = {'demand_element': elem, 'priority': default_p}
+            validation_log.append({
+                'No': len(validation_log)+1,
+                'Issue': f'Auto add DemandPriority for {elem}={default_p}'
+            })
+    for elem in needed:
+        if elem == 'AO':
+            _ensure_priority('AO', 1)
+        elif elem == 'normal':
+            _ensure_priority('normal', 2)
+        else:
+            _ensure_priority(elem, 9)
+    # 回写
+    config['DemandPriority'] = dp
+
     return validation_log
 
 def collect_node_demands(material, location, sim_date, config, up_gap_buffer):
@@ -750,6 +787,46 @@ def collect_node_demands(material, location, sim_date, config, up_gap_buffer):
             'requirement_date': requirement_date,
             'plan_deploy_date': planned_deploy_date,
         })
+    # ========= 新增：将当日版本 OrderLog（含AO/normal）纳入调运需求 =========
+    order_df = config.get('OrderLog', pd.DataFrame())
+    if not order_df.empty:
+        orders = order_df[
+            (order_df['material'] == material) &
+            (order_df['location'] == location)
+        ].copy()
+
+        if not orders.empty:
+            # 需求日期 = 订单到期日
+            orders['requirement_date'] = pd.to_datetime(orders['date'])
+            orders['demand_element'] = orders['demand_type']
+            # planned_deploy_date = requirement_date - leadtime（但不可早于sim_date）
+            orders['planned_deploy_date'] = orders['requirement_date'] - pd.Timedelta(days=leadtime)
+            orders['planned_deploy_date'] = orders['planned_deploy_date'].apply(lambda d: max(d, sim_date))
+
+            # LSK 窗口筛选：planned_deploy_date ∈ [sim_date, sim_date + lsk - 1]
+            mask = (orders['planned_deploy_date'] >= filter_start) & (orders['planned_deploy_date'] <= filter_end)
+            orders = orders[mask]
+
+            for _, row in orders.iterrows():
+                requirement_date = row['requirement_date']
+                planned_deploy_date = row['planned_deploy_date']
+                qty = int(row['quantity'])
+
+                demand_rows.append({
+                    'material': material,
+                    'location': location,
+                    'sending': upstream,
+                    'receiving': location,
+                    'demand_element': row['demand_element'],   # 'AO' / 'normal'
+                    'demand_qty': qty,
+                    'planned_qty': qty,         # MOQ/RV 稍后统一处理
+                    'moq': moq,
+                    'rv': rv,
+                    'leadtime': leadtime,
+                    'requirement_date': requirement_date,
+                    'plan_deploy_date': planned_deploy_date,
+                    'orig_location': location
+                })
 
     # gap行，这部分需要按requirement_date重新计算planned_deploy_date并筛选
     if up_gap_buffer is not None and (material, location) in up_gap_buffer:
@@ -1044,12 +1121,18 @@ def main(
     demand_priority_map = {row['demand_element']: row['priority'] for _, row in demand_priority.iterrows()}
     config['LocationLayerMap'] = location_to_layer
     # ========== 初始化库存 soh_dict ==========
+    # 1. 全收集所有material/location（包含 OrderLog）
+    ol_df = config.get('OrderLog', pd.DataFrame())
+    mats_from_ol = set(ol_df['material'].unique()) if ('material' in ol_df.columns and not ol_df.empty) else set()
+    locs_from_ol = set(ol_df['location'].unique()) if ('location' in ol_df.columns and not ol_df.empty) else set()
 
-    # 1. 全收集所有material/location
     all_mats = set(config['SupplyDemandLog']['material'].unique()) | \
-            set(config['SafetyStock']['material'].unique())
+            set(config['SafetyStock']['material'].unique()) | \
+            mats_from_ol
+
     all_locs = set(config['SupplyDemandLog']['location'].unique()) | \
-            set(config['SafetyStock']['location'].unique())
+            set(config['SafetyStock']['location'].unique()) | \
+            locs_from_ol
 
     # 2. 确定仿真开始日期并获取当天的库存
     # 集成模式下使用第一个仿真日期，独立模式下使用sim_start参数
@@ -1168,11 +1251,15 @@ def main(
             print(f"\n📦 处理层级 {layer}")
             print(f"{'-'*40}")
             
-            # 组合所有material-location对
+            # 组合所有material-location对（包含 OrderLog）
+            materials_union = set(config['SupplyDemandLog']['material'].unique())
+            if 'OrderLog' in config and not config['OrderLog'].empty:
+                materials_union |= set(config['OrderLog']['material'].unique())
+
             base_pairs = set(
                 (mat, loc)
                 for loc, l in location_to_layer.items() if l == layer
-                for mat in config['SupplyDemandLog']['material'].unique()
+                for mat in materials_union
             )
             # gap buffer补充
             gap_pairs = set(

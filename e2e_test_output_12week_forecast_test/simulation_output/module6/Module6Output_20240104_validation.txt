@@ -1,23 +1,33 @@
 ================================================================================
 MODULE6 VALIDATION REPORT
 ================================================================================
-Generated Time: 2025-09-02 10:34:36
-Total Issues: 0
-Errors: 0
+Generated Time: 2025-09-02 11:00:59
+Total Issues: 2
+Errors: 2
 Warnings: 0
 
-✅ ALL VALIDATIONS PASSED
-No configuration issues detected.
-All demand_element types are properly configured.
-All material metadata is available.
-All truck configurations are valid.
+❌ CRITICAL ERRORS FOUND
+Following issues may cause data loss or incorrect processing:
+------------------------------------------------------------
+1. Missing priority configuration for demand_element "net demand for AO" (affects 1 records: cross_node: 1). Records will be filtered out and not processed.
+   Impact: Data Loss - 1 deployment plans excluded
+   Missing Element: net demand for AO
+   Affected Records: 1
+   Route Breakdown: cross_node: 1
+
+2. Missing priority configuration for demand_element "net demand for normal" (affects 1 records: cross_node: 1). Records will be filtered out and not processed.
+   Impact: Data Loss - 1 deployment plans excluded
+   Missing Element: net demand for normal
+   Affected Records: 1
+   Route Breakdown: cross_node: 1
+
 
 ================================================================================
 RECOMMENDATIONS:
 ================================================================================
-1. Configuration is optimal for current deployment plans
-2. Monitor validation reports in future runs
-3. Consider adding bypass rules if delivery performance is suboptimal
+1. Fix all ERROR-level issues before proceeding
+2. Add missing demand_element configurations to Global_DemandPriority
+3. Ensure all material metadata is defined in M6_MaterialMD
 
 For detailed information, check the ValidationLog sheet in the Excel output.
 ================================================================================

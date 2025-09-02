@@ -1,1 +1,12 @@
 date,material,sending,receiving,quantity,ori_deployment_uid,actual_ship_date,actual_delivery_date,type
+2024-01-07,MAT_B,PLANT_001,DC_001,25,MAT_B|PLANT_001|DC_001|2024-01-08|net demand for forecast|000117,2024-01-07,2024-01-09,delivery_shipment
+2024-01-07,MAT_A,PLANT_001,DC_001,50,MAT_A|PLANT_001|DC_001|2024-01-08|net demand for forecast|000122,2024-01-07,2024-01-09,delivery_shipment
+2024-01-07,MAT_B,PLANT_001,DC_001,25,MAT_B|PLANT_001|DC_001|2024-01-09|net demand for forecast|000118,2024-01-07,2024-01-09,delivery_shipment
+2024-01-07,MAT_A,PLANT_001,DC_001,10,MAT_A|PLANT_001|DC_001|2024-01-09|net demand for forecast|000123,2024-01-07,2024-01-09,delivery_shipment
+2024-01-07,MAT_A,PLANT_001,DC_001,40,MAT_A|PLANT_001|DC_001|2024-01-09|net demand for forecast|000123,2024-01-07,2024-01-09,delivery_shipment
+2024-01-07,MAT_B,PLANT_001,DC_001,25,MAT_B|PLANT_001|DC_001|2024-01-10|net demand for forecast|000119,2024-01-07,2024-01-09,delivery_shipment
+2024-01-07,MAT_A,PLANT_001,DC_001,40,MAT_A|PLANT_001|DC_001|2024-01-10|net demand for forecast|000124,2024-01-07,2024-01-09,delivery_shipment
+2024-01-07,MAT_A,PLANT_001,DC_002,50,MAT_A|PLANT_001|DC_002|2024-01-08|net demand for forecast|000127,2024-01-07,2024-01-09,delivery_shipment
+2024-01-07,MAT_A,PLANT_001,DC_002,10,MAT_A|PLANT_001|DC_002|2024-01-09|net demand for forecast|000128,2024-01-07,2024-01-09,delivery_shipment
+2024-01-07,MAT_A,PLANT_001,DC_002,40,MAT_A|PLANT_001|DC_002|2024-01-09|net demand for forecast|000128,2024-01-07,2024-01-10,delivery_shipment
+2024-01-07,MAT_A,PLANT_001,DC_002,20,MAT_A|PLANT_001|DC_002|2024-01-10|net demand for forecast|000113,2024-01-07,2024-01-09,delivery_shipment

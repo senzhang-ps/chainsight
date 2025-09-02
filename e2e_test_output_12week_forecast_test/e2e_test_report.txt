@@ -1,7 +1,7 @@
 E2E Integration Test Report
 ========================================
 Test Name: 12week_forecast_test
-Test Date: 2025-09-02 14:51:50
+Test Date: 2025-09-02 17:41:10
 Simulation Period: 2024-01-01 to 2024-01-07
 
 Test Results:
@@ -21,11 +21,11 @@ Final Statistics:
 --------------------
 date: 2024-01-07
 total_inventory_items: 6
-total_inventory_quantity: 426
-open_deployment_count: 36
-in_transit_count: 0
-production_gr_count: 0
-delivery_gr_count: 0
+total_inventory_quantity: 1958
+open_deployment_count: 76
+in_transit_count: 17
+production_gr_count: 2
+delivery_gr_count: 7
 shipment_count: 4
 
 Validation Results:

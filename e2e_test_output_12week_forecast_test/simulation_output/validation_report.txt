@@ -1,11 +1,11 @@
 ================================================================================
 SUPPLY CHAIN INTEGRATION VALIDATION REPORT
 ================================================================================
-Validation Start Time: 2025-09-02 14:51:49
-Validation End Time: 2025-09-02 14:51:50
-Duration: 1.28 seconds
+Validation Start Time: 2025-09-02 17:41:07
+Validation End Time: 2025-09-02 17:41:09
+Duration: 1.85 seconds
 Total Errors: 0
-Total Warnings: 11
+Total Warnings: 5
 Total Infos: 24
 
 ⚠️  VALIDATION PASSED WITH WARNINGS
@@ -13,44 +13,38 @@ Simulation can proceed but please review warnings.
 
 WARNINGS:
 ----------------------------------------
-[14:51:49] [WARNING] [InventoryBalance] [DataAccess] No production GR data available from orchestrator for 2024-01-01. Using zero production receipts.
-[14:51:49] [WARNING] [InventoryBalance] [DataAccess] No delivery GR data available from orchestrator for 2024-01-01. Using zero delivery receipts.
-[14:51:49] [WARNING] [InventoryBalance] [DataAccess] No production GR data available from orchestrator for 2024-01-02. Using zero production receipts.
-[14:51:49] [WARNING] [InventoryBalance] [DataAccess] No delivery GR data available from orchestrator for 2024-01-02. Using zero delivery receipts.
-[14:51:49] [WARNING] [InventoryBalance] [DataAccess] No production GR data available from orchestrator for 2024-01-03. Using zero production receipts.
-[14:51:49] [WARNING] [InventoryBalance] [DataAccess] No production GR data available from orchestrator for 2024-01-04. Using zero production receipts.
-[14:51:49] [WARNING] [InventoryBalance] [DataAccess] No production GR data available from orchestrator for 2024-01-05. Using zero production receipts.
-[14:51:49] [WARNING] [InventoryBalance] [DataAccess] No production GR data available from orchestrator for 2024-01-06. Using zero production receipts.
-[14:51:49] [WARNING] [InventoryBalance] [DataAccess] No delivery GR data available from orchestrator for 2024-01-06. Using zero delivery receipts.
-[14:51:49] [WARNING] [InventoryBalance] [DataAccess] No production GR data available from orchestrator for 2024-01-07. Using zero production receipts.
-[14:51:49] [WARNING] [InventoryBalance] [DataAccess] No delivery GR data available from orchestrator for 2024-01-07. Using zero delivery receipts.
+[17:41:07] [WARNING] [InventoryBalance] [DataAccess] No production GR data available from orchestrator for 2024-01-01. Using zero production receipts.
+[17:41:07] [WARNING] [InventoryBalance] [DataAccess] No delivery GR data available from orchestrator for 2024-01-01. Using zero delivery receipts.
+[17:41:07] [WARNING] [InventoryBalance] [DataAccess] No production GR data available from orchestrator for 2024-01-02. Using zero production receipts.
+[17:41:07] [WARNING] [InventoryBalance] [DataAccess] No delivery GR data available from orchestrator for 2024-01-02. Using zero delivery receipts.
+[17:41:07] [WARNING] [InventoryBalance] [DataAccess] No production GR data available from orchestrator for 2024-01-03. Using zero production receipts.
 
 INFORMATION:
 ----------------------------------------
-[14:51:49] [INFO] [InventoryBalance] [ConsistencyCheck] Starting inventory consistency validation from 2024-01-01 to 2024-01-07
-[14:51:49] [INFO] [InventoryBalance] [DailyCheck] Checking inventory balance for 2024-01-01
-[14:51:49] [INFO] [InventoryBalance] [BalanceCheck] [2024-01-01] Inventory balance check passed for all 6 items
-[14:51:49] [INFO] [InventoryBalance] [DailyCheck] Checking inventory balance for 2024-01-02
-[14:51:49] [INFO] [InventoryBalance] [BalanceCheck] [2024-01-02] Inventory balance check passed for all 6 items
-[14:51:49] [INFO] [InventoryBalance] [DailyCheck] Checking inventory balance for 2024-01-03
-[14:51:49] [INFO] [InventoryBalance] [BalanceCheck] [2024-01-03] Inventory balance check passed for all 6 items
-[14:51:49] [INFO] [InventoryBalance] [DailyCheck] Checking inventory balance for 2024-01-04
-[14:51:49] [INFO] [InventoryBalance] [BalanceCheck] [2024-01-04] Inventory balance check passed for all 6 items
-[14:51:49] [INFO] [InventoryBalance] [DailyCheck] Checking inventory balance for 2024-01-05
-[14:51:49] [INFO] [InventoryBalance] [BalanceCheck] [2024-01-05] Inventory balance check passed for all 6 items
-[14:51:49] [INFO] [InventoryBalance] [DailyCheck] Checking inventory balance for 2024-01-06
-[14:51:49] [INFO] [InventoryBalance] [BalanceCheck] [2024-01-06] Inventory balance check passed for all 6 items
-[14:51:49] [INFO] [InventoryBalance] [DailyCheck] Checking inventory balance for 2024-01-07
-[14:51:49] [INFO] [InventoryBalance] [BalanceCheck] [2024-01-07] Inventory balance check passed for all 6 items
-[14:51:49] [INFO] [InventoryBalance] [PeriodSummary] Period 2024-01-01 to 2024-01-07: All 42 inventory transactions balanced
-[14:51:49] [INFO] [InventoryBalance] [NegativeCheck] [2024-01-01] No negative inventory detected
-[14:51:49] [INFO] [InventoryBalance] [NegativeCheck] [2024-01-02] No negative inventory detected
-[14:51:49] [INFO] [InventoryBalance] [NegativeCheck] [2024-01-03] No negative inventory detected
-[14:51:49] [INFO] [InventoryBalance] [NegativeCheck] [2024-01-04] No negative inventory detected
-[14:51:49] [INFO] [InventoryBalance] [NegativeCheck] [2024-01-05] No negative inventory detected
-[14:51:49] [INFO] [InventoryBalance] [NegativeCheck] [2024-01-06] No negative inventory detected
-[14:51:49] [INFO] [InventoryBalance] [NegativeCheck] [2024-01-07] No negative inventory detected
-[14:51:49] [INFO] [InventoryBalance] [ConsistencyResult] Inventory consistency validation passed
+[17:41:07] [INFO] [InventoryBalance] [ConsistencyCheck] Starting inventory consistency validation from 2024-01-01 to 2024-01-07
+[17:41:07] [INFO] [InventoryBalance] [DailyCheck] Checking inventory balance for 2024-01-01
+[17:41:07] [INFO] [InventoryBalance] [BalanceCheck] [2024-01-01] Inventory balance check passed for all 6 items
+[17:41:07] [INFO] [InventoryBalance] [DailyCheck] Checking inventory balance for 2024-01-02
+[17:41:07] [INFO] [InventoryBalance] [BalanceCheck] [2024-01-02] Inventory balance check passed for all 6 items
+[17:41:07] [INFO] [InventoryBalance] [DailyCheck] Checking inventory balance for 2024-01-03
+[17:41:07] [INFO] [InventoryBalance] [BalanceCheck] [2024-01-03] Inventory balance check passed for all 6 items
+[17:41:07] [INFO] [InventoryBalance] [DailyCheck] Checking inventory balance for 2024-01-04
+[17:41:07] [INFO] [InventoryBalance] [BalanceCheck] [2024-01-04] Inventory balance check passed for all 6 items
+[17:41:07] [INFO] [InventoryBalance] [DailyCheck] Checking inventory balance for 2024-01-05
+[17:41:07] [INFO] [InventoryBalance] [BalanceCheck] [2024-01-05] Inventory balance check passed for all 6 items
+[17:41:07] [INFO] [InventoryBalance] [DailyCheck] Checking inventory balance for 2024-01-06
+[17:41:07] [INFO] [InventoryBalance] [BalanceCheck] [2024-01-06] Inventory balance check passed for all 6 items
+[17:41:07] [INFO] [InventoryBalance] [DailyCheck] Checking inventory balance for 2024-01-07
+[17:41:07] [INFO] [InventoryBalance] [BalanceCheck] [2024-01-07] Inventory balance check passed for all 6 items
+[17:41:07] [INFO] [InventoryBalance] [PeriodSummary] Period 2024-01-01 to 2024-01-07: All 42 inventory transactions balanced
+[17:41:07] [INFO] [InventoryBalance] [NegativeCheck] [2024-01-01] No negative inventory detected
+[17:41:07] [INFO] [InventoryBalance] [NegativeCheck] [2024-01-02] No negative inventory detected
+[17:41:07] [INFO] [InventoryBalance] [NegativeCheck] [2024-01-03] No negative inventory detected
+[17:41:07] [INFO] [InventoryBalance] [NegativeCheck] [2024-01-04] No negative inventory detected
+[17:41:07] [INFO] [InventoryBalance] [NegativeCheck] [2024-01-05] No negative inventory detected
+[17:41:07] [INFO] [InventoryBalance] [NegativeCheck] [2024-01-06] No negative inventory detected
+[17:41:07] [INFO] [InventoryBalance] [NegativeCheck] [2024-01-07] No negative inventory detected
+[17:41:07] [INFO] [InventoryBalance] [ConsistencyResult] Inventory consistency validation passed
 
 ================================================================================
 END OF VALIDATION REPORT

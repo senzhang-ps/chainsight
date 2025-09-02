@@ -229,16 +229,6 @@ def build_unconstrained_plan_for_single_day(net_demand_df, mlcfg, simulation_dat
     """
     Build unconstrained plan for a single simulation date
     Only plans materials that are on review day
-    
-    Args:
-        net_demand_df: NetDemand DataFrame for this simulation date
-        mlcfg: Material location line configuration
-        simulation_date: Current simulation date
-        simulation_start: Simulation period start date
-        issues: List to append validation issues
-        
-    Returns:
-        DataFrame: Unconstrained production plans
     """
     plans = []
     
@@ -275,20 +265,25 @@ def build_unconstrained_plan_for_single_day(net_demand_df, mlcfg, simulation_dat
         
         # Calculate planning window (respects PTF)
         window_start, window_end = compute_planning_window(simulation_date, ptf, lsk)
-        
-        # Filter demands within planning window using requirement_date directly
         # Note: requirement_date from Module3 already includes lead time calculation
-        mask = (nd_sub['requirement_date'] >= window_start) & (nd_sub['requirement_date'] <= window_end)
+        # === 修复：不再用 window 过滤需求，改为“按日对齐进入计划” ===
+        nd_sub['requirement_date'] = pd.to_datetime(nd_sub['requirement_date']).dt.normalize()
+        _sim_d = pd.to_datetime(simulation_date).normalize()
+        mask = (nd_sub['requirement_date'] == _sim_d)
         
-        # Log issues for demands outside planning window
+        # === 修复对应：改为提示“非当日需求未纳入当日计划”，仅记录为校验信息 ===
         for _, r in nd_sub[~mask].iterrows():
-            issues.append({
-                'sheet': 'NetDemand',
-                'row': '',
-                'issue': f"Demand for material {r['material']} at location {r['location']} with requirement date {r['requirement_date'].date()} is outside planning window [{window_start.date()}, {window_end.date()}]."
-            })
+            try:
+                issues.append({
+                    'sheet': 'NetDemand',
+                    'row': '',
+                    'issue': f"Demand for material {r['material']} at location {r['location']} with requirement date {pd.to_datetime(r['requirement_date']).date()} is not equal to simulation date {simulation_date.date()} (kept out of today's plan)."
+                })
+            except Exception:
+                pass  # 容错，避免 issues 写入异常中断
         
         # Use only demands within planning window
+        # === 修复对应：这里改为仅用“当日需求” ===
         nd_sub = nd_sub[mask]
         
         if nd_sub.empty:

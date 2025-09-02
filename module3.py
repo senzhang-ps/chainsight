@@ -45,79 +45,57 @@ def load_config(config_path: str) -> Dict[str, pd.DataFrame]:
 
 def load_module1_daily_outputs(module1_output_dir: str, simulation_date: pd.Timestamp) -> Dict[str, pd.DataFrame]:
     """
-    Load Module1 daily versioned output data for a specific simulation date
-    Module1 generates daily versioned files - this reads the specific day's version
-    
-    Args:
-        module1_output_dir: Directory containing Module1 daily output files
-        simulation_date: The specific simulation date to load data for
-        
-    Returns:
-        Dictionary containing Module1 daily output DataFrames
+    读取 Module1 当天版本的输出：
+      - SupplyDemandLog: 已被订单消耗后的未来预测（M1已按 sim_date 生成）
+      - ShipmentLog: 仅当日发货（date == sim_date），用于从可用量中扣减
+      - OrderLog: 当天版本视图（包含历史生成但未来到期的订单 + 当天新单）
+                  这里不再按 simulation_date 过滤，只做基本类型规范化；
+                  未来是否纳入需求由 M3 在计算前再筛选（只取 date > sim_date）。
     """
     try:
         date_str = simulation_date.strftime('%Y%m%d')
-        
-        # Module1 daily output file naming pattern (adjust based on actual pattern)
-        module1_daily_file = f"{module1_output_dir}/module1_output_{date_str}.xlsx"
-        
-        # Alternative patterns if needed
-        if not os.path.exists(module1_daily_file):
-            module1_daily_file = f"{module1_output_dir}/output_simulation_{date_str}.xlsx"
-        
+        f1 = os.path.join(module1_output_dir, f"module1_output_{date_str}.xlsx")
+        f2 = os.path.join(module1_output_dir, f"output_simulation_{date_str}.xlsx")
+        module1_daily_file = f1 if os.path.exists(f1) else f2
+
         if not os.path.exists(module1_daily_file):
             print(f"Warning: Module1 output file not found for date {date_str}. Using empty DataFrames.")
-            return {
-                'supply_demand_df': pd.DataFrame(),
-                'shipment_df': pd.DataFrame(),
-                'order_df': pd.DataFrame()
-            }
-        
+            return {'supply_demand_df': pd.DataFrame(), 'shipment_df': pd.DataFrame(), 'order_df': pd.DataFrame()}
+
         xl = pd.ExcelFile(module1_daily_file)
         module1_data = {}
-        
-        # Expected sheets from Module1 daily output
-        expected_sheets = {
-            'SupplyDemandLog': 'supply_demand_df',
-            'ShipmentLog': 'shipment_df', 
-            'OrderLog': 'order_df'
-        }
-        
-        for sheet_name, key in expected_sheets.items():
-            if sheet_name in xl.sheet_names:
-                df = xl.parse(sheet_name)
-                
-                # Ensure we have a proper DataFrame
-                if not isinstance(df, pd.DataFrame):
-                    df = pd.DataFrame()
-                
-                # Filter for current simulation date data - 只保留模拟周期内的数据
-                if not df.empty and 'date' in df.columns:
-                    df['date'] = pd.to_datetime(df['date'])
-                    # For OrderLog: get orders where simulation_date == current date
-                    if sheet_name == 'OrderLog' and 'simulation_date' in df.columns:
-                        df['simulation_date'] = pd.to_datetime(df['simulation_date'])
-                        # Get today's generated orders (simulation_date = today)
-                        df = df[df['simulation_date'] == simulation_date].copy()
-                    # For ShipmentLog: get today's shipments (date = today)
-                    elif sheet_name == 'ShipmentLog':
-                        df = df[df['date'] == simulation_date].copy()
-                    # For SupplyDemandLog: get current version (all dates up to today)
-                    # This represents remaining forecast after consumption up to today
-                
-                module1_data[key] = df
-            else:
-                module1_data[key] = pd.DataFrame()
-                
+
+        def _read(name):
+            return xl.parse(name) if name in xl.sheet_names else pd.DataFrame()
+
+        # 1) SupplyDemandLog：原样读取（M1已保证为“未来剩余预测”）
+        sdl = _read('SupplyDemandLog')
+        if not sdl.empty and 'date' in sdl.columns:
+            sdl['date'] = pd.to_datetime(sdl['date'])
+
+        # 2) ShipmentLog：仅保留当日
+        shp = _read('ShipmentLog')
+        if not shp.empty and 'date' in shp.columns:
+            shp['date'] = pd.to_datetime(shp['date'])
+            shp = shp[shp['date'] == simulation_date].copy()
+
+        # 3) OrderLog：当天版本全量（包含未来订单 + 当天新单）
+        odl = _read('OrderLog')
+        if not odl.empty:
+            if 'date' in odl.columns:
+                odl['date'] = pd.to_datetime(odl['date'])
+            if 'simulation_date' in odl.columns:
+                odl['simulation_date'] = pd.to_datetime(odl['simulation_date'])
+            # 不按 simulation_date 过滤，保留当天版本全量；后续在 M3 内部再筛 date > sim_date
+
+        module1_data['supply_demand_df'] = sdl
+        module1_data['shipment_df'] = shp
+        module1_data['order_df'] = odl
         return module1_data
-        
+
     except Exception as e:
         print(f"Warning: Error loading Module1 daily outputs for {simulation_date.strftime('%Y-%m-%d')}: {e}")
-        return {
-            'supply_demand_df': pd.DataFrame(),
-            'shipment_df': pd.DataFrame(),
-            'order_df': pd.DataFrame()
-        }
+        return {'supply_demand_df': pd.DataFrame(), 'shipment_df': pd.DataFrame(), 'order_df': pd.DataFrame()}
 
 
 def assign_location_layers(network_df: pd.DataFrame) -> pd.DataFrame:
@@ -521,6 +499,7 @@ def calculate_daily_net_demand(
 def run_mrp_layered_simulation_daily(
     sim_date: pd.Timestamp,
     daily_supply_demand_df: pd.DataFrame,
+    daily_order_df: pd.DataFrame,  
     daily_shipment_df: pd.DataFrame,
     safety_stock_df: pd.DataFrame,
     unrestricted_inventory_df: pd.DataFrame,
@@ -555,7 +534,34 @@ def run_mrp_layered_simulation_daily(
     if network_df.empty:
         print(f"Warning: Empty network configuration for date {sim_date}")
         return pd.DataFrame({'material': [], 'location': [], 'requirement_date': [], 'quantity': [], 'demand_element': [], 'layer': []})
-    
+    # 需求池 = 未来订单（date > sim_date） + 剩余预测（SupplyDemandLog）
+    # - 当日订单（date == sim_date）不进入需求池，避免与当日发货在可用量侧重复计
+    def _std(df, element):
+        if df is None or df.empty:
+            return pd.DataFrame(columns=['date','material','location','quantity','demand_element'])
+        cols = ['date','material','location','quantity']
+        miss = [c for c in cols if c not in df.columns]
+        if miss:
+            print(f"  ⚠️ demand source '{element}' 缺少列: {miss}，将被忽略")
+            return pd.DataFrame(columns=['date','material','location','quantity','demand_element'])
+        out = df[cols].copy()
+        out['demand_element'] = element
+        return out
+
+    # 未来订单：只取 date > sim_date
+    future_orders = pd.DataFrame()
+    if daily_order_df is not None and not daily_order_df.empty:
+        # 仅保留未来订单（明天及以后）
+        future_orders = daily_order_df[pd.to_datetime(daily_order_df['date']) > sim_date].copy()
+
+    orders_std   = _std(future_orders, 'order')
+    forecast_std = _std(daily_supply_demand_df, 'forecast')
+
+    demand_pool_df = pd.concat([orders_std, forecast_std], ignore_index=True)
+    if not demand_pool_df.empty:
+        # 统一数据类型
+        demand_pool_df['date'] = pd.to_datetime(demand_pool_df['date'])
+        demand_pool_df['quantity'] = demand_pool_df['quantity'].astype(float)    
     # 分配层级
     location_layer_df = assign_location_layers(network_df)
     if location_layer_df.empty:
@@ -691,7 +697,7 @@ def run_mrp_layered_simulation_daily(
             # 计算当前节点的净需求
             forecast_gap, safety_gap = calculate_daily_net_demand(
                 str(material), str(location), sim_date,
-                daily_supply_demand_df, safety_stock_df,
+                demand_pool_df, safety_stock_df,
                 unrestricted_inventory_df, in_transit_df,
                 delivery_gr_df, pd.DataFrame(future_production_df),
                 daily_shipment_df, open_deployment_df,
@@ -863,6 +869,7 @@ def run_integrated_simulation(
             net_demand_df = run_mrp_layered_simulation_daily(
                 sim_date,
                 daily_supply_demand_df,
+                daily_module1_data.get('order_df', pd.DataFrame()),
                 daily_shipment_df,
                 safety_stock_df,
                 unrestricted_inventory_df,
@@ -999,6 +1006,7 @@ def run_standalone_simulation(
         net_demand_df = run_mrp_layered_simulation_daily(
             sim_date,
             supply_demand_df,  # 使用全部supply_demand数据
+            module1_data.get('order_df', pd.DataFrame()),
             daily_shipment_df,  # 使用当日过滤后的shipment数据
             safety_stock_df,
             unrestricted_inventory_df,
@@ -1110,6 +1118,7 @@ def run_integrated_mode(
             net_demand_df = run_mrp_layered_simulation_daily(
                 current_date,
                 supply_demand_df,
+                 module1_daily_data.get('order_df', pd.DataFrame()),
                 today_shipment_df,
                 safety_stock_df,
                 unrestricted_inventory_df,

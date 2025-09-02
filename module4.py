@@ -229,6 +229,15 @@ def build_unconstrained_plan_for_single_day(net_demand_df, mlcfg, simulation_dat
     """
     Build unconstrained plan for a single simulation date
     Only plans materials that are on review day
+        Args:
+        net_demand_df: NetDemand DataFrame for this simulation date
+        mlcfg: Material location line configuration
+        simulation_date: Current simulation date
+        simulation_start: Simulation period start date
+        issues: List to append validation issues
+        
+    Returns:
+        DataFrame: Unconstrained production plans
     """
     plans = []
     

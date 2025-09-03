@@ -334,7 +334,7 @@ def calculate_daily_net_demand(
     date: pd.Timestamp,
     supply_demand_df: pd.DataFrame,
     safety_stock_df: pd.DataFrame,
-    unrestricted_inventory_df: pd.DataFrame,
+    beginning_inventory_df: pd.DataFrame,
     in_transit_df: pd.DataFrame,
     delivery_gr_df: pd.DataFrame,
     future_production_df: pd.DataFrame,
@@ -353,7 +353,7 @@ def calculate_daily_net_demand(
         date: 计算日期
         supply_demand_df: 供需数据 (来自Module1 SupplyDemandLog)
         safety_stock_df: 安全库存数据
-        unrestricted_inventory_df: 无限制库存数据
+        beginning_inventory_df: 每日期初库存数据
         in_transit_df: 在途数据
         delivery_gr_df: 收货数据
         future_production_df: 未来确认生产数据
@@ -382,15 +382,15 @@ def calculate_daily_net_demand(
         raise ValueError(f"Invalid date calculation: {e}")
     
     try:
-        # 1. 当前无限制库存
-        unrestricted_qty = 0.0
-        if not unrestricted_inventory_df.empty and 'material' in unrestricted_inventory_df.columns:
-            inv_row = unrestricted_inventory_df[
-                (unrestricted_inventory_df['material'] == material) &
-                (unrestricted_inventory_df['location'] == location) &
-                (unrestricted_inventory_df['date'] == date)
+        # 1. 当日期初库存（Beginning Inventory，未包含当日出库/发运扣减）
+        begin_qty = 0.0
+        if beginning_inventory_df is not None and (not beginning_inventory_df.empty) and 'material' in beginning_inventory_df.columns:
+            bi_rows = beginning_inventory_df[
+                (beginning_inventory_df['material'] == material) &
+                (beginning_inventory_df['location'] == location) &
+                (pd.to_datetime(beginning_inventory_df['date']) == pd.to_datetime(date))
             ]
-            unrestricted_qty = float(inv_row['quantity'].sum()) if not inv_row.empty else 0.0
+            begin_qty = float(bi_rows['quantity'].sum()) if not bi_rows.empty else 0.0
         
         # 2. 在途库存
         in_transit_qty = 0.0
@@ -473,7 +473,7 @@ def calculate_daily_net_demand(
                 open_deployment_qty = float(open_deployment_rows['quantity'].sum())
         
         # 总可用量计算
-        total_available = (unrestricted_qty + in_transit_qty + delivery_gr_qty + 
+        total_available = (begin_qty + in_transit_qty + delivery_gr_qty + 
                           today_production_gr_qty + future_production_qty - 
                           today_shipment_qty - delivery_shipment_qty - open_deployment_qty)
 
@@ -520,7 +520,7 @@ def run_mrp_layered_simulation_daily(
     daily_order_df: pd.DataFrame,  
     daily_shipment_df: pd.DataFrame,
     safety_stock_df: pd.DataFrame,
-    unrestricted_inventory_df: pd.DataFrame,
+    beginning_inventory_df: pd.DataFrame,
     in_transit_df: pd.DataFrame,
     delivery_gr_df: pd.DataFrame,
     all_production_df: pd.DataFrame,
@@ -714,7 +714,7 @@ def run_mrp_layered_simulation_daily(
             forecast_gap, safety_gap = calculate_daily_net_demand(
                 str(material), str(location), sim_date,
                 demand_pool_df, safety_stock_df,
-                unrestricted_inventory_df, in_transit_df,
+                beginning_inventory_df, in_transit_df,
                 delivery_gr_df, pd.DataFrame(future_production_df),
                 daily_shipment_df, open_deployment_df,
                 lower_forecast_gap, lower_safety_gap, horizon,
@@ -867,7 +867,7 @@ def run_integrated_mode(
         
         # 从 Orchestrator 获取动态数据
         try:
-            unrestricted_inventory_df = orchestrator.get_unrestricted_inventory_view(current_date.strftime('%Y-%m-%d'))
+            beginning_inventory_df = orchestrator.get_beginning_inventory_view(current_date.strftime('%Y-%m-%d'))
             in_transit_df = orchestrator.get_planning_intransit_view(current_date.strftime('%Y-%m-%d'))
             delivery_gr_df = orchestrator.get_delivery_gr_view(current_date.strftime('%Y-%m-%d'))
             production_gr_df = orchestrator.get_production_gr_view(current_date.strftime('%Y-%m-%d'))
@@ -875,7 +875,7 @@ def run_integrated_mode(
             open_deployment_df = orchestrator.get_open_deployment_view(current_date.strftime('%Y-%m-%d'))
             delivery_shipment_df = orchestrator.get_delivery_shipment_log_view(current_date.strftime('%Y-%m-%d'))
 
-            print(f"  ✅ 从 Orchestrator 加载了 {len(unrestricted_inventory_df)} 条库存记录")
+            print(f"  ✅ 从 Orchestrator 加载了 {len(beginning_inventory_df)} 条期初库存记录")
             print(f"  ✅ 从 Orchestrator 加载了 {len(in_transit_df)} 条在途记录")
             print(f"  ✅ 从 Orchestrator 加载了 {len(delivery_gr_df)} 条收货记录")
             print(f"  ✅ 从 Orchestrator 加载了 {len(production_gr_df)} 条生产记录")
@@ -898,7 +898,7 @@ def run_integrated_mode(
                  module1_daily_data.get('order_df', pd.DataFrame()),
                 today_shipment_df,
                 safety_stock_df,
-                unrestricted_inventory_df,
+                beginning_inventory_df,
                 in_transit_df,
                 delivery_gr_df,
                 production_gr_df,  # 使用从Orchestrator获取的生产数据

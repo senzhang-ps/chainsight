@@ -411,26 +411,44 @@ def calculate_daily_net_demand(
             ]
             delivery_gr_qty = float(delivery_gr_rows['quantity'].sum()) if not delivery_gr_rows.empty else 0.0
         
-        # 4a. 当日生产收货 (available_date = today)
+        # 4a. 当日生产收货 (available_date = today) —— 用 produced_qty
         today_production_gr_qty = 0.0
         if not future_production_df.empty and 'material' in future_production_df.columns:
-            today_production_rows = future_production_df[
+            today_rows = future_production_df[
                 (future_production_df['material'] == material) &
                 (future_production_df['location'] == location) &
                 (future_production_df['available_date'] == date)
             ]
-            today_production_gr_qty = float(today_production_rows['quantity'].sum()) if not today_production_rows.empty else 0.0
-        
-        # 4b. 未来确认生产 (available_date > simulation_date)
+            if not today_rows.empty:
+                if 'produced_qty' in today_rows.columns:
+                    today_production_gr_qty = float(today_rows['produced_qty'].sum())
+                elif 'quantity' in today_rows.columns:
+                    # 兼容老口径
+                    today_production_gr_qty = float(today_rows['quantity'].sum())
+                else:
+                    today_production_gr_qty = 0.0
+
+        # 4b. 未来确认生产 (date < available_date ≤ horizon_end) —— 用 uncon_planned_qty
         future_production_qty = 0.0
         if not future_production_df.empty and 'material' in future_production_df.columns:
-            future_production_rows = future_production_df[
+            future_rows = future_production_df[
                 (future_production_df['material'] == material) &
                 (future_production_df['location'] == location) &
                 (future_production_df['available_date'] > date) &
                 (future_production_df['available_date'] <= horizon_end)
             ]
-            future_production_qty = float(future_production_rows['quantity'].sum()) if not future_production_rows.empty else 0.0
+            if not future_rows.empty:
+                if 'uncon_planned_qty' in future_rows.columns:
+                    future_production_qty = float(future_rows['uncon_planned_qty'].sum())
+                elif 'produced_qty' in future_rows.columns:
+                    # 回退：如果没有 uncon_planned_qty，就用 produced_qty
+                    future_production_qty = float(future_rows['produced_qty'].sum())
+                elif 'quantity' in future_rows.columns:
+                    # 兼容老口径
+                    future_production_qty = float(future_rows['quantity'].sum())
+                else:
+                    future_production_qty = 0.0
+
         
         # 5. 今日客户发货 (从可用量中扣除) - 使用Module1的ShipmentLog
         today_shipment_qty = 0.0
@@ -539,7 +557,7 @@ def run_mrp_layered_simulation_daily(
         daily_supply_demand_df: 当日供需数据 (来自Module1 SupplyDemandLog)
         daily_shipment_df: 当日发货数据 (来自Module1 ShipmentLog)
         safety_stock_df: 安全库存数据
-        unrestricted_inventory_df: 无限制库存数据
+        beginning_inventory_df: 期初库存数据
         in_transit_df: 在途数据
         delivery_gr_df: 收货数据
         all_production_df: 全量生产计划数据
@@ -634,7 +652,12 @@ def run_mrp_layered_simulation_daily(
     print(f"  包含的根节点: {[loc for loc in all_locations_in_layers if location_layer.get(loc, -1) == 0]}")
     
     future_production_df = all_production_df.copy() if not all_production_df.empty and 'available_date' in all_production_df.columns else pd.DataFrame()
-    
+    if not future_production_df.empty:
+        future_production_df['available_date'] = pd.to_datetime(future_production_df['available_date'])
+        # 数值列统一为数值类型，缺失置 0
+        for col in ['produced_qty', 'uncon_planned_qty', 'quantity']:
+            if col in future_production_df.columns:
+                future_production_df[col] = pd.to_numeric(future_production_df[col], errors='coerce').fillna(0)        
     # 下游gap分 forecast_gap、safety_gap
     downstream_gap_dict = defaultdict(lambda: {'forecast_gap': 0.0, 'safety_gap': 0.0})
 
@@ -870,23 +893,24 @@ def run_integrated_mode(
             beginning_inventory_df = orchestrator.get_beginning_inventory_view(current_date.strftime('%Y-%m-%d'))
             in_transit_df = orchestrator.get_planning_intransit_view(current_date.strftime('%Y-%m-%d'))
             delivery_gr_df = orchestrator.get_delivery_gr_view(current_date.strftime('%Y-%m-%d'))
-            production_gr_df = orchestrator.get_production_gr_view(current_date.strftime('%Y-%m-%d'))
-            production_gr_df = production_gr_df.rename(columns={'date': 'available_date'})
+            #production_gr_df = orchestrator.get_production_gr_view(current_date.strftime('%Y-%m-%d'))
+            #production_gr_df = production_gr_df.rename(columns={'date': 'available_date'})
+            all_production_df = orchestrator.get_all_production_view(current_date.strftime('%Y-%m-%d'))
             open_deployment_df = orchestrator.get_open_deployment_view(current_date.strftime('%Y-%m-%d'))
             delivery_shipment_df = orchestrator.get_delivery_shipment_log_view(current_date.strftime('%Y-%m-%d'))
 
             print(f"  ✅ 从 Orchestrator 加载了 {len(beginning_inventory_df)} 条期初库存记录")
             print(f"  ✅ 从 Orchestrator 加载了 {len(in_transit_df)} 条在途记录")
             print(f"  ✅ 从 Orchestrator 加载了 {len(delivery_gr_df)} 条收货记录")
-            print(f"  ✅ 从 Orchestrator 加载了 {len(production_gr_df)} 条生产记录")
+            print(f"  ✅ 从 Orchestrator 加载了 {len(all_production_df)} 条生产记录")
             print(f"  ✅ 从 Orchestrator 加载了 {len(open_deployment_df)} 条开放部署记录")
             print(f"  ✅ 从 Orchestrator 加载了 {len(delivery_shipment_df)} 条发运记录")
         except Exception as e:
             print(f"  ⚠️  Orchestrator数据加载失败: {e}")
-            unrestricted_inventory_df = pd.DataFrame()
+            beginning_inventory_df = pd.DataFrame()
             in_transit_df = pd.DataFrame()
             delivery_gr_df = pd.DataFrame()
-            production_gr_df = pd.DataFrame()
+            all_production_df = pd.DataFrame()
             open_deployment_df = pd.DataFrame()
             delivery_shipment_df = pd.DataFrame()
         
@@ -901,7 +925,7 @@ def run_integrated_mode(
                 beginning_inventory_df,
                 in_transit_df,
                 delivery_gr_df,
-                production_gr_df,  # 使用从Orchestrator获取的生产数据
+                all_production_df,  # 使用从Orchestrator获取的生产数据 全量生产：含今天+未来
                 open_deployment_df,
                 network_df,
                 lead_time_df,

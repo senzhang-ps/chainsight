@@ -483,20 +483,42 @@ def load_integrated_config(
     else:
         config['TodayShipment'] = pd.DataFrame()
     
-    # 3. 从Module4加载生产计划
-    config['ProductionPlan'] = config_dict.get('M5_ProductionPlan', pd.DataFrame())   # 从测试配置加载
-    
-    # 实际从Module4输出加载数据
-    if module4_output_path and os.path.exists(module4_output_path):
+    # 3. 生产计划：优先从 Orchestrator 读取（与 M3 对齐）
+    config['ProductionPlan'] = pd.DataFrame()  # 先置空
+    # === 从 Orchestrator 取 All Production（含今天 + 未来）===
+    if orchestrator and current_date:
+        date_str = current_date.strftime('%Y-%m-%d')
+        try:
+            prod = orchestrator.get_all_production_view(date_str)
+            if isinstance(prod, pd.DataFrame) and not prod.empty:
+                # 规范字段
+                if 'available_date' in prod.columns:
+                    prod['available_date'] = pd.to_datetime(prod['available_date'])
+                for col in ['produced_qty', 'uncon_planned_qty', 'planned_qty', 'quantity']:
+                    if col in prod.columns:
+                        prod[col] = pd.to_numeric(prod[col], errors='coerce').fillna(0)
+                config['ProductionPlan'] = prod
+                print(f"  ✅ 从 Orchestrator 加载了 {len(prod)} 条生产计划数据（All Production）")
+        except Exception as e:
+            print(f"  ⚠️  从 Orchestrator 加载生产计划失败: {e}")
+
+    # === 回退：若 orchestrator 无数据，再尝试从 module4 文件读取 ProductionPlan ===
+    if (config['ProductionPlan'].empty) and module4_output_path and os.path.exists(module4_output_path):
         try:
             xl = pd.ExcelFile(module4_output_path)
             if 'ProductionPlan' in xl.sheet_names:
                 m4_production = xl.parse('ProductionPlan')
                 if not m4_production.empty:
+                    if 'available_date' in m4_production.columns:
+                        m4_production['available_date'] = pd.to_datetime(m4_production['available_date'])
+                    for col in ['produced_qty', 'uncon_planned_qty', 'planned_qty', 'quantity']:
+                        if col in m4_production.columns:
+                            m4_production[col] = pd.to_numeric(m4_production[col], errors='coerce').fillna(0)
                     config['ProductionPlan'] = m4_production
-                    print(f"  ✅ 从 Module4 加载了 {len(m4_production)} 条生产计划数据")
+                    print(f"  ✅ 回退：从 Module4 加载了 {len(m4_production)} 条生产计划数据")
         except Exception as e:
-            print(f"  ⚠️  无法从 Module4 加载数据: {e}")
+            print(f"  ⚠️  无法从 Module4 加载 ProductionPlan: {e}")   
+
     # 读取 M4_MaterialLocationLineCfg（用于 PTF/LSK）
     config['M4_MaterialLocationLineCfg'] = config_dict.get('M4_MaterialLocationLineCfg', pd.DataFrame())
     if module4_output_path and os.path.exists(module4_output_path):
@@ -943,8 +965,6 @@ def push_softpush_allocation(
             if error_msg:
                 print(f"Warning: push/soft push {error_msg} for {sending}->{loc}, using default leadtime=1")
                 leadtime = 1
-                print(f"Warning: {error_msg} for {sending}->{loc}, using default leadtime=1")
-                leadtime = 1
             planned_delivery_date = sim_date + timedelta(days=leadtime)
             plan = {
                 'date': sim_date,
@@ -1184,21 +1204,40 @@ def main(
         # 使用期初库存作为基础，避免重复计算M1 shipment和M4 production
         beginning_inventory = soh_dict.copy()
         
-        # 从 Module4 获取当日和未来生产
+        # 从 Module4/Orchestrator 获取当日和未来生产（来源见 load_integrated_config 的配置）
         today_production_gr = {}
         future_production = {}
         if not production_plan.empty:
-            # 当日生产 (available_date = today)
+            # 当日生产 (available_date = sim_date) —— 用 produced_qty
             today_prod = production_plan[production_plan['available_date'] == sim_date]
             for _, row in today_prod.iterrows():
                 k = (row['material'], row['location'])
-                today_production_gr[k] = today_production_gr.get(k, 0) + int(row.get('produced_qty', row.get('planned_qty', 0)))
-            
-            # 未来生产 (available_date > today)
+                if 'produced_qty' in row and pd.notna(row['produced_qty']):
+                    qty_today = int(row['produced_qty'])
+                elif 'planned_qty' in row and pd.notna(row['planned_qty']):
+                    qty_today = int(row['planned_qty'])
+                elif 'quantity' in row and pd.notna(row['quantity']):
+                    qty_today = int(row['quantity'])
+                else:
+                    qty_today = 0
+                today_production_gr[k] = today_production_gr.get(k, 0) + qty_today
+
+            # 未来生产 (available_date > sim_date) —— 用 uncon_planned_qty
             future_prod = production_plan[production_plan['available_date'] > sim_date]
             for _, row in future_prod.iterrows():
                 k = (row['material'], row['location'])
-                future_production[k] = future_production.get(k, 0) + int(row.get('produced_qty', row.get('planned_qty', 0)))
+                if 'uncon_planned_qty' in row and pd.notna(row['uncon_planned_qty']):
+                    qty_future = int(row['uncon_planned_qty'])
+                elif 'produced_qty' in row and pd.notna(row['produced_qty']):
+                    # 回退：若没有 uncon，则用 produced（尽量不丢数据）
+                    qty_future = int(row['produced_qty'])
+                elif 'planned_qty' in row and pd.notna(row['planned_qty']):
+                    qty_future = int(row['planned_qty'])
+                elif 'quantity' in row and pd.notna(row['quantity']):
+                    qty_future = int(row['quantity'])
+                else:
+                    qty_future = 0
+                future_production[k] = future_production.get(k, 0) + qty_future
         
         # 从 Orchestrator 获取在途库存
         today_intransit = {}
@@ -1251,11 +1290,12 @@ def main(
             print(f"\n📦 处理层级 {layer}")
             print(f"{'-'*40}")
             
-            # 组合所有material-location对（包含 OrderLog）
+            # 组合所有material-location对（包含 OrderLog和safety stock）
             materials_union = set(config['SupplyDemandLog']['material'].unique())
             if 'OrderLog' in config and not config['OrderLog'].empty:
                 materials_union |= set(config['OrderLog']['material'].unique())
-
+            if not config['SafetyStock'].empty:
+                materials_union |= set(config['SafetyStock']['material'].unique())
             base_pairs = set(
                 (mat, loc)
                 for loc, l in location_to_layer.items() if l == layer

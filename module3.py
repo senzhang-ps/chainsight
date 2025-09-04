@@ -343,8 +343,10 @@ def calculate_daily_net_demand(
     downstream_forecast_gap: float,
     downstream_safety_gap: float,
     horizon: int,
-    delivery_shipment_df: pd.DataFrame | None = None
-) -> Tuple[float, float]:
+    delivery_shipment_df: pd.DataFrame | None = None,
+    order_df: pd.DataFrame | None = None,       # ← 新增：用于 AO_local
+    downstream_ao_gap: float = 0.0              # ← 新增：下游 AO 缺口    
+) -> Tuple[float, float, float]:  # ← 返回 AO, FC, SS 三个 gap
     """计算每日净需求（forecast gap和safety gap） - 兼容module1的数据格式
     
     Args:
@@ -495,42 +497,66 @@ def calculate_daily_net_demand(
                           today_production_gr_qty + future_production_qty - 
                           today_shipment_qty - delivery_shipment_qty - open_deployment_qty)
 
-        # 计算总预测需求 = 本节点需求 + 下游预测缺口
-        # 使用Module1的SupplyDemandLog数据
-        supply_demand_qty = 0.0
+        # ======== 需求侧：三类本地需求 ========
+        # 1) AO（来自 OrderLog 且 demand_type == 'AO'，窗口 [date, horizon_end]）
+        AO_local = 0.0
+        if order_df is not None and not order_df.empty:
+            od = order_df[
+                (order_df.get('material') == material) &
+                (order_df.get('location') == location) &
+                (order_df.get('demand_type') == 'AO') &
+                (pd.to_datetime(order_df.get('date')) > date) &
+                (pd.to_datetime(order_df.get('date')) <= horizon_end)
+            ]
+            if not od.empty and 'quantity' in od.columns:
+                AO_local = float(pd.to_numeric(od['quantity'], errors='coerce').fillna(0).sum())
+
+        # 2) forecast（来自 SupplyDemandLog，窗口 [date, horizon_end]）
+        FC_local = 0.0
         if not supply_demand_df.empty and 'material' in supply_demand_df.columns:
-            supply_demand_rows = supply_demand_df[
+            sdl_rows = supply_demand_df[
                 (supply_demand_df['material'] == material) &
                 (supply_demand_df['location'] == location) &
                 (supply_demand_df['date'] >= date) &
                 (supply_demand_df['date'] <= horizon_end)
             ]
-            # 根据Module1的数据结构，使用quantity字段
-            supply_demand_qty = float(supply_demand_rows['quantity'].sum()) if not supply_demand_rows.empty else 0.0
-        
-        total_forecast_demand = supply_demand_qty + downstream_forecast_gap
-        forecast_gap = max(total_forecast_demand - total_available, 0.0)
-        
-        # 计算安全库存需求缺口
-        safety_stock_qty = 0.0
+            FC_local = float(pd.to_numeric(sdl_rows.get('quantity', 0), errors='coerce').fillna(0).sum())
+
+        # 3) safety（取 horizon_end 当日目标）
+        SS_local = 0.0
         if not safety_stock_df.empty and 'material' in safety_stock_df.columns:
-            safety_row = safety_stock_df[
+            ssr = safety_stock_df[
                 (safety_stock_df['material'] == material) &
                 (safety_stock_df['location'] == location) &
                 (safety_stock_df['date'] == horizon_end)
             ]
-            safety_stock_qty = float(safety_row['safety_stock_qty'].sum()) if not safety_row.empty else 0.0
-        
-        # 总安全需求 = 预测需求 + 下游安全缺口 + 本地安全库存
-        total_safety_demand = total_forecast_demand + safety_stock_qty + downstream_safety_gap
-        safety_gap = max(total_safety_demand - total_available, 0.0) - forecast_gap
-        
-        return forecast_gap, safety_gap
+            if not ssr.empty and 'safety_stock_qty' in ssr.columns:
+                SS_local = float(pd.to_numeric(ssr['safety_stock_qty'], errors='coerce').fillna(0).sum())
+
+        # ======== 缺口顺序：AO → forecast → safety ========
+        # 使用 total_available 作为初始 AVAILABLE，依次消耗
+        AVAILABLE = float(total_available)
+
+        # AO
+        AO_total = AO_local + float(downstream_ao_gap or 0.0)
+        AO_gap = max(AO_total - AVAILABLE, 0.0)
+        AVAILABLE = max(AVAILABLE - min(AVAILABLE, AO_total), 0.0)
+
+        # forecast
+        FC_total = FC_local + float(downstream_forecast_gap or 0.0)
+        FC_gap = max(FC_total - AVAILABLE, 0.0)
+        AVAILABLE = max(AVAILABLE - min(AVAILABLE, FC_total), 0.0)
+
+        # safety（在 forecast 基础上校验安全目标，不重复计 AO）
+        SAF_total = FC_total + SS_local + float(downstream_safety_gap or 0.0)
+        SS_gap = max(SAF_total - AVAILABLE, 0.0)
+
+        return AO_gap, FC_gap, SS_gap
         
     except Exception as e:
         # 记录错误但返回默认值，避免中断整个流程
         print(f"Warning: Error calculating net demand for {material}-{location} on {date}: {e}")
-        return 0.0, 0.0
+        return 0.0, 0.0, 0.0
     
 def run_mrp_layered_simulation_daily(
     sim_date: pd.Timestamp,
@@ -658,11 +684,11 @@ def run_mrp_layered_simulation_daily(
         for col in ['produced_qty', 'uncon_planned_qty', 'quantity']:
             if col in future_production_df.columns:
                 future_production_df[col] = pd.to_numeric(future_production_df[col], errors='coerce').fillna(0)        
-    # 下游gap分 forecast_gap、safety_gap
-    downstream_gap_dict = defaultdict(lambda: {'forecast_gap': 0.0, 'safety_gap': 0.0})
+    # 下游gap分 AO、FC、SS gap
+    downstream_gap_dict = defaultdict(lambda: {'AO': 0.0, 'FC': 0.0, 'SS': 0.0})
 
     for layer in all_layers:
-        parent_gap_accum = defaultdict(lambda: {'forecast_gap': 0.0, 'safety_gap': 0.0})
+        parent_gap_accum = defaultdict(lambda: {'AO': 0.0, 'FC': 0.0, 'SS': 0.0})
         
         # 获取当前层级的节点
         material_locations_df = pd.DataFrame(material_locations)
@@ -730,46 +756,62 @@ def run_mrp_layered_simulation_daily(
                     horizon = 1
 
             # 获取下游缺口
-            lower_forecast_gap = downstream_gap_dict[(material, location)]['forecast_gap']
-            lower_safety_gap = downstream_gap_dict[(material, location)]['safety_gap']
+            lower_AO_gap = downstream_gap_dict[(material, location)]['AO']
+            lower_FC_gap = downstream_gap_dict[(material, location)]['FC']
+            lower_SS_gap = downstream_gap_dict[(material, location)]['SS']
 
             # 计算当前节点的净需求
-            forecast_gap, safety_gap = calculate_daily_net_demand(
+            AO_gap, FC_gap, SS_gap = calculate_daily_net_demand(
                 str(material), str(location), sim_date,
-                demand_pool_df, safety_stock_df,
+                daily_supply_demand_df, safety_stock_df,            # ← 传原始 SDL（不要合并池）
                 beginning_inventory_df, in_transit_df,
                 delivery_gr_df, pd.DataFrame(future_production_df),
                 daily_shipment_df, open_deployment_df,
-                lower_forecast_gap, lower_safety_gap, horizon,
-                delivery_shipment_df=delivery_shipment_df
+                lower_FC_gap, lower_SS_gap, horizon,
+                delivery_shipment_df=delivery_shipment_df,
+                order_df=daily_order_df,                            # ← 用于 AO_local
+                downstream_ao_gap=lower_AO_gap                      # ← 下游 AO 缺口
             )
 
             # gap分别加给父节点
             if upstream and pd.notna(upstream):
-                parent_gap_accum[(material, upstream)]['forecast_gap'] += forecast_gap
-                parent_gap_accum[(material, upstream)]['safety_gap'] += safety_gap
-                print(f"    📤 传递gap到上游: {material}@{upstream} += forecast:{forecast_gap:.2f}, safety:{safety_gap:.2f}")
+                parent_gap_accum[(material, upstream)]['AO'] += AO_gap
+                parent_gap_accum[(material, upstream)]['FC'] += FC_gap
+                parent_gap_accum[(material, upstream)]['SS'] += SS_gap
 
             # 记录当日净需求
-            if forecast_gap > 0:
+            # 记录当日净需求（有缺口才写行），统一命名为 net demand for ...
+            if AO_gap > 0:
                 all_net_demand_records.append({
                     'material': str(material),
                     'location': str(location),
-                    'requirement_date': sim_date + pd.Timedelta(days=1),  # +1天，给第二天的Module4使用
-                    'quantity': -forecast_gap,  # 负值表示需求
-                    'demand_element': 'Distribution Demand - Forecast',
+                    'requirement_date': sim_date + pd.Timedelta(days=1),
+                    'quantity': -AO_gap,
+                    'demand_element': 'net demand for AO',
                     'layer': layer,
                     'simulation_date': sim_date,
                     'horizon_days': horizon
                 })
-                
-            if safety_gap > 0:
+
+            if FC_gap > 0:
                 all_net_demand_records.append({
                     'material': str(material),
                     'location': str(location),
-                    'requirement_date': sim_date + pd.Timedelta(days=1),  # +1天，给第二天的Module4使用
-                    'quantity': -safety_gap,  # 负值表示需求
-                    'demand_element': 'Distribution Demand - Safety Stock',
+                    'requirement_date': sim_date + pd.Timedelta(days=1),
+                    'quantity': -FC_gap,
+                    'demand_element': 'net demand for forecast',
+                    'layer': layer,
+                    'simulation_date': sim_date,
+                    'horizon_days': horizon
+                })
+
+            if SS_gap > 0:
+                all_net_demand_records.append({
+                    'material': str(material),
+                    'location': str(location),
+                    'requirement_date': sim_date + pd.Timedelta(days=1),
+                    'quantity': -SS_gap,
+                    'demand_element': 'net demand for safety',
                     'layer': layer,
                     'simulation_date': sim_date,
                     'horizon_days': horizon
@@ -781,7 +823,7 @@ def run_mrp_layered_simulation_daily(
         if parent_gap_accum:
             print(f"    📊 Layer {layer} gap汇总:")
             for (mat, loc), gaps in parent_gap_accum.items():
-                print(f"      {mat}@{loc}: forecast={gaps['forecast_gap']:.2f}, safety={gaps['safety_gap']:.2f}")
+                print(f"      {mat}@{loc}: AO={gaps['AO']:.2f}, forecast={gaps['FC']:.2f}, safety={gaps['SS']:.2f}")
 
     # 生成最终净需求DataFrame
     net_demand_df = pd.DataFrame(all_net_demand_records)

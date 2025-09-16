@@ -4,6 +4,94 @@ import numpy as np
 from datetime import timedelta
 import argparse
 import os
+from typing import Optional
+
+
+def get_or_init_simulation_start(output_dir: str, provided_start: Optional[pd.Timestamp]) -> pd.Timestamp:
+    """Load persistent simulation start date or initialize it.
+
+    During the first Module4 run we persist the provided start date to a
+    small state file in ``output_dir``. Subsequent runs reuse the stored
+    value so that review-day calculations remain consistent.
+
+    Args:
+        output_dir: Directory for Module4 outputs/state files.
+        provided_start: Start date supplied by the user (optional after the
+            first run).
+
+    Returns:
+        pd.Timestamp: The persisted simulation start date.
+    """
+    state_file = os.path.join(output_dir, "simulation_start.txt")
+
+    # If a state file exists, always use it
+    if os.path.exists(state_file):
+        try:
+            with open(state_file, "r") as f:
+                return pd.to_datetime(f.read().strip())
+        except Exception as e:
+            raise ValueError(f"Failed to read simulation start from {state_file}: {e}")
+
+    # No state file yet – require a provided start date and persist it
+    if provided_start is None:
+        raise ValueError("Simulation start date not provided and state file not found")
+
+    os.makedirs(output_dir, exist_ok=True)
+    with open(state_file, "w") as f:
+        f.write(provided_start.strftime("%Y-%m-%d"))
+
+    return provided_start
+
+IDENTIFIER_COLS = [
+    'material', 'location', 'line', 'delegate_line', 'from_material', 'to_material'
+]
+
+
+def _normalize_location(location_str: str) -> str:
+    """Normalize location string by padding with leading zeros to 4 digits.
+    
+    Args:
+        location_str: Location string (e.g., "386" or "0386")
+        
+    Returns:
+        str: Normalized location with leading zeros (e.g., "0386")
+    """
+    try:
+        # Convert to int and back to string with 4-digit zero padding
+        return str(int(location_str)).zfill(4)
+    except (ValueError, TypeError):
+        # If conversion fails, return original string with zero padding
+        return str(location_str).zfill(4)
+
+
+def _cast_identifiers_to_str(df: pd.DataFrame, cols=None) -> pd.DataFrame:
+    """Cast identifier columns to pandas string dtype and normalize locations.
+
+    Args:
+        df: DataFrame to process
+        cols: Optional list of columns; defaults to IDENTIFIER_COLS
+
+    Returns:
+        DataFrame with specified columns cast to string dtype and normalized
+    """
+    cols = cols or IDENTIFIER_COLS
+    for c in cols:
+        if c in df.columns:
+            df[c] = df[c].astype('string')
+            # Normalize location column specifically
+            if c == 'location':
+                df[c] = df[c].apply(_normalize_location)
+    return df
+
+
+def _validate_merge_keys(df1: pd.DataFrame, df2: pd.DataFrame, keys):
+    """Validate that merge keys share the same dtype in both DataFrames."""
+    for k in keys:
+        if k in df1.columns and k in df2.columns:
+            if df1[k].dtype != df2[k].dtype:
+                raise TypeError(
+                    f"Merge key '{k}' has mismatched dtypes: {df1[k].dtype} vs {df2[k].dtype}"
+                )
 
 def load_daily_net_demand(module3_output_dir: str, simulation_date: pd.Timestamp) -> pd.DataFrame:
     """
@@ -18,19 +106,18 @@ def load_daily_net_demand(module3_output_dir: str, simulation_date: pd.Timestamp
         DataFrame: Filtered and processed NetDemand data
     """
     try:
-        # 首先尝试读取前一天的NetDemand（符合执行顺序 M1→M4→M5→M6→M3）
+        # 按照设计逻辑：Module4读取前一天的Module3输出
+        # Module3的requirement_date = simulation_date + 1
+        # Module4读取前一天文件，所以requirement_date = 当前simulation_date
         prev_date = simulation_date - pd.Timedelta(days=1)
         prev_date_str = prev_date.strftime('%Y%m%d')
         net_demand_file = os.path.join(module3_output_dir, f"Module3Output_{prev_date_str}.xlsx")
         
         if not os.path.exists(net_demand_file):
-            # 如果是第一天，尝试读取当天的（可能是初始需求预测）
-            current_date_str = simulation_date.strftime('%Y%m%d')
-            net_demand_file = os.path.join(module3_output_dir, f"Module3Output_{current_date_str}.xlsx")
-            
-            if not os.path.exists(net_demand_file):
-                print(f"Warning: NetDemand file not found for {prev_date_str} or {current_date_str}. Using empty DataFrame.")
-                return pd.DataFrame(columns=['material', 'location', 'requirement_date', 'quantity', 'demand_type', 'layer'])
+            # 第一天没有前一天的Module3输出，这是正常的
+            # 按照设计，第一天应该没有生产计划
+            print(f"Info: No previous day Module3 output found for {prev_date_str}. This is expected for the first day.")
+            return pd.DataFrame(columns=['material', 'location', 'requirement_date', 'quantity', 'demand_type', 'layer'])
         
         # Load NetDemand sheet
         xl = pd.ExcelFile(net_demand_file)
@@ -39,7 +126,8 @@ def load_daily_net_demand(module3_output_dir: str, simulation_date: pd.Timestamp
             return pd.DataFrame(columns=['material', 'location', 'requirement_date', 'quantity', 'demand_type', 'layer'])
         
         net_demand = pd.read_excel(net_demand_file, sheet_name='NetDemand')
-        
+        net_demand = _cast_identifiers_to_str(net_demand, ['material', 'location'])
+
         if net_demand.empty:
             return pd.DataFrame(columns=['material', 'location', 'requirement_date', 'quantity', 'demand_type', 'layer'])
         
@@ -157,18 +245,24 @@ def load_config(filepath):
             raise KeyError(f"Missing required sheet: {s}")
         # Map to original keys for backward compatibility
         if s == 'M4_MaterialLocationLineCfg':
-            cfg['MaterialLocationLineCfg'] = xl.parse(s)
+            cfg['MaterialLocationLineCfg'] = _cast_identifiers_to_str(xl.parse(s))
         elif s == 'M4_LineCapacity':
-            cfg['LineCapacity'] = xl.parse(s)
+            cfg['LineCapacity'] = _cast_identifiers_to_str(xl.parse(s))
         elif s == 'M4_ChangeoverMatrix':
-            cfg['ChangeoverMatrix'] = xl.parse(s)
+            cfg['ChangeoverMatrix'] = _cast_identifiers_to_str(xl.parse(s))
         elif s == 'M4_ChangeoverDefinition':
-            cfg['ChangeoverDefinition'] = xl.parse(s)
+            cfg['ChangeoverDefinition'] = _cast_identifiers_to_str(xl.parse(s))
         elif s == 'M4_ProductionReliability':
-            cfg['ProductionReliability'] = xl.parse(s)
+            cfg['ProductionReliability'] = _cast_identifiers_to_str(xl.parse(s))
         elif s == 'Global_DemandPriority':
-            cfg['NetDemandTypePriority'] = xl.parse(s)
-    
+            cfg['NetDemandTypePriority'] = _cast_identifiers_to_str(xl.parse(s))
+
+    # Optional NetDemand sheet for legacy mode
+    if 'NetDemand' in xl.sheet_names:
+        cfg['NetDemand'] = _cast_identifiers_to_str(
+            xl.parse('NetDemand'), ['material', 'location']
+        )
+
     # Handle optional Global_seed sheet
     if 'Global_seed' in xl.sheet_names:
         seed_df = pd.read_excel(filepath, sheet_name='Global_seed')
@@ -184,6 +278,7 @@ def validate_config(cfg):
     if 'NetDemand' in cfg and not cfg['NetDemand'].empty:
         nd = cfg['NetDemand'][['material', 'location']]
         ml = cfg['MaterialLocationLineCfg'][['material', 'location']]
+        _validate_merge_keys(nd, ml, ['material', 'location'])
         merged = pd.merge(nd, ml, on=['material', 'location'], how='left', indicator=True)
         bad = merged[merged['_merge'] == 'left_only']
         for mat, loc in bad[['material', 'location']].drop_duplicates().values:
@@ -220,7 +315,7 @@ def is_review_day(simulation_date, simulation_start, lsk, day):
         bool: True if this is a review day for the material
     """
     days_since_start = (simulation_date - simulation_start).days
-    first_review_day = int(day)  # offset from start
+    first_review_day = int(day)-1  # offset from start
     return (days_since_start - first_review_day) % int(lsk) == 0 and days_since_start >= first_review_day
 
 
@@ -244,6 +339,9 @@ def build_unconstrained_plan_for_single_day(net_demand_df, mlcfg, simulation_dat
     if net_demand_df.empty:
         return pd.DataFrame(columns=['material', 'location', 'line', 'planned_date', 'uncon_planned_qty', 'simulation_date'])
     
+    # 确保MLCFG的标识符也是string类型，与NetDemand保持一致
+    mlcfg = _cast_identifiers_to_str(mlcfg.copy(), ['material', 'location'])
+    
     for idx, row in mlcfg.iterrows():
         material = row['material']
         location = row['location']
@@ -256,7 +354,7 @@ def build_unconstrained_plan_for_single_day(net_demand_df, mlcfg, simulation_dat
         if not is_review_day(simulation_date, simulation_start, lsk, day):
             continue  # Skip non-review materials
         
-        # Get demands for this material-location
+        # Get demands for this material-location (两边都是string类型)
         nd_sub = net_demand_df[
             (net_demand_df['material'] == material) & 
             (net_demand_df['location'] == location)
@@ -265,28 +363,33 @@ def build_unconstrained_plan_for_single_day(net_demand_df, mlcfg, simulation_dat
         if nd_sub.empty:
             continue
         
-        # Add configuration data to demands
+        # Add configuration data to demands (现在两边都是string类型，可以安全merge)
+        cfg_slice = mlcfg[mlcfg['material'].eq(material) & mlcfg['location'].eq(location)]
+        _validate_merge_keys(nd_sub, cfg_slice, ['material', 'location'])
         nd_sub = nd_sub.merge(
-            mlcfg[mlcfg['material'].eq(material) & mlcfg['location'].eq(location)], 
-            on=['material', 'location'], 
+            cfg_slice,
+            on=['material', 'location'],
             how='left'
         )
         
         # Calculate planning window (respects PTF)
         window_start, window_end = compute_planning_window(simulation_date, ptf, lsk)
         # Note: requirement_date from Module3 already includes lead time calculation
-        # === 修复：不再用 window 过滤需求，改为“按日对齐进入计划” ===
+        # === 恢复正确的日期匹配逻辑：requirement_date应该等于simulation_date ===
         nd_sub['requirement_date'] = pd.to_datetime(nd_sub['requirement_date']).dt.normalize()
         _sim_d = pd.to_datetime(simulation_date).normalize()
+        
+        # 严格匹配：Module3的requirement_date = simulation_date + 1，
+        # Module4读取前一天文件，所以requirement_date应该等于当前simulation_date
         mask = (nd_sub['requirement_date'] == _sim_d)
         
-        # === 修复对应：改为提示“非当日需求未纳入当日计划”，仅记录为校验信息 ===
+        # === 报告日期不匹配的需求 ===
         for _, r in nd_sub[~mask].iterrows():
             try:
                 issues.append({
                     'sheet': 'NetDemand',
                     'row': '',
-                    'issue': f"Demand for material {r['material']} at location {r['location']} with requirement date {pd.to_datetime(r['requirement_date']).date()} is not equal to simulation date {simulation_date.date()} (kept out of today's plan)."
+                    'issue': f"Demand for material {r['material']} at location {r['location']} with requirement date {pd.to_datetime(r['requirement_date']).date()} does not match simulation date {simulation_date.date()} (excluded from plan)."
                 })
             except Exception:
                 pass  # 容错，避免 issues 写入异常中断
@@ -548,7 +651,7 @@ def run_daily_production_planning(config_file: str, module3_output_dir: str,
         
         # Load daily NetDemand from Module3
         net_demand_df = load_daily_net_demand(module3_output_dir, simulation_date)
-        
+        net_demand_df = _cast_identifiers_to_str(net_demand_df, ['material', 'location'])        
         if net_demand_df.empty:
             print(f"Warning: No NetDemand data for {simulation_date.strftime('%Y-%m-%d')}. Generating empty output.")
         
@@ -689,7 +792,7 @@ def main():
     # Daily mode arguments
     parser.add_argument('--module3_output_dir', help='Directory containing Module3 daily outputs (daily mode)')
     parser.add_argument('--simulation_date', help='Simulation date YYYY-MM-DD (daily mode)')
-    parser.add_argument('--simulation_start', help='Simulation start date YYYY-MM-DD (daily mode)')
+    parser.add_argument('--simulation_start', help='Simulation start date YYYY-MM-DD (daily mode, required on first run)')
     parser.add_argument('--output_dir', help='Output directory (daily mode)')
     
     # Legacy mode arguments (backward compatibility)
@@ -703,11 +806,14 @@ def main():
     try:
         if args.mode == 'daily':
             # Daily execution mode
-            if not all([args.module3_output_dir, args.simulation_date, args.simulation_start, args.output_dir]):
-                raise ValueError("Daily mode requires: --module3_output_dir, --simulation_date, --simulation_start, --output_dir")
+            if not all([args.module3_output_dir, args.simulation_date, args.output_dir]):
+                raise ValueError("Daily mode requires: --module3_output_dir, --simulation_date, --output_dir")
             
             simulation_date = pd.to_datetime(args.simulation_date)
-            simulation_start = pd.to_datetime(args.simulation_start)
+            simulation_start = get_or_init_simulation_start(
+                args.output_dir,
+                pd.to_datetime(args.simulation_start) if args.simulation_start else None
+            )
             
             output_file = run_daily_production_planning(
                 config_file=args.config,
@@ -730,8 +836,10 @@ def main():
             cfg = load_config(args.input)
             issues = validate_config(cfg)
             
+
             # Legacy mode uses embedded NetDemand from config
             nd = cfg.get('NetDemand', pd.DataFrame())
+            nd = _cast_identifiers_to_str(nd, ['material', 'location'])
             if nd.empty:
                 raise ValueError("Legacy mode requires NetDemand sheet in config file")
             

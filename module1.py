@@ -736,9 +736,12 @@ def generate_shipment_with_inventory_check(
     # 当日到期订单
     today_orders = orders_df[
         pd.to_datetime(orders_df['date']) == simulation_date.normalize()
-    ]
+    ].copy()
     if today_orders.empty:
         return pd.DataFrame(), pd.DataFrame()
+    
+    # 确保与库存键一致的物料数据类型
+    today_orders['material'] = today_orders['material'].astype(str)
     
     # ✅ 可用库存 = 期初 + 当日 Production GR + 当日 Delivery GR
     current_inventory = _build_available_inventory_from_orchestrator(orchestrator, simulation_date)

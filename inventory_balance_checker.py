@@ -9,6 +9,27 @@ from typing import Dict, List, Tuple, Optional
 from collections import defaultdict
 from validation_manager import ValidationManager
 
+def _normalize_location(location_str: str) -> str:
+    """标准化location为4位补0格式"""
+    try:
+        if pd.isna(location_str):
+            return ""
+        return str(int(float(location_str))).zfill(4)
+    except (ValueError, TypeError):
+        location_str = str(location_str).strip()
+        if location_str.isdigit():
+            return location_str.zfill(4)
+        return location_str
+
+def _normalize_inventory_keys(inventory_dict: Dict) -> Dict:
+    """标准化库存字典的keys中的location"""
+    normalized_dict = {}
+    for (material, location), quantity in inventory_dict.items():
+        normalized_location = _normalize_location(location)
+        normalized_key = (str(material), normalized_location)
+        normalized_dict[normalized_key] = quantity
+    return normalized_dict
+
 class InventoryBalanceChecker:
     """库存平衡检查器"""
     
@@ -115,7 +136,8 @@ class InventoryBalanceChecker:
                 ending_inventory = self.orchestrator.daily_ending_inventory[date]
                 inventory_dict = {}
                 for (material, location), quantity in ending_inventory.items():
-                    inventory_dict[(material, location)] = float(quantity)
+                    normalized_location = _normalize_location(location)
+                    inventory_dict[(material, normalized_location)] = float(quantity)
                 print(f"    🔍 从期末库存记录获取 [{date}]: {len(inventory_dict)} 项")
                 return inventory_dict
             
@@ -125,6 +147,7 @@ class InventoryBalanceChecker:
             inventory_dict = {}
             for _, row in inventory_df.iterrows():
                 key = (row['material'], row['location'])
+                normalized_location = _normalize_location(row['location'])
                 inventory_dict[key] = float(row['quantity'])
             
             print(f"    🔍 从当前库存状态获取 [{date}]: {len(inventory_dict)} 项")
@@ -152,7 +175,8 @@ class InventoryBalanceChecker:
                 beginning_inventory = self.orchestrator.daily_beginning_inventory[date]
                 inventory_dict = {}
                 for (material, location), quantity in beginning_inventory.items():
-                    inventory_dict[(material, location)] = float(quantity)
+                    normalized_location = _normalize_location(location)
+                    inventory_dict[(material, normalized_location)] = float(quantity)
                 print(f"    🔍 从期初库存记录获取 [{date}]: {len(inventory_dict)} 项")
                 return inventory_dict
             
@@ -191,6 +215,7 @@ class InventoryBalanceChecker:
             
             for _, row in production_gr_df.iterrows():
                 key = (row['material'], row['location'])
+                normalized_location = _normalize_location(row['location'])
                 receipts_dict[key] = receipts_dict.get(key, 0) + float(row['quantity'])
             
             # 如果从Orchestrator实例获取不到数据，记录警告
@@ -224,6 +249,7 @@ class InventoryBalanceChecker:
             
             for _, row in delivery_gr_df.iterrows():
                 key = (row['material'], row['receiving'])
+                normalized_location = _normalize_location(row['receiving'])
                 receipts_dict[key] = receipts_dict.get(key, 0) + float(row['quantity'])
             
             # 如果从Orchestrator实例获取不到数据，记录警告
@@ -250,14 +276,16 @@ class InventoryBalanceChecker:
             if hasattr(self.orchestrator, 'initial_inventory') and self.orchestrator.initial_inventory:
                 initial_dict = {}
                 for (material, location), quantity in self.orchestrator.initial_inventory.items():
-                    initial_dict[(material, location)] = float(quantity)
+                    normalized_location = _normalize_location(location)
+                    initial_dict[(material, normalized_location)] = float(quantity)
                 print(f"    🔍 从初始库存配置获取: {len(initial_dict)} 项")
                 return initial_dict
             # 回退到当前库存（兼容旧版本）
             elif hasattr(self.orchestrator, 'unrestricted_inventory'):
                 initial_dict = {}
                 for (material, location), quantity in self.orchestrator.unrestricted_inventory.items():
-                    initial_dict[(material, location)] = float(quantity)
+                    normalized_location = _normalize_location(location)
+                    initial_dict[(material, normalized_location)] = float(quantity)
                 self.vm.add_warning("InventoryBalance", "DataAccess", 
                                   "Using current inventory as initial inventory (no initial_inventory found)")
                 return initial_dict
@@ -357,6 +385,7 @@ class InventoryBalanceChecker:
                 shipment_date = pd.to_datetime(shipment.get('date')).normalize()
                 if shipment_date == date_obj:
                     key = (shipment['material'], shipment['location'])
+                    normalized_location = _normalize_location(shipment['location'])
                     shipments_dict[key] = shipments_dict.get(key, 0) + float(shipment['quantity'])
             
             # 如果从Orchestrator实例获取不到数据，记录警告
@@ -449,7 +478,17 @@ class InventoryBalanceChecker:
         # 获取所有涉及的物料-地点组合
         all_keys = set()
         for d in [beginning, production, delivery, shipments, delivery_plans, ending]:
-            all_keys.update(d.keys())
+            # 标准化每个字典的keys
+            normalized_d = _normalize_inventory_keys(d)
+            all_keys.update(normalized_d.keys())
+
+        # 同时标准化所有字典
+        beginning = _normalize_inventory_keys(beginning)
+        production = _normalize_inventory_keys(production)
+        delivery = _normalize_inventory_keys(delivery)
+        shipments = _normalize_inventory_keys(shipments)
+        delivery_plans = _normalize_inventory_keys(delivery_plans)
+        ending = _normalize_inventory_keys(ending)
         
         balance_passed = True
         imbalances = []

@@ -42,6 +42,43 @@ def load_module1_daily_shipment(module1_output_dir: str, current_date: pd.Timest
     # 返回空DataFrame
     return pd.DataFrame(columns=['date', 'material', 'location', 'quantity'])
 
+def load_module1_daily_orders(module1_output_dir: str, current_date: pd.Timestamp) -> pd.DataFrame:
+    """
+    从Module1输出加载“当日版本”的订单日志（包含历史天生成但尚未来到期的订单 + 当天新生成）
+    仅按 requirement_date>=current_date 过滤，不按 simulation_date 过滤
+    返回列: [date, material, location, demand_type, quantity, simulation_date]
+    """
+    cols = ['date', 'material', 'location', 'demand_type', 'quantity', 'simulation_date']
+    try:
+        date_str = current_date.strftime('%Y%m%d')
+        module1_file = f"{module1_output_dir}/module1_output_{date_str}.xlsx"
+        if not os.path.exists(module1_file):
+            print(f"⚠️  Module1输出文件不存在: {module1_file}")
+            return pd.DataFrame(columns=cols)
+
+        xl = pd.ExcelFile(module1_file)
+        if 'OrderLog' not in xl.sheet_names:
+            print(f"⚠️  Module1输出文件中无OrderLog表: {module1_file}")
+            return pd.DataFrame(columns=cols)
+
+        df = xl.parse('OrderLog')
+        for c in ['date', 'simulation_date']:
+            if c in df.columns:
+                df[c] = pd.to_datetime(df[c])
+        # 只保留 requirement_date(=date) >= today 的订单行
+        if 'date' in df.columns:
+            df = df[df['date'] >= current_date]
+
+        # 规范列
+        for c in cols:
+            if c not in df.columns:
+                df[c] = pd.NaT if c in ['date','simulation_date'] else np.nan
+        return df[cols].copy()
+
+    except Exception as e:
+        print(f"⚠️  加载Module1订单数据失败: {e}")
+        return pd.DataFrame(columns=cols)
+
 def load_orchestrator_delivery_gr(orchestrator: object, current_date: pd.Timestamp) -> pd.DataFrame:
     """
     从Orchestrator加载当日收货数据
@@ -193,97 +230,133 @@ def apply_moq_rv(qty, moq, rv):
         return moq
     return int(np.ceil(qty / rv)) * rv
 
+def _get_ptf_lsk(material: str, site: str, m4_mlcfg_df: pd.DataFrame | None) -> tuple[int, int]:
+    ptf, lsk = 0, 1
+    if m4_mlcfg_df is None or m4_mlcfg_df.empty:
+        return ptf, lsk
+    ml = m4_mlcfg_df[
+        (m4_mlcfg_df['material'] == material) &
+        (m4_mlcfg_df['location'] == site)
+    ]
+    if ml.empty:
+        return ptf, lsk
+    row = ml.iloc[0]
+    if 'ptf' in ml.columns and pd.notna(row.get('ptf')):
+        ptf = int(row['ptf'])
+    elif 'PTF' in ml.columns and pd.notna(row.get('PTF')):
+        ptf = int(row['PTF'])
+    if 'lsk' in ml.columns and pd.notna(row.get('lsk')):
+        lsk = int(row['lsk'])
+    elif 'LSK' in ml.columns and pd.notna(row.get('LSK')):
+        lsk = int(row['LSK'])
+    return ptf, lsk
+
 def determine_lead_time(
     sending: str,
     receiving: str,
     location_type: str,
-    lead_time_df: pd.DataFrame
+    lead_time_df: pd.DataFrame,
+    m4_mlcfg_df: pd.DataFrame | None = None,   # ← 新增
+    material: str | None = None                # ← 新增
 ) -> tuple[int, str]:
     """
-    确定两地之间的提前期 - 与Module3保持一致
-    使用Global_Network中的location_type字段进行计算
-    
-    Args:
-        sending: 发送地点
-        receiving: 接收地点
-        location_type: 地点类型（来自Global_Network）
-        lead_time_df: 提前期配置数据
-        
-    Returns:
-        tuple[int, str]: (提前期天数, 错误信息)
+    Plant: lead_time = max(MCT, PDT+GR) + PTF + LSK - 1
+    DC:    lead_time = PDT + GR
+    PTF/LSK 来源: M4_MaterialLocationLineCfg（按 material+sending 匹配）
     """
     if lead_time_df.empty:
         return 1, 'empty_lead_time_config'
-        
+
     row = lead_time_df[
-        (lead_time_df['sending'] == sending) & 
+        (lead_time_df['sending'] == sending) &
         (lead_time_df['receiving'] == receiving)
     ]
-    
     if row.empty:
         return 1, 'lead_time_missing'
-    
+
     try:
-        PDT = int(row.iloc[0]['PDT']) if pd.notna(row.iloc[0]['PDT']) else 0
-        GR = int(row.iloc[0]['GR']) if pd.notna(row.iloc[0]['GR']) else 0
-        MCT = int(row.iloc[0]['MCT']) if pd.notna(row.iloc[0]['MCT']) else 0
-        
+        PDT = int(row.iloc[0].get('PDT', 0) or 0)
+        GR  = int(row.iloc[0].get('GR',  0) or 0)
+        MCT = int(row.iloc[0].get('MCT', 0) or 0)
+
+        ptf, lsk = 0, 1
+        if str(location_type).lower() == 'plant' and material is not None:
+            # 与 M3 对齐：按 (material, sending) 取 PTF/LSK
+            ptf, lsk = _get_ptf_lsk(material=material, site=sending, m4_mlcfg_df=m4_mlcfg_df)
+
         if str(location_type).lower() == 'plant':
-            lead_time = max(MCT, PDT + GR)
-        else:  # DC (Distribution Center)
-            lead_time = PDT + GR
-            
-        return max(1, lead_time), ""
-        
+            base_lt  = max(MCT, PDT + GR)
+            leadtime = base_lt + ptf + lsk - 1
+        else:
+            leadtime = PDT + GR
+
+        return max(1, int(leadtime)), ""
+
     except Exception as e:
         return 1, f'lead_time_calculation_error: {str(e)}'
 
-def assign_network_layers(network_df: pd.DataFrame) -> pd.DataFrame:
-    from collections import defaultdict, deque
+def get_sending_location_type(
+    material: str,
+    sending: str,
+    sim_date: pd.Timestamp,
+    network_df: pd.DataFrame,
+    location_layer_map: dict
+) -> str:
+    """
+    与 Module3 一致的口径：
+    1) 先查 network 中 (material, location=sending) 活动行，若存在则用其 location_type
+    2) 若不存在且 sending 是自动识别的最上游（layer=0），则视为 Plant
+    3) 否则默认 DC
+    """
+    if not sending or pd.isna(sending) or str(sending).strip() == "":
+        return 'DC'
 
-    # 1. 原始网络数据处理
-    net = network_df.copy()
-    
-    # 2. 构建父子关系图
+    row = get_active_network(network_df, material, sending, sim_date)
+    if not row.empty:
+        return str(row.iloc[0].get('location_type', 'DC') or 'DC')
+
+    # 未维护但被自动识别为根节点 → Plant
+    if location_layer_map.get(str(sending), None) == 0:
+        return 'Plant'
+
+    return 'DC'
+
+# === 用 module3 的版本替换 ===
+def assign_location_layers(network_df: pd.DataFrame) -> pd.DataFrame:
+    from collections import defaultdict, deque
+    if network_df.empty:
+        return pd.DataFrame({'location': [], 'layer': []})
+
     children = defaultdict(list)
     parents = defaultdict(list)
-    for _, row in net.iterrows():
-        if pd.notna(row['sourcing']):  # 只处理有效的sourcing关系
-            children[row['sourcing']].append(row['location'])
-            parents[row['location']].append(row['sourcing'])
+    for _, row in network_df.iterrows():
+        sourcing_val = row['sourcing']
+        location_val = row['location']
+        sourcing_valid = sourcing_val is not None and pd.notna(sourcing_val) and str(sourcing_val).strip() != ''
+        location_valid = location_val is not None and pd.notna(location_val) and str(location_val).strip() != ''
+        if sourcing_valid and location_valid:
+            children[sourcing_val].append(location_val)
+            parents[location_val].append(sourcing_val)
 
-    # 3. 收集所有涉及的节点
-    all_locations = set()
-    # 添加所有location节点
-    all_locations.update(network_df['location'].dropna().unique())
-    # 添加所有sourcing节点（可能不在location列中）
-    all_locations.update(network_df['sourcing'].dropna().unique())
+    all_locations = set(network_df['location'].dropna()).union(set(network_df['sourcing'].dropna()))
+    potential_roots = [loc for loc in all_locations if not parents[loc]]
 
-    # 4. 自动识别根节点（没有父节点的节点）
-    roots = []
-    for loc in all_locations:
-        if not parents.get(loc):  # 没有父节点或父节点为空
-            roots.append(loc)
-    
-    # 5. 如果没有明确的根节点，使用启发式方法
-    if not roots:
-        # 启发式：寻找在网络中作为sourcing出现但不作为location出现的节点
-        sourcing_only = set(network_df['sourcing'].dropna().unique()) - set(network_df['location'].dropna().unique())
-        if sourcing_only:
-            roots = list(sourcing_only)
+    true_roots = []
+    for loc in potential_roots:
+        if loc in children:
+            true_roots.append(loc)
         else:
-            # 最后手段：使用所有节点中最上游的节点
-            all_sourcing = set(network_df['sourcing'].dropna().unique())
-            all_locations_set = set(network_df['location'].dropna().unique())
-            potential_roots = all_sourcing - all_locations_set
-            roots = list(potential_roots) if potential_roots else list(all_locations)[:1] if all_locations else []
+            has_incoming = any(loc in parents.get(other_loc, []) for other_loc in all_locations)
+            if not has_incoming:
+                true_roots.append(loc)
+    if not true_roots:
+        true_roots = potential_roots
 
-    # 6. 层级分配（BFS）
     layer_dict = {}
+    from collections import deque
     queue = deque()
-    for root in roots:
+    for root in true_roots:
         queue.append((root, 0))
-    
     while queue:
         loc, layer = queue.popleft()
         if loc in layer_dict and layer_dict[loc] <= layer:
@@ -291,17 +364,15 @@ def assign_network_layers(network_df: pd.DataFrame) -> pd.DataFrame:
         layer_dict[loc] = layer
         for child in children.get(loc, []):
             queue.append((child, layer + 1))
-    
-    # 7. 孤立点处理
-    for loc in all_locations:
-        if loc not in layer_dict:
-            layer_dict[loc] = max(layer_dict.values()) + 1 if layer_dict else 0
-    
-    # 8. 反转层级（让消费者层为0，供应商层递增）
+
+    unassigned = [loc for loc in all_locations if loc not in layer_dict]
+    if unassigned:
+        max_layer = max(layer_dict.values()) if layer_dict else 0
+        for loc in unassigned:
+            layer_dict[loc] = max_layer + 1
+
     layer_df = pd.DataFrame([{'location': loc, 'layer': layer} for loc, layer in layer_dict.items()])
-    max_layer = layer_df['layer'].max()
-    layer_df['layer'] = max_layer - layer_df['layer']
-    
+    layer_df = layer_df.sort_values('layer')
     return layer_df
 
 def get_active_network(network_df, material, location, sim_date):
@@ -350,36 +421,6 @@ def compute_horizon(dt, lsk, day):
         return dt, window_end
     raise ValueError(f"Unknown LSK: {lsk}")
 
-
-def allocate_by_priority_and_weight(demand_rows, available_stock, demand_priority_map):
-    demand_rows_sorted = sorted(demand_rows, key=lambda d: demand_priority_map.get(d['demand_type'], 99))
-    grouped = {}
-    for d in demand_rows_sorted:
-        p = demand_priority_map.get(d['demand_type'], 99)
-        grouped.setdefault(p, []).append(d)
-    stock_left = available_stock
-    for priority in sorted(grouped):
-        group = grouped[priority]
-        total = sum(d['planned_qty'] for d in group)
-        if total == 0:
-            for d in group:
-                d['deployed_qty_invCon'] = 0
-            continue
-        if stock_left >= total:
-            for d in group:
-                d['deployed_qty_invCon'] = d['planned_qty']
-            stock_left -= total
-        else:
-            allocated = 0
-            for d in group:
-                weight = d['planned_qty'] / total
-                d['deployed_qty_invCon'] = int(stock_left * weight)
-                allocated += d['deployed_qty_invCon']
-            stock_left -= allocated
-            for d in group:
-                d['deployed_qty_invCon'] = min(d['deployed_qty_invCon'], d['planned_qty'])
-    return stock_left
-
 def load_integrated_config(
     config_dict: dict,
     module1_output_dir: str,
@@ -414,6 +455,12 @@ def load_integrated_config(
     # 2. 从Module1加载当日数据
     config['SupplyDemandLog'] = config_dict.get('M5_SupplyDemandLog', pd.DataFrame())  # 从测试配置加载
     
+    # 从Module1加载当日“订单池”
+    if module1_output_dir and current_date:
+        config['OrderLog'] = load_module1_daily_orders(module1_output_dir, current_date)
+    else:
+        config['OrderLog'] = pd.DataFrame()
+
     # 实际从 Module1 输出加载当日数据
     if module1_output_dir and current_date:
         try:
@@ -436,21 +483,55 @@ def load_integrated_config(
     else:
         config['TodayShipment'] = pd.DataFrame()
     
-    # 3. 从Module4加载生产计划
-    config['ProductionPlan'] = config_dict.get('M5_ProductionPlan', pd.DataFrame())   # 从测试配置加载
-    
-    # 实际从Module4输出加载数据
-    if module4_output_path and os.path.exists(module4_output_path):
+    # 3. 生产计划：优先从 Orchestrator 读取（与 M3 对齐）
+    config['ProductionPlan'] = pd.DataFrame()  # 先置空
+    # === 从 Orchestrator 取 All Production（含今天 + 未来）===
+    if orchestrator and current_date:
+        date_str = current_date.strftime('%Y-%m-%d')
+        try:
+            prod = orchestrator.get_all_production_view(date_str)
+            if isinstance(prod, pd.DataFrame) and not prod.empty:
+                # 规范字段
+                if 'available_date' in prod.columns:
+                    prod['available_date'] = pd.to_datetime(prod['available_date'])
+                for col in ['produced_qty', 'uncon_planned_qty', 'planned_qty', 'quantity']:
+                    if col in prod.columns:
+                        prod[col] = pd.to_numeric(prod[col], errors='coerce').fillna(0)
+                config['ProductionPlan'] = prod
+                print(f"  ✅ 从 Orchestrator 加载了 {len(prod)} 条生产计划数据（All Production）")
+        except Exception as e:
+            print(f"  ⚠️  从 Orchestrator 加载生产计划失败: {e}")
+
+    # === 回退：若 orchestrator 无数据，再尝试从 module4 文件读取 ProductionPlan ===
+    if (config['ProductionPlan'].empty) and module4_output_path and os.path.exists(module4_output_path):
         try:
             xl = pd.ExcelFile(module4_output_path)
             if 'ProductionPlan' in xl.sheet_names:
                 m4_production = xl.parse('ProductionPlan')
                 if not m4_production.empty:
+                    if 'available_date' in m4_production.columns:
+                        m4_production['available_date'] = pd.to_datetime(m4_production['available_date'])
+                    for col in ['produced_qty', 'uncon_planned_qty', 'planned_qty', 'quantity']:
+                        if col in m4_production.columns:
+                            m4_production[col] = pd.to_numeric(m4_production[col], errors='coerce').fillna(0)
                     config['ProductionPlan'] = m4_production
-                    print(f"  ✅ 从 Module4 加载了 {len(m4_production)} 条生产计划数据")
+                    print(f"  ✅ 回退：从 Module4 加载了 {len(m4_production)} 条生产计划数据")
         except Exception as e:
-            print(f"  ⚠️  无法从 Module4 加载数据: {e}")
-    
+            print(f"  ⚠️  无法从 Module4 加载 ProductionPlan: {e}")   
+
+    # 读取 M4_MaterialLocationLineCfg（用于 PTF/LSK）
+    config['M4_MaterialLocationLineCfg'] = config_dict.get('M4_MaterialLocationLineCfg', pd.DataFrame())
+    if module4_output_path and os.path.exists(module4_output_path):
+        try:
+            xl = pd.ExcelFile(module4_output_path)
+            if 'M4_MaterialLocationLineCfg' in xl.sheet_names:
+                mlcfg = xl.parse('M4_MaterialLocationLineCfg')
+                if not mlcfg.empty:
+                    config['M4_MaterialLocationLineCfg'] = mlcfg
+                    print(f"  ✅ 从 Module4 加载了 {len(mlcfg)} 条 M4_MaterialLocationLineCfg")
+        except Exception as e:
+            print(f"  ⚠️  无法从 Module4 读取 M4_MaterialLocationLineCfg: {e}")
+
     # 4. 从Orchestrator加载动态数据
     if orchestrator and current_date:
         date_str = current_date.strftime('%Y-%m-%d')
@@ -492,6 +573,7 @@ def load_integrated_config(
         'SafetyStock': ['date'],
         'ReceivingSpace': ['date'],
         'Network': ['eff_from', 'eff_to'],
+        'OrderLog': ['date', 'simulation_date'],
     }
     
     for sheet, fields in date_fields.items():
@@ -534,6 +616,7 @@ def load_config(input_path: str):
         'SafetyStock': ['date'],
         'ReceivingSpace': ['date'],
         'Network': ['eff_from', 'eff_to'],
+        'OrderLog': ['date', 'simulation_date'],
     }
     for sheet, fields in date_fields.items():
         if sheet in config and not config[sheet].empty:
@@ -544,7 +627,6 @@ def load_config(input_path: str):
     return config
 
 def validate_config_before_run(config, validation_log):
-    # 检查leadtime缺失，pushpull缺失，demand_priority缺失
     deploy_cfg = config['DeployConfig']
     leadtime_df = config['LeadTime']
     pushpull = config['PushPullModel']
@@ -575,12 +657,35 @@ def validate_config_before_run(config, validation_log):
         ].empty:
             validation_log.append({'No': len(validation_log)+1,
                 'Issue': f"Missing PushPullModel for {row['material']}/{row['sending']}"})
-    # 校验demand_priority
-    demand_types = set(config['SupplyDemandLog']['demand_element'].unique()) if not config['SupplyDemandLog'].empty else set()
-    for dt in demand_types:
-        if demand_priority[demand_priority['demand_element'] == dt].empty:
-            validation_log.append({'No': len(validation_log)+1,
-                                   'Issue': f"DemandPriority not defined for {dt}"})
+    # ======= 校验/补充 DemandPriority ==========
+    dp = demand_priority.copy()
+
+    # 既看 SupplyDemandLog 的 demand_element，也看 OrderLog 的 demand_type（AO/normal）
+    sdl_types = set(config['SupplyDemandLog']['demand_element'].unique()) if not config['SupplyDemandLog'].empty else set()
+    ol = config.get('OrderLog', pd.DataFrame())
+    ol_types = set(ol['demand_type'].unique()) if ('demand_type' in ol.columns and not ol.empty) else set()
+
+    # 把 AO/normal 映射为 demand_element 字段里的值（我们后续用 demand_element 做优先级）
+    needed = sdl_types | ol_types  # AO/normal 也在其中
+
+    # 缺啥补啥（默认：AO=1，normal=2，其余给个较低优先级 9）
+    def _ensure_priority(elem, default_p):
+        if dp[dp['demand_element'] == elem].empty:
+            dp.loc[len(dp)] = {'demand_element': elem, 'priority': default_p}
+            validation_log.append({
+                'No': len(validation_log)+1,
+                'Issue': f'Auto add DemandPriority for {elem}={default_p}'
+            })
+    for elem in needed:
+        if elem == 'AO':
+            _ensure_priority('AO', 1)
+        elif elem == 'normal':
+            _ensure_priority('normal', 2)
+        else:
+            _ensure_priority(elem, 9)
+    # 回写
+    config['DemandPriority'] = dp
+
     return validation_log
 
 def collect_node_demands(material, location, sim_date, config, up_gap_buffer):
@@ -605,28 +710,28 @@ def collect_node_demands(material, location, sim_date, config, up_gap_buffer):
     network_row = get_active_network(network, material, location, sim_date)
     if not network_row.empty:
         upstream = network_row.iloc[0]['sourcing']
-        
-        # MCT是微生物检测时间，与sending site相关
-        # 需要查找sending location的location_type
-        if upstream:
-            sending_network_row = get_active_network(network, material, upstream, sim_date)
-            if not sending_network_row.empty:
-                sending_location_type = sending_network_row.iloc[0].get('location_type', 'DC')
-            else:
-                sending_location_type = 'DC'
-        else:
-            sending_location_type = 'DC'
     else:
         upstream = None
-        sending_location_type = 'DC'
+
+    # 统一口径：通过层级判根→Plant
+    sending_location_type = get_sending_location_type(
+        material=str(material),
+        sending=str(upstream) if upstream else "",
+        sim_date=sim_date,
+        network_df=network,
+        location_layer_map=config.get('LocationLayerMap', {})
+    )
+
 
     # 使用与Module3一致的提前期计算逻辑
     if upstream and pd.notna(upstream) and str(upstream).strip():
         leadtime, error_msg = determine_lead_time(
             sending=str(upstream),
             receiving=str(location),
-            location_type=str(sending_location_type),  # 使用sending location的location_type
-            lead_time_df=leadtime_df
+            location_type=str(sending_location_type),
+            lead_time_df=leadtime_df,
+            m4_mlcfg_df=config.get('M4_MaterialLocationLineCfg', pd.DataFrame()),
+            material=str(material)
         )
         if error_msg:
             print(f"Warning: {error_msg} for {upstream}->{location}, using default leadtime=1")
@@ -704,6 +809,46 @@ def collect_node_demands(material, location, sim_date, config, up_gap_buffer):
             'requirement_date': requirement_date,
             'plan_deploy_date': planned_deploy_date,
         })
+    # ========= 新增：将当日版本 OrderLog（含AO/normal）纳入调运需求 =========
+    order_df = config.get('OrderLog', pd.DataFrame())
+    if not order_df.empty:
+        orders = order_df[
+            (order_df['material'] == material) &
+            (order_df['location'] == location)
+        ].copy()
+
+        if not orders.empty:
+            # 需求日期 = 订单到期日
+            orders['requirement_date'] = pd.to_datetime(orders['date'])
+            orders['demand_element'] = orders['demand_type']
+            # planned_deploy_date = requirement_date - leadtime（但不可早于sim_date）
+            orders['planned_deploy_date'] = orders['requirement_date'] - pd.Timedelta(days=leadtime)
+            orders['planned_deploy_date'] = orders['planned_deploy_date'].apply(lambda d: max(d, sim_date))
+
+            # LSK 窗口筛选：planned_deploy_date ∈ [sim_date, sim_date + lsk - 1]
+            mask = (orders['planned_deploy_date'] >= filter_start) & (orders['planned_deploy_date'] <= filter_end)
+            orders = orders[mask]
+
+            for _, row in orders.iterrows():
+                requirement_date = row['requirement_date']
+                planned_deploy_date = row['planned_deploy_date']
+                qty = int(row['quantity'])
+
+                demand_rows.append({
+                    'material': material,
+                    'location': location,
+                    'sending': upstream,
+                    'receiving': location,
+                    'demand_element': row['demand_element'],   # 'AO' / 'normal'
+                    'demand_qty': qty,
+                    'planned_qty': qty,         # MOQ/RV 稍后统一处理
+                    'moq': moq,
+                    'rv': rv,
+                    'leadtime': leadtime,
+                    'requirement_date': requirement_date,
+                    'plan_deploy_date': planned_deploy_date,
+                    'orig_location': location
+                })
 
     # gap行，这部分需要按requirement_date重新计算planned_deploy_date并筛选
     if up_gap_buffer is not None and (material, location) in up_gap_buffer:
@@ -802,24 +947,23 @@ def push_softpush_allocation(
             # 关键：查leadtime，使用与Module3一致的逻辑
             # MCT是微生物检测时间，与sending site相关
             # 获取sending location的location_type
-            sending_network_row = net[
-                (net['material'] == mat) & (net['location'] == sending)
-            ]
-            if not sending_network_row.empty:
-                sending_location_type = sending_network_row.iloc[0].get('location_type', 'DC')
-            else:
-                sending_location_type = 'DC'
-            
+            sending_location_type = get_sending_location_type(
+                material=str(mat),
+                sending=str(sending),
+                sim_date=sim_date,
+                network_df=net,
+                location_layer_map=config.get('LocationLayerMap', {})
+            )
             leadtime, error_msg = determine_lead_time(
                 sending=str(sending),
                 receiving=str(loc),
-                location_type=str(sending_location_type),  # 使用sending location的location_type
-                lead_time_df=leadtime_df
+                location_type=str(sending_location_type),
+                lead_time_df=leadtime_df,
+                m4_mlcfg_df=config.get('M4_MaterialLocationLineCfg', pd.DataFrame()),
+                material=str(mat)
             )
             if error_msg:
                 print(f"Warning: push/soft push {error_msg} for {sending}->{loc}, using default leadtime=1")
-                leadtime = 1
-                print(f"Warning: {error_msg} for {sending}->{loc}, using default leadtime=1")
                 leadtime = 1
             planned_delivery_date = sim_date + timedelta(days=leadtime)
             plan = {
@@ -991,23 +1135,28 @@ def main(
     demand_priority = config['DemandPriority']
     receiving_space = config['ReceivingSpace']
 
-    network_layers = assign_network_layers(network)
+    network_layers = assign_location_layers(network)
     location_to_layer = dict(zip(network_layers['location'], network_layers['layer']))
-    layer_list = sorted(network_layers['layer'].unique())
-
+    layer_list = sorted(network_layers['layer'].unique(), reverse=True)  # 从最大层往上游推进
     demand_priority_map = {row['demand_element']: row['priority'] for _, row in demand_priority.iterrows()}
-
+    config['LocationLayerMap'] = location_to_layer
     # ========== 初始化库存 soh_dict ==========
+    # 1. 全收集所有material/location（包含 OrderLog）
+    ol_df = config.get('OrderLog', pd.DataFrame())
+    mats_from_ol = set(ol_df['material'].unique()) if ('material' in ol_df.columns and not ol_df.empty) else set()
+    locs_from_ol = set(ol_df['location'].unique()) if ('location' in ol_df.columns and not ol_df.empty) else set()
 
-    # 1. 全收集所有material/location
     all_mats = set(config['SupplyDemandLog']['material'].unique()) | \
-            set(config['SafetyStock']['material'].unique())
+            set(config['SafetyStock']['material'].unique()) | \
+            mats_from_ol
+
     all_locs = set(config['SupplyDemandLog']['location'].unique()) | \
-            set(config['SafetyStock']['location'].unique())
+            set(config['SafetyStock']['location'].unique()) | \
+            locs_from_ol
 
     # 2. 确定仿真开始日期并获取当天的库存
     # 集成模式下使用第一个仿真日期，独立模式下使用sim_start参数
-    actual_sim_start = sim_dates[0] if isinstance(sim_dates, list) and len(sim_dates) > 0 else sim_start
+    actual_sim_start = (sim_dates[0] if hasattr(sim_dates, '__getitem__') else pd.to_datetime(sim_start))
     
     inv_df = inventory_log[inventory_log['date'] == actual_sim_start]
     if inv_df.empty:
@@ -1055,21 +1204,40 @@ def main(
         # 使用期初库存作为基础，避免重复计算M1 shipment和M4 production
         beginning_inventory = soh_dict.copy()
         
-        # 从 Module4 获取当日和未来生产
+        # 从 Module4/Orchestrator 获取当日和未来生产（来源见 load_integrated_config 的配置）
         today_production_gr = {}
         future_production = {}
         if not production_plan.empty:
-            # 当日生产 (available_date = today)
+            # 当日生产 (available_date = sim_date) —— 用 produced_qty
             today_prod = production_plan[production_plan['available_date'] == sim_date]
             for _, row in today_prod.iterrows():
                 k = (row['material'], row['location'])
-                today_production_gr[k] = today_production_gr.get(k, 0) + int(row.get('produced_qty', row.get('planned_qty', 0)))
-            
-            # 未来生产 (available_date > today)
+                if 'produced_qty' in row and pd.notna(row['produced_qty']):
+                    qty_today = int(row['produced_qty'])
+                elif 'planned_qty' in row and pd.notna(row['planned_qty']):
+                    qty_today = int(row['planned_qty'])
+                elif 'quantity' in row and pd.notna(row['quantity']):
+                    qty_today = int(row['quantity'])
+                else:
+                    qty_today = 0
+                today_production_gr[k] = today_production_gr.get(k, 0) + qty_today
+
+            # 未来生产 (available_date > sim_date) —— 用 uncon_planned_qty
             future_prod = production_plan[production_plan['available_date'] > sim_date]
             for _, row in future_prod.iterrows():
                 k = (row['material'], row['location'])
-                future_production[k] = future_production.get(k, 0) + int(row.get('produced_qty', row.get('planned_qty', 0)))
+                if 'uncon_planned_qty' in row and pd.notna(row['uncon_planned_qty']):
+                    qty_future = int(row['uncon_planned_qty'])
+                elif 'produced_qty' in row and pd.notna(row['produced_qty']):
+                    # 回退：若没有 uncon，则用 produced（尽量不丢数据）
+                    qty_future = int(row['produced_qty'])
+                elif 'planned_qty' in row and pd.notna(row['planned_qty']):
+                    qty_future = int(row['planned_qty'])
+                elif 'quantity' in row and pd.notna(row['quantity']):
+                    qty_future = int(row['quantity'])
+                else:
+                    qty_future = 0
+                future_production[k] = future_production.get(k, 0) + qty_future
         
         # 从 Orchestrator 获取在途库存
         today_intransit = {}
@@ -1122,11 +1290,16 @@ def main(
             print(f"\n📦 处理层级 {layer}")
             print(f"{'-'*40}")
             
-            # 组合所有material-location对
+            # 组合所有material-location对（包含 OrderLog和safety stock）
+            materials_union = set(config['SupplyDemandLog']['material'].unique())
+            if 'OrderLog' in config and not config['OrderLog'].empty:
+                materials_union |= set(config['OrderLog']['material'].unique())
+            if not config['SafetyStock'].empty:
+                materials_union |= set(config['SafetyStock']['material'].unique())
             base_pairs = set(
                 (mat, loc)
                 for loc, l in location_to_layer.items() if l == layer
-                for mat in config['SupplyDemandLog']['material'].unique()
+                for mat in materials_union
             )
             # gap buffer补充
             gap_pairs = set(
@@ -1256,10 +1429,27 @@ def main(
                     
                     # 自补货（sending == receiving）不应有leadtime
                     if loc == receiving:
-                        planned_delivery_date = d['plan_deploy_date']  # 本地分配无需leadtime
+                        planned_delivery_date = d['plan_deploy_date']
+                        leadtime_for_row = 0
                     else:
-                        planned_delivery_date = d.get('requirement_date', d['plan_deploy_date'])  # 跨层级调拨使用requirement_date
-                    
+                        planned_delivery_date = d.get('requirement_date', d['plan_deploy_date'])
+                        # 即时计算该行的 lead time：sending=loc, receiving=receiving
+                        sending_location_type = get_sending_location_type(
+                            material=str(mat),
+                            sending=str(loc),
+                            sim_date=sim_date,
+                            network_df=network,
+                            location_layer_map=config.get('LocationLayerMap', {})
+                        )
+                        lt_row, _ = determine_lead_time(
+                            sending=str(loc),
+                            receiving=str(receiving),
+                            location_type=str(sending_location_type),
+                            lead_time_df=config['LeadTime'],
+                            m4_mlcfg_df=config.get('M4_MaterialLocationLineCfg', pd.DataFrame()),
+                            material=str(mat)
+                        )
+                        leadtime_for_row = int(lt_row)
                     plan_row = {
                         'date': d['plan_deploy_date'],
                         'material': mat,
@@ -1270,7 +1460,8 @@ def main(
                         'planned_qty': d['planned_qty'],
                         'deployed_qty_invCon': d['deployed_qty_invCon'],
                         'planned_delivery_date': planned_delivery_date,
-                        'orig_location': d.get('orig_location', d['location'])
+                        'orig_location': d.get('orig_location', d['location']),
+                        'leadtime': leadtime_for_row,
                     }
                     deployment_plan_rows.append(plan_row)
 
@@ -1282,8 +1473,6 @@ def main(
         # push/soft-push再分配
         plan_push = push_softpush_allocation(deployment_plan_rows, config, dynamic_soh, sim_date)
         if plan_push:
-            for plan in plan_push:
-                plan['planned_delivery_date'] = plan['date']
             deployment_plan_rows.extend(plan_push)
             print(f"\n🔄 Push/Soft-push 补货: 生成 {len(plan_push)} 条补货计划")
 
@@ -1400,13 +1589,6 @@ def main(
         }
     }
 
-# 辅助函数（如assign_network_layers、collect_node_demands等）请按你当前最新版粘贴在同一个文件
-# get_upstream需要sim_date参数
-def get_upstream(location, material, network_df, sim_date):
-    row = get_active_network(network_df, material, location, sim_date)
-    if not row.empty:
-        return row.iloc[0]['sourcing']
-    return None
 
 if __name__ == '__main__':
     import argparse

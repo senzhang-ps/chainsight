@@ -73,7 +73,7 @@ class Orchestrator:
         self.production_gr: List[Dict] = []  # Daily production receipts
         self.delivery_gr: List[Dict] = []  # Daily delivery receipts
         self.shipment_log: List[Dict] = []  # Daily shipments
-        
+        self.production_plan_backlog: List[Dict] = []  # 存所有已确认生产(含未来)，供 M3 查询
         # Space capacity configuration
         self.space_capacity: pd.DataFrame = pd.DataFrame()
         
@@ -122,8 +122,16 @@ class Orchestrator:
             space_capacity_df: DataFrame with columns [location, eff_from, eff_to, capacity]
         """
         self.space_capacity = space_capacity_df.copy()
-        self.space_capacity['eff_from'] = pd.to_datetime(self.space_capacity['eff_from'])
-        self.space_capacity['eff_to'] = pd.to_datetime(self.space_capacity['eff_to'])
+        self.space_capacity["eff_from"] = pd.to_datetime(
+            self.space_capacity["eff_from"].astype(str),
+            format="%Y-%m-%d",
+            errors="coerce",
+        )
+        self.space_capacity["eff_to"] = pd.to_datetime(
+            self.space_capacity["eff_to"].astype(str),
+            format="%Y-%m-%d",
+            errors="coerce",
+        )
         
         print(f"✅ Set space capacity configuration with {len(space_capacity_df)} records")
         self._log_event("SET_SPACE_CAPACITY", f"Configured {len(space_capacity_df)} space capacity records")
@@ -286,6 +294,31 @@ class Orchestrator:
         
         return df
     
+    def get_all_production_view(self, date: str) -> pd.DataFrame:
+        date_obj = pd.to_datetime(date).normalize()
+
+        # 当日 GR -> 统一为 available_date 字段
+        today_gr = self.get_production_gr_view(date)
+        if not today_gr.empty:
+            today_gr = today_gr.rename(columns={'date':'available_date'})[['material','location','available_date','quantity']]
+        else:
+            today_gr = pd.DataFrame(columns=['material','location','available_date','quantity'])
+
+        # backlog 中的未来计划（含当天及以后）
+        future = pd.DataFrame(self.production_plan_backlog)
+        if not future.empty:
+            future['available_date'] = pd.to_datetime(future['available_date']).dt.normalize()
+            future = future[future['available_date'] >= date_obj][['material','location','available_date','quantity']]
+        else:
+            future = pd.DataFrame(columns=['material','location','available_date','quantity'])
+
+        out = pd.concat([today_gr, future], ignore_index=True)
+        if out.empty:
+            return out
+        out = out.groupby(['material','location','available_date'], as_index=False).agg({'quantity':'sum'})
+        out['quantity'] = out['quantity'].astype(int)
+        return out
+
     def get_production_gr_view(self, date: str) -> pd.DataFrame:
         """
         Get production GR records for specified date
@@ -400,7 +433,32 @@ class Orchestrator:
             date: Simulation date in YYYY-MM-DD format
         """
         date_obj = pd.to_datetime(date).normalize()
-        
+        # === A) 缓存全量计划（含未来），供 M3 读用 ===
+        if production_df is not None and not production_df.empty:
+            tmp = production_df.copy()
+            # 标准列名：available_date / quantity
+            if 'available_date' in tmp.columns:
+                tmp['available_date'] = pd.to_datetime(tmp['available_date']).dt.normalize()
+            if 'quantity' not in tmp.columns and 'produced_qty' in tmp.columns:
+                tmp = tmp.rename(columns={'produced_qty': 'quantity'})
+            keep = ['material', 'location', 'available_date', 'quantity']
+            tmp = tmp[keep].copy()
+            tmp['material'] = tmp['material'].astype(str)
+            # 标准化location为4位补0格式
+            tmp['location'] = tmp['location'].astype(str).apply(lambda x: str(int(x)).zfill(4) if pd.notna(x) and str(x).strip() else x)
+            tmp['quantity'] = tmp['quantity'].fillna(0).astype(int)
+
+            # 追加到 backlog（可按需要去重合并）
+            if self.production_plan_backlog:
+                self.production_plan_backlog = pd.concat(
+                    [pd.DataFrame(self.production_plan_backlog), tmp],
+                    ignore_index=True
+                ).drop_duplicates(subset=['material','location','available_date'], keep='last') \
+                .to_dict('records')
+            else:
+                self.production_plan_backlog = tmp.to_dict('records')
+
+        # === B) 原有逻辑：只对“今天到货”的进行 GR 入库 ===
         # Filter production for current date (available_date = inventory receipt date)
         daily_production = production_df[
             pd.to_datetime(production_df['available_date']).dt.normalize() == date_obj
@@ -587,7 +645,7 @@ class Orchestrator:
         self.current_date = pd.to_datetime(date).normalize()
         
         print(f"\n📅 Processing date: {date}")
-        
+
         # Check for delivery arrivals at start of day
         self._process_delivery_arrivals(date)
         

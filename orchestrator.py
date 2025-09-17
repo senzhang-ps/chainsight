@@ -21,6 +21,18 @@ import json
 import os
 from datetime import datetime
 
+# 在文件开头添加字符串格式化函数
+def _normalize_material(material_str) -> str:
+    """Normalize material string to ensure string format"""
+    return str(material_str) if material_str is not None else ""
+
+def _normalize_location(location_str) -> str:
+    """Normalize location string by padding with leading zeros to 4 digits"""
+    try:
+        return str(int(location_str)).zfill(4)
+    except (ValueError, TypeError):
+        return str(location_str).zfill(4)
+
 @dataclass
 class DeploymentUID:
     """Unique identifier for deployment tracking"""
@@ -152,8 +164,8 @@ class Orchestrator:
         for (material, location), quantity in self.unrestricted_inventory.items():
             records.append({
                 'date': date_obj,
-                'material': material,
-                'location': location,
+                'material': _normalize_material(material),  # 添加格式化
+                'location': _normalize_location(location),  # 添加格式化
                 'quantity': quantity
             })
         
@@ -180,7 +192,7 @@ class Orchestrator:
             records.append({
                 'date': date_obj,
                 'available_date': pd.to_datetime(transit_record['actual_delivery_date']),
-                'material': transit_record['material'],
+                'material': _normalize_material(transit_record['material']), # 添加格式化
                 'receiving': transit_record['receiving'],
                 'quantity': transit_record['quantity']
             })
@@ -228,7 +240,7 @@ class Orchestrator:
         records = []
         for uid, deployment_record in self.open_deployment.items():
             records.append({
-                'material': deployment_record['material'],
+                'material': _normalize_material(deployment_record['material']), # 添加格式化
                 'sending': deployment_record['sending'],
                 'receiving': deployment_record['receiving'],
                 'planned_deployment_date': pd.to_datetime(deployment_record['planned_deployment_date']),
@@ -414,8 +426,8 @@ class Orchestrator:
             # Log shipment
             self.shipment_log.append({
                 'date': date_obj,
-                'material': row['material'],
-                'location': row['location'],
+                'material': _normalize_material(row['material']), # 添加格式化
+                'location': _normalize_location(row['location']), # 添加格式化
                 'quantity': int(row['quantity']),
                 'type': 'customer_shipment'
             })
@@ -474,8 +486,8 @@ class Orchestrator:
             # Log production GR
             self.production_gr.append({
                 'date': date_obj,
-                'material': row['material'],
-                'location': row['location'],
+                'material': _normalize_material(row['material']), # 添加格式化
+                'location': _normalize_location(row['location']), # 添加格式化
                 'quantity': quantity
             })
         
@@ -519,7 +531,7 @@ class Orchestrator:
                 print(f"      记录{i+1}: original_qty={original_qty} (类型: {type(original_qty)}), converted_qty={converted_qty}")
             
             self.open_deployment[uid] = {
-                'material': str(row['material']),
+                'material': _normalize_material(row['material']), # 添加格式化
                 'sending': str(row['sending']),
                 'receiving': str(row['receiving']),
                 'planned_deployment_date': pd.to_datetime(row['planned_deployment_date']).strftime('%Y-%m-%d'),
@@ -576,9 +588,9 @@ class Orchestrator:
             # 🆕 记录发运出库日志
             self.delivery_shipment_log.append({
                 'date': date_obj,
-                'material': material,
-                'sending': sending,
-                'receiving': receiving,
+                'material': _normalize_material(material), # 添加格式化
+                'sending': _normalize_material(sending), # 添加格式化
+                'receiving': _normalize_location(receiving), # 添加格式化
                 'quantity': quantity,
                 'ori_deployment_uid': uid,
                 'actual_ship_date': ship_date.strftime('%Y-%m-%d'),
@@ -591,9 +603,9 @@ class Orchestrator:
                 # Create in-transit record for future delivery
                 transit_uid = f"{uid}_transit_{date_obj.strftime('%Y%m%d')}"
                 self.in_transit[transit_uid] = {
-                    'material': material,
-                    'sending': sending,
-                    'receiving': receiving,
+                    'material': _normalize_material(material), # 添加格式化
+                    'sending': _normalize_material(sending), # 添加格式化
+                    'receiving': _normalize_location(receiving), # 添加格式化
                     'actual_ship_date': ship_date.strftime('%Y-%m-%d'),
                     'actual_delivery_date': delivery_date.strftime('%Y-%m-%d'),
                     'quantity': quantity,
@@ -608,8 +620,8 @@ class Orchestrator:
                 # Log delivery GR (with deduplication check)
                 gr_record = {
                     'date': date_obj,
-                    'material': material,
-                    'receiving': receiving,
+                    'material': _normalize_material(material), # 添加格式化
+                    'receiving': _normalize_location(receiving), # 添加格式化
                     'quantity': quantity,
                     'ori_deployment_uid': uid
                 }
@@ -687,8 +699,8 @@ class Orchestrator:
                 # Log delivery GR (with improved deduplication check)
                 gr_record = {
                     'date': date_obj,
-                    'material': transit_record['material'],
-                    'receiving': transit_record['receiving'],
+                    'material': _normalize_material(transit_record['material']), # 添加格式化
+                    'receiving': _normalize_location(transit_record['receiving']), # 添加格式化
                     'quantity': transit_record['quantity'],
                     'ori_deployment_uid': transit_record['ori_deployment_uid'],
                     'actual_ship_date': transit_record['actual_ship_date']  # 新增字段
@@ -886,8 +898,8 @@ class Orchestrator:
         for (material, location), quantity in beginning_inventory.items():
             records.append({
                 'date': date_obj,
-                'material': material,
-                'location': location,
+                'material': _normalize_material(material),  # 添加格式化
+                'location': _normalize_location(location),  # 添加格式化
                 'quantity': quantity
             })
         

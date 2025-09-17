@@ -32,14 +32,9 @@ def load_config(config_path: str) -> Dict[str, pd.DataFrame]:
                 # Convert date columns if they exist
                 if key in ['safety_stock'] and 'date' in loaded_config[key].columns:
                     loaded_config[key]['date'] = pd.to_datetime(loaded_config[key]['date'])
-                elif key in ['network_config']:
-                    if 'eff_from' in loaded_config[key].columns:
-                        loaded_config[key]['eff_from'] = pd.to_datetime(loaded_config[key]['eff_from'])
-                        loaded_config[key]['eff_to'] = pd.to_datetime(loaded_config[key]['eff_to'])
-                    # Ensure key fields are treated as strings
-                    for col in ['material', 'location', 'sourcing']:
-                        if col in loaded_config[key].columns:
-                            loaded_config[key][col] = loaded_config[key][col].astype(str)
+                elif key in ['network_config'] and 'eff_from' in loaded_config[key].columns:
+                    loaded_config[key]['eff_from'] = pd.to_datetime(loaded_config[key]['eff_from'])
+                    loaded_config[key]['eff_to'] = pd.to_datetime(loaded_config[key]['eff_to'])
             else:
                 loaded_config[key] = default
                 
@@ -77,19 +72,12 @@ def load_module1_daily_outputs(module1_output_dir: str, simulation_date: pd.Time
         sdl = _read('SupplyDemandLog')
         if not sdl.empty and 'date' in sdl.columns:
             sdl['date'] = pd.to_datetime(sdl['date'])
-        # standardize key fields as strings
-        for col in ['material', 'location']:
-            if col in sdl.columns:
-                sdl[col] = sdl[col].astype(str)
 
         # 2) ShipmentLog：仅保留当日
         shp = _read('ShipmentLog')
         if not shp.empty and 'date' in shp.columns:
             shp['date'] = pd.to_datetime(shp['date'])
             shp = shp[shp['date'] == simulation_date].copy()
-        for col in ['material', 'location']:
-            if col in shp.columns:
-                shp[col] = shp[col].astype(str)
 
         # 3) OrderLog：当天版本全量（包含未来订单 + 当天新单）
         odl = _read('OrderLog')
@@ -99,9 +87,7 @@ def load_module1_daily_outputs(module1_output_dir: str, simulation_date: pd.Time
             if 'simulation_date' in odl.columns:
                 odl['simulation_date'] = pd.to_datetime(odl['simulation_date'])
             # 不按 simulation_date 过滤，保留当天版本全量；后续在 M3 内部再筛 date > sim_date
-            for col in ['material', 'location']:
-                if col in odl.columns:
-                    odl[col] = odl[col].astype(str)
+
         module1_data['supply_demand_df'] = sdl
         module1_data['shipment_df'] = shp
         module1_data['order_df'] = odl
@@ -561,8 +547,8 @@ def calculate_daily_net_demand(
         FC_gap = max(FC_total - AVAILABLE, 0.0)
         AVAILABLE = max(AVAILABLE - min(AVAILABLE, FC_total), 0.0)
 
-        # safety（仅计算超过 AO 和 forecast 的增量安全需求）
-        SAF_total = SS_local + float(downstream_safety_gap or 0.0)
+        # safety（在 forecast 基础上校验安全目标，不重复计 AO）
+        SAF_total = FC_total + SS_local + float(downstream_safety_gap or 0.0)
         SS_gap = max(SAF_total - AVAILABLE, 0.0)
 
         return AO_gap, FC_gap, SS_gap
@@ -611,19 +597,6 @@ def run_mrp_layered_simulation_daily(
     if network_df.empty:
         print(f"Warning: Empty network configuration for date {sim_date}")
         return pd.DataFrame({'material': [], 'location': [], 'requirement_date': [], 'quantity': [], 'demand_element': [], 'layer': []})
-
-    # standardize key columns as strings to ensure consistent joins/matching
-    for col in ['material', 'location', 'sourcing']:
-        if col in network_df.columns:
-            network_df[col] = network_df[col].astype(str)
-
-    # filter to network entries active on the simulation date
-    active_network = network_df[
-        (network_df['eff_from'] <= sim_date) & (network_df['eff_to'] >= sim_date)
-    ]
-    if active_network.empty:
-        print(f"Warning: No active network configuration for date {sim_date}")
-        return pd.DataFrame({'material': [], 'location': [], 'requirement_date': [], 'quantity': [], 'demand_element': [], 'layer': []})
     # 需求池 = 未来订单（date > sim_date） + 剩余预测（SupplyDemandLog）
     # - 当日订单（date == sim_date）不进入需求池，避免与当日发货在可用量侧重复计
     def _std(df, element):
@@ -653,10 +626,11 @@ def run_mrp_layered_simulation_daily(
         demand_pool_df['date'] = pd.to_datetime(demand_pool_df['date'])
         demand_pool_df['quantity'] = demand_pool_df['quantity'].astype(float)    
     # 分配层级
-        location_layer_df = assign_location_layers(active_network)
-        if location_layer_df.empty:
-            print(f"Warning: No location layers assigned for date {sim_date}")
-            return pd.DataFrame({'material': [], 'location': [], 'requirement_date': [], 'quantity': [], 'demand_element': [], 'layer': []})
+    location_layer_df = assign_location_layers(network_df)
+    if location_layer_df.empty:
+        print(f"Warning: No location layers assigned for date {sim_date}")
+        return pd.DataFrame({'material': [], 'location': [], 'requirement_date': [], 'quantity': [], 'demand_element': [], 'layer': []})
+    
     location_layer = dict(zip(location_layer_df['location'], location_layer_df['layer']))
     all_layers = sorted(set(location_layer.values()), reverse=True)
     all_net_demand_records = []
@@ -673,7 +647,7 @@ def run_mrp_layered_simulation_daily(
     extended_material_locations = []
     
     # 1. 添加network中明确配置的组合
-    for _, row in active_network.iterrows():
+    for _, row in network_df.iterrows():
         extended_material_locations.append({
             'material': str(row['material']),
             'location': str(row['location'])
@@ -699,7 +673,7 @@ def run_mrp_layered_simulation_daily(
     material_locations = pd.DataFrame(extended_material_locations).drop_duplicates()
     
     print(f"🔍 扩展后的material-location组合:")
-    print(f"  原始network配置: {len(active_network)} 条")
+    print(f"  原始network配置: {len(network_df)} 条")
     print(f"  扩展后组合: {len(material_locations)} 条")
     print(f"  包含的根节点: {[loc for loc in all_locations_in_layers if location_layer.get(loc, -1) == 0]}")
     
@@ -728,9 +702,11 @@ def run_mrp_layered_simulation_daily(
             location = str(ml['location'])
 
             # 查找有效的网络配置
-            network_candidates = active_network[
-                (active_network['material'] == material) &
-                (active_network['location'] == location)
+            network_candidates = network_df[
+                (network_df['material'] == material) &
+                (network_df['location'] == location) &
+                (network_df['eff_from'] <= sim_date) &
+                (network_df['eff_to'] >= sim_date)
             ]
 
             if not network_candidates.empty:
@@ -746,7 +722,7 @@ def run_mrp_layered_simulation_daily(
                     # MCT是微生物检测时间，与sending site相关
                     # 需要查找sending location的location_type
                     sending_location_type = infer_sending_location_type(
-                        network_df=active_network,
+                        network_df=network_df,
                         location_layer_df=location_layer_df,
                         sending=str(upstream),
                         material=str(material),

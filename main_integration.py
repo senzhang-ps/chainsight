@@ -59,12 +59,18 @@ def run_module4_integrated(
                 raise ValueError(f"缺少必需的Module4配置数据：{config_name}")
         
         # 直接构建 Module4 所需的配置数据
-        # 直接使用config_dict，不再需要子配置字典
-        m4_config = config_dict
+        m4_config = {
+            'MaterialLocationLineCfg': config_dict['M4_MaterialLocationLineCfg'],
+            'LineCapacity': config_dict['M4_LineCapacity'],
+            'ChangeoverMatrix': config_dict['M4_ChangeoverMatrix'],
+            'ChangeoverDefinition': config_dict['M4_ChangeoverDefinition'],
+            'ProductionReliability': config_dict['M4_ProductionReliability'],
+            'NetDemandTypePriority': config_dict.get('Global_DemandPriority', pd.DataFrame([{'demand_type': '_ALL_', 'priority': 1}])),
+            'RandomSeed': config_dict.get('M4_RandomSeed', 42)  # 使用统一设置的种子
+        }
         
         # 加载 Module3 的日度净需求数据
         net_demand_df = module4.load_daily_net_demand(module3_output_dir, simulation_date)
-        net_demand_df = module4._cast_identifiers_to_str(net_demand_df, ['material', 'location'])
         
         if net_demand_df.empty:
             print(f"Warning: No NetDemand data for {simulation_date.strftime('%Y-%m-%d')}. Generating empty output.")
@@ -74,22 +80,18 @@ def run_module4_integrated(
             net_demand_df['requirement_date'] = pd.to_datetime(net_demand_df['requirement_date'])
         
         # 构建无约束计划
-        mlcfg = m4_config['M4_MaterialLocationLineCfg']
-        
-        # 确保MLCFG也应用类型转换（与NetDemand保持一致）
-        mlcfg = module4._cast_identifiers_to_str(mlcfg.copy(), ['material', 'location'])
-        
+        mlcfg = m4_config['MaterialLocationLineCfg']
         issues = []
         uncon_plan = module4.build_unconstrained_plan_for_single_day(
             net_demand_df, mlcfg, simulation_date, simulation_start, issues
         )
         
         # 设置产能分配参数
-        co_mat = m4_config['M4_ChangeoverMatrix'].set_index(['from_material', 'to_material'])['changeover_id']
-        co_def_df = m4_config['M4_ChangeoverDefinition']
+        co_mat = m4_config['ChangeoverMatrix'].set_index(['from_material', 'to_material'])['changeover_id']
+        co_def_df = m4_config['ChangeoverDefinition']
         co_def = co_def_df.set_index(['changeover_id', 'line'])['time'].to_dict()
         
-        cap_df = m4_config['M4_LineCapacity'].copy()
+        cap_df = m4_config['LineCapacity'].copy()
         cap_df['date'] = pd.to_datetime(cap_df['date'])
         
         rate_map = mlcfg.set_index(['material', 'delegate_line'])['prd_rate']
@@ -102,7 +104,7 @@ def run_module4_integrated(
         
         # 仿真生产可靠性
         random_seed = m4_config.get('RandomSeed', 42)
-        plan_log = module4.simulate_production(plan_log, m4_config['M4_ProductionReliability'], seed=random_seed)
+        plan_log = module4.simulate_production(plan_log, m4_config['ProductionReliability'], seed=random_seed)
         
         # 计算换产指标
         changeover_log = module4.calculate_changeover_metrics(plan_log, co_def_df)
@@ -128,10 +130,7 @@ def run_module4_integrated(
             return pd.DataFrame()
         
     except Exception as e:
-        import traceback
         print(f'[ERROR] Module4 integrated execution failed for {simulation_date.strftime("%Y-%m-%d")}: {str(e)}')
-        print("Full traceback:")
-        traceback.print_exc()
         return pd.DataFrame()
 
 # ========== Module4 集成辅助函数（清理后） ==========

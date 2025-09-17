@@ -359,7 +359,7 @@ class ConfigValidator:
                 ))
                 
                 # 验证推拉模式值
-                valid_modes = ['push', 'pull', 'PUSH', 'PULL','soft push','SOFT PUSH']
+                valid_modes = ['push', 'pull', 'PUSH', 'PULL']
                 invalid_modes = pushpull_df[~pushpull_df['model'].isin(valid_modes)]
                 if not invalid_modes.empty:
                     self.vm.add_error("Module5", "InvalidValues", 

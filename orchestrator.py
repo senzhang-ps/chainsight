@@ -122,8 +122,16 @@ class Orchestrator:
             space_capacity_df: DataFrame with columns [location, eff_from, eff_to, capacity]
         """
         self.space_capacity = space_capacity_df.copy()
-        self.space_capacity['eff_from'] = pd.to_datetime(self.space_capacity['eff_from'])
-        self.space_capacity['eff_to'] = pd.to_datetime(self.space_capacity['eff_to'])
+        self.space_capacity["eff_from"] = pd.to_datetime(
+            self.space_capacity["eff_from"].astype(str),
+            format="%Y-%m-%d",
+            errors="coerce",
+        )
+        self.space_capacity["eff_to"] = pd.to_datetime(
+            self.space_capacity["eff_to"].astype(str),
+            format="%Y-%m-%d",
+            errors="coerce",
+        )
         
         print(f"✅ Set space capacity configuration with {len(space_capacity_df)} records")
         self._log_event("SET_SPACE_CAPACITY", f"Configured {len(space_capacity_df)} space capacity records")
@@ -436,7 +444,8 @@ class Orchestrator:
             keep = ['material', 'location', 'available_date', 'quantity']
             tmp = tmp[keep].copy()
             tmp['material'] = tmp['material'].astype(str)
-            tmp['location'] = tmp['location'].astype(str)
+            # 标准化location为4位补0格式
+            tmp['location'] = tmp['location'].astype(str).apply(lambda x: str(int(x)).zfill(4) if pd.notna(x) and str(x).strip() else x)
             tmp['quantity'] = tmp['quantity'].fillna(0).astype(int)
 
             # 追加到 backlog（可按需要去重合并）

@@ -325,6 +325,64 @@ def apply_moq_rv(qty, moq, rv, is_cross_node=True):
         return moq
     return int(np.ceil(qty / rv)) * rv
 
+def apply_grouped_moq_rv(demand_rows, location):
+    """
+    按调运路径分组应用MOQ/RV
+    
+    Args:
+        demand_rows: 需求行列表
+        location: 当前位置（sending）
+        
+    Returns:
+        dict: 调整后的 demand_row_index -> adjusted_qty 映射
+    """
+    # 按 (material, sending, receiving, demand_element) 分组
+    route_groups = {}
+    for i, d in enumerate(demand_rows):
+        receiving = d.get('from_location', d.get('receiving', location))
+        is_cross_node = (location != receiving)
+        
+        route_key = (d['material'], location, receiving, d['demand_element'])
+        if route_key not in route_groups:
+            route_groups[route_key] = {
+                'items': [],
+                'total_qty': 0,
+                'is_cross_node': is_cross_node,
+                'moq': d['moq'],
+                'rv': d['rv']
+            }
+        
+        route_groups[route_key]['items'].append((i, d))
+        route_groups[route_key]['total_qty'] += d['demand_qty']
+    
+    # 对每个路径组应用MOQ/RV
+    adjusted_qtys = {}
+    
+    for route_key, group in route_groups.items():
+        material, sending, receiving, demand_element = route_key
+        total_qty = group['total_qty']
+        is_cross_node = group['is_cross_node']
+        moq = group['moq']
+        rv = group['rv']
+        
+        # 对组合后的总量应用MOQ/RV
+        adjusted_total = apply_moq_rv(total_qty, moq, rv, is_cross_node=is_cross_node)
+        
+        print(f"      📦 路径组 {sending}→{receiving} [{demand_element}]: 原始={total_qty} → 调整={adjusted_total} (MOQ={moq}, 跨节点={is_cross_node})")
+        
+        # 将调整后的总量按原始比例分配回各个需求项
+        if total_qty > 0:
+            adjustment_ratio = adjusted_total / total_qty
+        else:
+            adjustment_ratio = 1.0
+            
+        for item_idx, item in group['items']:
+            original_qty = item['demand_qty']
+            adjusted_qty = int(original_qty * adjustment_ratio)
+            adjusted_qtys[item_idx] = adjusted_qty
+            
+    return adjusted_qtys
+
 def _get_ptf_lsk(material: str, site: str, m4_mlcfg_df: pd.DataFrame | None) -> tuple[int, int]:
     ptf, lsk = 0, 1
     if m4_mlcfg_df is None or m4_mlcfg_df.empty:
@@ -1588,24 +1646,18 @@ def main(
                     p = demand_priority_map.get(d['demand_element'], 99)
                     grouped.setdefault(p, []).append(d)
                 
-                # 🔧 修复：总需求量应该基于实际的planned_qty（应用MOQ/RV后）
-                total_actual_demand = 0
-                for d in demand_rows:
-                    receiving = d.get('from_location', d.get('receiving', loc))
-                    is_cross_node = (loc != receiving)
-                    actual_planned_qty = apply_moq_rv(d['demand_qty'], d['moq'], d['rv'], is_cross_node=is_cross_node)
-                    total_actual_demand += actual_planned_qty
+                # 🔧 修复：使用分组MOQ/RV逻辑计算总需求量
+                adjusted_qtys = apply_grouped_moq_rv(demand_rows, loc)
+                total_actual_demand = sum(adjusted_qtys.values())
                 print(f"   📊 总需求: {total_actual_demand}, 可用库存: {current_stock}")
                 
                 for priority in sorted(grouped):
                     group = grouped[priority]
-                    # 🔧 修复：优先级组需求量也需要基于实际的planned_qty
+                    # 🔧 修复：优先级组需求量基于分组MOQ/RV调整结果
                     group_actual_demand = 0
-                    for d in group:
-                        receiving = d.get('from_location', d.get('receiving', loc))
-                        is_cross_node = (loc != receiving)
-                        actual_planned_qty = apply_moq_rv(d['demand_qty'], d['moq'], d['rv'], is_cross_node=is_cross_node)
-                        group_actual_demand += actual_planned_qty
+                    for i, d in enumerate(demand_rows):
+                        if d in group:
+                            group_actual_demand += adjusted_qtys.get(i, d['demand_qty'])
                     print(f"   🔢 优先级 {priority}: 需求 {group_actual_demand}")
                     
                     # 如果没有剩余库存，所有后续优先级都分配0
@@ -1622,22 +1674,20 @@ def main(
                     
                     if current_stock >= group_actual_demand:
                         # 库存充足，完全满足当前优先级
-                        for d in group:
-                            receiving = d.get('from_location', d.get('receiving', loc))
-                            is_cross_node = (loc != receiving)
-                            actual_planned_qty = apply_moq_rv(d['demand_qty'], d['moq'], d['rv'], is_cross_node=is_cross_node)
-                            d['deployed_qty_invCon'] = actual_planned_qty
+                        for i, d in enumerate(demand_rows):
+                            if d in group:
+                                adjusted_qty = adjusted_qtys.get(i, d['demand_qty'])
+                                d['deployed_qty_invCon'] = adjusted_qty
                         current_stock -= group_actual_demand
                         print(f"      ✅ 库存充足，完全满足")
                     else:
                         # 库存不足，按权重分配所有剩余库存给当前优先级
                         # 关键修复：用完库存后，后续优先级不再分配
-                        for d in group:
-                            receiving = d.get('from_location', d.get('receiving', loc))
-                            is_cross_node = (loc != receiving)
-                            actual_planned_qty = apply_moq_rv(d['demand_qty'], d['moq'], d['rv'], is_cross_node=is_cross_node)
-                            weight = actual_planned_qty / group_actual_demand if group_actual_demand > 0 else 0
-                            d['deployed_qty_invCon'] = min(int(current_stock * weight), actual_planned_qty)
+                        for i, d in enumerate(demand_rows):
+                            if d in group:
+                                adjusted_qty = adjusted_qtys.get(i, d['demand_qty'])
+                                weight = adjusted_qty / group_actual_demand if group_actual_demand > 0 else 0
+                                d['deployed_qty_invCon'] = min(int(current_stock * weight), adjusted_qty)
                         
                         # 重新计算实际分配量
                         actual_allocated = sum(d['deployed_qty_invCon'] for d in group)
@@ -1652,26 +1702,22 @@ def main(
                         break  # 跳出优先级循环
                     
                     # 显示分配详情
-                    for d in group:
-                        receiving = d.get('from_location', d.get('receiving', loc))
-                        is_cross_node = (loc != receiving)
-                        actual_planned_qty = apply_moq_rv(d['demand_qty'], d['moq'], d['rv'], is_cross_node=is_cross_node)
-                        status = "✅" if d['deployed_qty_invCon'] == actual_planned_qty else "⚠️"
-                        print(f"      {status} [{d['demand_element']}] 原始需求={d['demand_qty']} 计划={actual_planned_qty} 分配={d['deployed_qty_invCon']} 跨节点={is_cross_node}")
+                    for i, d in enumerate(demand_rows):
+                        if d in group:
+                            receiving = d.get('from_location', d.get('receiving', loc))
+                            is_cross_node = (loc != receiving)
+                            adjusted_qty = adjusted_qtys.get(i, d['demand_qty'])
+                            status = "✅" if d['deployed_qty_invCon'] == adjusted_qty else "⚠️"
+                            print(f"      {status} [{d['demand_element']}] 原始需求={d['demand_qty']} 计划={adjusted_qty} 分配={d['deployed_qty_invCon']} 跨节点={is_cross_node}")
 
                 # 处理GAP和生成调拨计划
                 gap_count = 0
-                for d in demand_rows:
-                    # 🔧 修复：计算gap时需要考虑实际的planned_qty（基于是否跨节点应用MOQ/RV）
+                for i, d in enumerate(demand_rows):
+                    # 🔧 修复：计算gap时使用分组MOQ/RV调整后的数量
                     receiving = d.get('from_location', d.get('receiving', loc))
                     is_cross_node = (loc != receiving)
-                    actual_planned_qty = apply_moq_rv(
-                        d['demand_qty'], 
-                        d['moq'], 
-                        d['rv'], 
-                        is_cross_node=is_cross_node
-                    )
-                    gap_qty = actual_planned_qty - d['deployed_qty_invCon']
+                    adjusted_qty = adjusted_qtys.get(i, d['demand_qty'])
+                    gap_qty = adjusted_qty - d['deployed_qty_invCon']
                     
                     if gap_qty > 0:
                         up_loc = get_upstream(loc, mat, network, sim_date)
@@ -1699,23 +1745,18 @@ def main(
                             'reason': "supply shortage"
                         })
                         
-                        print(f"      🔼 需求缺口: {gap_qty} [{d['demand_element']}] → 上游 {up_loc} (is_cross_node: {is_cross_node}, actual_planned_qty: {actual_planned_qty})")
+                        print(f"      🔼 需求缺口: {gap_qty} [{d['demand_element']}] → 上游 {up_loc} (is_cross_node: {is_cross_node}, adjusted_qty: {adjusted_qty})")
                 
                 if gap_count == 0:
                     print(f"      🟢 无需求缺口")
                 
                 # 生成调拨计划行
-                for d in demand_rows:
+                for i, d in enumerate(demand_rows):
                     receiving = d.get('from_location', d.get('receiving', loc))
                     
-                    # 🔧 修复：根据实际sending/receiving关系决定是否应用MOQ/RV约束
+                    # 🔧 修复：使用分组MOQ/RV调整后的数量
                     is_cross_node = (loc != receiving)
-                    actual_planned_qty = apply_moq_rv(
-                        d['demand_qty'], 
-                        d['moq'], 
-                        d['rv'], 
-                        is_cross_node=is_cross_node
-                    )
+                    actual_planned_qty = adjusted_qtys.get(i, d['demand_qty'])
                     
                     # 自补货（sending == receiving）不应有leadtime
                     if loc == receiving:

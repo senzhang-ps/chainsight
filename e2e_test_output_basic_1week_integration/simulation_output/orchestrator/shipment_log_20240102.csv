@@ -1,7 +1,0 @@
-date,material,location,quantity,type
-2024-01-02,MAT_A,DC_001,5,customer_shipment
-2024-01-02,MAT_A,DC_002,0,customer_shipment
-2024-01-02,MAT_A,PLANT_001,34,customer_shipment
-2024-01-02,MAT_B,DC_001,0,customer_shipment
-2024-01-02,MAT_B,DC_002,0,customer_shipment
-2024-01-02,MAT_B,PLANT_001,0,customer_shipment

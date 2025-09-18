@@ -24,6 +24,62 @@ import module4
 import module5
 import module6
 
+
+# 标识符字段标准化函数（统一处理所有配置表）
+def _normalize_location(location_str) -> str:
+    """Normalize location string by padding with leading zeros to 4 digits"""
+    try:
+        return str(int(location_str)).zfill(4)
+    except (ValueError, TypeError):
+        return str(location_str).zfill(4)
+
+def _normalize_material(material_str) -> str:
+    """Normalize material string"""
+    return str(material_str) if material_str is not None else ""
+
+def _normalize_sending(sending_str) -> str:
+    """Normalize sending string by padding with leading zeros to 4 digits"""
+    try:
+        return str(int(sending_str)).zfill(4)
+    except (ValueError, TypeError):
+        return str(sending_str).zfill(4)
+
+def _normalize_receiving(receiving_str) -> str:
+    """Normalize receiving string by padding with leading zeros to 4 digits"""
+    try:
+        return str(int(receiving_str)).zfill(4)
+    except (ValueError, TypeError):
+        return str(receiving_str).zfill(4)
+
+def _normalize_identifiers(df: pd.DataFrame) -> pd.DataFrame:
+    """Normalize identifier columns to string format with proper formatting"""
+    if df.empty:
+        return df
+    
+    # Define identifier columns that need string conversion
+    identifier_cols = ['material', 'location', 'sending', 'receiving', 'sourcing', 'dps_location', 'from_material', 'to_material', 'line', 'delegate_line']
+    
+    df = df.copy()
+    for col in identifier_cols:
+        if col in df.columns:
+            # Convert to string and handle NaN values
+            df[col] = df[col].astype('string')
+            # Apply specific normalization for location-type fields
+            if col in ['location', 'dps_location']:
+                df[col] = df[col].apply(_normalize_location)
+            elif col == 'sending':
+                df[col] = df[col].apply(_normalize_sending)
+            elif col == 'receiving':
+                df[col] = df[col].apply(_normalize_receiving)
+            # Apply specific normalization for material-type fields
+            elif col in ['material', 'from_material', 'to_material']:
+                df[col] = df[col].apply(_normalize_material)
+            # For other identifier columns (line, delegate_line, etc), ensure they are properly formatted strings
+            else:
+                df[col] = df[col].apply(lambda x: str(x) if pd.notna(x) else "")
+    
+    return df
+
 def run_module4_integrated(
     config_dict: dict,
     module3_output_dir: str,
@@ -329,6 +385,35 @@ def load_configuration(config_path: str) -> dict:
             for sheet in missing_sheets:
                 config_dict[sheet] = pd.DataFrame()
         
+        # 统一标准化所有配置表的标识符字段
+        print(f"🔧 正在标准化标识符字段...")
+        standardized_count = 0
+        for sheet_name, df in config_dict.items():
+            if isinstance(df, pd.DataFrame) and not df.empty:
+                # 检查是否包含标识符字段
+                identifier_cols = ['material', 'location', 'sending', 'receiving', 'sourcing', 'dps_location']
+                has_identifiers = any(col in df.columns for col in identifier_cols)
+                
+                if has_identifiers:
+                    original_dtypes = {col: str(df[col].dtype) for col in identifier_cols if col in df.columns}
+                    config_dict[sheet_name] = _normalize_identifiers(df)
+                    new_dtypes = {col: str(config_dict[sheet_name][col].dtype) for col in identifier_cols if col in config_dict[sheet_name].columns}
+                    
+                    # 记录标准化的字段
+                    normalized_fields = []
+                    for col in identifier_cols:
+                        if col in df.columns and original_dtypes[col] != new_dtypes[col]:
+                            normalized_fields.append(f"{col}({original_dtypes[col]}→{new_dtypes[col]})")
+                    
+                    if normalized_fields:
+                        print(f"  🔧 {sheet_name}: {', '.join(normalized_fields)}")
+                        standardized_count += 1
+        
+        if standardized_count > 0:
+            print(f"✅ 已标准化 {standardized_count} 个配置表的标识符字段")
+        else:
+            print(f"✅ 所有配置表的标识符字段已是标准格式")
+        
         return config_dict
         
     except Exception as e:
@@ -551,10 +636,11 @@ def run_integrated_simulation(
                                 qty_stats = deployment_plan_df['deployed_qty_invCon'].describe()
                                 print(f"    deployed_qty_invCon统计: {qty_stats}")
                         
-                        # 过滤出有实际部署量的计划
+                        # 过滤出有实际部署量的计划，排除自循环（sending=receiving）
                         valid_deployment = deployment_plan_df[
                             (deployment_plan_df['deployed_qty_invCon'] > 0) & 
-                            (deployment_plan_df['deployed_qty_invCon'].notna())
+                            (deployment_plan_df['deployed_qty_invCon'].notna()) &
+                            (deployment_plan_df['sending'] != deployment_plan_df['receiving'])  # 排除自循环
                         ].copy()
                         
                         print(f"    🎯 有效部署计划: {len(valid_deployment)}/{len(deployment_plan_df)} 条")

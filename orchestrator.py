@@ -33,6 +33,48 @@ def _normalize_location(location_str) -> str:
     except (ValueError, TypeError):
         return str(location_str).zfill(4)
 
+def _normalize_sending(sending_str) -> str:
+    """Normalize sending string to ensure string format"""
+    return str(sending_str) if sending_str is not None else ""
+
+def _normalize_receiving(receiving_str) -> str:
+    """Normalize receiving string by padding with leading zeros to 4 digits"""
+    try:
+        return str(int(receiving_str)).zfill(4)
+    except (ValueError, TypeError):
+        return str(receiving_str).zfill(4)
+
+def _normalize_identifiers(df: pd.DataFrame) -> pd.DataFrame:
+    """Normalize identifier columns to string format with proper formatting"""
+    if df.empty:
+        return df
+    
+    # Define identifier columns that need string conversion
+    identifier_cols = ['material', 'location', 'sending', 'receiving', 'sourcing']
+    
+    df = df.copy()
+    for col in identifier_cols:
+        if col in df.columns:
+            # Convert to string and handle NaN values
+            df[col] = df[col].astype('string')
+            # Apply specific normalization for location
+            if col == 'location':
+                df[col] = df[col].apply(_normalize_location)
+            # Apply specific normalization for material
+            elif col == 'material':
+                df[col] = df[col].apply(_normalize_material)
+            # Apply specific normalization for sending
+            elif col == 'sending':
+                df[col] = df[col].apply(_normalize_sending)
+            # Apply specific normalization for receiving
+            elif col == 'receiving':
+                df[col] = df[col].apply(_normalize_receiving)
+            # For other identifier columns, ensure they are properly formatted strings
+            else:
+                df[col] = df[col].apply(lambda x: str(x) if pd.notna(x) else "")
+    
+    return df
+
 @dataclass
 class DeploymentUID:
     """Unique identifier for deployment tracking"""
@@ -117,14 +159,17 @@ class Orchestrator:
         self.unrestricted_inventory.clear()
         self.initial_inventory.clear()
         
-        for _, row in initial_inventory_df.iterrows():
-            key = (str(row['material']), str(row['location']))
+        # 确保标识符字段为字符串格式
+        normalized_df = _normalize_identifiers(initial_inventory_df)
+        
+        for _, row in normalized_df.iterrows():
+            key = (row['material'], row['location'])
             quantity = int(row['quantity'])
             self.unrestricted_inventory[key] = quantity
             self.initial_inventory[key] = quantity  # 保存初始库存副本
         
-        print(f"✅ Initialized inventory with {len(initial_inventory_df)} records")
-        self._log_event("INIT_INVENTORY", f"Initialized {len(initial_inventory_df)} inventory records")
+        print(f"✅ Initialized inventory with {len(normalized_df)} records")
+        self._log_event("INIT_INVENTORY", f"Initialized {len(normalized_df)} inventory records")
     
     def set_space_capacity(self, space_capacity_df: pd.DataFrame):
         """
@@ -133,7 +178,8 @@ class Orchestrator:
         Args:
             space_capacity_df: DataFrame with columns [location, eff_from, eff_to, capacity]
         """
-        self.space_capacity = space_capacity_df.copy()
+        # 确保标识符字段为字符串格式
+        self.space_capacity = _normalize_identifiers(space_capacity_df.copy())
         self.space_capacity["eff_from"] = pd.to_datetime(
             self.space_capacity["eff_from"].astype(str),
             format="%Y-%m-%d",
@@ -174,6 +220,19 @@ class Orchestrator:
             df = pd.DataFrame(columns=['date', 'material', 'location', 'quantity'])
         
         return df
+    
+    def get_current_unrestricted_inventory(self) -> Dict[Tuple[str, str], int]:
+        """
+        Get current unrestricted inventory as a dictionary
+        
+        Returns:
+            Dict: {(material, location): quantity} with normalized keys
+        """
+        normalized_inventory = {}
+        for (material, location), quantity in self.unrestricted_inventory.items():
+            normalized_key = (_normalize_material(material), _normalize_location(location))
+            normalized_inventory[normalized_key] = quantity
+        return normalized_inventory
     
     def get_planning_intransit_view(self, date: str) -> pd.DataFrame:
         """
@@ -241,8 +300,8 @@ class Orchestrator:
         for uid, deployment_record in self.open_deployment.items():
             records.append({
                 'material': _normalize_material(deployment_record['material']), # 添加格式化
-                'sending': deployment_record['sending'],
-                'receiving': deployment_record['receiving'],
+                'sending': _normalize_sending(deployment_record['sending']), # 添加格式化
+                'receiving': _normalize_receiving(deployment_record['receiving']), # 添加格式化
                 'planned_deployment_date': pd.to_datetime(deployment_record['planned_deployment_date']),
                 'deployed_qty': deployment_record['deployed_qty'],
                 'demand_element': deployment_record['demand_element'],
@@ -478,7 +537,8 @@ class Orchestrator:
         
         # Update unrestricted inventory and log production GR
         for _, row in daily_production.iterrows():
-            key = (str(row['material']), str(row['location']))
+            # 🔧 修复：使用标准化的location格式，确保与其他地方一致
+            key = (_normalize_material(row['material']), _normalize_location(row['location']))
             quantity = int(row['produced_qty'])
             
             self.unrestricted_inventory[key] = self.unrestricted_inventory.get(key, 0) + quantity
@@ -532,8 +592,8 @@ class Orchestrator:
             
             self.open_deployment[uid] = {
                 'material': _normalize_material(row['material']), # 添加格式化
-                'sending': str(row['sending']),
-                'receiving': str(row['receiving']),
+                'sending': _normalize_sending(row['sending']), # 添加格式化
+                'receiving': _normalize_receiving(row['receiving']), # 添加格式化
                 'planned_deployment_date': pd.to_datetime(row['planned_deployment_date']).strftime('%Y-%m-%d'),
                 'deployed_qty': converted_qty,
                 'demand_element': str(row['demand_element']),
@@ -589,8 +649,8 @@ class Orchestrator:
             self.delivery_shipment_log.append({
                 'date': date_obj,
                 'material': _normalize_material(material), # 添加格式化
-                'sending': _normalize_material(sending), # 添加格式化
-                'receiving': _normalize_location(receiving), # 添加格式化
+                'sending': _normalize_sending(sending), # 添加格式化
+                'receiving': _normalize_receiving(receiving), # 添加格式化
                 'quantity': quantity,
                 'ori_deployment_uid': uid,
                 'actual_ship_date': ship_date.strftime('%Y-%m-%d'),
@@ -604,8 +664,8 @@ class Orchestrator:
                 transit_uid = f"{uid}_transit_{date_obj.strftime('%Y%m%d')}"
                 self.in_transit[transit_uid] = {
                     'material': _normalize_material(material), # 添加格式化
-                    'sending': _normalize_material(sending), # 添加格式化
-                    'receiving': _normalize_location(receiving), # 添加格式化
+                    'sending': _normalize_sending(sending), # 添加格式化
+                    'receiving': _normalize_receiving(receiving), # 添加格式化
                     'actual_ship_date': ship_date.strftime('%Y-%m-%d'),
                     'actual_delivery_date': delivery_date.strftime('%Y-%m-%d'),
                     'quantity': quantity,
@@ -621,7 +681,7 @@ class Orchestrator:
                 gr_record = {
                     'date': date_obj,
                     'material': _normalize_material(material), # 添加格式化
-                    'receiving': _normalize_location(receiving), # 添加格式化
+                    'receiving': _normalize_receiving(receiving), # 添加格式化
                     'quantity': quantity,
                     'ori_deployment_uid': uid
                 }
@@ -700,7 +760,7 @@ class Orchestrator:
                 gr_record = {
                     'date': date_obj,
                     'material': _normalize_material(transit_record['material']), # 添加格式化
-                    'receiving': _normalize_location(transit_record['receiving']), # 添加格式化
+                    'receiving': _normalize_receiving(transit_record['receiving']), # 添加格式化
                     'quantity': transit_record['quantity'],
                     'ori_deployment_uid': transit_record['ori_deployment_uid'],
                     'actual_ship_date': transit_record['actual_ship_date']  # 新增字段
@@ -767,27 +827,27 @@ class Orchestrator:
         
         # Save unrestricted inventory view
         unrestricted_df = self.get_unrestricted_inventory_view(date)
-        unrestricted_df.to_csv(self.output_dir / f"unrestricted_inventory_{date_str}.csv", index=False)
+        _normalize_identifiers(unrestricted_df).to_csv(self.output_dir / f"unrestricted_inventory_{date_str}.csv", index=False)
         
         # Save open deployment view
         open_deployment_df = self.get_open_deployment_view(date)
-        open_deployment_df.to_csv(self.output_dir / f"open_deployment_{date_str}.csv", index=False)
+        _normalize_identifiers(open_deployment_df).to_csv(self.output_dir / f"open_deployment_{date_str}.csv", index=False)
         
         # Save in-transit view
         intransit_df = self.get_planning_intransit_view(date)
-        intransit_df.to_csv(self.output_dir / f"planning_intransit_{date_str}.csv", index=False)
+        _normalize_identifiers(intransit_df).to_csv(self.output_dir / f"planning_intransit_{date_str}.csv", index=False)
         
         # Save space quota view
         space_quota_df = self.get_space_quota_view(date)
-        space_quota_df.to_csv(self.output_dir / f"space_quota_{date_str}.csv", index=False)
+        _normalize_identifiers(space_quota_df).to_csv(self.output_dir / f"space_quota_{date_str}.csv", index=False)
         
         # Save daily delivery GR
         delivery_gr_df = self.get_delivery_gr_view(date)
-        delivery_gr_df.to_csv(self.output_dir / f"delivery_gr_{date_str}.csv", index=False)
+        _normalize_identifiers(delivery_gr_df).to_csv(self.output_dir / f"delivery_gr_{date_str}.csv", index=False)
         
         # Save daily production GR  
         production_gr_df = self.get_production_gr_view(date)
-        production_gr_df.to_csv(self.output_dir / f"production_gr_{date_str}.csv", index=False)
+        _normalize_identifiers(production_gr_df).to_csv(self.output_dir / f"production_gr_{date_str}.csv", index=False)
         
         # Save daily shipment log
         date_obj = pd.to_datetime(date).normalize()
@@ -796,7 +856,7 @@ class Orchestrator:
         shipment_df = pd.DataFrame(daily_shipments)
         if shipment_df.empty:
             shipment_df = pd.DataFrame(columns=['date', 'material', 'location', 'quantity'])
-        shipment_df.to_csv(self.output_dir / f"shipment_log_{date_str}.csv", index=False)
+        _normalize_identifiers(shipment_df).to_csv(self.output_dir / f"shipment_log_{date_str}.csv", index=False)
         
         # 🆕 保存发运出库日志
         daily_delivery_shipments = [record for record in self.delivery_shipment_log 
@@ -805,11 +865,11 @@ class Orchestrator:
         if delivery_shipment_df.empty:
             delivery_shipment_df = pd.DataFrame(columns=['date', 'material', 'sending', 'receiving', 'quantity', 
                                                        'ori_deployment_uid', 'actual_ship_date', 'actual_delivery_date', 'type'])
-        delivery_shipment_df.to_csv(self.output_dir / f"delivery_shipment_log_{date_str}.csv", index=False)
+        _normalize_identifiers(delivery_shipment_df).to_csv(self.output_dir / f"delivery_shipment_log_{date_str}.csv", index=False)
         
         # 🆕 生成库存变动日志
         inventory_change_df = self.generate_inventory_change_log(date)
-        inventory_change_df.to_csv(self.output_dir / f"inventory_change_log_{date_str}.csv", index=False)
+        _normalize_identifiers(inventory_change_df).to_csv(self.output_dir / f"inventory_change_log_{date_str}.csv", index=False)
         print(f"  📊 已生成库存变动日志: {len(inventory_change_df)} 条记录")
         
         # Save daily logs

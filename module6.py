@@ -464,12 +464,9 @@ def calculate_physical_inventory(
     current_date: pd.Timestamp
 ) -> Dict[Tuple[str, str], float]:
     """
-    获取指定日期的实物库存（创建副本，避免直接修改Orchestrator库存）
+    获取指定日期的实物库存（直接使用Orchestrator的最新unrestricted_inventory）
     
-    由于Orchestrator在Module6执行时，其unrestricted_inventory已经按照以下公式更新：
-    实物库存 = 期初unrestricted inventory + 当日production GR + 当日delivery GR - 当日shipment
-    
-    注意：创建库存副本，避免Module6直接修改Orchestrator的实际库存。
+    Module6应该使用Orchestrator在M1,M4,M5执行后的最新实物库存状态
     
     Args:
         orchestrator: Orchestrator实例
@@ -479,10 +476,33 @@ def calculate_physical_inventory(
         Dict: 实物库存字典副本 {(material, location): physical_quantity}
     """
     try:
-        # 创建Orchestrator库存的副本，避免直接修改原始库存
+        # 直接使用Orchestrator的最新unrestricted_inventory
         physical_inventory = {}
+        
+        print(f"  🔍 调试：Orchestrator unrestricted_inventory详情")
+        print(f"    总条目数: {len(orchestrator.unrestricted_inventory)}")
+        
+        # 检查是否存在重复的material-location组合
+        location_counts = {}
         for key, qty in orchestrator.unrestricted_inventory.items():
+            material, location = key
+            location_key = f"{material}@{location}"
+            if location_key in location_counts:
+                location_counts[location_key] += 1
+                print(f"    ⚠️  发现重复键: {location_key} (第{location_counts[location_key]}次)")
+            else:
+                location_counts[location_key] = 1
+            
             physical_inventory[key] = float(qty)
+            
+        # 显示重复情况统计
+        duplicates = {k: v for k, v in location_counts.items() if v > 1}
+        if duplicates:
+            print(f"    🚨 重复的material-location组合: {len(duplicates)} 个")
+            for location_key, count in duplicates.items():
+                print(f"      {location_key}: {count} 条记录")
+        else:
+            print(f"    ✅ 无重复记录")
         
         print(f"  📊 实物库存统计: {len(physical_inventory)} 个SKU-地点组合")
         if physical_inventory:
@@ -862,10 +882,13 @@ def run_physical_flow_module(
                 if remaining_demands.empty:
                     break
 
-                n_truck_total = int(cap_map.get((sim_date, sending, receiving, truck_type), 0))
+                # 获取车辆数量，如果没有配置则默认提供99辆
+                n_truck_total = int(cap_map.get((sim_date, sending, receiving, truck_type), 99))
                 if n_truck_total == 0:
                     print(f"      🚫 {truck_type}: 今日无可用车辆")
                     continue
+                elif (sim_date, sending, receiving, truck_type) not in cap_map:
+                    print(f"      🔧 {truck_type}: 未配置容量，使用默认值 {n_truck_total} 辆")
 
                 conf = truck_cfgs[truck_cfgs['truck_type']==truck_type].iloc[0]
                 spec = spec_map.get(truck_type)

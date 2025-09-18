@@ -34,8 +34,20 @@ def _normalize_location(location_str) -> str:
         return str(location_str).zfill(4)
 
 def _normalize_material(material_str) -> str:
-    """Normalize material string"""
-    return str(material_str) if material_str is not None else ""
+    """Normalize material string to ensure consistent format"""
+    if material_str is None:
+        return ""
+    
+    try:
+        # 如果是数字（int或float），转换为整数字符串以移除多余的.0
+        if isinstance(material_str, (int, float)) or str(material_str).replace('.', '').isdigit():
+            return str(int(float(material_str)))
+        else:
+            # 非数字material，直接返回字符串
+            return str(material_str)
+    except (ValueError, TypeError):
+        # 如果转换失败，直接返回字符串
+        return str(material_str)
 
 def _normalize_sending(sending_str) -> str:
     """Normalize sending string by padding with leading zeros to 4 digits"""
@@ -659,10 +671,14 @@ def run_integrated_simulation(
                                     'deployed_qty_invCon': 'deployed_qty'
                                 })[['material', 'sending', 'receiving', 'planned_deployment_date', 'deployed_qty', 'demand_element']]
                             
+                            # 🔧 标准化标识符字段，确保数据类型一致性
+                            m5_deployment_df = _normalize_identifiers(m5_deployment_df)
+                            
                             print(f"    ✅ 最终传递给Orchestrator的数据: {len(m5_deployment_df)} 条")
                             if len(m5_deployment_df) > 0:
                                 final_qty_stats = m5_deployment_df['deployed_qty'].describe()
                                 print(f"    deployed_qty统计: {final_qty_stats}")
+                                print(f"    数据类型: material={m5_deployment_df['material'].dtype}, sending={m5_deployment_df['sending'].dtype}, receiving={m5_deployment_df['receiving'].dtype}")
                             
                             # 🔄 立即处理M5 deployment，更新open deployment
                             print(f"    📦 立即处理M5 deployment，更新open deployment...")

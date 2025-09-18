@@ -5,6 +5,29 @@ from typing import Dict, Tuple, List
 from collections import defaultdict, deque
 from datetime import datetime, timedelta
 
+# 从 module5 导入 MOQ/RV 应用逻辑
+def apply_moq_rv(qty, moq, rv, is_cross_node=True):
+    """
+    补货量小于moq补moq，否则向上取整到rv的倍数
+    
+    Args:
+        qty: 需求数量
+        moq: 最小订货量
+        rv: 重订量(Round Volume)
+        is_cross_node: 是否为跨节点调运。True=跨节点需要应用MOQ/RV，False=自循环不应用MOQ/RV
+    """
+    if qty <= 0:
+        return 0
+    
+    # 自循环调运不应用MOQ/RV约束，直接返回原需求量
+    if not is_cross_node:
+        return qty
+    
+    # 跨节点调运应用MOQ/RV约束
+    if qty < moq:
+        return moq
+    return int(np.ceil(qty / rv)) * rv
+
 # 标识符字段标准化函数（与main_integration.py保持一致）
 def _normalize_location(location_str) -> str:
     """Normalize location string by padding with leading zeros to 4 digits"""
@@ -645,6 +668,7 @@ def run_mrp_layered_simulation_daily(
     lead_time_df: pd.DataFrame,
     m4_mlcfg_df: pd.DataFrame | None = None,   
     delivery_shipment_df: pd.DataFrame | None = None,
+    deploy_config_df: pd.DataFrame | None = None,  # 🔧 新增：M5_DeployConfig for MOQ/RV
 ) -> pd.DataFrame:
     """运行单日MRP模拟 - 使用当日版本的Module1数据
     使用Global_Network中的location_type字段进行提前期计算
@@ -856,11 +880,36 @@ def run_mrp_layered_simulation_daily(
                 downstream_ao_gap=lower_AO_gap                      # ← 下游 AO 缺口
             )
 
-            # gap分别加给父节点
+            # 🔧 修复：向上传递gap时应用MOQ/RV逻辑（与Module5一致）
             if upstream and pd.notna(upstream):
-                parent_gap_accum[(material, upstream)]['AO'] += AO_gap
-                parent_gap_accum[(material, upstream)]['FC'] += FC_gap
-                parent_gap_accum[(material, upstream)]['SS'] += SS_gap
+                # 获取MOQ/RV配置
+                moq, rv = 1, 1  # 默认值
+                if deploy_config_df is not None and not deploy_config_df.empty:
+                    config_row = deploy_config_df[
+                        (deploy_config_df['material'] == material) & 
+                        (deploy_config_df['sending'] == upstream)
+                    ]
+                    if not config_row.empty:
+                        moq = int(config_row.iloc[0].get('moq', 1))
+                        rv = int(config_row.iloc[0].get('rv', 1))
+                
+                # 按demand element分组应用MOQ/RV（避免过量）
+                gap_dict = {'AO': AO_gap, 'FC': FC_gap, 'SS': SS_gap}
+                adjusted_gaps = {}
+                
+                for demand_element, gap_value in gap_dict.items():
+                    if gap_value > 0:
+                        # 向上传递是跨节点调运，需要应用MOQ/RV
+                        adjusted_gap = apply_moq_rv(gap_value, moq, rv, is_cross_node=True)
+                        adjusted_gaps[demand_element] = adjusted_gap
+                        print(f"      📦 {demand_element} gap: 原始={gap_value:.2f} → MOQ/RV调整={adjusted_gap:.2f} (MOQ={moq}, RV={rv})")
+                    else:
+                        adjusted_gaps[demand_element] = 0
+                
+                # 向父节点传递调整后的gap
+                parent_gap_accum[(material, upstream)]['AO'] += adjusted_gaps.get('AO', 0)
+                parent_gap_accum[(material, upstream)]['FC'] += adjusted_gaps.get('FC', 0) 
+                parent_gap_accum[(material, upstream)]['SS'] += adjusted_gaps.get('SS', 0)
 
             # 记录当日净需求
             # 记录当日净需求（有缺口才写行），统一命名为 net demand for ...
@@ -987,7 +1036,8 @@ def run_integrated_mode(
     network_df = config_dict.get('Global_Network', pd.DataFrame())
     lead_time_df = config_dict.get('Global_LeadTime', pd.DataFrame())
     m4_mlcfg_df = config_dict.get('M4_MaterialLocationLineCfg', pd.DataFrame())
-    # 数据类型转换
+    deploy_config_df = config_dict.get('M5_DeployConfig', pd.DataFrame())  # 🔧 新增：MOQ/RV配置
+    # 数据类型转换和标识符字段标准化
     if not safety_stock_df.empty and 'date' in safety_stock_df.columns:
         safety_stock_df['date'] = pd.to_datetime(safety_stock_df['date'])
     if not network_df.empty:
@@ -995,6 +1045,16 @@ def run_integrated_mode(
             network_df['eff_from'] = pd.to_datetime(network_df['eff_from'])
         if 'eff_to' in network_df.columns:
             network_df['eff_to'] = pd.to_datetime(network_df['eff_to'])
+    
+    # 🔧 标准化所有配置数据的标识符字段
+    if not deploy_config_df.empty:
+        deploy_config_df = _normalize_identifiers(deploy_config_df)
+    if not safety_stock_df.empty:
+        safety_stock_df = _normalize_identifiers(safety_stock_df)
+    if not network_df.empty:
+        network_df = _normalize_identifiers(network_df)
+    if not m4_mlcfg_df.empty:
+        m4_mlcfg_df = _normalize_identifiers(m4_mlcfg_df)
     
     # 生成日期范围
     date_range = pd.date_range(start_date, end_date, freq='D')
@@ -1067,7 +1127,8 @@ def run_integrated_mode(
                 network_df,
                 lead_time_df,
                 m4_mlcfg_df,
-                delivery_shipment_df=delivery_shipment_df
+                delivery_shipment_df=delivery_shipment_df,
+                deploy_config_df=deploy_config_df  # 🔧 新增：传递MOQ/RV配置
             )
             print(f"  ✅ 计算完成，生成 {len(net_demand_df)} 条净需求记录")
         except Exception as e:

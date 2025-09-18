@@ -391,7 +391,7 @@ def load_configuration(config_path: str) -> dict:
         for sheet_name, df in config_dict.items():
             if isinstance(df, pd.DataFrame) and not df.empty:
                 # 检查是否包含标识符字段
-                identifier_cols = ['material', 'location', 'sending', 'receiving', 'sourcing', 'dps_location']
+                identifier_cols = ['material', 'location', 'sending', 'receiving', 'sourcing', 'dps_location', 'from_material', 'to_material', 'line', 'delegate_line']
                 has_identifiers = any(col in df.columns for col in identifier_cols)
                 
                 if has_identifiers:

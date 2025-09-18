@@ -453,7 +453,10 @@ def optimal_changeover_sequence(batches, co_mat, co_def, line):
         for i in left:
             next_mat = batches[i]['material']
             try:
-                coid = co_mat.loc[(cur_mat, next_mat)]
+                # Ensure material IDs are strings for lookup
+                cur_mat_str = str(cur_mat)
+                next_mat_str = str(next_mat)
+                coid = co_mat.loc[(cur_mat_str, next_mat_str)]
                 co_time = co_def.get((coid, line), 0)
             except Exception:
                 co_time = 0
@@ -506,7 +509,10 @@ def centralized_capacity_allocation_with_changeover(uncon, cap_df, rate_map, co_
             # Calculate changeover time if material changes
             if prev_mat is not None and prev_mat != cur_mat:
                 try:
-                    coid = co_mat.loc[(prev_mat, cur_mat)]
+                    # Ensure material IDs are strings for lookup
+                    prev_mat_str = str(prev_mat)
+                    cur_mat_str = str(cur_mat)
+                    coid = co_mat.loc[(prev_mat_str, cur_mat_str)]
                     co_time = co_def.get((coid, line), 0) if coid else 0
                 except Exception:
                     coid = None
@@ -524,38 +530,40 @@ def centralized_capacity_allocation_with_changeover(uncon, cap_df, rate_map, co_
                 cap_key = (location, line, day_dt) if 'location' in cap_df.columns else (line, day_dt)
                 today_cap = cap_map.get(cap_key, 0)
                 
-                # First allocate changeover time
+                # First deduct changeover time from capacity (without creating separate record)
+                changeover_completed_this_day = False
                 if co_remain > 0:
-                    used = min(today_cap, co_remain)
-                    co_remain -= used
-                    today_cap -= used
+                    changeover_used = min(today_cap, co_remain)
+                    co_remain -= changeover_used
+                    today_cap -= changeover_used
+                    # Mark if changeover completed this day
+                    if co_remain == 0:
+                        changeover_completed_this_day = True
+                    # No separate changeover record - just deduct from capacity
+                    if co_remain > 0:
+                        cap_map[cap_key] = today_cap
+                        continue
+                
+                # Then allocate production capacity (with changeover_id if applicable)
+                rate = float(rate_map.get((cur_mat, line), 1))
+                can_produce = min(prod_remain, int(today_cap * rate))
+                hours_used = can_produce / rate if rate else 0
+                
+                # Only create record if there's actual production
+                if can_produce > 0:
                     plans_log.append({
                         'material': cur_mat, 'location': location, 'line': line,
                         'simulation_date': sim_date, 'production_plan_date': day_dt,
                         'available_date': day_dt + timedelta(days=int(mct_map.get((cur_mat, location), 0))),
                         'uncon_planned_qty': cur_plan['uncon_planned_qty'],
-                        'con_planned_qty': 0,
-                        'changeover_id': coid_to_log if is_first_co_day else None
+                        'con_planned_qty': can_produce,
+                        'changeover_id': coid_to_log if (changeover_completed_this_day or is_first_co_day) else None
                     })
-                    cap_map[cap_key] = today_cap
-                    if co_remain > 0:
+                    # Reset changeover tracking after first production record
+                    if coid_to_log is not None:
+                        coid_to_log = None
                         is_first_co_day = False
-                        continue
-                    coid_to_log = None
-                    is_first_co_day = False
                 
-                # Then allocate production capacity
-                rate = float(rate_map.get((cur_mat, line), 1))
-                can_produce = min(prod_remain, int(today_cap * rate))
-                hours_used = can_produce / rate if rate else 0
-                plans_log.append({
-                    'material': cur_mat, 'location': location, 'line': line,
-                    'simulation_date': sim_date, 'production_plan_date': day_dt,
-                    'available_date': day_dt + timedelta(days=int(mct_map.get((cur_mat, location), 0))),
-                    'uncon_planned_qty': cur_plan['uncon_planned_qty'],
-                    'con_planned_qty': can_produce,
-                    'changeover_id': None
-                })
                 prod_remain -= can_produce
                 today_cap -= hours_used
                 cap_map[cap_key] = today_cap
@@ -661,12 +669,21 @@ def run_daily_production_planning(config_file: str, module3_output_dir: str,
         
         # Build unconstrained plan for this simulation date
         mlcfg = cfg['MaterialLocationLineCfg']
+        # Normalize identifiers to ensure proper matching
+        from orchestrator import _normalize_identifiers
+        mlcfg = _normalize_identifiers(mlcfg)
+        # Also normalize NetDemand data to ensure proper matching
+        net_demand_df = _normalize_identifiers(net_demand_df)
         uncon_plan = build_unconstrained_plan_for_single_day(
             net_demand_df, mlcfg, simulation_date, simulation_start, issues
         )
         
         # Set up capacity allocation parameters
-        co_mat = cfg['ChangeoverMatrix'].set_index(['from_material', 'to_material'])['changeover_id']
+        # Also normalize changeover matrix to ensure proper matching
+        co_mat_df = cfg['ChangeoverMatrix'].copy()
+        co_mat_df['from_material'] = co_mat_df['from_material'].astype(str)
+        co_mat_df['to_material'] = co_mat_df['to_material'].astype(str)
+        co_mat = co_mat_df.set_index(['from_material', 'to_material'])['changeover_id']
         
         # Enhanced changeover definition with cost and mu_loss
         co_def_df = cfg['ChangeoverDefinition']

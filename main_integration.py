@@ -548,7 +548,9 @@ def run_integrated_simulation(
             
             if not historical_production.empty:
                 print(f"    📦 当日需要入库的历史生产: {len(historical_production)} 条记录")
-                orchestrator.process_module4_production(historical_production, current_date.strftime('%Y-%m-%d'))
+                # 🔧 标准化标识符字段，确保数据类型一致性
+                historical_production_normalized = _normalize_identifiers(historical_production)
+                orchestrator.process_module4_production(historical_production_normalized, current_date.strftime('%Y-%m-%d'))
             else:
                 print(f"    📦 当日无历史生产入库")
                 
@@ -577,8 +579,10 @@ def run_integrated_simulation(
                 # 🔄 立即处理M1 shipment，扣减库存
                 if not m1_shipments.empty:
                     print(f"    🚚 立即处理M1 shipment，扣减库存...")
-                    orchestrator.process_module1_shipments(m1_shipments, current_date.strftime('%Y-%m-%d'))
-                    print(f"    ✅ 已扣减 {len(m1_shipments)} 个shipment的库存")
+                    # 🔧 标准化标识符字段，确保数据类型一致性
+                    m1_shipments_normalized = _normalize_identifiers(m1_shipments)
+                    orchestrator.process_module1_shipments(m1_shipments_normalized, current_date.strftime('%Y-%m-%d'))
+                    print(f"    ✅ 已扣减 {len(m1_shipments_normalized)} 个shipment的库存")
                 
                 print(f"  ✅ Module1 完成 - 生成 {len(m1_result.get('orders_df', []))} 个订单, {len(m1_shipments)} 个发货")
                 all_results['module1'].append(m1_result)
@@ -608,8 +612,10 @@ def run_integrated_simulation(
                     
                     if not daily_available.empty:
                         print(f"    🏭 立即处理M4当日生产入库...")
-                        orchestrator.process_module4_production(daily_available, current_date.strftime('%Y-%m-%d'))
-                        print(f"    ✅ 已入库 {len(daily_available)} 条当日生产")
+                        # 🔧 标准化标识符字段，确保数据类型一致性
+                        daily_available_normalized = _normalize_identifiers(daily_available)
+                        orchestrator.process_module4_production(daily_available_normalized, current_date.strftime('%Y-%m-%d'))
+                        print(f"    ✅ 已入库 {len(daily_available_normalized)} 条当日生产")
                     else:
                         print(f"    📦 M4当日无可用生产入库")
                 
@@ -718,8 +724,10 @@ def run_integrated_simulation(
                     # 🔄 立即处理M6 delivery，更新多个状态
                     if not m6_delivery_df.empty:
                         print(f"    🚛 立即处理M6 delivery，更新库存/open deployment/in-transit...")
-                        orchestrator.process_module6_delivery(m6_delivery_df, current_date.strftime('%Y-%m-%d'))
-                        print(f"    ✅ 已处理 {len(m6_delivery_df)} 条delivery计划，更新相关状态")
+                        # 🔧 标准化标识符字段，确保数据类型一致性
+                        m6_delivery_df_normalized = _normalize_identifiers(m6_delivery_df)
+                        orchestrator.process_module6_delivery(m6_delivery_df_normalized, current_date.strftime('%Y-%m-%d'))
+                        print(f"    ✅ 已处理 {len(m6_delivery_df_normalized)} 条delivery计划，更新相关状态")
                     
                     print(f"  ✅ Module6 完成 - 生成 {len(m6_delivery_df)} 条交付计划")
                 else:

@@ -478,7 +478,8 @@ class Orchestrator:
         
         # Update unrestricted inventory
         for _, row in daily_shipments.iterrows():
-            key = (str(row['material']), str(row['location']))
+            # 🔧 使用标准化函数确保数据一致性
+            key = (_normalize_material(row['material']), _normalize_location(row['location']))
             if key in self.unrestricted_inventory:
                 self.unrestricted_inventory[key] = max(0, self.unrestricted_inventory[key] - int(row['quantity']))
             
@@ -639,8 +640,9 @@ class Orchestrator:
                 if self.open_deployment[uid]['deployed_qty'] <= 0:
                     del self.open_deployment[uid]
             
-            # Reduce unrestricted inventory at sending location
-            sending_key = (material, sending)
+            # Reduce unrestricted inventory at sending location  
+            # 🔧 使用标准化函数确保数据一致性
+            sending_key = (_normalize_material(material), _normalize_location(sending))
             if sending_key in self.unrestricted_inventory:
                 self.unrestricted_inventory[sending_key] = max(0, 
                     self.unrestricted_inventory[sending_key] - quantity)

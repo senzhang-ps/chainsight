@@ -289,7 +289,7 @@ def calculate_available_inventory(
             beginning_inventory.get(key, 0) +
             delivery_gr.get(key, 0) +
             today_production_gr.get(key, 0) -
-            today_shipment.get(key, 0) -
+#           today_shipment.get(key, 0) -
             open_deployment.get(key, 0)
         )
     

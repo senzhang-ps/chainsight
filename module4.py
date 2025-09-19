@@ -42,6 +42,75 @@ def get_or_init_simulation_start(output_dir: str, provided_start: Optional[pd.Ti
 
     return provided_start
 
+
+def save_line_state(output_dir: str, simulation_date: pd.Timestamp, line_states: dict):
+    """Save line states (last material and remaining changeover time) for cross-day continuity.
+    
+    Args:
+        output_dir: Directory for Module4 outputs/state files
+        simulation_date: Current simulation date
+        line_states: Dict with line keys containing {'last_material': str, 'remaining_changeover': float}
+    """
+    os.makedirs(output_dir, exist_ok=True)
+    state_file = os.path.join(output_dir, f"line_states_{simulation_date.strftime('%Y%m%d')}.json")
+    
+    import json
+    with open(state_file, "w") as f:
+        json.dump(line_states, f, indent=2)
+
+
+def load_line_state(output_dir: str, simulation_date: pd.Timestamp) -> dict:
+    """Load line states from previous day for cross-day changeover continuity.
+    
+    Args:
+        output_dir: Directory for Module4 outputs/state files
+        simulation_date: Current simulation date
+        
+    Returns:
+        dict: Line states from previous day, empty dict if not found
+    """
+    prev_date = simulation_date - pd.Timedelta(days=1)
+    state_file = os.path.join(output_dir, f"line_states_{prev_date.strftime('%Y%m%d')}.json")
+    
+    if not os.path.exists(state_file):
+        return {}
+    
+    try:
+        import json
+        with open(state_file, "r") as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"Warning: Failed to load line state from {state_file}: {e}")
+        return {}
+
+
+def extract_line_states_from_plan(plan_df: pd.DataFrame) -> dict:
+    """Extract line states from production plan for state persistence.
+    
+    Args:
+        plan_df: Production plan DataFrame
+        
+    Returns:
+        dict: Line states with last material and remaining changeover info
+    """
+    line_states = {}
+    
+    if plan_df.empty:
+        return line_states
+    
+    # Group by line and simulation_date to get the last production for each line
+    for (line, sim_date), group in plan_df.groupby(['line', 'simulation_date']):
+        # Sort by production_plan_date to get the last production
+        last_production = group.sort_values('production_plan_date').iloc[-1]
+        
+        line_states[line] = {
+            'last_material': str(last_production['material']),
+            'last_location': str(last_production['location']),
+            'last_production_date': last_production['production_plan_date'].strftime('%Y-%m-%d')
+        }
+    
+    return line_states
+
 IDENTIFIER_COLS = [
     'material', 'location', 'line', 'delegate_line', 'from_material', 'to_material'
 ]
@@ -467,7 +536,24 @@ def optimal_changeover_sequence(batches, co_mat, co_def, line):
         cur_mat = batches[min_idx]['material']
     return seq
 
-def centralized_capacity_allocation_with_changeover(uncon, cap_df, rate_map, co_mat, co_def, mlcfg):
+def centralized_capacity_allocation_with_changeover(uncon, cap_df, rate_map, co_mat, co_def, mlcfg, 
+                                                   previous_line_states=None, simulation_date=None):
+    """
+    Enhanced capacity allocation with cross-day changeover continuity.
+    
+    Args:
+        uncon: Unconstrained production plan
+        cap_df: Capacity DataFrame
+        rate_map: Production rate mapping
+        co_mat: Changeover matrix
+        co_def: Changeover definition
+        mlcfg: Material location line configuration
+        previous_line_states: Line states from previous day (optional)
+        simulation_date: Current simulation date (optional)
+        
+    Returns:
+        tuple: (plans_log, exceed_log)
+    """
     plans_log = []
     exceed = []
     mct_map = mlcfg.set_index(['material', 'location'])['MCT'].to_dict()
@@ -481,12 +567,18 @@ def centralized_capacity_allocation_with_changeover(uncon, cap_df, rate_map, co_
     uncon = uncon.sort_values(['line', 'simulation_date', 'planned_date', 'material']).reset_index(drop=True)
     for (line, sim_date), uncon_grp in uncon.groupby(['line', 'simulation_date']):
         batch_list = uncon_grp.to_dict(orient='records')
+        
         # Apply changeover optimization
         if len(batch_list) > 1:
             co_seq = optimal_changeover_sequence(batch_list, co_mat, co_def, line)
             batch_list = [batch_list[i] for i in co_seq]
 
+        # Initialize previous material from previous day's state
         prev_mat = None
+        if previous_line_states and line in previous_line_states:
+            prev_mat = previous_line_states[line].get('last_material')
+            print(f"Line {line}: Starting with previous day's last material: {prev_mat}")
+
         for cur_plan in batch_list:
             material = cur_plan['material']
             location = cur_plan['location']
@@ -520,6 +612,7 @@ def centralized_capacity_allocation_with_changeover(uncon, cap_df, rate_map, co_
                 co_remain = co_time
                 coid_to_log = coid
                 is_first_co_day = True
+                print(f"Line {line}: Changeover from {prev_mat} to {cur_mat}, time needed: {co_time}")
             else:
                 co_remain = 0
                 coid_to_log = None
@@ -640,7 +733,7 @@ def run_daily_production_planning(config_file: str, module3_output_dir: str,
                                  simulation_date: pd.Timestamp, simulation_start: pd.Timestamp,
                                  output_dir: str) -> str:
     """
-    Run daily production planning for a single simulation date
+    Run daily production planning for a single simulation date with cross-day changeover continuity
     
     Args:
         config_file: Path to M4 configuration Excel file
@@ -678,6 +771,13 @@ def run_daily_production_planning(config_file: str, module3_output_dir: str,
             net_demand_df, mlcfg, simulation_date, simulation_start, issues
         )
         
+        # Load previous day's line states for cross-day changeover continuity
+        previous_line_states = load_line_state(output_dir, simulation_date)
+        if previous_line_states:
+            print(f"Loaded previous day's line states: {list(previous_line_states.keys())}")
+        else:
+            print("No previous day's line states found - starting fresh")
+        
         # Set up capacity allocation parameters
         # Also normalize changeover matrix to ensure proper matching
         co_mat_df = cfg['ChangeoverMatrix'].copy()
@@ -695,9 +795,10 @@ def run_daily_production_planning(config_file: str, module3_output_dir: str,
         rate_map = mlcfg.set_index(['material', 'delegate_line'])['prd_rate']
         rate_map.index.set_names(['material', 'line'], inplace=True)
         
-        # Allocate capacity with changeover consideration
+        # Allocate capacity with changeover consideration and cross-day continuity
         plan_log, exceed_log = centralized_capacity_allocation_with_changeover(
-            uncon_plan, cap_df, rate_map, co_mat, co_def, mlcfg
+            uncon_plan, cap_df, rate_map, co_mat, co_def, mlcfg,
+            previous_line_states=previous_line_states, simulation_date=simulation_date
         )
         
         # Simulate production reliability
@@ -706,6 +807,12 @@ def run_daily_production_planning(config_file: str, module3_output_dir: str,
         
         # Calculate changeover metrics
         changeover_log = calculate_changeover_metrics(plan_log, co_def_df)
+        
+        # Extract and save current day's line states for next day
+        current_line_states = extract_line_states_from_plan(plan_log)
+        if current_line_states:
+            save_line_state(output_dir, simulation_date, current_line_states)
+            print(f"Saved current day's line states: {list(current_line_states.keys())}")
         
         # Deduplicate issues
         issues = dedup_issues(issues)

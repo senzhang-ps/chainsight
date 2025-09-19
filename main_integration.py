@@ -163,9 +163,17 @@ def run_module4_integrated(
         rate_map = mlcfg.set_index(['material', 'delegate_line'])['prd_rate']
         rate_map.index.set_names(['material', 'line'], inplace=True)
         
-        # 分配产能
+        # 加载前一天产线状态用于跨天转产连续性
+        previous_line_states = module4.load_line_state(output_dir, simulation_date)
+        if previous_line_states:
+            print(f"  🔄 加载前一天产线状态: {list(previous_line_states.keys())}")
+        else:
+            print(f"  🔄 无前一天产线状态 - 全新开始")
+        
+        # 分配产能（支持跨天转产连续性）
         plan_log, exceed_log = module4.centralized_capacity_allocation_with_changeover(
-            uncon_plan, cap_df, rate_map, co_mat, co_def, mlcfg
+            uncon_plan, cap_df, rate_map, co_mat, co_def, mlcfg,
+            previous_line_states=previous_line_states, simulation_date=simulation_date
         )
         
         # 仿真生产可靠性
@@ -174,6 +182,12 @@ def run_module4_integrated(
         
         # 计算换产指标
         changeover_log = module4.calculate_changeover_metrics(plan_log, co_def_df)
+        
+        # 提取并保存当天产线状态供下一天使用
+        current_line_states = module4.extract_line_states_from_plan(plan_log)
+        if current_line_states:
+            module4.save_line_state(output_dir, simulation_date, current_line_states)
+            print(f"  💾 保存当天产线状态: {list(current_line_states.keys())}")
         
         # 去重问题
         issues = module4.dedup_issues(issues)

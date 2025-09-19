@@ -621,7 +621,7 @@ class Orchestrator:
         date_obj = pd.to_datetime(date).normalize()
         print(f"[M6->Orch] incoming rows: {len(delivery_df)}; date={date}")
         # Process each delivery record
-        for _, row in delivery_df.iterrows():
+        for idx, row in delivery_df.iterrows():
             uid = str(row['ori_deployment_uid'])
             material = str(row['material'])
             sending = str(row['sending'])
@@ -663,7 +663,8 @@ class Orchestrator:
             # 判断处理逻辑：基于delivery_date是否为未来日期
             if delivery_date.normalize() > date_obj:
                 # Create in-transit record for future delivery
-                transit_uid = f"{uid}_transit_{date_obj.strftime('%Y%m%d')}"
+                # Use row index to ensure uniqueness for multiple deliveries with same ori_deployment_uid
+                transit_uid = f"{uid}_transit_{date_obj.strftime('%Y%m%d')}_{idx}"
                 self.in_transit[transit_uid] = {
                     'material': _normalize_material(material), # 添加格式化
                     'sending': _normalize_sending(sending), # 添加格式化

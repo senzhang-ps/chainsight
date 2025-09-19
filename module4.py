@@ -406,7 +406,7 @@ def build_unconstrained_plan_for_single_day(net_demand_df, mlcfg, simulation_dat
     plans = []
     
     if net_demand_df.empty:
-        return pd.DataFrame(columns=['material', 'location', 'line', 'planned_date', 'uncon_planned_qty', 'simulation_date'])
+        return pd.DataFrame(columns=['material', 'location', 'line', 'planned_date', 'uncon_planned_qty', 'simulation_date', 'original_quantity'])
     
     # 确保MLCFG的标识符也是string类型，与NetDemand保持一致
     mlcfg = _cast_identifiers_to_str(mlcfg.copy(), ['material', 'location'])
@@ -488,37 +488,46 @@ def build_unconstrained_plan_for_single_day(net_demand_df, mlcfg, simulation_dat
             'line': line,
             'planned_date': simulation_date,  # Plan on review date
             'uncon_planned_qty': uncon_planned_qty,
-            'simulation_date': simulation_date
+            'simulation_date': simulation_date,
+            'original_quantity': agg_qty  # 保存原始quantity用于排序
         }])
         
         plans.append(result)
     
     if not plans:
-        return pd.DataFrame(columns=['material', 'location', 'line', 'planned_date', 'uncon_planned_qty', 'simulation_date'])
+        return pd.DataFrame(columns=['material', 'location', 'line', 'planned_date', 'uncon_planned_qty', 'simulation_date', 'original_quantity'])
     
     return pd.concat(plans, ignore_index=True)
 
 def optimal_changeover_sequence(batches, co_mat, co_def, line):
     """
-    batches: list of dict, each batch at least: 'material', 'uncon_planned_qty'
+    Enhanced production sequencing with quantity-based prioritization:
+    1. First SKU: Select by largest original quantity (not batch size)
+    2. Subsequent SKUs: Minimize changeover time, with quantity as tie-breaker
+    
+    batches: list of dict, each batch at least: 'material', 'uncon_planned_qty', 'original_quantity'
     co_mat: pandas.Series, MultiIndex [from, to] -> changeover_id
     co_def: dict, (changeover_id, line) -> time
     line: str
     Returns: list of batch indices (order)
     """
-    # 1. Start with largest batch
     batch_idx_list = list(range(len(batches)))
     if not batch_idx_list:
         return []
     left = set(batch_idx_list)
-    # First: max batch
-    first = max(left, key=lambda i: batches[i]['uncon_planned_qty'])
+    
+    # 1. First SKU: Select by largest original quantity (not batch size)
+    first = max(left, key=lambda i: batches[i].get('original_quantity', batches[i]['uncon_planned_qty']))
     seq = [first]
     left.remove(first)
     cur_mat = batches[first]['material']
+    
     while left:
-        # Pick next with min changeover time from cur_mat
-        min_cost, min_idx = None, None
+        # 2. Pick next with min changeover time from cur_mat
+        # If multiple options have same changeover time, use quantity as tie-breaker
+        min_cost = None
+        candidates = []  # Store all candidates with minimum changeover time
+        
         for i in left:
             next_mat = batches[i]['material']
             try:
@@ -529,11 +538,23 @@ def optimal_changeover_sequence(batches, co_mat, co_def, line):
                 co_time = co_def.get((coid, line), 0)
             except Exception:
                 co_time = 0
-            if (min_cost is None) or (co_time < min_cost):
-                min_cost, min_idx = co_time, i
+            
+            if min_cost is None or co_time < min_cost:
+                min_cost = co_time
+                candidates = [i]
+            elif co_time == min_cost:
+                candidates.append(i)
+        
+        # Among candidates with minimum changeover time, select by largest quantity
+        if len(candidates) == 1:
+            min_idx = candidates[0]
+        else:
+            min_idx = max(candidates, key=lambda i: batches[i].get('original_quantity', batches[i]['uncon_planned_qty']))
+        
         seq.append(min_idx)
         left.remove(min_idx)
         cur_mat = batches[min_idx]['material']
+    
     return seq
 
 def centralized_capacity_allocation_with_changeover(uncon, cap_df, rate_map, co_mat, co_def, mlcfg, 
@@ -977,7 +998,7 @@ def main():
             rate_map.index.set_names(['material', 'line'], inplace=True)
             
             # For legacy mode - create empty unconstrained plan for now
-            uncon = pd.DataFrame(columns=['material', 'location', 'line', 'planned_date', 'uncon_planned_qty', 'simulation_date'])
+            uncon = pd.DataFrame(columns=['material', 'location', 'line', 'planned_date', 'uncon_planned_qty', 'simulation_date', 'original_quantity'])
             
             plan_log, exceed_log = centralized_capacity_allocation_with_changeover(
                 uncon, cap_df, rate_map, co_mat, co_def, mlcfg

@@ -59,6 +59,191 @@ def save_line_state(output_dir: str, simulation_date: pd.Timestamp, line_states:
         json.dump(line_states, f, indent=2)
 
 
+def save_allocated_capacity(output_dir: str, simulation_date: pd.Timestamp, allocated_capacity: dict):
+    """Save allocated capacity for future production dates to track capacity usage across simulation dates.
+    
+    Args:
+        output_dir: Directory for Module4 outputs/state files
+        simulation_date: Current simulation date
+        allocated_capacity: Dict with capacity allocation info for future production dates
+    """
+    os.makedirs(output_dir, exist_ok=True)
+    capacity_file = os.path.join(output_dir, f"allocated_capacity_{simulation_date.strftime('%Y%m%d')}.json")
+    
+    import json
+    with open(capacity_file, "w") as f:
+        json.dump(allocated_capacity, f, indent=2)
+
+
+def load_allocated_capacity(output_dir: str, simulation_date: pd.Timestamp) -> dict:
+    """Load previously allocated capacity for future production dates.
+    
+    Args:
+        output_dir: Directory for Module4 outputs/state files
+        simulation_date: Current simulation date
+        
+    Returns:
+        dict: Previously allocated capacity, empty dict if not found
+    """
+    capacity_file = os.path.join(output_dir, f"allocated_capacity_{simulation_date.strftime('%Y%m%d')}.json")
+    
+    if not os.path.exists(capacity_file):
+        return {}
+    
+    try:
+        import json
+        with open(capacity_file, "r") as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"Warning: Failed to load allocated capacity from {capacity_file}: {e}")
+        return {}
+
+
+def load_all_previous_capacity(output_dir: str, simulation_date: pd.Timestamp) -> dict:
+    """Load all previously allocated capacity from all previous simulation dates.
+    
+    Args:
+        output_dir: Directory for Module4 outputs/state files
+        simulation_date: Current simulation date
+        
+    Returns:
+        dict: Consolidated capacity allocation from all previous simulation dates
+    """
+    consolidated_capacity = {}
+    
+    # Look for all capacity files from previous simulation dates
+    for file_name in os.listdir(output_dir):
+        if file_name.startswith("allocated_capacity_") and file_name.endswith(".json"):
+            try:
+                # Extract date from filename
+                date_str = file_name.replace("allocated_capacity_", "").replace(".json", "")
+                file_date = pd.to_datetime(date_str, format='%Y%m%d')
+                
+                # Only load capacity from previous simulation dates
+                if file_date < simulation_date:
+                    capacity_file = os.path.join(output_dir, file_name)
+                    with open(capacity_file, "r") as f:
+                        import json
+                        daily_capacity = json.load(f)
+                        
+                        # Merge into consolidated capacity
+                        for key, value in daily_capacity.items():
+                            if key not in consolidated_capacity:
+                                consolidated_capacity[key] = 0
+                            consolidated_capacity[key] += value
+                            
+            except Exception as e:
+                print(f"Warning: Failed to load capacity from {file_name}: {e}")
+                continue
+    
+    return consolidated_capacity
+
+
+def extract_allocated_capacity_from_plan(plan_df: pd.DataFrame, rate_map: dict, changeover_def: dict = None) -> dict:
+    """Extract allocated capacity information from production plan for persistence.
+    
+    Args:
+        plan_df: Production plan DataFrame
+        rate_map: Production rate mapping (material, line) -> rate
+        changeover_def: Changeover definition mapping (changeover_id, line) -> time
+        
+    Returns:
+        dict: Capacity allocation info in HOURS keyed by (location, line, production_plan_date)
+        Includes both production time and changeover time
+    """
+    allocated_capacity = {}
+    
+    if plan_df.empty:
+        return allocated_capacity
+    
+    # Group by location, line, and production_plan_date to get allocated capacity
+    for (location, line, prod_date), group in plan_df.groupby(['location', 'line', 'production_plan_date']):
+        # Calculate total allocated capacity in HOURS (production + changeover)
+        total_allocated_hours = 0
+        
+        for _, row in group.iterrows():
+            material = row['material']
+            quantity = row['con_planned_qty']
+            changeover_id = row.get('changeover_id')
+            
+            # Calculate production time
+            rate = rate_map.get((material, line), 1)
+            production_hours = quantity / rate if rate else 0
+            total_allocated_hours += production_hours
+            
+            # Add changeover time if changeover_id exists
+            if changeover_id and changeover_def and pd.notna(changeover_id):
+                changeover_hours = changeover_def.get((changeover_id, line), 0)
+                total_allocated_hours += changeover_hours
+        
+        # Convert to Python float for JSON serialization
+        if isinstance(total_allocated_hours, (np.integer, np.int64, np.floating)):
+            total_allocated_hours = float(total_allocated_hours)
+        
+        # Create key for capacity tracking
+        key = f"{location}|{line}|{prod_date.strftime('%Y-%m-%d')}"
+        allocated_capacity[key] = total_allocated_hours
+    
+    return allocated_capacity
+
+
+def validate_capacity_allocation(plan_log: pd.DataFrame, previously_allocated_capacity: dict, 
+                                simulation_date: pd.Timestamp, rate_map: dict, changeover_def: dict = None) -> list:
+    """Validate that capacity allocation respects previously allocated capacity.
+    
+    Args:
+        plan_log: Current production plan DataFrame
+        previously_allocated_capacity: Previously allocated capacity dict (in hours)
+        simulation_date: Current simulation date
+        rate_map: Production rate mapping (material, line) -> rate
+        changeover_def: Changeover definition mapping (changeover_id, line) -> time
+        
+    Returns:
+        list: Validation issues found
+    """
+    issues = []
+    
+    if plan_log.empty or not previously_allocated_capacity:
+        return issues
+    
+    # Group current plan by location, line, and production_plan_date
+    for (location, line, prod_date), group in plan_log.groupby(['location', 'line', 'production_plan_date']):
+        # Calculate current allocated capacity in hours (production + changeover)
+        current_allocated_hours = 0
+        for _, row in group.iterrows():
+            material = row['material']
+            quantity = row['con_planned_qty']
+            changeover_id = row.get('changeover_id')
+            
+            # Calculate production time
+            rate = rate_map.get((material, line), 1)
+            production_hours = quantity / rate if rate else 0
+            current_allocated_hours += production_hours
+            
+            # Add changeover time if changeover_id exists
+            if changeover_id and changeover_def and pd.notna(changeover_id):
+                changeover_hours = changeover_def.get((changeover_id, line), 0)
+                current_allocated_hours += changeover_hours
+        
+        capacity_key = f"{location}|{line}|{prod_date.strftime('%Y-%m-%d')}"
+        previously_allocated_hours = previously_allocated_capacity.get(capacity_key, 0)
+        
+        if previously_allocated_hours > 0:
+            issues.append({
+                'type': 'capacity_validation',
+                'location': location,
+                'line': line,
+                'production_plan_date': prod_date.strftime('%Y-%m-%d'),
+                'simulation_date': simulation_date.strftime('%Y-%m-%d'),
+                'previously_allocated_hours': previously_allocated_hours,
+                'currently_allocated_hours': current_allocated_hours,
+                'total_allocated_hours': previously_allocated_hours + current_allocated_hours,
+                'message': f"Capacity allocation validation: {location}/{line} on {prod_date.strftime('%Y-%m-%d')} - Previously: {previously_allocated_hours:.2f} hours, Currently: {current_allocated_hours:.2f} hours, Total: {previously_allocated_hours + current_allocated_hours:.2f} hours"
+            })
+    
+    return issues
+
+
 def load_line_state(output_dir: str, simulation_date: pd.Timestamp) -> dict:
     """Load line states from previous day for cross-day changeover continuity.
     
@@ -558,9 +743,10 @@ def optimal_changeover_sequence(batches, co_mat, co_def, line):
     return seq
 
 def centralized_capacity_allocation_with_changeover(uncon, cap_df, rate_map, co_mat, co_def, mlcfg, 
-                                                   previous_line_states=None, simulation_date=None):
+                                                   previous_line_states=None, simulation_date=None, 
+                                                   previously_allocated_capacity=None):
     """
-    Enhanced capacity allocation with cross-day changeover continuity.
+    Enhanced capacity allocation with cross-day changeover continuity and capacity tracking.
     
     Args:
         uncon: Unconstrained production plan
@@ -571,6 +757,7 @@ def centralized_capacity_allocation_with_changeover(uncon, cap_df, rate_map, co_
         mlcfg: Material location line configuration
         previous_line_states: Line states from previous day (optional)
         simulation_date: Current simulation date (optional)
+        previously_allocated_capacity: Previously allocated capacity from earlier simulation dates (optional)
         
     Returns:
         tuple: (plans_log, exceed_log)
@@ -642,10 +829,24 @@ def centralized_capacity_allocation_with_changeover(uncon, cap_df, rate_map, co_
             # Allocate production across horizon days
             for day_dt in horizon_days:
                 cap_key = (location, line, day_dt) if 'location' in cap_df.columns else (line, day_dt)
-                today_cap = cap_map.get(cap_key, 0)
+                # Get current remaining capacity (already considers previous allocations from cap_map)
+                current_remaining_cap = cap_map.get(cap_key, 0)
+                today_cap = current_remaining_cap
+                
+                # Check for previously allocated capacity for this production plan date (from other simulation dates)
+                if previously_allocated_capacity:
+                    capacity_key = f"{location}|{line}|{day_dt.strftime('%Y-%m-%d')}"
+                    previously_used_hours = previously_allocated_capacity.get(capacity_key, 0)
+                    
+                    # Deduct previously allocated capacity (in hours) from available capacity (in hours)
+                    today_cap = max(0, today_cap - previously_used_hours)
+                    
+                    if previously_used_hours > 0:
+                        print(f"Line {line}: Production plan date {day_dt.strftime('%Y-%m-%d')} has {previously_used_hours:.2f} hours already allocated by previous simulation dates. Available capacity: {today_cap:.2f} hours")
                 
                 # First deduct changeover time from capacity (without creating separate record)
                 changeover_completed_this_day = False
+                changeover_used = 0
                 if co_remain > 0:
                     changeover_used = min(today_cap, co_remain)
                     co_remain -= changeover_used
@@ -653,9 +854,9 @@ def centralized_capacity_allocation_with_changeover(uncon, cap_df, rate_map, co_
                     # Mark if changeover completed this day
                     if co_remain == 0:
                         changeover_completed_this_day = True
-                    # No separate changeover record - just deduct from capacity
+                    # If changeover not completed, update cap_map and continue to next day
                     if co_remain > 0:
-                        cap_map[cap_key] = today_cap
+                        cap_map[cap_key] = current_remaining_cap - changeover_used
                         continue
                 
                 # Then allocate production capacity (with changeover_id if applicable)
@@ -680,7 +881,8 @@ def centralized_capacity_allocation_with_changeover(uncon, cap_df, rate_map, co_
                 
                 prod_remain -= can_produce
                 today_cap -= hours_used
-                cap_map[cap_key] = today_cap
+                # Update cap_map with remaining capacity after all usage (changeover + production)
+                cap_map[cap_key] = current_remaining_cap - changeover_used - hours_used
                 if prod_remain <= 0:
                     break
                     
@@ -799,6 +1001,13 @@ def run_daily_production_planning(config_file: str, module3_output_dir: str,
         else:
             print("No previous day's line states found - starting fresh")
         
+        # Load previously allocated capacity from all previous simulation dates
+        previously_allocated_capacity = load_all_previous_capacity(output_dir, simulation_date)
+        if previously_allocated_capacity:
+            print(f"Loaded previously allocated capacity: {len(previously_allocated_capacity)} capacity allocations from previous simulation dates")
+        else:
+            print("No previously allocated capacity found - starting fresh")
+        
         # Set up capacity allocation parameters
         # Also normalize changeover matrix to ensure proper matching
         co_mat_df = cfg['ChangeoverMatrix'].copy()
@@ -819,7 +1028,8 @@ def run_daily_production_planning(config_file: str, module3_output_dir: str,
         # Allocate capacity with changeover consideration and cross-day continuity
         plan_log, exceed_log = centralized_capacity_allocation_with_changeover(
             uncon_plan, cap_df, rate_map, co_mat, co_def, mlcfg,
-            previous_line_states=previous_line_states, simulation_date=simulation_date
+            previous_line_states=previous_line_states, simulation_date=simulation_date,
+            previously_allocated_capacity=previously_allocated_capacity
         )
         
         # Simulate production reliability
@@ -834,6 +1044,19 @@ def run_daily_production_planning(config_file: str, module3_output_dir: str,
         if current_line_states:
             save_line_state(output_dir, simulation_date, current_line_states)
             print(f"Saved current day's line states: {list(current_line_states.keys())}")
+        
+        # Extract and save current day's allocated capacity for future simulation dates
+        current_allocated_capacity = extract_allocated_capacity_from_plan(plan_log, rate_map.to_dict(), co_def)
+        if current_allocated_capacity:
+            save_allocated_capacity(output_dir, simulation_date, current_allocated_capacity)
+            print(f"Saved current day's allocated capacity: {len(current_allocated_capacity)} capacity allocations (in hours)")
+        
+        # Validate capacity allocation to ensure no over-allocation
+        capacity_validation_issues = validate_capacity_allocation(plan_log, previously_allocated_capacity, simulation_date, rate_map.to_dict(), co_def)
+        if capacity_validation_issues:
+            print(f"Capacity allocation validation completed: {len(capacity_validation_issues)} validation records generated")
+            # Add validation issues to the main issues list
+            issues.extend(capacity_validation_issues)
         
         # Deduplicate issues
         issues = dedup_issues(issues)

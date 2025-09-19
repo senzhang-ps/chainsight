@@ -170,10 +170,18 @@ def run_module4_integrated(
         else:
             print(f"  🔄 无前一天产线状态 - 全新开始")
         
-        # 分配产能（支持跨天转产连续性）
+        # 加载之前所有仿真日期已分配的产能
+        previously_allocated_capacity = module4.load_all_previous_capacity(output_dir, simulation_date)
+        if previously_allocated_capacity:
+            print(f"  🔄 加载之前已分配产能: {len(previously_allocated_capacity)} 个产能分配")
+        else:
+            print(f"  🔄 无之前已分配产能 - 全新开始")
+        
+        # 分配产能（支持跨天转产连续性和产能跟踪）
         plan_log, exceed_log = module4.centralized_capacity_allocation_with_changeover(
             uncon_plan, cap_df, rate_map, co_mat, co_def, mlcfg,
-            previous_line_states=previous_line_states, simulation_date=simulation_date
+            previous_line_states=previous_line_states, simulation_date=simulation_date,
+            previously_allocated_capacity=previously_allocated_capacity
         )
         
         # 仿真生产可靠性
@@ -188,6 +196,12 @@ def run_module4_integrated(
         if current_line_states:
             module4.save_line_state(output_dir, simulation_date, current_line_states)
             print(f"  💾 保存当天产线状态: {list(current_line_states.keys())}")
+        
+        # 提取并保存当天分配的产能供后续仿真日期使用
+        current_allocated_capacity = module4.extract_allocated_capacity_from_plan(plan_log, rate_map.to_dict(), co_def)
+        if current_allocated_capacity:
+            module4.save_allocated_capacity(output_dir, simulation_date, current_allocated_capacity)
+            print(f"  💾 保存当天分配产能: {len(current_allocated_capacity)} 个产能分配 (小时单位)")
         
         # 去重问题
         issues = module4.dedup_issues(issues)

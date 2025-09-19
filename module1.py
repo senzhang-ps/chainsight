@@ -4,6 +4,44 @@ from scipy.stats import truncnorm
 import os
 import re
 
+# ----------- 0. STRING NORMALIZATION FUNCTIONS -----------
+
+def _normalize_location(location_str) -> str:
+    """Normalize location string by padding with leading zeros to 4 digits"""
+    try:
+        return str(int(location_str)).zfill(4)
+    except (ValueError, TypeError):
+        return str(location_str).zfill(4)
+
+def _normalize_material(material_str) -> str:
+    """Normalize material string"""
+    return str(material_str) if material_str is not None else ""
+
+def _normalize_identifiers(df: pd.DataFrame) -> pd.DataFrame:
+    """Normalize identifier columns to string format with proper formatting"""
+    if df.empty:
+        return df
+    
+    # Define identifier columns that need string conversion
+    identifier_cols = ['material', 'location', 'sending', 'receiving', 'sourcing', 'dps_location']
+    
+    df = df.copy()
+    for col in identifier_cols:
+        if col in df.columns:
+            # Convert to string and handle NaN values
+            df[col] = df[col].astype('string')
+            # Apply specific normalization for location
+            if col in ['location', 'dps_location']:
+                df[col] = df[col].apply(_normalize_location)
+            # Apply specific normalization for material
+            elif col == 'material':
+                df[col] = df[col].apply(_normalize_material)
+            # For other identifier columns, ensure they are properly formatted strings
+            else:
+                df[col] = df[col].apply(lambda x: str(x) if pd.notna(x) else "")
+    
+    return df
+
 # ----------- 1. LOAD CONFIG (Enhanced) -----------
 def load_config(filename, sheet_mapping=None):
     """
@@ -27,7 +65,9 @@ def load_config(filename, sheet_mapping=None):
         loaded_sheets = {}
         for sheet_name, (key, default) in sheet_mapping.items():
             if sheet_name in xl.sheet_names:
-                loaded_sheets[key] = xl.parse(sheet_name)
+                df = xl.parse(sheet_name)
+                # 确保标识符字段为字符串格式
+                loaded_sheets[key] = _normalize_identifiers(df)
             else:
                 loaded_sheets[key] = default
         return loaded_sheets
@@ -56,7 +96,8 @@ def apply_dps(df, dps_cfg):
         df_new = pd.concat([df_new, pd.DataFrame(splits)], ignore_index=True)
     df_new = df_new.groupby(['material','location','week'], as_index=False)['quantity'].sum()
     df_new['quantity'] = df_new['quantity'].astype(int)
-    return df_new
+    # 确保标识符字段为字符串格式
+    return _normalize_identifiers(df_new)
 
 # ----------- 3. SUPPLY CHOICE -----------
 def apply_supply_choice(df, supply_cfg):
@@ -71,7 +112,8 @@ def apply_supply_choice(df, supply_cfg):
         )
         df_new.loc[filt, 'quantity'] += int(round(row['adjust_quantity']))
     df_new['quantity'] = df_new['quantity'].astype(int)
-    return df_new
+    # 确保标识符字段为字符串格式
+    return _normalize_identifiers(df_new)
 
 # ----------- 4. SPLIT WEEKLY FORECAST TO DAILY (INTEGER, NO ERROR) -----------
 def expand_forecast_to_days_integer_split(demand_weekly, start_date, num_weeks, simulation_end_date=None):
@@ -113,7 +155,8 @@ def expand_forecast_to_days_integer_split(demand_weekly, start_date, num_weeks, 
     print(f"  ✅ 转换完成: {len(result_df)}个日度记录")
     print(f"  📅 日期范围: {result_df['date'].min()} 到 {result_df['date'].max()}")
     
-    return result_df
+    # 确保标识符字段为字符串格式
+    return _normalize_identifiers(result_df)
 
 # ----------- 5. DAILY ORDER GENERATION -----------
 def generate_daily_orders(sim_date, original_forecast, current_forecast, ao_config, order_calendar, forecast_error):
@@ -238,6 +281,8 @@ def generate_daily_orders(sim_date, original_forecast, current_forecast, ao_conf
     orders_df = pd.DataFrame(orders)
     if not orders_df.empty:
         orders_df['quantity'] = orders_df['quantity'].astype(int)
+        # 确保标识符字段为字符串格式
+        orders_df = _normalize_identifiers(orders_df)
         
         # 添加调试信息
         ao_orders = orders_df[orders_df['demand_type'] == 'AO']
@@ -424,9 +469,13 @@ def simulate_shipment_for_single_day(simulation_date, order_log, current_invento
                     'date': simulation_date, 'material': mat, 'location': loc, 'quantity': stockout
                 })
 
+    # 确保标识符字段为字符串格式
+    shipment_df = _normalize_identifiers(pd.DataFrame(shipment_log))
+    cut_df = _normalize_identifiers(pd.DataFrame(cut_log))
+    
     return (
-        pd.DataFrame(shipment_log),
-        pd.DataFrame(cut_log),
+        shipment_df,
+        cut_df,
         unres_inventory  # 返回计算后的可用库存，供下次调用使用
     )
 
@@ -512,6 +561,7 @@ def run_daily_order_generation(
             print(f"  📊 使用现有日度预测(跳过 DPS/SC): {len(daily_demand_forecast)}天")
 
         # 6) 生成当日订单（consumption 保持原逻辑）
+        # 注意：标识符字段已在main_integration.py中统一标准化，无需重复处理
         today_orders_df, consumed_forecast = generate_daily_orders(
             simulation_date, daily_demand_forecast, daily_demand_forecast, 
             ao_config, order_calendar, forecast_error
@@ -576,6 +626,8 @@ def run_daily_order_generation(
                 orders_df['quantity'] = orders_df['quantity'].astype(int)
             if 'simulation_date' not in orders_df.columns:
                 orders_df['simulation_date'] = orders_df['date']
+            # 确保标识符字段为字符串格式
+            orders_df = _normalize_identifiers(orders_df)
 
         # 8) 发货（依赖 orchestrator 库存）
         if orchestrator is not None:
@@ -656,7 +708,8 @@ def generate_supply_demand_log_for_integration(
         'date', 'material', 'location', 'quantity', 'demand_element'
     ]].copy()
     
-    return supply_demand_log
+    # 确保标识符字段为字符串格式
+    return _normalize_identifiers(supply_demand_log)
 
 def save_module1_output_with_supply_demand(
     orders_df: pd.DataFrame, 
@@ -667,9 +720,10 @@ def save_module1_output_with_supply_demand(
     """保存Module1输出到Excel文件（包括SupplyDemandLog）"""
     try:
         with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
-            orders_df.to_excel(writer, sheet_name='OrderLog', index=False)
-            shipment_df.to_excel(writer, sheet_name='ShipmentLog', index=False)
-            supply_demand_df.to_excel(writer, sheet_name='SupplyDemandLog', index=False)
+            # 确保输出时标识符字段为字符串格式
+            _normalize_identifiers(orders_df).to_excel(writer, sheet_name='OrderLog', index=False)
+            _normalize_identifiers(shipment_df).to_excel(writer, sheet_name='ShipmentLog', index=False)
+            _normalize_identifiers(supply_demand_df).to_excel(writer, sheet_name='SupplyDemandLog', index=False)
             
             # 创建汇总数据
             summary_data = pd.DataFrame([{

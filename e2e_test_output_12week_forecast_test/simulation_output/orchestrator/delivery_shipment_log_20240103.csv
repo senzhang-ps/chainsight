@@ -1,3 +1,0 @@
-date,material,sending,receiving,quantity,ori_deployment_uid,actual_ship_date,actual_delivery_date,type
-2024-01-03,MAT_B,PLANT_001,DC_001,35,MAT_B|PLANT_001|DC_001|2024-01-06|net demand for forecast|000046,2024-01-03,2024-01-05,delivery_shipment
-2024-01-03,MAT_B,PLANT_001,DC_001,60,MAT_B|PLANT_001|DC_001|2024-01-01|net demand for safety|000023,2024-01-03,2024-01-05,delivery_shipment

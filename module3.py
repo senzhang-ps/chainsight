@@ -5,6 +5,66 @@ from typing import Dict, Tuple, List
 from collections import defaultdict, deque
 from datetime import datetime, timedelta
 
+# 从 module5 导入 MOQ/RV 应用逻辑
+def apply_moq_rv(qty, moq, rv, is_cross_node=True):
+    """
+    补货量小于moq补moq，否则向上取整到rv的倍数
+    
+    Args:
+        qty: 需求数量
+        moq: 最小订货量
+        rv: 重订量(Round Volume)
+        is_cross_node: 是否为跨节点调运。True=跨节点需要应用MOQ/RV，False=自循环不应用MOQ/RV
+    """
+    if qty <= 0:
+        return 0
+    
+    # 自循环调运不应用MOQ/RV约束，直接返回原需求量
+    if not is_cross_node:
+        return qty
+    
+    # 跨节点调运应用MOQ/RV约束
+    if qty < moq:
+        return moq
+    return int(np.ceil(qty / rv)) * rv
+
+# 标识符字段标准化函数（与main_integration.py保持一致）
+def _normalize_location(location_str) -> str:
+    """Normalize location string by padding with leading zeros to 4 digits"""
+    try:
+        return str(int(location_str)).zfill(4)
+    except (ValueError, TypeError):
+        return str(location_str).zfill(4)
+
+def _normalize_material(material_str) -> str:
+    """Normalize material string"""
+    return str(material_str) if material_str is not None else ""
+
+def _normalize_identifiers(df: pd.DataFrame) -> pd.DataFrame:
+    """Normalize identifier columns to string format with proper formatting"""
+    if df.empty:
+        return df
+    
+    # Define identifier columns that need string conversion
+    identifier_cols = ['material', 'location', 'sending', 'receiving', 'sourcing']
+    
+    df = df.copy()
+    for col in identifier_cols:
+        if col in df.columns:
+            # Convert to string and handle NaN values
+            df[col] = df[col].astype('string')
+            # Apply specific normalization for location-type fields
+            if col in ['location', 'sending', 'receiving']:
+                df[col] = df[col].apply(_normalize_location)
+            # Apply specific normalization for material
+            elif col in ['material']:
+                df[col] = df[col].apply(_normalize_material)
+            # For other identifier columns, ensure they are properly formatted strings
+            else:
+                df[col] = df[col].apply(lambda x: str(x) if pd.notna(x) else "")
+    
+    return df
+
 def load_config(config_path: str) -> Dict[str, pd.DataFrame]:
     """
     Load configuration data from Excel file
@@ -36,10 +96,8 @@ def load_config(config_path: str) -> Dict[str, pd.DataFrame]:
                     if 'eff_from' in loaded_config[key].columns:
                         loaded_config[key]['eff_from'] = pd.to_datetime(loaded_config[key]['eff_from'])
                         loaded_config[key]['eff_to'] = pd.to_datetime(loaded_config[key]['eff_to'])
-                    # Ensure key fields are treated as strings
-                    for col in ['material', 'location', 'sourcing']:
-                        if col in loaded_config[key].columns:
-                            loaded_config[key][col] = loaded_config[key][col].astype(str)
+                    # 标准化标识符字段
+                    loaded_config[key] = _normalize_identifiers(loaded_config[key])
             else:
                 loaded_config[key] = default
                 
@@ -78,18 +136,16 @@ def load_module1_daily_outputs(module1_output_dir: str, simulation_date: pd.Time
         if not sdl.empty and 'date' in sdl.columns:
             sdl['date'] = pd.to_datetime(sdl['date'])
         # standardize key fields as strings
-        for col in ['material', 'location']:
-            if col in sdl.columns:
-                sdl[col] = sdl[col].astype(str)
+        # 标准化标识符字段
+        sdl = _normalize_identifiers(sdl)
 
         # 2) ShipmentLog：仅保留当日
         shp = _read('ShipmentLog')
         if not shp.empty and 'date' in shp.columns:
             shp['date'] = pd.to_datetime(shp['date'])
             shp = shp[shp['date'] == simulation_date].copy()
-        for col in ['material', 'location']:
-            if col in shp.columns:
-                shp[col] = shp[col].astype(str)
+        # 标准化标识符字段
+        shp = _normalize_identifiers(shp)
 
         # 3) OrderLog：当天版本全量（包含未来订单 + 当天新单）
         odl = _read('OrderLog')
@@ -99,9 +155,8 @@ def load_module1_daily_outputs(module1_output_dir: str, simulation_date: pd.Time
             if 'simulation_date' in odl.columns:
                 odl['simulation_date'] = pd.to_datetime(odl['simulation_date'])
             # 不按 simulation_date 过滤，保留当天版本全量；后续在 M3 内部再筛 date > sim_date
-            for col in ['material', 'location']:
-                if col in odl.columns:
-                    odl[col] = odl[col].astype(str)
+            # 标准化标识符字段
+            odl = _normalize_identifiers(odl)
         module1_data['supply_demand_df'] = sdl
         module1_data['shipment_df'] = shp
         module1_data['order_df'] = odl
@@ -337,7 +392,15 @@ def determine_lead_time(
         else:
             leadtime = PDT + GR
 
-        return max(0, int(leadtime)), ""
+        # 添加调试信息以追踪问题
+        final_leadtime = max(0, int(leadtime))
+        if material == '80813644' and receiving == 'C816':
+            print(f"    Debug: determine_lead_time for {material}@{receiving}")
+            print(f"      sending={sending}, receiving={receiving}, location_type={location_type}")
+            print(f"      PDT={PDT}, GR={GR}, MCT={MCT}")
+            print(f"      计算leadtime={leadtime}, 最终={final_leadtime}")
+
+        return final_leadtime, ""
 
     except Exception as e:
         return 0, f'lead_time_calculation_error: {e}'
@@ -494,11 +557,13 @@ def calculate_daily_net_demand(
                 delivery_shipment_qty = float(ds_rows[qty_col].sum()) if not ds_rows.empty else 0.0
 
         # 6. 开放调拨 (从可用量中扣除) - 从 orchestrator 读取的已经是当日版本的视图
+        # 注意：只计算真正从该地点发出的调拨，排除自循环（sending=receiving）
         open_deployment_qty = 0.0
         if not open_deployment_df.empty and 'material' in open_deployment_df.columns:
             open_deployment_rows = open_deployment_df[
                 (open_deployment_df['material'] == material) &
-                (open_deployment_df['sending'] == location)
+                (open_deployment_df['sending'] == location) &
+                (open_deployment_df['receiving'] != location)  # 排除自循环
             ]
             # open_deployment使用deployed_qty字段而不quantity
             if not open_deployment_rows.empty and 'deployed_qty' in open_deployment_rows.columns:
@@ -510,20 +575,35 @@ def calculate_daily_net_demand(
         total_available = (begin_qty + in_transit_qty + delivery_gr_qty + 
                           today_production_gr_qty + future_production_qty - 
                           today_shipment_qty - delivery_shipment_qty - open_deployment_qty)
+        
 
         # ======== 需求侧：三类本地需求 ========
         # 1) AO（来自 OrderLog 且 demand_type == 'AO'，窗口 [date, horizon_end]）
         AO_local = 0.0
         if order_df is not None and not order_df.empty:
-            od = order_df[
-                (order_df.get('material') == material) &
-                (order_df.get('location') == location) &
-                (order_df.get('demand_type') == 'AO') &
-                (pd.to_datetime(order_df.get('date')) > date) &
-                (pd.to_datetime(order_df.get('date')) <= horizon_end)
-            ]
-            if not od.empty and 'quantity' in od.columns:
-                AO_local = float(pd.to_numeric(od['quantity'], errors='coerce').fillna(0).sum())
+            # 首先过滤物料和地点，确保类型匹配
+            material_filter = (order_df.get('material').astype(str) == str(material))
+            location_filter = (order_df.get('location').astype(str) == str(location))
+            demand_type_filter = (order_df.get('demand_type') == 'AO')
+            
+            # 确保日期列存在且为datetime类型
+            if 'date' in order_df.columns:
+                order_dates = pd.to_datetime(order_df['date'], errors='coerce')
+                date_filter = (order_dates > date) & (order_dates <= horizon_end)
+                
+                od = order_df[material_filter & location_filter & demand_type_filter & date_filter]
+                
+                if not od.empty and 'quantity' in od.columns:
+                    AO_local = float(pd.to_numeric(od['quantity'], errors='coerce').fillna(0).sum())
+                    # 添加调试信息以追踪问题
+                    if AO_local > 0:
+                        print(f"    Debug: AO_local={AO_local} for {material}@{location}, horizon_end={horizon_end.date()}")
+                        for _, ao_row in od.iterrows():
+                            ao_date = pd.to_datetime(ao_row['date'])
+                            print(f"      AO订单: 日期={ao_date.date()}, 数量={ao_row['quantity']}")
+            else:
+                # 如果没有date列，AO_local保持为0
+                pass
 
         # 2) forecast（来自 SupplyDemandLog，窗口 [date, horizon_end]）
         FC_local = 0.0
@@ -565,6 +645,7 @@ def calculate_daily_net_demand(
         SAF_total = SS_local + float(downstream_safety_gap or 0.0)
         SS_gap = max(SAF_total - AVAILABLE, 0.0)
 
+
         return AO_gap, FC_gap, SS_gap
         
     except Exception as e:
@@ -587,6 +668,7 @@ def run_mrp_layered_simulation_daily(
     lead_time_df: pd.DataFrame,
     m4_mlcfg_df: pd.DataFrame | None = None,   
     delivery_shipment_df: pd.DataFrame | None = None,
+    deploy_config_df: pd.DataFrame | None = None,  # 🔧 新增：M5_DeployConfig for MOQ/RV
 ) -> pd.DataFrame:
     """运行单日MRP模拟 - 使用当日版本的Module1数据
     使用Global_Network中的location_type字段进行提前期计算
@@ -613,9 +695,8 @@ def run_mrp_layered_simulation_daily(
         return pd.DataFrame({'material': [], 'location': [], 'requirement_date': [], 'quantity': [], 'demand_element': [], 'layer': []})
 
     # standardize key columns as strings to ensure consistent joins/matching
-    for col in ['material', 'location', 'sourcing']:
-        if col in network_df.columns:
-            network_df[col] = network_df[col].astype(str)
+    # 标准化标识符字段
+    network_df = _normalize_identifiers(network_df)
 
     # filter to network entries active on the simulation date
     active_network = network_df[
@@ -695,8 +776,10 @@ def run_mrp_layered_simulation_daily(
                     'location': str(location)
                 })
     
-    # 去重并转换为DataFrame
+    # 去重并转换为DataFrame，确保标识符字段保持字符串类型
     material_locations = pd.DataFrame(extended_material_locations).drop_duplicates()
+    # 标准化标识符字段，确保类型一致性
+    material_locations = _normalize_identifiers(material_locations)
     
     print(f"🔍 扩展后的material-location组合:")
     print(f"  原始network配置: {len(active_network)} 条")
@@ -797,11 +880,36 @@ def run_mrp_layered_simulation_daily(
                 downstream_ao_gap=lower_AO_gap                      # ← 下游 AO 缺口
             )
 
-            # gap分别加给父节点
+            # 🔧 修复：向上传递gap时应用MOQ/RV逻辑（与Module5一致）
             if upstream and pd.notna(upstream):
-                parent_gap_accum[(material, upstream)]['AO'] += AO_gap
-                parent_gap_accum[(material, upstream)]['FC'] += FC_gap
-                parent_gap_accum[(material, upstream)]['SS'] += SS_gap
+                # 获取MOQ/RV配置
+                moq, rv = 1, 1  # 默认值
+                if deploy_config_df is not None and not deploy_config_df.empty:
+                    config_row = deploy_config_df[
+                        (deploy_config_df['material'] == material) & 
+                        (deploy_config_df['sending'] == upstream)
+                    ]
+                    if not config_row.empty:
+                        moq = int(config_row.iloc[0].get('moq', 1))
+                        rv = int(config_row.iloc[0].get('rv', 1))
+                
+                # 按demand element分组应用MOQ/RV（避免过量）
+                gap_dict = {'AO': AO_gap, 'FC': FC_gap, 'SS': SS_gap}
+                adjusted_gaps = {}
+                
+                for demand_element, gap_value in gap_dict.items():
+                    if gap_value > 0:
+                        # 向上传递是跨节点调运，需要应用MOQ/RV
+                        adjusted_gap = apply_moq_rv(gap_value, moq, rv, is_cross_node=True)
+                        adjusted_gaps[demand_element] = adjusted_gap
+                        print(f"      📦 {demand_element} gap: 原始={gap_value:.2f} → MOQ/RV调整={adjusted_gap:.2f} (MOQ={moq}, RV={rv})")
+                    else:
+                        adjusted_gaps[demand_element] = 0
+                
+                # 向父节点传递调整后的gap
+                parent_gap_accum[(material, upstream)]['AO'] += adjusted_gaps.get('AO', 0)
+                parent_gap_accum[(material, upstream)]['FC'] += adjusted_gaps.get('FC', 0) 
+                parent_gap_accum[(material, upstream)]['SS'] += adjusted_gaps.get('SS', 0)
 
             # 记录当日净需求
             # 记录当日净需求（有缺口才写行），统一命名为 net demand for ...
@@ -851,6 +959,10 @@ def run_mrp_layered_simulation_daily(
 
     # 生成最终净需求DataFrame
     net_demand_df = pd.DataFrame(all_net_demand_records)
+    
+    # 立即标准化标识符字段，避免pandas自动类型推断导致问题
+    if not net_demand_df.empty:
+        net_demand_df = _normalize_identifiers(net_demand_df)
     
     if not net_demand_df.empty and len(net_demand_df) > 0:
         # 按关键字段分组聚合
@@ -924,7 +1036,8 @@ def run_integrated_mode(
     network_df = config_dict.get('Global_Network', pd.DataFrame())
     lead_time_df = config_dict.get('Global_LeadTime', pd.DataFrame())
     m4_mlcfg_df = config_dict.get('M4_MaterialLocationLineCfg', pd.DataFrame())
-    # 数据类型转换
+    deploy_config_df = config_dict.get('M5_DeployConfig', pd.DataFrame())  # 🔧 新增：MOQ/RV配置
+    # 数据类型转换和标识符字段标准化
     if not safety_stock_df.empty and 'date' in safety_stock_df.columns:
         safety_stock_df['date'] = pd.to_datetime(safety_stock_df['date'])
     if not network_df.empty:
@@ -932,6 +1045,16 @@ def run_integrated_mode(
             network_df['eff_from'] = pd.to_datetime(network_df['eff_from'])
         if 'eff_to' in network_df.columns:
             network_df['eff_to'] = pd.to_datetime(network_df['eff_to'])
+    
+    # 🔧 标准化所有配置数据的标识符字段
+    if not deploy_config_df.empty:
+        deploy_config_df = _normalize_identifiers(deploy_config_df)
+    if not safety_stock_df.empty:
+        safety_stock_df = _normalize_identifiers(safety_stock_df)
+    if not network_df.empty:
+        network_df = _normalize_identifiers(network_df)
+    if not m4_mlcfg_df.empty:
+        m4_mlcfg_df = _normalize_identifiers(m4_mlcfg_df)
     
     # 生成日期范围
     date_range = pd.date_range(start_date, end_date, freq='D')
@@ -965,6 +1088,14 @@ def run_integrated_mode(
             open_deployment_df = orchestrator.get_open_deployment_view(current_date.strftime('%Y-%m-%d'))
             delivery_shipment_df = orchestrator.get_delivery_shipment_log_view(current_date.strftime('%Y-%m-%d'))
 
+            # 标准化从Orchestrator获取的数据中的标识符字段
+            beginning_inventory_df = _normalize_identifiers(beginning_inventory_df)
+            in_transit_df = _normalize_identifiers(in_transit_df)
+            delivery_gr_df = _normalize_identifiers(delivery_gr_df)
+            all_production_df = _normalize_identifiers(all_production_df)
+            open_deployment_df = _normalize_identifiers(open_deployment_df)
+            delivery_shipment_df = _normalize_identifiers(delivery_shipment_df)
+
             print(f"  ✅ 从 Orchestrator 加载了 {len(beginning_inventory_df)} 条期初库存记录")
             print(f"  ✅ 从 Orchestrator 加载了 {len(in_transit_df)} 条在途记录")
             print(f"  ✅ 从 Orchestrator 加载了 {len(delivery_gr_df)} 条收货记录")
@@ -996,7 +1127,8 @@ def run_integrated_mode(
                 network_df,
                 lead_time_df,
                 m4_mlcfg_df,
-                delivery_shipment_df=delivery_shipment_df
+                delivery_shipment_df=delivery_shipment_df,
+                deploy_config_df=deploy_config_df  # 🔧 新增：传递MOQ/RV配置
             )
             print(f"  ✅ 计算完成，生成 {len(net_demand_df)} 条净需求记录")
         except Exception as e:
@@ -1008,6 +1140,12 @@ def run_integrated_mode(
         # 保存每日输出
         daily_output_file = f"{output_dir}/Module3Output_{current_date.strftime('%Y%m%d')}.xlsx"
         try:
+            # 强制确保标识符字段为字符串类型，避免Excel保存/读取时的类型转换问题
+            if not net_demand_df.empty:
+                for col in ['material', 'location']:
+                    if col in net_demand_df.columns:
+                        net_demand_df[col] = net_demand_df[col].astype(str)
+            
             with pd.ExcelWriter(daily_output_file, engine='openpyxl') as writer:
                 net_demand_df.to_excel(writer, index=False, sheet_name='NetDemand')
             print(f"  ✅ 已保存每日输出: {daily_output_file}")

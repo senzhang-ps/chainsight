@@ -1,0 +1,6 @@
+date,material,sending,receiving,quantity,ori_deployment_uid,actual_ship_date,actual_delivery_date,type
+9/1/2025,80813608,0386,C810,50,80813608|0386|C810|2025-09-01|net demand for normal|000002,9/1/2025,9/3/2025,delivery_shipment
+9/1/2025,80813644,0386,C816,60,80813644|0386|C816|2025-09-01|net demand for normal|000001,9/1/2025,9/3/2025,delivery_shipment
+9/1/2025,80813644,0386,C816,40,80813644|0386|C816|2025-09-01|net demand for normal|000001,9/1/2025,9/3/2025,delivery_shipment
+9/1/2025,80813608,0386,C816,25,80813608|0386|C816|2025-09-01|net demand for normal|000003,9/1/2025,9/3/2025,delivery_shipment
+9/1/2025,80813608,0386,C816,25,80813608|0386|C816|2025-09-01|net demand for normal|000003,9/1/2025,9/3/2025,delivery_shipment

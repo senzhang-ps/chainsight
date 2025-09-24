@@ -419,7 +419,7 @@ class Orchestrator:
             date: Date in YYYY-MM-DD format
             
         Returns:
-            DataFrame with columns [date, material, receiving, quantity]
+            DataFrame with columns [date, material, receiving, quantity, ori_deployment_uid, vehicle_uid]
         """
         date_obj = pd.to_datetime(date).normalize()
         
@@ -428,7 +428,7 @@ class Orchestrator:
         
         df = pd.DataFrame(records)
         if df.empty:
-            df = pd.DataFrame(columns=['date', 'material', 'receiving', 'quantity'])
+            df = pd.DataFrame(columns=['date', 'material', 'receiving', 'quantity', 'ori_deployment_uid', 'vehicle_uid'])
         
         return df
     
@@ -620,19 +620,36 @@ class Orchestrator:
         """
         date_obj = pd.to_datetime(date).normalize()
         print(f"[M6->Orch] incoming rows: {len(delivery_df)}; date={date}")
+        
+        # 添加调试信息：显示输入数据的详细信息
+        if not delivery_df.empty:
+            print(f"  📊 M6输入数据预览:")
+            for idx, row in delivery_df.head(3).iterrows():
+                print(f"    Row {idx}: {row['material']}@{row['sending']}->{row['receiving']}, ship:{row['actual_ship_date']}, delivery:{row['actual_delivery_date']}, qty:{row['delivery_qty']}")
+        
         # Process each delivery record
         for idx, row in delivery_df.iterrows():
             uid = str(row['ori_deployment_uid'])
+            vehicle_uid = str(row['vehicle_uid'])
             material = str(row['material'])
             sending = str(row['sending'])
             receiving = str(row['receiving'])
+            
+            # 添加调试信息：显示原始和标准化后的标识符
+            normalized_material = _normalize_material(material)
+            normalized_receiving = _normalize_receiving(receiving)
+            if material == '80813644' and receiving in ['C816', 'C810']:
+                print(f"      🔍 标识符标准化: 原始material='{material}' -> '{normalized_material}', 原始receiving='{receiving}' -> '{normalized_receiving}'")
             ship_date = pd.to_datetime(row['actual_ship_date'])
             delivery_date = pd.to_datetime(row['actual_delivery_date'])
             quantity = self._safe_convert_to_int(row['delivery_qty'])
             
             # 只处理当天发运的货物（actual_ship_date == 当前仿真日期）
             if ship_date.normalize() != date_obj:
+                print(f"    ⏭️  跳过非当天发运: {material}@{sending}->{receiving}, ship_date:{ship_date.date()}, current:{date_obj.date()}")
                 continue
+            
+            print(f"    ✅ 处理当天发运: {material}@{sending}->{receiving}, ship:{ship_date.date()}, delivery:{delivery_date.date()}, qty:{quantity}")
             
             # Reduce open deployment quantity
             if uid in self.open_deployment:
@@ -663,8 +680,8 @@ class Orchestrator:
             # 判断处理逻辑：基于delivery_date是否为未来日期
             if delivery_date.normalize() > date_obj:
                 # Create in-transit record for future delivery
-                # Use row index to ensure uniqueness for multiple deliveries with same ori_deployment_uid
-                transit_uid = f"{uid}_transit_{date_obj.strftime('%Y%m%d')}_{idx}"
+                # Use vehicle_uid to ensure uniqueness for multiple deliveries with same ori_deployment_uid
+                transit_uid = f"{uid}_transit_{vehicle_uid}"
                 self.in_transit[transit_uid] = {
                     'material': _normalize_material(material), # 添加格式化
                     'sending': _normalize_sending(sending), # 添加格式化
@@ -672,10 +689,12 @@ class Orchestrator:
                     'actual_ship_date': ship_date.strftime('%Y-%m-%d'),
                     'actual_delivery_date': delivery_date.strftime('%Y-%m-%d'),
                     'quantity': quantity,
-                    'ori_deployment_uid': uid
+                    'ori_deployment_uid': uid,
+                    'vehicle_uid': vehicle_uid
                 }
             elif delivery_date.normalize() == date_obj:
                 # Delivery is today, create delivery GR and update inventory immediately
+                print(f"      📦 同天到达，创建delivery GR: {material}@{receiving}, qty:{quantity}, uid:{uid}")
                 receiving_key = (material, receiving)
                 self.unrestricted_inventory[receiving_key] = (
                     self.unrestricted_inventory.get(receiving_key, 0) + quantity)
@@ -686,17 +705,30 @@ class Orchestrator:
                     'material': _normalize_material(material), # 添加格式化
                     'receiving': _normalize_receiving(receiving), # 添加格式化
                     'quantity': quantity,
-                    'ori_deployment_uid': uid
+                    'ori_deployment_uid': uid,
+                    'vehicle_uid': vehicle_uid  # 使用vehicle_uid来区分同一deployment的不同车辆
                 }
                 
                 # Check for duplicates based on key fields
-                existing_key = (date_obj, material, receiving, uid)
-                if not any(
-                    (record['date'], record['material'], record['receiving'], record['ori_deployment_uid']) == existing_key
+                # 修复：使用ori_deployment_uid + vehicle_uid作为唯一键，完美支持多车情况
+                existing_key = (date_obj, material, receiving, uid, vehicle_uid)
+                is_duplicate = any(
+                    (record['date'], record['material'], record['receiving'], 
+                     record['ori_deployment_uid'], record['vehicle_uid']) == existing_key
                     for record in self.delivery_gr
-                ):
+                )
+                
+                if not is_duplicate:
                     self.delivery_gr.append(gr_record)
-            # 如果delivery_date < date_obj，这是历史数据，应该已经处理过，跳过
+                    print(f"        ✅ 已添加delivery GR记录: {material}@{receiving}={quantity}")
+                    # 特别追踪80813644@C816
+                    if material == '80813644' and receiving == 'C816':
+                        print(f"        🎯 特别追踪80813644@C816: 当前delivery_gr总数={len(self.delivery_gr)}")
+                else:
+                    print(f"        ⚠️  跳过重复的delivery GR记录: {material}@{receiving}={quantity}, uid:{uid}")
+            else:
+                # 如果delivery_date < date_obj，这是历史数据，应该已经处理过，跳过
+                print(f"      ⏭️  跳过历史数据: delivery_date={delivery_date.date()}, current={date_obj.date()}")
         
         if len(delivery_df) > 0:
             print(f"✅ Processed {len(delivery_df)} M6 delivery plans for {date}")
@@ -766,15 +798,16 @@ class Orchestrator:
                     'receiving': _normalize_receiving(transit_record['receiving']), # 添加格式化
                     'quantity': transit_record['quantity'],
                     'ori_deployment_uid': transit_record['ori_deployment_uid'],
+                    'vehicle_uid': transit_record['vehicle_uid'],
                     'actual_ship_date': transit_record['actual_ship_date']  # 新增字段
                 }
                 
-                # 改进的重复检查：包含发运日期
+                # 改进的重复检查：使用ori_deployment_uid + vehicle_uid作为唯一键
                 existing_key = (date_obj, transit_record['material'], transit_record['receiving'], 
-                              transit_record['ori_deployment_uid'], transit_record['actual_ship_date'])
+                              transit_record['ori_deployment_uid'], transit_record['vehicle_uid'])
                 if not any(
                     (record['date'], record['material'], record['receiving'], 
-                     record['ori_deployment_uid'], record.get('actual_ship_date')) == existing_key
+                     record['ori_deployment_uid'], record['vehicle_uid']) == existing_key
                     for record in self.delivery_gr
                 ):
                     self.delivery_gr.append(gr_record)
@@ -1021,6 +1054,18 @@ class Orchestrator:
         
         print(f"  📊 从内存获取发运出库 [{date}]: {len(delivery_ship_data)} 项")
         
+        # 调试信息：显示delivery_gr中相关记录的详细信息
+        print(f"  📊 当前delivery_gr中共有 {len(self.delivery_gr)} 条记录")
+        relevant_gr_records = [
+            record for record in self.delivery_gr
+            if (pd.to_datetime(record['date']).normalize() == date_obj and 
+                record['material'] == '80813644' and record['receiving'] in ['C816', 'C810'])
+        ]
+        if relevant_gr_records:
+            print(f"  🔍 找到 {len(relevant_gr_records)} 条80813644的delivery_gr记录:")
+            for i, rec in enumerate(relevant_gr_records):
+                print(f"    记录{i+1}: material='{rec['material']}', receiving='{rec['receiving']}', qty={rec['quantity']}, uid={rec.get('ori_deployment_uid', 'N/A')}")
+        
         change_log = []
         
         for material, location in all_keys:
@@ -1042,6 +1087,17 @@ class Orchestrator:
                 if (pd.to_datetime(record['date']).normalize() == date_obj and 
                     record['material'] == material and record['receiving'] == location)
             )
+            
+            # 调试信息：显示delivery_gr匹配情况
+            if material == '80813644' and location in ['C816', 'C810']:
+                matching_records = [
+                    record for record in self.delivery_gr
+                    if (pd.to_datetime(record['date']).normalize() == date_obj and 
+                        record['material'] == material and record['receiving'] == location)
+                ]
+                print(f"  🔍 调试 {material}@{location}: 找到 {len(matching_records)} 条delivery_gr记录, 总量={delivery_qty}")
+                for i, rec in enumerate(matching_records):
+                    print(f"    记录{i+1}: uid={rec.get('ori_deployment_uid', 'N/A')}, qty={rec['quantity']}, date={rec['date']}")
             
             # 发货出库
             shipment_qty = sum(

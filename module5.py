@@ -31,8 +31,8 @@ def _normalize_identifiers(df: pd.DataFrame) -> pd.DataFrame:
         if col in df.columns:
             # Convert to string and handle NaN values
             df[col] = df[col].astype('string')
-            # Apply specific normalization for location
-            if col == 'location':
+            # Apply specific normalization for location-type fields
+            if col in ['location', 'sending', 'receiving', 'sourcing']:
                 df[col] = df[col].apply(_normalize_location)
             # Apply specific normalization for material
             elif col == 'material':
@@ -1062,8 +1062,11 @@ def push_softpush_allocation(
 ):
     """
     对push/soft-push模式节点，分配剩余库存到下游receiving, 输出push补货计划行
-    修正：planned_delivery_date = date + leadtime (按LeadTime表查)
-    修复：使用剩余库存而不是全部库存进行Push补货分配
+    修复：
+    1. sending site safety基于simulation_date
+    2. receiving site safety基于simulation_date + leadtime  
+    3. 如果所有receiving sites的safety都是0，则无需分配
+    4. push和soft push都按receiving site的safety权重分配
     """
     pushpull = config['PushPullModel']
     safety_stock = config['SafetyStock']
@@ -1104,9 +1107,7 @@ def push_softpush_allocation(
         already_allocated = allocated_inventory.get((mat, sending), 0)
         soh = max(0, total_soh - already_allocated)
         
-        print(f"     总库存: {total_soh}")
-        print(f"     已分配: {already_allocated}")
-        print(f"     剩余库存: {soh}")
+        print(f"     材料{mat}@{sending}: 总库存={total_soh}, 已分配={already_allocated}, 剩余库存={soh}")
         
         if soh <= 0:
             continue  # 如果没有剩余库存，跳过Push补货
@@ -1120,35 +1121,34 @@ def push_softpush_allocation(
         else:
             lsk, day = 1, 1
         
-        # 使用统一的筛选逻辑计算filter_end
-        filter_end = sim_date + pd.Timedelta(days=lsk - 1)
-        ss = safety_stock[
-            (safety_stock['material'] == mat) & (safety_stock['location'].isin(recs))
-        ]
-        ss = ss[pd.to_datetime(ss['date']) == filter_end]
-        total_ss = ss['safety_stock_qty'].sum()
-        for _, row in ss.iterrows():
-            loc = row['location']
-            ss_val = row['safety_stock_qty']
-            if model == 'push':
-                if total_ss > 0:
-                    qty = soh * ss_val / total_ss
-                else:
-                    qty = 0
-            else:  # soft push
-                # 计算本层site的safety
-                own_ss = 0
-                ss_self = safety_stock[
-                    (safety_stock['material'] == mat) & (safety_stock['location'] == sending)
-                ]
-                if not ss_self.empty:
-                    own_ss = ss_self['safety_stock_qty'].sum()
-                qty_avail = max(0, soh - own_ss)
-                qty = qty_avail * ss_val / total_ss if total_ss > 0 else 0
-            qty = int(np.floor(qty))
-            # 关键：查leadtime，使用与Module3一致的逻辑
-            # MCT是微生物检测时间，与sending site相关
-            # 获取sending location的location_type
+        # 🔧 修复1: 计算sending site的安全库存 (基于simulation_date)
+        sending_ss = 0
+        if model == 'soft push':
+            ss_self = safety_stock[
+                (safety_stock['material'] == mat) & (safety_stock['location'] == sending)
+            ]
+            ss_self_filtered = ss_self[pd.to_datetime(ss_self['date']) == sim_date] if not ss_self.empty else pd.DataFrame()
+            if not ss_self_filtered.empty:
+                sending_ss = ss_self_filtered['safety_stock_qty'].sum()
+            else:
+                print(f"     Warning: 没有找到{sim_date.date()}的sending安全库存配置，{sending}材料{mat}默认为0")
+        
+        # 计算可用库存
+        if model == 'push':
+            available_soh = soh  # push使用全部剩余库存
+        else:  # soft push
+            available_soh = max(0, soh - sending_ss)  # soft push扣除sending的安全库存
+        
+        print(f"     {model}可用库存: {available_soh} (sending_ss={sending_ss})")
+        
+        if available_soh <= 0:
+            continue
+            
+        # 🔧 修复2: 准备receiving sites的安全库存数据 (基于simulation_date + leadtime)
+        receiving_ss_data = []
+        
+        for loc in recs:
+            # 计算leadtime
             sending_location_type = get_sending_location_type(
                 material=str(mat),
                 sending=str(sending),
@@ -1165,22 +1165,66 @@ def push_softpush_allocation(
                 material=str(mat)
             )
             if error_msg:
-                print(f"Warning: push/soft push {error_msg} for {sending}->{loc}, using default leadtime=1")
+                print(f"     Warning: {error_msg} for {sending}->{loc}, using default leadtime=1")
                 leadtime = 1
-            planned_delivery_date = sim_date + timedelta(days=leadtime)
-            plan = {
-                'date': sim_date,
-                'material': mat,
-                'sending': sending,
-                'receiving': loc,
-                'demand_qty': 0,
-                'demand_element': 'push replenishment' if model=='push' else 'soft push replenishment',
-                'planned_qty': qty,
-                'deployed_qty_invCon_push': qty,
-                'planned_delivery_date': planned_delivery_date,
-            }
-            plan['deployed_qty_invCon'] = plan['deployed_qty_invCon_push']  # 兼容后续空间分配和库存统计
-            plan_rows_push.append(plan)
+            
+            # 基于leadtime end date查找receiving site的安全库存
+            leadtime_end_date = sim_date + pd.Timedelta(days=leadtime)
+            loc_ss = safety_stock[
+                (safety_stock['material'] == mat) & (safety_stock['location'] == loc)
+            ]
+            
+            loc_ss_filtered = loc_ss[pd.to_datetime(loc_ss['date']) == leadtime_end_date] if not loc_ss.empty else pd.DataFrame()
+            if loc_ss_filtered.empty:
+                if not loc_ss.empty:
+                    print(f"     Warning: 没有找到{leadtime_end_date.date()}的receiving安全库存配置，{loc}材料{mat}默认为0")
+                ss_qty = 0
+            else:
+                ss_qty = loc_ss_filtered['safety_stock_qty'].sum()
+            
+            receiving_ss_data.append({
+                'location': loc,
+                'safety_stock_qty': ss_qty,
+                'leadtime': leadtime,
+                'leadtime_end_date': leadtime_end_date
+            })
+        
+        # 计算total receiving safety stock
+        total_receiving_ss = sum(item['safety_stock_qty'] for item in receiving_ss_data)
+        
+        print(f"     下游位置安全库存总计: {total_receiving_ss}")
+        
+        # 🔧 修复3: 如果所有receiving sites的safety都是0，则无需分配
+        if total_receiving_ss == 0:
+            print(f"     所有receiving sites的安全库存都为0，无需分配")
+            continue
+        
+        # 🔧 修复4: push和soft push都按receiving site的safety权重分配
+        for item in receiving_ss_data:
+            loc = item['location']
+            ss_val = item['safety_stock_qty']
+            leadtime = item['leadtime']
+            
+            qty = available_soh * ss_val / total_receiving_ss
+            qty = int(np.floor(qty))
+            
+            if qty > 0:
+                planned_delivery_date = sim_date + timedelta(days=leadtime)
+                plan = {
+                    'date': sim_date,
+                    'material': mat,
+                    'sending': sending,
+                    'receiving': loc,
+                    'demand_qty': 0,
+                    'demand_element': 'push replenishment' if model=='push' else 'soft push replenishment',
+                    'planned_qty': qty,
+                    'deployed_qty_invCon_push': qty,
+                    'planned_delivery_date': planned_delivery_date,
+                }
+                plan['deployed_qty_invCon'] = plan['deployed_qty_invCon_push']  # 兼容后续空间分配和库存统计
+                plan_rows_push.append(plan)
+                
+                print(f"     {model}分配: {loc} = {qty} (权重={ss_val}/{total_receiving_ss})")
     return plan_rows_push
 
 

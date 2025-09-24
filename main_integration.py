@@ -191,8 +191,8 @@ def run_module4_integrated(
         # 计算换产指标
         changeover_log = module4.calculate_changeover_metrics(plan_log, co_def_df)
         
-        # 提取并保存当天产线状态供下一天使用
-        current_line_states = module4.extract_line_states_from_plan(plan_log)
+        # 提取并保存当天产线状态供下一天使用（带跨天转产检测）
+        current_line_states = module4.extract_line_states_from_plan(plan_log, cap_df, co_def, simulation_date, rate_map.to_dict())
         if current_line_states:
             module4.save_line_state(output_dir, simulation_date, current_line_states)
             print(f"  💾 保存当天产线状态: {list(current_line_states.keys())}")

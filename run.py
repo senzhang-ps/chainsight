@@ -30,15 +30,20 @@ from datetime import datetime
 from typing import Optional
 
 # External system imports (assumed available in project environment)
-from main_integration import run_integrated_simulation, load_configuration  # type: ignore
+from main_integration import run_integrated_simulation, load_configuration, check_resume_capability  # type: ignore
+from logger_config import setup_logging  # type: ignore
 
 
-def _ensure_output_dir(config_path: Path) -> Path:
+def _ensure_output_dir(config_path: Path, resume_mode: bool = False) -> Path:
     """Create the output directory rooted by the config filename stem.
 
     Structure:
       <config_dir>/<config_stem>/
         └─ run_YYYYMMDD_HHMMSS/  (actual write target to avoid overwrites)
+
+    Args:
+        config_path: Path to the configuration file
+        resume_mode: If True, look for existing run directories for resume capability
 
     Returns the leaf path to be used as `output_base_dir`.
     """
@@ -48,6 +53,15 @@ def _ensure_output_dir(config_path: Path) -> Path:
     root_dir = cfg_dir / cfg_stem
     # Always ensure the top-level directory exists so its name matches the config
     root_dir.mkdir(parents=True, exist_ok=True)
+
+    if resume_mode:
+        # In resume mode, look for the most recent run directory
+        existing_runs = [d for d in root_dir.iterdir() if d.is_dir() and d.name.startswith("run_")]
+        if existing_runs:
+            # Sort by creation time and return the most recent one
+            latest_run = max(existing_runs, key=lambda d: d.stat().st_mtime)
+            return latest_run
+        # If no existing runs found in resume mode, fall through to create new one
 
     # Create a unique run folder under the top-level directory to avoid collisions
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -81,7 +95,8 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         add_help=True,
         description=(
             "Run the integrated planning flow using a given configuration file. "
-            "Outputs are written under a folder named after the configuration file."
+            "Outputs are written under a folder named after the configuration file. "
+            "Supports automatic resume from interruption points."
         ),
     )
     parser.add_argument(
@@ -99,6 +114,21 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         required=True,
         help="Simulation end date in YYYY-MM-DD",
     )
+    parser.add_argument(
+        "--force-restart",
+        action="store_true",
+        help="Force restart from beginning, ignore resume capability",
+    )
+    parser.add_argument(
+        "--check-resume",
+        action="store_true",
+        help="Check resume status only, do not execute simulation",
+    )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Enable automatic resume from interruption point (default: True)",
+    )
     return parser.parse_args(argv)
 
 
@@ -115,20 +145,66 @@ def main(argv: list[str] | None = None) -> int:
     # (This returns an object usable by your run function or validates the file.)
     _ = load_configuration(str(cfg_path))  # noqa: F841
 
-    output_base_dir = _ensure_output_dir(cfg_path)
+    # Determine output directory and resume mode
+    enable_resume = ns.resume and not ns.force_restart
+    output_base_dir = _ensure_output_dir(cfg_path, resume_mode=enable_resume)
     root_dir = output_base_dir.parent
     start_arg = ns["start_date"] if isinstance(ns, dict) else ns.start_date
     simulation_start = get_or_init_simulation_start(root_dir, start_arg)
-    # Delegate to the integrated simulation. It is assumed to create its own
-    # sub-structure under `output_base_dir` (e.g., orchestrator/module folders).
-    _ = run_integrated_simulation(
-        config_path=str(cfg_path),
-        start_date=simulation_start,
-        end_date=str(ns["end_date"]) if isinstance(ns, dict) else ns.end_date,
-        output_base_dir=str(output_base_dir),
-    )
+    end_date = str(ns["end_date"]) if isinstance(ns, dict) else ns.end_date
 
-    return 0
+    # 🆕 设置日志系统 - 同时输出到terminal和文件
+    logger, redirector = setup_logging(str(output_base_dir), log_level="INFO", redirect_print=True)
+    logger.info(f"🚀 供应链仿真系统启动")
+    logger.info(f"📂 配置文件: {cfg_path}")
+    logger.info(f"📁 输出目录: {output_base_dir}")
+    logger.info(f"📅 仿真日期范围: {simulation_start} 到 {end_date}")
+    
+    try:
+        # Handle resume status check
+        if ns.check_resume:
+            logger.info("🔍 检查续跑状态...")
+            resume_info = check_resume_capability(str(output_base_dir), simulation_start, end_date)
+            
+            logger.info(f"\n📊 续跑状态报告:")
+            logger.info(f"  配置文件: {cfg_path}")
+            logger.info(f"  输出目录: {output_base_dir}")
+            logger.info(f"  日期范围: {simulation_start} 到 {end_date}")
+            
+            if resume_info.get('already_completed', False):
+                logger.info(f"  ✅ 仿真已完成!")
+                logger.info(f"     最后处理日期: {resume_info['last_complete_date']}")
+                logger.info(f"     总处理天数: {resume_info['days_completed']}")
+            elif resume_info['can_resume']:
+                logger.info(f"  🔄 可以续跑!")
+                logger.info(f"     已完成: {resume_info['days_completed']} 天 (截至 {resume_info['last_complete_date']})")
+                logger.info(f"     剩余: {resume_info['days_remaining']} 天 (从 {resume_info['resume_from_date']} 开始)")
+            else:
+                logger.info(f"  📝 无续跑能力，将从头开始")
+                logger.info(f"     需处理天数: {resume_info['days_remaining']}")
+            
+            return 0
+
+        # Delegate to the integrated simulation with resume capability
+        _ = run_integrated_simulation(
+            config_path=str(cfg_path),
+            start_date=simulation_start,
+            end_date=end_date,
+            output_base_dir=str(output_base_dir),
+            force_restart=ns.force_restart,
+        )
+        
+        logger.info("✅ 仿真成功完成")
+        return 0
+        
+    except Exception as e:
+        logger.error(f"❌ 仿真执行出错: {str(e)}")
+        raise
+    finally:
+        # 恢复原始输出
+        if redirector:
+            redirector.stop_redirect()
+            print(f"\n📝 完整日志已保存到: {output_base_dir}")  # 这条会显示在terminal
 
 
 if __name__ == "__main__":
@@ -141,9 +217,28 @@ if __name__ == "__main__":
         # (Callers can capture stderr/traceback if needed.)
         raise SystemExit(1) from exc
 
-# run example
+# run examples
 # First run requires --start-date; subsequent runs may omit it
-# python production_integrator.py \
+# python run.py \
 #   --config /path/to/YourConfig.xlsx \
 #   --start-date 2024-01-01 \
 #   --end-date 2024-01-31
+
+# Resume from interruption (automatic detection)
+# python run.py \
+#   --config /path/to/YourConfig.xlsx \
+#   --end-date 2024-01-31 \
+#   --resume
+
+# Check resume status without running
+# python run.py \
+#   --config /path/to/YourConfig.xlsx \
+#   --end-date 2024-01-31 \
+#   --check-resume
+
+# Force restart from beginning
+# python run.py \
+#   --config /path/to/YourConfig.xlsx \
+#   --start-date 2024-01-01 \
+#   --end-date 2024-01-31 \
+#   --force-restart

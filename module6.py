@@ -77,7 +77,7 @@ def load_standalone_config(input_excel: str) -> dict:
     """
     加载独立模式的配置数据（从 Excel 文件）
     """
-    print(f"📝 正在从 '{input_excel}' 读取输入数据...")
+    # print(f"📝 正在从 '{input_excel}' 读取输入数据...")
     try:
         config = {
             'DeploymentPlan': pd.read_excel(input_excel, sheet_name='DeploymentPlan'),
@@ -98,7 +98,7 @@ def load_standalone_config(input_excel: str) -> dict:
             if 'random_seed' in rs.columns and not rs.empty and pd.notna(rs.iloc[0]['random_seed']):
                 file_seed = int(rs.iloc[0]['random_seed'])
                 np.random.seed(file_seed)
-                print(f"🌱 已从文件设置随机种子: {file_seed}")
+                # print(f"🌱 已从文件设置随机种子: {file_seed}")
         
         return config
         
@@ -128,7 +128,7 @@ def load_integrated_config(
     try:
         # 1. 从Orchestrator加载OpenDeployment（替代DeploymentPlan）
         open_deployment = orchestrator.get_open_deployment(current_date)
-        print(f"  🔍 从Orchestrator获取open_deployment: {len(open_deployment) if open_deployment is not None else 0} 条")
+        # print(f"  🔍 从Orchestrator获取open_deployment: {len(open_deployment) if open_deployment is not None else 0} 条")
         
         if open_deployment is None or open_deployment.empty:
             print(f"[WARN] No open deployment found for {current_date.strftime('%Y-%m-%d')}")
@@ -142,15 +142,15 @@ def load_integrated_config(
                 lambda row: 'self_loop' if row['sending'] == row['receiving'] else 'cross_node', axis=1
             )
             route_stats = open_deployment['route_type'].value_counts()
-            print(f"  📊 路线统计: {route_stats.to_dict()}")
+            # print(f"  📊 路线统计: {route_stats.to_dict()}")
             
             # 显示跨节点路线详情
             cross_node = open_deployment[open_deployment['route_type'] == 'cross_node']
             if len(cross_node) > 0:
                 cross_routes = cross_node.groupby(['sending', 'receiving']).size().reset_index(name='count')
-                print(f"  🚚 跨节点路线详情:")
-                for _, row in cross_routes.iterrows():
-                    print(f"    {row['sending']} -> {row['receiving']}: {row['count']} 项")
+                # # print(f"  🚚 跨节点路线详情:")
+                # for _, row in cross_routes.iterrows():
+                #     print(f"    {row['sending']} -> {row['receiving']}: {row['count']} 项")
             else:
                 print(f"  ⚠️  无跨节点路线数据")
         
@@ -173,6 +173,29 @@ def load_integrated_config(
         for config_key, sheet_name in m6_configs.items():
             if sheet_name in config_dict:
                 config[config_key] = config_dict[sheet_name].copy()
+                # 确保标识符列存在并且列名正确
+                if config_key in ['TruckReleaseCon', 'TruckCapacityPlan', 'DeliveryDelayDistribution']:
+                    # 检查并添加缺失的标识符列
+                    required_identifier_cols = ['sending', 'receiving']
+                    for col in required_identifier_cols:
+                        if col not in config[config_key].columns:
+                            # 尝试从可能的列名变体中找到
+                            possible_names = [col.upper(), col.capitalize(), f'{col.capitalize()}', 
+                                            'Sending' if col == 'sending' else 'Receiving',
+                                            'from' if col == 'sending' else 'to',
+                                            'From' if col == 'sending' else 'To']
+                            found = False
+                            for possible_name in possible_names:
+                                if possible_name in config[config_key].columns:
+                                    config[config_key][col] = config[config_key][possible_name]
+                                    found = True
+                                    # print(f"  🔧 {sheet_name}: 映射列名 {possible_name} -> {col}")
+                                    break
+                            if not found:
+                                validation_log.append({
+                                    'sheet': sheet_name, 'row': '', 
+                                    'issue': f'Missing required column: {col}. Available columns: {list(config[config_key].columns)}'
+                                })
             else:
                 validation_log.append({
                     'sheet': sheet_name, 'row': '', 
@@ -189,6 +212,28 @@ def load_integrated_config(
         for config_key, sheet_name in global_configs.items():
             if sheet_name in config_dict:
                 config[config_key] = config_dict[sheet_name].copy()
+                # 确保LeadTime表包含正确的标识符列
+                if config_key == 'LeadTime':
+                    required_identifier_cols = ['sending', 'receiving']
+                    for col in required_identifier_cols:
+                        if col not in config[config_key].columns:
+                            # 尝试从可能的列名变体中找到
+                            possible_names = [col.upper(), col.capitalize(), f'{col.capitalize()}', 
+                                            'Sending' if col == 'sending' else 'Receiving',
+                                            'from' if col == 'sending' else 'to',
+                                            'From' if col == 'sending' else 'To']
+                            found = False
+                            for possible_name in possible_names:
+                                if possible_name in config[config_key].columns:
+                                    config[config_key][col] = config[config_key][possible_name]
+                                    found = True
+                                    # print(f"  🔧 {sheet_name}: 映射列名 {possible_name} -> {col}")
+                                    break
+                            if not found:
+                                validation_log.append({
+                                    'sheet': sheet_name, 'row': '', 
+                                    'issue': f'Missing required column: {col}. Available columns: {list(config[config_key].columns)}'
+                                })
             else:
                 validation_log.append({
                     'sheet': sheet_name, 'row': '',
@@ -207,10 +252,26 @@ def load_integrated_config(
             if sheet in config and not config[sheet].empty:
                 for field in fields:
                     if field in config[sheet].columns:
-                        config[sheet][field] = pd.to_datetime(config[sheet][field], errors='coerce')
+                        # 抑制日期解析警告，使用更智能的日期推断
+                        import warnings
+                        with warnings.catch_warnings():
+                            warnings.simplefilter("ignore", UserWarning)
+                            config[sheet][field] = pd.to_datetime(config[sheet][field], errors='coerce')
         
         config['ValidationLog'] = validation_log
-        print(f"✅ Integrated config loaded: {len(config['DeploymentPlan'])} deployment plans, {len(validation_log)} validation issues")
+        
+        # 调试信息：打印加载的配置表摘要
+        # print(f"✅ Module6 Integrated config loaded:")
+        # print(f"  - DeploymentPlan: {len(config['DeploymentPlan'])} 条记录")
+        # if not config['TruckReleaseCon'].empty:
+        #     print(f"  - TruckReleaseCon: {len(config['TruckReleaseCon'])} 条记录，列名: {list(config['TruckReleaseCon'].columns)}")
+        # if not config['LeadTime'].empty:
+        #     print(f"  - LeadTime: {len(config['LeadTime'])} 条记录，列名: {list(config['LeadTime'].columns)}")
+        # if len(validation_log) > 0:
+        #     print(f"  - 验证问题: {len(validation_log)} 项")
+        #     for issue in validation_log[:3]:  # 只显示前3个问题
+        #         print(f"    - {issue.get('sheet', 'Unknown')}: {issue.get('issue', 'Unknown issue')}")
+        # print(f"✅ Integrated config loaded: {len(config['DeploymentPlan'])} deployment plans, {len(validation_log)} validation issues")
         
     except Exception as e:
         print(f"❌ Error loading integrated config: {str(e)}")
@@ -307,11 +368,11 @@ def _generate_validation_report(validation_log: List[Dict], output_file: str):
         f.write("For detailed information, check the ValidationLog sheet in the Excel output.\n")
         f.write("=" * 80 + "\n")
     
-    if validation_log:
-        status = "with issues" if (errors or warnings) else "clean"
-        print(f"📄 Validation报告已生成 ({status}): {validation_file}")
-    else:
-        print(f"📄 Validation报告已生成 (no issues): {validation_file}")
+    # if validation_log:
+    #     status = "with issues" if (errors or warnings) else "clean"
+    #     print(f"📄 Validation报告已生成 ({status}): {validation_file}")
+    # else:
+    #     print(f"📄 Validation报告已生成 (no issues): {validation_file}")
 
 
 def should_bypass_mdq(
@@ -331,7 +392,7 @@ def should_bypass_mdq(
         try:
             expr = rule['condition_logic']
             if evaluator.eval(expr, context):
-                print(f"  🔹 规则命中: RuleID={rule.get('rule_id')}, Condition='{expr}'")
+                # print(f"  🔹 规则命中: RuleID={rule.get('rule_id')}, Condition='{expr}'")
                 return True, rule.get('rule_id')
         except Exception as e:
             print(f"  ⚠️  规则表达式评估失败 (RuleID={rule.get('rule_id')}): {e}")
@@ -430,7 +491,7 @@ def run_daily_physical_flow(
     Returns:
         dict: 包含输出结果的字典
     """
-    print(f"📊 Module6 Daily Physical Flow - {current_date.strftime('%Y-%m-%d')}")
+    # print(f"📊 Module6 Daily Physical Flow - {current_date.strftime('%Y-%m-%d')}")
     
     # 加载集成配置
     config = load_integrated_config(config_dict, orchestrator, current_date)
@@ -479,8 +540,8 @@ def calculate_physical_inventory(
         # 直接使用Orchestrator的最新unrestricted_inventory
         physical_inventory = {}
         
-        print(f"  🔍 调试：Orchestrator unrestricted_inventory详情")
-        print(f"    总条目数: {len(orchestrator.unrestricted_inventory)}")
+        # print(f"  🔍 调试：Orchestrator unrestricted_inventory详情")
+        # print(f"    总条目数: {len(orchestrator.unrestricted_inventory)}")
         
         # 检查是否存在重复的material-location组合
         location_counts = {}
@@ -501,19 +562,19 @@ def calculate_physical_inventory(
             print(f"    🚨 重复的material-location组合: {len(duplicates)} 个")
             for location_key, count in duplicates.items():
                 print(f"      {location_key}: {count} 条记录")
-        else:
-            print(f"    ✅ 无重复记录")
+        # else:
+            # print(f"    ✅ 无重复记录")
         
-        print(f"  📊 实物库存统计: {len(physical_inventory)} 个SKU-地点组合")
+        # print(f"  📊 实物库存统计: {len(physical_inventory)} 个SKU-地点组合")
         if physical_inventory:
             total_items = sum(1 for qty in physical_inventory.values() if qty > 0)
             positive_qty = sum(qty for qty in physical_inventory.values() if qty > 0)
-            print(f"  ✅ 有库存SKU: {total_items}/{len(physical_inventory)}, 总量: {positive_qty:.1f}")
+            # print(f"  ✅ 有库存SKU: {total_items}/{len(physical_inventory)}, 总量: {positive_qty:.1f}")
             
             # 调试：显示前5个实物库存明细
             for i, (key, qty) in enumerate(list(physical_inventory.items())[:5]):
                 material, location = key
-                print(f"    实物库存: {material}@{location}: {qty:.1f}")
+                # print(f"    实物库存: {material}@{location}: {qty:.1f}")
         
         return physical_inventory
         
@@ -539,7 +600,7 @@ def run_physical_flow_module(
     # 判断运行模式
     if config_dict is not None:
         # 集成模式
-        print("🔄 Module6 运行于集成模式")
+        # print("🔄 Module6 运行于集成模式")
         sim_date = pd.to_datetime(current_date)
         sim_dates = pd.DatetimeIndex([sim_date])  # 单日处理，使用DatetimeIndex
         output_file = output_path
@@ -547,7 +608,7 @@ def run_physical_flow_module(
         config = load_integrated_config(config_dict, orchestrator, sim_date)
     else:
         # 独立模式 - 保持向后兼容
-        print("📜 Module6 运行于独立模式")
+        # print("📜 Module6 运行于独立模式")
         config = load_standalone_config(input_excel)
         sim_start = pd.to_datetime(simulation_start)
         sim_end = pd.to_datetime(simulation_end)
@@ -566,13 +627,13 @@ def run_physical_flow_module(
     # Seed
     if random_seed is not None:
         np.random.seed(random_seed)
-        print(f"🌱 随机种子已设置为: {random_seed}")
+        # print(f"🌱 随机种子已设置为: {random_seed}")
 
-    print(f"📅 仿真时间范围: {sim_dates.min().date()} 到 {sim_dates.max().date()}")
+    # print(f"📅 仿真时间范围: {sim_dates.min().date()} 到 {sim_dates.max().date()}")
 
     # 数据验证
     validation_log = list(config.get('ValidationLog', []))
-    print("📊 开始数据校验...")
+    # print("📊 开始数据校验...")
 
     # 获取数据
     dp = config['DeploymentPlan']
@@ -618,7 +679,7 @@ def run_physical_flow_module(
         
         # 过滤掉缺失priority的记录
         dp = dp[dp['demand_element'].isin(prio_map.keys())]
-        print(f"  📊 过滤后保留: {len(dp)} 条记录")
+        # print(f"  📊 过滤后保留: {len(dp)} 条记录")
 
     mat_map = material_md.set_index('material')[['demand_unit_to_weight','demand_unit_to_volume']].to_dict('index')
     missing_mat = dp[~dp['material'].isin(mat_map.keys())]
@@ -692,18 +753,18 @@ def run_physical_flow_module(
     if 'ori_deployment_uid' not in dp.columns or dp['ori_deployment_uid'].isnull().any():
         print(f"  ⚠️  检测到缺失UID，重新生成")
         dp['ori_deployment_uid'] = [f'UID{i:06d}' for i in dp.index]
-    else:
-        print(f"  ✅ 使用Orchestrator提供的原UID")
+    # else:
+    #     print(f"  ✅ 使用Orchestrator提供的原UID")
     
     dp['priority'] = dp['demand_element'].map(prio_map)
     dp['waiting_days'] = 0
     dp['simulation_date'] = dp['planned_deployment_date']
     
-    print(f"  🔍 处理后的部署计划数量: {len(dp)}")
+    # print(f"  🔍 处理后的部署计划数量: {len(dp)}")
     # 按路线类型统计
     dp['route_type_debug'] = dp.apply(lambda row: 'self_loop' if row['sending'] == row['receiving'] else 'cross_node', axis=1)
     route_debug_stats = dp['route_type_debug'].value_counts()
-    print(f"  📊 部署计划路线统计: {route_debug_stats.to_dict()}")
+    # print(f"  📊 部署计划路线统计: {route_debug_stats.to_dict()}")
 
     # Dict index
     dp_dict = dp.set_index('ori_deployment_uid').to_dict('index')
@@ -726,11 +787,11 @@ def run_physical_flow_module(
             max(sim_start, dp['planned_deployment_date'].min()),
             min(sim_end,   dp['planned_deployment_date'].max() + pd.Timedelta(days=max_wait_days))
         )
-    print(f"📅 模拟时间范围: {sim_dates.min().date()} 到 {sim_dates.max().date()}")
+    # print(f"📅 模拟时间范围: {sim_dates.min().date()} 到 {sim_dates.max().date()}")
 
     cap_daily = _normalize_capacity_plan(truck_cap.copy(), sim_start, sim_end)
     cap_map   = cap_daily.set_index(['date','sending','receiving','truck_type'])['truck_number'].to_dict()
-    print(f"[Capacity] normalized rows: {len(cap_daily)}")
+    # print(f"[Capacity] normalized rows: {len(cap_daily)}")
 
     # Outputs
     delivery_plan, unsat_log, bypass_log = [], [], []
@@ -745,23 +806,23 @@ def run_physical_flow_module(
     inventory_check_enabled = config_dict is not None and orchestrator is not None
     
     for sim_date in sim_dates:
-        print(f"\n📆 模拟日期: {sim_date.date()}")
+        # print(f"\n📆 模拟日期: {sim_date.date()}")
         
         # 集成模式：获取当日实物库存
         if inventory_check_enabled:
             available_inventory = calculate_physical_inventory(orchestrator, sim_date)
-            print(f"    💰 库存检查已启用（使用实物库存）")
+            # print(f"    💰 库存检查已启用（使用实物库存）")
         else:
             print(f"    ⚠️  独立模式：跳过库存检查")
         
-        print(f"    🗒 部署计划状态检查:")
+        # print(f"    🗒 部署计划状态检查:")
         active_plans = {uid: st for uid, st in agg_status.items() if st['qty'] > 0}
-        print(f"    📈 有效计划数: {len(active_plans)}/{len(agg_status)}")
+        # print(f"    📈 有效计划数: {len(active_plans)}/{len(agg_status)}")
         
-        if active_plans:
-            print(f"    🔍 前5个有效计划:")
-            for i, (uid, st) in enumerate(list(active_plans.items())[:5]):
-                print(f"      {i+1}. {uid}: qty={st['qty']}, planned={st['planned']}, waiting={st['waiting']}")
+        # if active_plans:
+        #     # print(f"    🔍 前5个有效计划:")
+        #     for i, (uid, st) in enumerate(list(active_plans.items())[:5]):
+        #         print(f"      {i+1}. {uid}: qty={st['qty']}, planned={st['planned']}, waiting={st['waiting']}")
         
         pending_rows = []
         # collect todays pendings
@@ -787,8 +848,8 @@ def run_physical_flow_module(
             
             # 调试：记录跨节点计划的详细信息
             route_type = "自循环" if full['sending'] == full['receiving'] else "跨节点"
-            if route_type == "跨节点":
-                print(f"    🔍 跨节点计划 {uid}: {full['sending']}->{full['receiving']}, planned={planned_date.date()}, waiting={waiting_days}天, qty={st['qty']}")
+            # if route_type == "跨节点":
+            #     # print(f"    🔍 跨节点计划 {uid}: {full['sending']}->{full['receiving']}, planned={planned_date.date()}, waiting={waiting_days}天, qty={st['qty']}")
             
             pending_rows.append({
                 'ori_deployment_uid': uid,
@@ -804,25 +865,25 @@ def run_physical_flow_module(
                 'waiting_days': waiting_days,
             })
 
-        if not pending_rows:
-            print("  ✅ 无待处理需求")
-            continue
+        # if not pending_rows:
+        #     print("  ✅ 无待处理需求")
+        #     continue
 
         pendf = pd.DataFrame(pending_rows)
-        print(f"  📦 发现 {len(pending_rows)} 个待处理需求")
+        # print(f"  📦 发现 {len(pending_rows)} 个待处理需求")
         
         # 调试：按路线类型统计
         route_stats = pendf.groupby(['sending', 'receiving']).size().reset_index(name='count')
-        print(f"  📊 路线统计:")
-        for _, row in route_stats.iterrows():
-            route_type = "自循环" if row['sending'] == row['receiving'] else "跨节点"
-            print(f"    {row['sending']} -> {row['receiving']}: {row['count']} 项 ({route_type})")
+        # print(f"  📊 路线统计:")
+        # for _, row in route_stats.iterrows():
+        #     route_type = "自循环" if row['sending'] == row['receiving'] else "跨节点"
+        #     print(f"    {row['sending']} -> {row['receiving']}: {row['count']} 项 ({route_type})")
         
         # 过滤出跨节点路线（忽略自循环）
         cross_node_df = pendf[pendf['sending'] != pendf['receiving']].copy()
-        if cross_node_df.empty:
-            print("  ✅ 无跨节点需求需要处理")
-            continue
+        # if cross_node_df.empty:
+        #     print("  ✅ 无跨节点需求需要处理")
+        #     continue
             
         # 全局优先级排序：按优先级(asc) + 计划日期(asc) + 路线排序，确保高优先级需求优先获得库存
         cross_node_df_sorted = cross_node_df.sort_values([
@@ -832,11 +893,11 @@ def run_physical_flow_module(
             'receiving'  # 稳定排序
         ]).reset_index(drop=True)
         
-        print(f"  🎯 跨节点需求已按全局优先级排序: {len(cross_node_df_sorted)} 项")
-        if len(cross_node_df_sorted) > 0:
-            print(f"  📋 前5个高优先级需求:")
-            for i, (_, row) in enumerate(cross_node_df_sorted.head().iterrows()):
-                print(f"    {i+1}. {row['material']}@{row['sending']}->{row['receiving']}: qty={row['deployed_qty']}, priority={row['priority']}, date={row['planned_deployment_date'].date()}")
+        # print(f"  🎯 跨节点需求已按全局优先级排序: {len(cross_node_df_sorted)} 项")
+        # if len(cross_node_df_sorted) > 0:
+        #     print(f"  📋 前5个高优先级需求:")
+        #     for i, (_, row) in enumerate(cross_node_df_sorted.head().iterrows()):
+        #         print(f"    {i+1}. {row['material']}@{row['sending']}->{row['receiving']}: qty={row['deployed_qty']}, priority={row['priority']}, date={row['planned_deployment_date'].date()}")
         
         # 新的处理逻辑：按全局优先级逐条处理需求，在路线级别进行车辆分配
         processed_routes = set()  # 记录已处理的路线
@@ -858,7 +919,7 @@ def run_physical_flow_module(
                 (cross_node_df_sorted['receiving'] == receiving)
             ].copy()
             
-            print(f"    🚚 处理跨节点路线: {sending} -> {receiving} ({len(route_demands)} 项需求)")
+            # print(f"    🚚 处理跨节点路线: {sending} -> {receiving} ({len(route_demands)} 项需求)")
 
             
             truck_cfgs = truck_con[(truck_con['sending']==sending) & (truck_con['receiving']==receiving)]
@@ -870,7 +931,7 @@ def run_physical_flow_module(
             optimal_types = truck_cfgs[truck_cfgs['optimal_type']=='Y']['truck_type'].tolist()
             all_types = truck_cfgs['truck_type'].tolist()
             type_seq = optimal_types + [x for x in all_types if x not in optimal_types]
-            print(f"      🚛 车型序列: {type_seq}")
+            # print(f"      🚛 车型序列: {type_seq}")
 
             # 使用全局排序后的需求列表
             remaining_demands = route_demands.copy()
@@ -884,11 +945,11 @@ def run_physical_flow_module(
 
                 # 获取车辆数量，如果没有配置则默认提供99辆
                 n_truck_total = int(cap_map.get((sim_date, sending, receiving, truck_type), 99))
-                if n_truck_total == 0:
-                    print(f"      🚫 {truck_type}: 今日无可用车辆")
-                    continue
-                elif (sim_date, sending, receiving, truck_type) not in cap_map:
-                    print(f"      🔧 {truck_type}: 未配置容量，使用默认值 {n_truck_total} 辆")
+                # if n_truck_total == 0:
+                #     print(f"      🚫 {truck_type}: 今日无可用车辆")
+                #     continue
+                # elif (sim_date, sending, receiving, truck_type) not in cap_map:
+                #     print(f"      🔧 {truck_type}: 未配置容量，使用默认值 {n_truck_total} 辆")
 
                 conf = truck_cfgs[truck_cfgs['truck_type']==truck_type].iloc[0]
                 spec = spec_map.get(truck_type)
@@ -900,7 +961,7 @@ def run_physical_flow_module(
                 mdq = float(conf['MDQ']) if pd.notna(conf['MDQ']) else 0.0
                 cap_w = float(spec['capacity_qty_in_weight'])
                 cap_v = float(spec['capacity_qty_in_volume'])
-                print(f"      🚛 尝试车型: {truck_type} (可用: {n_truck_total} 辆) 阈值 WFR={wfr_th}, VFR={vfr_th}")
+                # print(f"      🚛 尝试车型: {truck_type} (可用: {n_truck_total} 辆) 阈值 WFR={wfr_th}, VFR={vfr_th}")
 
                 used = 0  # 已用车辆数（该车型）
                 while used < n_truck_total and not remaining_demands.empty:
@@ -936,10 +997,10 @@ def run_physical_flow_module(
                             inventory_limit = max(0, available_qty - already_loaded)
                             limits.append(inventory_limit)
                             
-                            if inventory_limit <= 0:
-                                # 库存不足，跳过该物料
-                                print(f"        🚫 库存不足: {material}@{sending}, 可用={available_qty}, 已装={already_loaded}")
-                                continue
+                            # if inventory_limit <= 0:
+                            #     # 库存不足，跳过该物料
+                            #     print(f"        🚫 库存不足: {material}@{sending}, 可用={available_qty}, 已装={already_loaded}")
+                            #     continue
 
                         addable = int(max(0, min(limits)))
                         if addable <= 0:
@@ -1117,7 +1178,7 @@ def run_physical_flow_module(
                         remaining_demands = remaining_demands[remaining_demands['deployed_qty'] > 0].copy()
                         used += 1
                     else:
-                        print(f"        🚫 {truck_type}: 聚合未触发发运，剩余 {len(remaining_demands)} 项")
+                        # print(f"        🚫 {truck_type}: 聚合未触发发运，剩余 {len(remaining_demands)} 项")
                         break  # 换车型
 
             # 路线级收尾：处理该路线剩余的未发出需求
@@ -1174,9 +1235,9 @@ def run_physical_flow_module(
 
     # 注意：Orchestrator状态更新由main_integration.py统一处理
     # 避免重复调用导致双重库存扣减
-    if config_dict is not None and orchestrator is not None and not delivery_plan_df.empty:
-        print(f"✅ Processed {len(delivery_plan_df)} M6 delivery plans for {current_date}")
-        print(f"✅ Orchestrator 状态将由main_integration统一更新")
+    # if config_dict is not None and orchestrator is not None and not delivery_plan_df.empty:
+        # print(f"✅ Processed {len(delivery_plan_df)} M6 delivery plans for {current_date}")
+        # print(f"✅ Orchestrator 状态将由main_integration统一更新")
         # 移除直接调用，避免与main_integration.py中的process_module6_delivery重复
 
     statistics = {
@@ -1186,9 +1247,10 @@ def run_physical_flow_module(
         'bypass_count': len(bypass_log)
     }
     
-    print(f"\n🎉 仿真完成! 输出已保存至: {output_file}")
+    # print(f"\n🎉 仿真完成! 输出已保存至: {output_file}")
     try:
-        print(f"📊 统计: 发运 {statistics['delivery_count']} 明细，车辆 {statistics['vehicle_count']} 车，未满足 {statistics['unsatisfied_count']} 项，bypass 命中 {statistics['bypass_count']} 次")
+        # print(f"📊 统计: 发运 {statistics['delivery_count']} 明细，车辆 {statistics['vehicle_count']} 车，未满足 {statistics['unsatisfied_count']} 项，bypass 命中 {statistics['bypass_count']} 次")
+        pass
     except Exception as e:
         print(f"[WARN] printing statistics failed: {e}")
     # 返回结果用于集成模式

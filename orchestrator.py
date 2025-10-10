@@ -23,26 +23,71 @@ from datetime import datetime
 
 # 在文件开头添加字符串格式化函数
 def _normalize_material(material_str) -> str:
-    """Normalize material string to ensure string format"""
-    return str(material_str) if material_str is not None else ""
+    """Normalize material string to ensure consistent format - removes .0 suffix from numeric materials"""
+    if material_str is None:
+        return ""
+    
+    try:
+        # 如果是数字（int或float），转换为整数字符串以移除多余的.0
+        if isinstance(material_str, (int, float)) or str(material_str).replace('.', '').replace('-', '').isdigit():
+            return str(int(float(material_str)))
+        else:
+            # 非数字material，直接返回字符串
+            return str(material_str)
+    except (ValueError, TypeError):
+        # 如果转换失败，直接返回字符串
+        return str(material_str)
 
 def _normalize_location(location_str) -> str:
-    """Normalize location string by padding with leading zeros to 4 digits"""
+    """Normalize location string by padding with leading zeros to 4 digits if numeric"""
+    if pd.isna(location_str) or location_str is None:
+        return ""
+    
+    location_str = str(location_str).strip()
+    
     try:
-        return str(int(location_str)).zfill(4)
+        # 检查是否为纯数字字符串
+        if location_str.isdigit():
+            return str(int(location_str)).zfill(4)
+        else:
+            # 非数字location（如A888），直接返回字符串，不做padding
+            return location_str
     except (ValueError, TypeError):
-        return str(location_str).zfill(4)
+        return str(location_str)
 
 def _normalize_sending(sending_str) -> str:
-    """Normalize sending string to ensure string format"""
-    return str(sending_str) if sending_str is not None else ""
+    """Normalize sending string by padding with leading zeros to 4 digits if numeric"""
+    if pd.isna(sending_str) or sending_str is None:
+        return ""
+    
+    sending_str = str(sending_str).strip()
+    
+    try:
+        # 检查是否为纯数字字符串
+        if sending_str.isdigit():
+            return str(int(sending_str)).zfill(4)
+        else:
+            # 非数字sending（如A888），直接返回字符串，不做padding
+            return sending_str
+    except (ValueError, TypeError):
+        return str(sending_str)
 
 def _normalize_receiving(receiving_str) -> str:
-    """Normalize receiving string by padding with leading zeros to 4 digits"""
+    """Normalize receiving string by padding with leading zeros to 4 digits if numeric"""
+    if pd.isna(receiving_str) or receiving_str is None:
+        return ""
+    
+    receiving_str = str(receiving_str).strip()
+    
     try:
-        return str(int(receiving_str)).zfill(4)
+        # 检查是否为纯数字字符串
+        if receiving_str.isdigit():
+            return str(int(receiving_str)).zfill(4)
+        else:
+            # 非数字receiving（如A888），直接返回字符串，不做padding
+            return receiving_str
     except (ValueError, TypeError):
-        return str(receiving_str).zfill(4)
+        return str(receiving_str)
 
 def _normalize_identifiers(df: pd.DataFrame) -> pd.DataFrame:
     """Normalize identifier columns to string format with proper formatting"""
@@ -168,7 +213,7 @@ class Orchestrator:
             self.unrestricted_inventory[key] = quantity
             self.initial_inventory[key] = quantity  # 保存初始库存副本
         
-        print(f"✅ Initialized inventory with {len(normalized_df)} records")
+        # print(f"✅ Initialized inventory with {len(normalized_df)} records")
         self._log_event("INIT_INVENTORY", f"Initialized {len(normalized_df)} inventory records")
     
     def set_space_capacity(self, space_capacity_df: pd.DataFrame):
@@ -191,7 +236,7 @@ class Orchestrator:
             errors="coerce",
         )
         
-        print(f"✅ Set space capacity configuration with {len(space_capacity_df)} records")
+        # print(f"✅ Set space capacity configuration with {len(space_capacity_df)} records")
         self._log_event("SET_SPACE_CAPACITY", f"Configured {len(space_capacity_df)} space capacity records")
     
     def get_unrestricted_inventory_view(self, date: str) -> pd.DataFrame:
@@ -516,8 +561,8 @@ class Orchestrator:
             keep = ['material', 'location', 'available_date', 'quantity']
             tmp = tmp[keep].copy()
             tmp['material'] = tmp['material'].astype(str)
-            # 标准化location为4位补0格式
-            tmp['location'] = tmp['location'].astype(str).apply(lambda x: str(int(x)).zfill(4) if pd.notna(x) and str(x).strip() else x)
+            # 标准化location格式（兼容数字和字母数字混合）
+            tmp['location'] = tmp['location'].apply(_normalize_location)
             tmp['quantity'] = tmp['quantity'].fillna(0).astype(int)
 
             # 追加到 backlog（可按需要去重合并）
@@ -567,9 +612,9 @@ class Orchestrator:
         """
         date_obj = pd.to_datetime(date).normalize()
         
-        print(f"    🔍 Orchestrator正在处理Module5部署计划: {len(deployment_df)} 条")
-        if len(deployment_df) > 0:
-            print(f"    📈 部署计划deployed_qty统计: {deployment_df['deployed_qty'].describe()}")
+        # print(f"    🔍 Orchestrator正在处理Module5部署计划: {len(deployment_df)} 条")
+        # if len(deployment_df) > 0:
+        #     print(f"    📈 部署计划deployed_qty统计: {deployment_df['deployed_qty'].describe()}")
         
         # Add new deployment plans to open deployment
         for i, row in deployment_df.iterrows():
@@ -588,8 +633,8 @@ class Orchestrator:
             original_qty = row['deployed_qty']
             converted_qty = self._safe_convert_to_int(row['deployed_qty'])
             
-            if i < 3:  # 只显示前3条记录的详细信息
-                print(f"      记录{i+1}: original_qty={original_qty} (类型: {type(original_qty)}), converted_qty={converted_qty}")
+            # if i < 3:  # 只显示前3条记录的详细信息
+                # print(f"      记录{i+1}: original_qty={original_qty} (类型: {type(original_qty)}), converted_qty={converted_qty}")
             
             self.open_deployment[uid] = {
                 'material': _normalize_material(row['material']), # 添加格式化
@@ -606,7 +651,7 @@ class Orchestrator:
             # 检查存储后的数量
             stored_qtys = [v['deployed_qty'] for v in self.open_deployment.values()]
             non_zero_qtys = [q for q in stored_qtys if q > 0]
-            print(f"    🔍 存储后的数量统计: 总数={len(stored_qtys)}, 非零数量={len(non_zero_qtys)}")
+            # print(f"    🔍 存储后的数量统计: 总数={len(stored_qtys)}, 非零数量={len(non_zero_qtys)}")
             self._log_event("M5_DEPLOYMENT", f"Added {len(deployment_df)} deployment plans")
     
     def process_module6_delivery(self, delivery_df: pd.DataFrame, date: str):
@@ -622,10 +667,10 @@ class Orchestrator:
         print(f"[M6->Orch] incoming rows: {len(delivery_df)}; date={date}")
         
         # 添加调试信息：显示输入数据的详细信息
-        if not delivery_df.empty:
-            print(f"  📊 M6输入数据预览:")
-            for idx, row in delivery_df.head(3).iterrows():
-                print(f"    Row {idx}: {row['material']}@{row['sending']}->{row['receiving']}, ship:{row['actual_ship_date']}, delivery:{row['actual_delivery_date']}, qty:{row['delivery_qty']}")
+        # if not delivery_df.empty:
+        #     # print(f"  📊 M6输入数据预览:")
+        #     for idx, row in delivery_df.head(3).iterrows():
+        #         # print(f"    Row {idx}: {row['material']}@{row['sending']}->{row['receiving']}, ship:{row['actual_ship_date']}, delivery:{row['actual_delivery_date']}, qty:{row['delivery_qty']}")
         
         # Process each delivery record
         for idx, row in delivery_df.iterrows():
@@ -638,18 +683,18 @@ class Orchestrator:
             # 添加调试信息：显示原始和标准化后的标识符
             normalized_material = _normalize_material(material)
             normalized_receiving = _normalize_receiving(receiving)
-            if material == '80813644' and receiving in ['C816', 'C810']:
-                print(f"      🔍 标识符标准化: 原始material='{material}' -> '{normalized_material}', 原始receiving='{receiving}' -> '{normalized_receiving}'")
+            # if material == '80813644' and receiving in ['C816', 'C810']:
+                # print(f"      🔍 标识符标准化: 原始material='{material}' -> '{normalized_material}', 原始receiving='{receiving}' -> '{normalized_receiving}'")
             ship_date = pd.to_datetime(row['actual_ship_date'])
             delivery_date = pd.to_datetime(row['actual_delivery_date'])
             quantity = self._safe_convert_to_int(row['delivery_qty'])
             
             # 只处理当天发运的货物（actual_ship_date == 当前仿真日期）
             if ship_date.normalize() != date_obj:
-                print(f"    ⏭️  跳过非当天发运: {material}@{sending}->{receiving}, ship_date:{ship_date.date()}, current:{date_obj.date()}")
+                # print(f"    ⏭️  跳过非当天发运: {material}@{sending}->{receiving}, ship_date:{ship_date.date()}, current:{date_obj.date()}")
                 continue
             
-            print(f"    ✅ 处理当天发运: {material}@{sending}->{receiving}, ship:{ship_date.date()}, delivery:{delivery_date.date()}, qty:{quantity}")
+            # print(f"    ✅ 处理当天发运: {material}@{sending}->{receiving}, ship:{ship_date.date()}, delivery:{delivery_date.date()}, qty:{quantity}")
             
             # Reduce open deployment quantity
             if uid in self.open_deployment:
@@ -694,7 +739,7 @@ class Orchestrator:
                 }
             elif delivery_date.normalize() == date_obj:
                 # Delivery is today, create delivery GR and update inventory immediately
-                print(f"      📦 同天到达，创建delivery GR: {material}@{receiving}, qty:{quantity}, uid:{uid}")
+                # print(f"      📦 同天到达，创建delivery GR: {material}@{receiving}, qty:{quantity}, uid:{uid}")
                 receiving_key = (material, receiving)
                 self.unrestricted_inventory[receiving_key] = (
                     self.unrestricted_inventory.get(receiving_key, 0) + quantity)
@@ -720,15 +765,15 @@ class Orchestrator:
                 
                 if not is_duplicate:
                     self.delivery_gr.append(gr_record)
-                    print(f"        ✅ 已添加delivery GR记录: {material}@{receiving}={quantity}")
+                    # print(f"        ✅ 已添加delivery GR记录: {material}@{receiving}={quantity}")
                     # 特别追踪80813644@C816
-                    if material == '80813644' and receiving == 'C816':
-                        print(f"        🎯 特别追踪80813644@C816: 当前delivery_gr总数={len(self.delivery_gr)}")
-                else:
-                    print(f"        ⚠️  跳过重复的delivery GR记录: {material}@{receiving}={quantity}, uid:{uid}")
-            else:
-                # 如果delivery_date < date_obj，这是历史数据，应该已经处理过，跳过
-                print(f"      ⏭️  跳过历史数据: delivery_date={delivery_date.date()}, current={date_obj.date()}")
+            #         if material == '80813644' and receiving == 'C816':
+            #             # print(f"        🎯 特别追踪80813644@C816: 当前delivery_gr总数={len(self.delivery_gr)}")
+            #     else:
+            #         # print(f"        ⚠️  跳过重复的delivery GR记录: {material}@{receiving}={quantity}, uid:{uid}")
+            # else:
+            #     # 如果delivery_date < date_obj，这是历史数据，应该已经处理过，跳过
+            #     # print(f"      ⏭️  跳过历史数据: delivery_date={delivery_date.date()}, current={date_obj.date()}")
         
         if len(delivery_df) > 0:
             print(f"✅ Processed {len(delivery_df)} M6 delivery plans for {date}")
@@ -906,7 +951,7 @@ class Orchestrator:
         # 🆕 生成库存变动日志
         inventory_change_df = self.generate_inventory_change_log(date)
         _normalize_identifiers(inventory_change_df).to_csv(self.output_dir / f"inventory_change_log_{date_str}.csv", index=False)
-        print(f"  📊 已生成库存变动日志: {len(inventory_change_df)} 条记录")
+        # print(f"  📊 已生成库存变动日志: {len(inventory_change_df)} 条记录")
         
         # Save daily logs
         if self.daily_logs:
@@ -1055,16 +1100,16 @@ class Orchestrator:
         print(f"  📊 从内存获取发运出库 [{date}]: {len(delivery_ship_data)} 项")
         
         # 调试信息：显示delivery_gr中相关记录的详细信息
-        print(f"  📊 当前delivery_gr中共有 {len(self.delivery_gr)} 条记录")
-        relevant_gr_records = [
-            record for record in self.delivery_gr
-            if (pd.to_datetime(record['date']).normalize() == date_obj and 
-                record['material'] == '80813644' and record['receiving'] in ['C816', 'C810'])
-        ]
-        if relevant_gr_records:
-            print(f"  🔍 找到 {len(relevant_gr_records)} 条80813644的delivery_gr记录:")
-            for i, rec in enumerate(relevant_gr_records):
-                print(f"    记录{i+1}: material='{rec['material']}', receiving='{rec['receiving']}', qty={rec['quantity']}, uid={rec.get('ori_deployment_uid', 'N/A')}")
+        # print(f"  📊 当前delivery_gr中共有 {len(self.delivery_gr)} 条记录")
+        # relevant_gr_records = [
+        #     record for record in self.delivery_gr
+        #     if (pd.to_datetime(record['date']).normalize() == date_obj and 
+        #         record['material'] == '80813644' and record['receiving'] in ['C816', 'C810'])
+        # ]
+        # if relevant_gr_records:
+        #     print(f"  🔍 找到 {len(relevant_gr_records)} 条80813644的delivery_gr记录:")
+        #     for i, rec in enumerate(relevant_gr_records):
+        #         print(f"    记录{i+1}: material='{rec['material']}', receiving='{rec['receiving']}', qty={rec['quantity']}, uid={rec.get('ori_deployment_uid', 'N/A')}")
         
         change_log = []
         
@@ -1089,15 +1134,15 @@ class Orchestrator:
             )
             
             # 调试信息：显示delivery_gr匹配情况
-            if material == '80813644' and location in ['C816', 'C810']:
-                matching_records = [
-                    record for record in self.delivery_gr
-                    if (pd.to_datetime(record['date']).normalize() == date_obj and 
-                        record['material'] == material and record['receiving'] == location)
-                ]
-                print(f"  🔍 调试 {material}@{location}: 找到 {len(matching_records)} 条delivery_gr记录, 总量={delivery_qty}")
-                for i, rec in enumerate(matching_records):
-                    print(f"    记录{i+1}: uid={rec.get('ori_deployment_uid', 'N/A')}, qty={rec['quantity']}, date={rec['date']}")
+            # if material == '80813644' and location in ['C816', 'C810']:
+            #     matching_records = [
+            #         record for record in self.delivery_gr
+            #         if (pd.to_datetime(record['date']).normalize() == date_obj and 
+            #             record['material'] == material and record['receiving'] == location)
+            #     ]
+            #     print(f"  🔍 调试 {material}@{location}: 找到 {len(matching_records)} 条delivery_gr记录, 总量={delivery_qty}")
+            #     for i, rec in enumerate(matching_records):
+            #         print(f"    记录{i+1}: uid={rec.get('ori_deployment_uid', 'N/A')}, qty={rec['quantity']}, date={rec['date']}")
             
             # 发货出库
             shipment_qty = sum(
@@ -1154,7 +1199,7 @@ class Orchestrator:
         Args:
             date: 日期字符串 (YYYY-MM-DD)
         """
-        print(f"\n📊 === Orchestrator每日库存变动详情 [{date}] ===")
+        # print(f"\n📊 === Orchestrator每日库存变动详情 [{date}] ===")
         
         # 获取期初期末库存
         beginning_inv = self.daily_beginning_inventory.get(date, {})
@@ -1181,47 +1226,47 @@ class Orchestrator:
         print(f"期末库存条目: {len(ending_inv)}")
         
         # 重点分析MAT_B@DC_001
-        key = ('MAT_B', 'DC_001')
-        material, location = key
+        # key = ('MAT_B', 'DC_001')
+        # material, location = key
         
-        begin_qty = beginning_inv.get(key, 0)
-        end_qty = ending_inv.get(key, 0)
+        # begin_qty = beginning_inv.get(key, 0)
+        # end_qty = ending_inv.get(key, 0)
         
-        print(f"\n=== 重点分析: {material}@{location} ===")
-        print(f"期初库存: {begin_qty}")
+        # print(f"\n=== 重点分析: {material}@{location} ===")
+        # print(f"期初库存: {begin_qty}")
         
-        # Production GR
-        prod_qty = sum(gr['quantity'] for gr in production_gr 
-                      if gr['material'] == material and gr['location'] == location)
-        print(f"生产入库: +{prod_qty}")
+        # # Production GR
+        # prod_qty = sum(gr['quantity'] for gr in production_gr 
+        #               if gr['material'] == material and gr['location'] == location)
+        # print(f"生产入库: +{prod_qty}")
         
-        # Delivery GR
-        del_qty = sum(gr['quantity'] for gr in delivery_gr 
-                     if gr['material'] == material and gr['receiving'] == location)
-        print(f"交付入库: +{del_qty}")
+        # # Delivery GR
+        # del_qty = sum(gr['quantity'] for gr in delivery_gr 
+        #              if gr['material'] == material and gr['receiving'] == location)
+        # print(f"交付入库: +{del_qty}")
         
-        # Shipment
-        ship_qty = sum(ship['quantity'] for ship in shipments 
-                      if ship['material'] == material and ship['location'] == location)
-        print(f"发货出库: -{ship_qty}")
+        # # Shipment
+        # ship_qty = sum(ship['quantity'] for ship in shipments 
+        #               if ship['material'] == material and ship['location'] == location)
+        # print(f"发货出库: -{ship_qty}")
         
-        # 发运出库按 M6 发运日志统计
-        transit_qty = 0
-        if not m6_ship_df.empty:
-            mask = (m6_ship_df['material'] == material) & (m6_ship_df['sending'] == location)
-            transit_qty = int(m6_ship_df.loc[mask, 'quantity'].sum())
-        print(f"发运出库(M6): -{transit_qty}")
+        # # 发运出库按 M6 发运日志统计
+        # transit_qty = 0
+        # if not m6_ship_df.empty:
+        #     mask = (m6_ship_df['material'] == material) & (m6_ship_df['sending'] == location)
+        #     transit_qty = int(m6_ship_df.loc[mask, 'quantity'].sum())
+        # print(f"发运出库(M6): -{transit_qty}")
         
-        print(f"期末库存: {end_qty}")
+        # print(f"期末库存: {end_qty}")
         
-        # 计算期望值
-        expected = begin_qty + prod_qty + del_qty - ship_qty - transit_qty
-        print(f"计算期望: {begin_qty} + {prod_qty} + {del_qty} - {ship_qty} - {transit_qty} = {expected}")
+        # # 计算期望值
+        # expected = begin_qty + prod_qty + del_qty - ship_qty - transit_qty
+        # print(f"计算期望: {begin_qty} + {prod_qty} + {del_qty} - {ship_qty} - {transit_qty} = {expected}")
         
-        if expected != end_qty:
-            print(f"⚠️  差异: 期望{expected}, 实际{end_qty}, 差异{end_qty - expected}")
-        else:
-            print(f"✅ 一致")
+        # if expected != end_qty:
+        #     print(f"⚠️  差异: 期望{expected}, 实际{end_qty}, 差异{end_qty - expected}")
+        # else:
+        #     print(f"✅ 一致")
 
 # Convenience functions for module integration
 def create_orchestrator(start_date: str, output_dir: str = "./orchestrator_output") -> Orchestrator:
@@ -1259,9 +1304,9 @@ if __name__ == "__main__":
     inventory_view = orchestrator.get_unrestricted_inventory_view("2024-01-01")
     space_quota = orchestrator.get_space_quota_view("2024-01-01")
     
-    print("\n📊 Initial State:")
-    print(f"Inventory items: {len(inventory_view)}")
-    print(f"Space quota available: {space_quota['max_qty'].sum() if not space_quota.empty else 0}")
+    # print("\n📊 Initial State:")
+    # print(f"Inventory items: {len(inventory_view)}")
+    # print(f"Space quota available: {space_quota['max_qty'].sum() if not space_quota.empty else 0}")
     
-    stats = orchestrator.get_summary_statistics("2024-01-01")
-    print(f"Summary: {stats}")
+    # stats = orchestrator.get_summary_statistics("2024-01-01")
+    # print(f"Summary: {stats}")

@@ -125,8 +125,8 @@ def expand_forecast_to_days_integer_split(demand_weekly, start_date, num_weeks, 
         num_weeks: 周数
         simulation_end_date: 仿真结束日期（可选，用于限制输出范围）
     """
-    print(f"  🔄 开始周度到日度转换: {len(demand_weekly)}个周度记录 -> {num_weeks}周")
-    print(f"  📅 起始日期: {start_date}")
+    # print(f"  🔄 开始周度到日度转换: {len(demand_weekly)}个周度记录 -> {num_weeks}周")
+    # print(f"  📅 起始日期: {start_date}")
     
     rows = []
     for _, row in demand_weekly.iterrows():
@@ -152,8 +152,8 @@ def expand_forecast_to_days_integer_split(demand_weekly, start_date, num_weeks, 
             })
     
     result_df = pd.DataFrame(rows)
-    print(f"  ✅ 转换完成: {len(result_df)}个日度记录")
-    print(f"  📅 日期范围: {result_df['date'].min()} 到 {result_df['date'].max()}")
+    # print(f"  ✅ 转换完成: {len(result_df)}个日度记录")
+    # print(f"  📅 日期范围: {result_df['date'].min()} 到 {result_df['date'].max()}")
     
     # 确保标识符字段为字符串格式
     return _normalize_identifiers(result_df)
@@ -215,7 +215,7 @@ def generate_daily_orders(sim_date, original_forecast, current_forecast, ao_conf
             
         daily_avg_forecast = ml_original_forecast['quantity'].mean()
         
-        print(f"  📊 {material}@{location}: 平均日需求 {daily_avg_forecast:.1f}")
+        # print(f"  📊 {material}@{location}: 平均日需求 {daily_avg_forecast:.1f}")
         
         # Get AO configuration for this material-location
         ml_ao_config = ao_config[
@@ -287,7 +287,7 @@ def generate_daily_orders(sim_date, original_forecast, current_forecast, ao_conf
         # 添加调试信息
         ao_orders = orders_df[orders_df['demand_type'] == 'AO']
         normal_orders = orders_df[orders_df['demand_type'] == 'normal']
-        print(f"  📋 订单生成完成: AO订单 {len(ao_orders)}个, 普通订单 {len(normal_orders)}个")
+        # print(f"  📋 订单生成完成: AO订单 {len(ao_orders)}个, 普通订单 {len(normal_orders)}个")
     
     return orders_df, consumed_forecast
 
@@ -503,7 +503,7 @@ def run_daily_order_generation(
     Returns:
         dict: 包含订单和发货数据的字典 {orders_df, shipment_df, cut_df, supply_demand_df, output_file}
     """
-    print(f"🔄 Module1 运行于集成模式 - {simulation_date.strftime('%Y-%m-%d')}")
+    # print(f"🔄 Module1 运行于集成模式 - {simulation_date.strftime('%Y-%m-%d')}")
     
     try:
         # 1) 读取集成配置
@@ -524,12 +524,12 @@ def run_daily_order_generation(
             raise ValueError("缺少必需的配置数据：M1_ForecastError")
 
         # 3) 订单日历规范化
-        print(f"  📅 订单日历验证: {len(order_calendar)}个日期")
+        # print(f"  📅 订单日历验证: {len(order_calendar)}个日期")
         order_calendar['date'] = pd.to_datetime(order_calendar['date'])
-        print(f"  📅 订单日历日期范围: {order_calendar['date'].min()} 到 {order_calendar['date'].max()}")
-        print(f"  📅 当前仿真日期: {simulation_date}")
+        # print(f"  📅 订单日历日期范围: {order_calendar['date'].min()} 到 {order_calendar['date'].max()}")
+        # print(f"  📅 当前仿真日期: {simulation_date}")
         is_order_day = not order_calendar[order_calendar['date'] == simulation_date].empty
-        print(f"  📅 当前日期是否为订单日: {'是' if is_order_day else '否'}")
+        # print(f"  📅 当前日期是否为订单日: {'是' if is_order_day else '否'}")
 
         # —— 将周度预测转换为日度预测（先做 DPS → Supply Choice），且起始日期必须与全局一致 —— 
         # 强制要求 orchestrator 存在且提供 start_date
@@ -553,12 +553,12 @@ def run_daily_order_generation(
             daily_demand_forecast = expand_forecast_to_days_integer_split(
                 demand_forecast, sim_start, max_week
             )
-            print(f"  📊 周度预测转换(已过 DPS/SC): {max_week}周 -> {len(daily_demand_forecast)}天")
-            print(f"  📅 预测日期范围: {daily_demand_forecast['date'].min()} 到 {daily_demand_forecast['date'].max()}")
+            # print(f"  📊 周度预测转换(已过 DPS/SC): {max_week}周 -> {len(daily_demand_forecast)}天")
+            # print(f"  📅 预测日期范围: {daily_demand_forecast['date'].min()} 到 {daily_demand_forecast['date'].max()}")
         else:
             # 已经是日度数据：通常不再对日度数据应用 DPS/SC（按你当前定义）
             daily_demand_forecast = demand_forecast.copy()
-            print(f"  📊 使用现有日度预测(跳过 DPS/SC): {len(daily_demand_forecast)}天")
+            # print(f"  📊 使用现有日度预测(跳过 DPS/SC): {len(daily_demand_forecast)}天")
 
         # 6) 生成当日订单（consumption 保持原逻辑）
         # 注意：标识符字段已在main_integration.py中统一标准化，无需重复处理
@@ -646,9 +646,9 @@ def run_daily_order_generation(
 
         # 10) 落盘
         output_file = f"{output_dir}/module1_output_{simulation_date.strftime('%Y%m%d')}.xlsx"
-        save_module1_output_with_supply_demand(orders_df, shipment_df, supply_demand_df, output_file)
+        save_module1_output_with_supply_demand(orders_df, shipment_df, supply_demand_df, output_file, cut_df)
 
-        print(f"✅ Module1 完成 - 生成 {len(orders_df)} 个订单, {len(shipment_df)} 个发货, {len(cut_df)} 个cut")
+        # print(f"✅ Module1 完成 - 生成 {len(orders_df)} 个订单, {len(shipment_df)} 个发货, {len(cut_df)} 个cut")
         return {
             'orders_df': orders_df,
             'shipment_df': shipment_df,
@@ -715,26 +715,30 @@ def save_module1_output_with_supply_demand(
     orders_df: pd.DataFrame, 
     shipment_df: pd.DataFrame, 
     supply_demand_df: pd.DataFrame,
-    output_file: str
+    output_file: str,
+    cut_df: pd.DataFrame = None
 ):
-    """保存Module1输出到Excel文件（包括SupplyDemandLog）"""
+    """保存Module1输出到Excel文件（包括SupplyDemandLog和CutLog）"""
     try:
         with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
             # 确保输出时标识符字段为字符串格式
             _normalize_identifiers(orders_df).to_excel(writer, sheet_name='OrderLog', index=False)
             _normalize_identifiers(shipment_df).to_excel(writer, sheet_name='ShipmentLog', index=False)
+            if cut_df is not None and not cut_df.empty:
+                _normalize_identifiers(cut_df).to_excel(writer, sheet_name='CutLog', index=False)
             _normalize_identifiers(supply_demand_df).to_excel(writer, sheet_name='SupplyDemandLog', index=False)
             
             # 创建汇总数据
             summary_data = pd.DataFrame([{
                 'Total_Orders': len(orders_df),
                 'Total_Shipments': len(shipment_df),
+                'Total_Cuts': len(cut_df) if cut_df is not None else 0,
                 'Total_SupplyDemand': len(supply_demand_df),
                 'Date': orders_df['date'].iloc[0] if not orders_df.empty else 'N/A'
             }])
             summary_data.to_excel(writer, sheet_name='Summary', index=False)
         
-        print(f"💾 Module1 输出已保存: {output_file}")
+        # print(f"💾 Module1 输出已保存: {output_file}")
         
     except Exception as e:
         print(f"⚠️  Module1 输出保存失败: {e}")
@@ -821,6 +825,6 @@ def generate_shipment_with_inventory_check(
             lambda row: f"ORD_{simulation_date.strftime('%Y%m%d')}_{row.name}", axis=1
         )
     
-    print(f"  📦 基于[期初+当日GR]生成: {len(shipment_df)} 个shipment, {len(cut_df)} 个cut")
+    # print(f"  📦 基于[期初+当日GR]生成: {len(shipment_df)} 个shipment, {len(cut_df)} 个cut")
     return shipment_df, cut_df
 

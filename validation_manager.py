@@ -224,8 +224,8 @@ class ValidationManager:
             if col not in df.columns:
                 continue
                 
-            # 检查负数或零
-            invalid_values = df[df[col] <= 0]
+            # 检查负数
+            invalid_values = df[df[col] < 0]
             if not invalid_values.empty:
                 self.add_error(
                     module,

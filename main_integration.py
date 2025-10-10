@@ -10,6 +10,8 @@ from pathlib import Path
 import sys
 from datetime import datetime
 import os
+import json
+import glob
 
 # 导入所有模块
 from orchestrator import create_orchestrator
@@ -25,43 +27,297 @@ import module5
 import module6
 
 
+# ========================= 断点续跑功能 =========================
+
+def detect_last_complete_date(output_base_dir: str, start_date: str, end_date: str) -> str:
+    """
+    检测最后一个完整处理的日期
+    
+    Args:
+        output_base_dir: 输出基础目录
+        start_date: 原始开始日期
+        end_date: 原始结束日期
+        
+    Returns:
+        str: 最后完整处理的日期(YYYY-MM-DD)，如果没有则返回None
+    """
+    print(f"🔍 检测中断点...")
+    
+    output_dir = Path(output_base_dir)
+    orchestrator_dir = output_dir / "orchestrator"
+    
+    if not orchestrator_dir.exists():
+        print(f"  📁 输出目录不存在，将从头开始: {orchestrator_dir}")
+        return None
+    
+    # 生成日期范围
+    date_range = pd.date_range(start_date, end_date, freq='D')
+    
+    last_complete_date = None
+    
+    for current_date in date_range:
+        date_str = current_date.strftime('%Y%m%d')
+        
+        # 检查关键状态文件是否都存在
+        required_files = [
+            f"unrestricted_inventory_{date_str}.csv",
+            f"production_gr_{date_str}.csv", 
+            f"shipment_log_{date_str}.csv"
+        ]
+        
+        # 检查文件完整性
+        all_files_exist = True
+        for file_name in required_files:
+            file_path = orchestrator_dir / file_name
+            if not file_path.exists():
+                all_files_exist = False
+                break
+                
+        if all_files_exist:
+            # 验证文件不为空
+            try:
+                inventory_file = orchestrator_dir / f"unrestricted_inventory_{date_str}.csv"
+                df = pd.read_csv(inventory_file)
+                if len(df) >= 0:  # 允许空库存，但文件格式要正确
+                    last_complete_date = current_date.strftime('%Y-%m-%d')
+                    print(f"  ✅ 发现完整日期: {last_complete_date}")
+                else:
+                    break
+            except Exception as e:
+                print(f"  ⚠️  日期 {current_date.strftime('%Y-%m-%d')} 文件损坏: {e}")
+                break
+        else:
+            print(f"  ❌ 日期 {current_date.strftime('%Y-%m-%d')} 文件不完整")
+            break
+    
+    if last_complete_date:
+        print(f"  🎯 检测到最后完整日期: {last_complete_date}")
+    else:
+        print(f"  📝 未发现完整日期，将从头开始")
+        
+    return last_complete_date
+
+def restore_orchestrator_state(orchestrator, restore_date: str, output_base_dir: str):
+    """
+    从指定日期的状态文件恢复Orchestrator状态
+    
+    Args:
+        orchestrator: Orchestrator实例
+        restore_date: 恢复日期 (YYYY-MM-DD)
+        output_base_dir: 输出基础目录
+    """
+    print(f"🔄 从日期 {restore_date} 恢复Orchestrator状态...")
+    
+    output_dir = Path(output_base_dir)
+    orchestrator_dir = output_dir / "orchestrator"
+    date_str = pd.to_datetime(restore_date).strftime('%Y%m%d')
+    
+    try:
+        # 1. 恢复无限制库存
+        inventory_file = orchestrator_dir / f"unrestricted_inventory_{date_str}.csv"
+        if inventory_file.exists():
+            inventory_df = pd.read_csv(inventory_file)
+            # 重建库存字典
+            orchestrator.unrestricted_inventory = {}
+            for _, row in inventory_df.iterrows():
+                key = (str(row['material']), str(row['location']))
+                orchestrator.unrestricted_inventory[key] = float(row['quantity'])
+            print(f"  ✅ 恢复库存记录: {len(inventory_df)} 条")
+        
+        # 2. 恢复在途库存
+        intransit_file = orchestrator_dir / f"planning_intransit_{date_str}.csv"
+        if intransit_file.exists():
+            intransit_df = pd.read_csv(intransit_file)
+            orchestrator.planning_intransit = intransit_df.to_dict('records')
+            print(f"  ✅ 恢复在途记录: {len(intransit_df)} 条")
+        
+        # 3. 恢复开放调拨
+        deployment_file = orchestrator_dir / f"open_deployment_{date_str}.csv"
+        if deployment_file.exists():
+            deployment_df = pd.read_csv(deployment_file)
+            orchestrator.open_deployment = deployment_df.to_dict('records')
+            print(f"  ✅ 恢复调拨记录: {len(deployment_df)} 条")
+        
+        # 4. 恢复空间配额
+        space_file = orchestrator_dir / f"space_quota_{date_str}.csv"
+        if space_file.exists():
+            space_df = pd.read_csv(space_file)
+            orchestrator.space_quota = {}
+            for _, row in space_df.iterrows():
+                key = str(row['location'])
+                orchestrator.space_quota[key] = {
+                    'used': float(row['used_capacity']),
+                    'total': float(row['total_capacity'])
+                }
+            print(f"  ✅ 恢复空间配额: {len(space_df)} 条")
+        
+        # 5. 恢复历史日志（近期的部分）
+        # 扫描最近几天的日志文件
+        restore_date_obj = pd.to_datetime(restore_date)
+        log_start_date = restore_date_obj - pd.Timedelta(days=7)  # 恢复最近7天的日志
+        
+        orchestrator.shipment_log = []
+        orchestrator.production_gr = []
+        orchestrator.delivery_gr = []
+        
+        current_scan_date = log_start_date
+        while current_scan_date <= restore_date_obj:
+            scan_date_str = current_scan_date.strftime('%Y%m%d')
+            
+            # 恢复发货日志
+            shipment_file = orchestrator_dir / f"shipment_log_{scan_date_str}.csv"
+            if shipment_file.exists():
+                shipment_df = pd.read_csv(shipment_file)
+                orchestrator.shipment_log.extend(shipment_df.to_dict('records'))
+            
+            # 恢复生产入库日志
+            production_file = orchestrator_dir / f"production_gr_{scan_date_str}.csv"
+            if production_file.exists():
+                production_df = pd.read_csv(production_file)
+                orchestrator.production_gr.extend(production_df.to_dict('records'))
+            
+            # 恢复收货日志
+            delivery_file = orchestrator_dir / f"delivery_gr_{scan_date_str}.csv"
+            if delivery_file.exists():
+                delivery_df = pd.read_csv(delivery_file)
+                orchestrator.delivery_gr.extend(delivery_df.to_dict('records'))
+            
+            current_scan_date += pd.Timedelta(days=1)
+        
+        print(f"  ✅ 恢复发货日志: {len(orchestrator.shipment_log)} 条")
+        print(f"  ✅ 恢复生产日志: {len(orchestrator.production_gr)} 条")
+        print(f"  ✅ 恢复收货日志: {len(orchestrator.delivery_gr)} 条")
+        
+        # 6. 设置当前日期
+        orchestrator.current_date = restore_date_obj
+        
+        print(f"  🎯 Orchestrator状态恢复完成")
+        
+    except Exception as e:
+        print(f"  ❌ 状态恢复失败: {e}")
+        raise
+
+def check_resume_capability(output_base_dir: str, start_date: str, end_date: str):
+    """
+    检查是否可以续跑，返回续跑信息
+    
+    Returns:
+        dict: {
+            'can_resume': bool,
+            'last_complete_date': str,  
+            'resume_from_date': str,
+            'days_completed': int,
+            'days_remaining': int
+        }
+    """
+    last_complete_date = detect_last_complete_date(output_base_dir, start_date, end_date)
+    
+    if last_complete_date is None:
+        return {
+            'can_resume': False,
+            'last_complete_date': None,
+            'resume_from_date': start_date,
+            'days_completed': 0,
+            'days_remaining': len(pd.date_range(start_date, end_date, freq='D'))
+        }
+    
+    # 计算续跑信息
+    last_date_obj = pd.to_datetime(last_complete_date)
+    resume_from_date = (last_date_obj + pd.Timedelta(days=1)).strftime('%Y-%m-%d')
+    
+    total_dates = pd.date_range(start_date, end_date, freq='D')
+    completed_dates = pd.date_range(start_date, last_complete_date, freq='D')
+    
+    # 检查是否已经全部完成
+    if last_complete_date >= end_date:
+        return {
+            'can_resume': False,
+            'last_complete_date': last_complete_date,
+            'resume_from_date': None,
+            'days_completed': len(completed_dates),
+            'days_remaining': 0,
+            'already_completed': True
+        }
+    
+    remaining_dates = pd.date_range(resume_from_date, end_date, freq='D')
+    
+    return {
+        'can_resume': True,
+        'last_complete_date': last_complete_date,
+        'resume_from_date': resume_from_date,
+        'days_completed': len(completed_dates),
+        'days_remaining': len(remaining_dates)
+    }
+
+# ========================= 原有函数 =========================
+
 # 标识符字段标准化函数（统一处理所有配置表）
 def _normalize_location(location_str) -> str:
-    """Normalize location string by padding with leading zeros to 4 digits"""
+    """Normalize location string by padding with leading zeros to 4 digits if numeric"""
+    if pd.isna(location_str) or location_str is None:
+        return ""
+    
+    location_str = str(location_str).strip()
+    
     try:
-        return str(int(location_str)).zfill(4)
+        # 检查是否为纯数字字符串
+        if location_str.isdigit():
+            return str(int(location_str)).zfill(4)
+        else:
+            # 非数字location（如A888），直接返回字符串，不做padding
+            return location_str
     except (ValueError, TypeError):
-        return str(location_str).zfill(4)
+        return str(location_str)
 
 def _normalize_material(material_str) -> str:
     """Normalize material string to ensure consistent format"""
-    if material_str is None:
+    if material_str is None or material_str == '' or str(material_str).lower() in ['nan', 'none', '<na>']:
         return ""
     
     try:
         # 如果是数字（int或float），转换为整数字符串以移除多余的.0
-        if isinstance(material_str, (int, float)) or str(material_str).replace('.', '').isdigit():
+        if isinstance(material_str, (int, float)) or str(material_str).replace('.', '').replace('-', '').isdigit():
             return str(int(float(material_str)))
         else:
             # 非数字material，直接返回字符串
-            return str(material_str)
+            return str(material_str).strip()
     except (ValueError, TypeError):
         # 如果转换失败，直接返回字符串
-        return str(material_str)
+        return str(material_str).strip()
 
 def _normalize_sending(sending_str) -> str:
-    """Normalize sending string by padding with leading zeros to 4 digits"""
+    """Normalize sending string by padding with leading zeros to 4 digits if numeric"""
+    if pd.isna(sending_str) or sending_str is None:
+        return ""
+    
+    sending_str = str(sending_str).strip()
+    
     try:
-        return str(int(sending_str)).zfill(4)
+        # 检查是否为纯数字字符串
+        if sending_str.isdigit():
+            return str(int(sending_str)).zfill(4)
+        else:
+            # 非数字sending（如A888），直接返回字符串，不做padding
+            return sending_str
     except (ValueError, TypeError):
-        return str(sending_str).zfill(4)
+        return str(sending_str)
 
 def _normalize_receiving(receiving_str) -> str:
-    """Normalize receiving string by padding with leading zeros to 4 digits"""
+    """Normalize receiving string by padding with leading zeros to 4 digits if numeric"""
+    if pd.isna(receiving_str) or receiving_str is None:
+        return ""
+    
+    receiving_str = str(receiving_str).strip()
+    
     try:
-        return str(int(receiving_str)).zfill(4)
+        # 检查是否为纯数字字符串
+        if receiving_str.isdigit():
+            return str(int(receiving_str)).zfill(4)
+        else:
+            # 非数字receiving（如A888），直接返回字符串，不做padding
+            return receiving_str
     except (ValueError, TypeError):
-        return str(receiving_str).zfill(4)
+        return str(receiving_str)
 
 def _normalize_identifiers(df: pd.DataFrame) -> pd.DataFrame:
     """Normalize identifier columns to string format with proper formatting"""
@@ -69,13 +325,14 @@ def _normalize_identifiers(df: pd.DataFrame) -> pd.DataFrame:
         return df
     
     # Define identifier columns that need string conversion
-    identifier_cols = ['material', 'location', 'sending', 'receiving', 'sourcing', 'dps_location', 'from_material', 'to_material', 'line', 'delegate_line']
+    identifier_cols = ['material', 'location', 'sending', 'receiving', 'sourcing', 'dps_location', 'from_material', 'to_material', 'line', 'delegate_line', 'changeover_id']
     
     df = df.copy()
     for col in identifier_cols:
         if col in df.columns:
-            # Convert to string and handle NaN values
-            df[col] = df[col].astype('string')
+            # 🔧 关键修复：使用 object dtype (Python str) 而不是 pandas StringDtype
+            # 这样可以确保与后续 astype(str) 的一致性
+            df[col] = df[col].astype(str)
             # Apply specific normalization for location-type fields
             if col in ['location', 'dps_location']:
                 df[col] = df[col].apply(_normalize_location)
@@ -86,7 +343,12 @@ def _normalize_identifiers(df: pd.DataFrame) -> pd.DataFrame:
             # Apply specific normalization for material-type fields
             elif col in ['material', 'from_material', 'to_material']:
                 df[col] = df[col].apply(_normalize_material)
+            # changeover_id 和 line 只需要转换为字符串，不需要特殊格式化
+            # (已在 astype('string') 时处理)
             # For other identifier columns (line, delegate_line, etc), ensure they are properly formatted strings
+            elif col in ['changeover_id', 'line', 'delegate_line']:
+                # 这些字段只需要保持为字符串，不需要额外处理
+                pass
             else:
                 df[col] = df[col].apply(lambda x: str(x) if pd.notna(x) else "")
     
@@ -134,6 +396,10 @@ def run_module4_integrated(
         net_demand_df = module4.load_daily_net_demand(module3_output_dir, simulation_date)
         net_demand_df = module4._cast_identifiers_to_str(net_demand_df, ['material', 'location'])
         
+        # 🔧 修复Module3→Module4数据流：标准化material字段，移除.0后缀
+        if not net_demand_df.empty and 'material' in net_demand_df.columns:
+            net_demand_df['material'] = net_demand_df['material'].apply(_normalize_material).astype('string')
+        
         if net_demand_df.empty:
             print(f"Warning: No NetDemand data for {simulation_date.strftime('%Y-%m-%d')}. Generating empty output.")
         
@@ -152,9 +418,54 @@ def run_module4_integrated(
             net_demand_df, mlcfg, simulation_date, simulation_start, issues
         )
         
+        # 🔧 关键修复：标准化uncon_plan中的material字段，确保与changeover matrix一致
+        if not uncon_plan.empty and 'material' in uncon_plan.columns:
+            # print(f"\n🔍 DEBUG uncon_plan 标准化前:")
+            # print(f"  material dtype: {uncon_plan['material'].dtype}")
+            # print(f"  前5个 material: {list(uncon_plan['material'].head())}")
+            
+            uncon_plan['material'] = uncon_plan['material'].apply(_normalize_material).astype('string')
+            
+            # print(f"\n  标准化后:")
+            # print(f"  material dtype: {uncon_plan['material'].dtype}")
+            # print(f"  前5个 material: {list(uncon_plan['material'].head())}")
+            # print(f"  Line 列: {list(uncon_plan['line'].unique())}")
+        
         # 设置产能分配参数
-        co_mat = m4_config['M4_ChangeoverMatrix'].set_index(['from_material', 'to_material'])['changeover_id']
-        co_def_df = m4_config['M4_ChangeoverDefinition']
+        # 🔧 关键修复：标准化 ChangeoverMatrix 中的字段为字符串类型
+        co_mat_df = m4_config['M4_ChangeoverMatrix'].copy()
+        
+        # 🔍 调试：显示原始数据类型
+        # print(f"\n🔍 DEBUG M4 ChangeoverMatrix 数据类型:")
+        # print(f"  原始 from_material dtype: {co_mat_df['from_material'].dtype}")
+        # print(f"  原始 to_material dtype: {co_mat_df['to_material'].dtype}")
+        # print(f"  原始 changeover_id dtype: {co_mat_df['changeover_id'].dtype}")
+        # print(f"  前5条记录:")
+        # print(co_mat_df.head())
+        
+        co_mat_df['from_material'] = co_mat_df['from_material'].astype(str)
+        co_mat_df['to_material'] = co_mat_df['to_material'].astype(str)
+        co_mat_df['changeover_id'] = co_mat_df['changeover_id'].astype(str)
+        
+        # print(f"\n  转换后 from_material dtype: {co_mat_df['from_material'].dtype}")
+        # print(f"  转换后 to_material dtype: {co_mat_df['to_material'].dtype}")
+        # print(f"  转换后 changeover_id dtype: {co_mat_df['changeover_id'].dtype}")
+        # print(f"  转换后前5条记录:")
+        # print(co_mat_df.head())
+        
+        # Note: Changeover 去重已在 load_configuration 中完成
+        
+        co_mat = co_mat_df.set_index(['from_material', 'to_material'])['changeover_id']
+        # 对MultiIndex进行排序以避免性能警告
+        co_mat = co_mat.sort_index()
+        
+        # print(f"\n  Co_mat 索引类型: {co_mat.index.dtypes}")
+        # print(f"  Co_mat 总条目数: {len(co_mat)}")
+        # print(f"  前5个索引: {list(co_mat.index[:5])}")
+        
+        # 🔧 关键修复：标准化 ChangeoverDefinition 中的 changeover_id 为字符串类型
+        co_def_df = m4_config['M4_ChangeoverDefinition'].copy()
+        co_def_df['changeover_id'] = co_def_df['changeover_id'].astype(str)
         co_def = co_def_df.set_index(['changeover_id', 'line'])['time'].to_dict()
         
         cap_df = m4_config['M4_LineCapacity'].copy()
@@ -163,9 +474,25 @@ def run_module4_integrated(
         rate_map = mlcfg.set_index(['material', 'delegate_line'])['prd_rate']
         rate_map.index.set_names(['material', 'line'], inplace=True)
         
-        # 分配产能
+        # 加载前一天产线状态用于跨天转产连续性
+        previous_line_states = module4.load_line_state(output_dir, simulation_date)
+        if previous_line_states:
+            print(f"  🔄 加载前一天产线状态: {list(previous_line_states.keys())}")
+        else:
+            print(f"  🔄 无前一天产线状态 - 全新开始")
+        
+        # 加载之前所有仿真日期已分配的产能
+        previously_allocated_capacity = module4.load_all_previous_capacity(output_dir, simulation_date)
+        if previously_allocated_capacity:
+            print(f"  🔄 加载之前已分配产能: {len(previously_allocated_capacity)} 个产能分配")
+        else:
+            print(f"  🔄 无之前已分配产能 - 全新开始")
+        
+        # 分配产能（支持跨天转产连续性和产能跟踪）
         plan_log, exceed_log = module4.centralized_capacity_allocation_with_changeover(
-            uncon_plan, cap_df, rate_map, co_mat, co_def, mlcfg
+            uncon_plan, cap_df, rate_map, co_mat, co_def, mlcfg,
+            previous_line_states=previous_line_states, simulation_date=simulation_date,
+            previously_allocated_capacity=previously_allocated_capacity, issues=issues
         )
         
         # 仿真生产可靠性
@@ -174,6 +501,18 @@ def run_module4_integrated(
         
         # 计算换产指标
         changeover_log = module4.calculate_changeover_metrics(plan_log, co_def_df)
+        
+        # 提取并保存当天产线状态供下一天使用（带跨天转产检测）
+        current_line_states = module4.extract_line_states_from_plan(plan_log, cap_df, co_def, simulation_date, rate_map.to_dict())
+        if current_line_states:
+            module4.save_line_state(output_dir, simulation_date, current_line_states)
+            print(f"  💾 保存当天产线状态: {list(current_line_states.keys())}")
+        
+        # 提取并保存当天分配的产能供后续仿真日期使用
+        current_allocated_capacity = module4.extract_allocated_capacity_from_plan(plan_log, rate_map.to_dict(), co_def)
+        if current_allocated_capacity:
+            module4.save_allocated_capacity(output_dir, simulation_date, current_allocated_capacity)
+            print(f"  💾 保存当天分配产能: {len(current_allocated_capacity)} 个产能分配 (小时单位)")
         
         # 去重问题
         issues = module4.dedup_issues(issues)
@@ -191,6 +530,11 @@ def run_module4_integrated(
         if not plan_log.empty and 'available_date' in plan_log.columns:
             plan_log['available_date'] = pd.to_datetime(plan_log['available_date'])
             current_production = plan_log[plan_log['available_date'] >= simulation_date.normalize()]
+            
+            # 确保返回的数据标识符已标准化，与orchestrator期望格式一致
+            if not current_production.empty:
+                current_production = _normalize_identifiers(current_production)
+                
             return current_production
         else:
             return pd.DataFrame()
@@ -267,10 +611,10 @@ def load_all_historical_production_plans(module4_output_dir: str, current_date: 
             combined_production['available_date'].dt.normalize() == current_date.normalize()
         ]
         
-        if not daily_available.empty:
-            print(f"  📦 发现当日入库的历史生产: {len(daily_available)} 条记录")
-            for _, row in daily_available.iterrows():
-                print(f"    {row['material']}@{row['location']}: {row['produced_qty']} (生产日期: {row['source_date'].strftime('%Y-%m-%d')})")
+        # if not daily_available.empty:
+        #     print(f"  📦 发现当日入库的历史生产: {len(daily_available)} 条记录")
+        #     for _, row in daily_available.iterrows():
+        #         print(f"    {row['material']}@{row['location']}: {row['produced_qty']} (生产日期: {row['source_date'].strftime('%Y-%m-%d')})")
         
         return daily_available[['material', 'location', 'line', 'simulation_date', 'available_date', 'produced_qty']]
     
@@ -403,7 +747,7 @@ def load_configuration(config_path: str) -> dict:
         for sheet_name, df in config_dict.items():
             if isinstance(df, pd.DataFrame) and not df.empty:
                 # 检查是否包含标识符字段
-                identifier_cols = ['material', 'location', 'sending', 'receiving', 'sourcing', 'dps_location', 'from_material', 'to_material', 'line', 'delegate_line']
+                identifier_cols = ['material', 'location', 'sending', 'receiving', 'sourcing', 'dps_location', 'from_material', 'to_material', 'line', 'delegate_line', 'changeover_id']
                 has_identifiers = any(col in df.columns for col in identifier_cols)
                 
                 if has_identifiers:
@@ -426,6 +770,88 @@ def load_configuration(config_path: str) -> dict:
         else:
             print(f"✅ 所有配置表的标识符字段已是标准格式")
         
+        # 🔧 Changeover 配置校验和去重
+        if 'M4_ChangeoverMatrix' in config_dict and not config_dict['M4_ChangeoverMatrix'].empty:
+            print(f"\n🔧 校验 Changeover Matrix 配置...")
+            co_matrix = config_dict['M4_ChangeoverMatrix']
+            
+            # 检查重复定义
+            duplicates = co_matrix[co_matrix.duplicated(subset=['from_material', 'to_material'], keep=False)]
+            if not duplicates.empty:
+                print(f"  ⚠️  发现 {len(duplicates)} 条重复的 changeover matrix 定义")
+                
+                # 详细检查每组重复
+                for (from_mat, to_mat), group in duplicates.groupby(['from_material', 'to_material']):
+                    unique_coids = group['changeover_id'].unique()
+                    if len(unique_coids) > 1:
+                        # 不同的 changeover_id - 严重错误
+                        print(f"    ❌ ERROR: {from_mat} → {to_mat} 有 {len(unique_coids)} 个不同的 changeover_id: {list(unique_coids)}")
+                    else:
+                        # 相同的 changeover_id - 只是重复
+                        print(f"    ⚠️  {from_mat} → {to_mat} 有 {len(group)} 条重复记录 (changeover_id={unique_coids[0]})")
+                
+                # 去重（保留第一条）
+                original_count = len(co_matrix)
+                config_dict['M4_ChangeoverMatrix'] = co_matrix.drop_duplicates(
+                    subset=['from_material', 'to_material'], keep='first'
+                )
+                removed_count = original_count - len(config_dict['M4_ChangeoverMatrix'])
+                print(f"  🔧 已去除 {removed_count} 条重复记录")
+            else:
+                print(f"  ✅ Changeover Matrix 无重复定义")
+        
+        # 🔧 ChangeoverDefinition 配置校验和去重
+        if 'M4_ChangeoverDefinition' in config_dict and not config_dict['M4_ChangeoverDefinition'].empty:
+            print(f"\n🔧 校验 Changeover Definition 配置...")
+            co_def = config_dict['M4_ChangeoverDefinition']
+            
+            # 检查重复定义
+            duplicates = co_def[co_def.duplicated(subset=['changeover_id', 'line'], keep=False)]
+            if not duplicates.empty:
+                print(f"  ⚠️  发现 {len(duplicates)} 条重复的 changeover definition 定义")
+                
+                # 详细检查每组重复
+                for (coid, line), group in duplicates.groupby(['changeover_id', 'line']):
+                    unique_times = group['time'].unique()
+                    if len(unique_times) > 1:
+                        # 不同的 time - 严重错误
+                        print(f"    ❌ ERROR: changeover_id={coid}, line={line} 有 {len(unique_times)} 个不同的 time 值: {list(unique_times)}")
+                    else:
+                        # 相同的参数 - 只是重复
+                        print(f"    ⚠️  changeover_id={coid}, line={line} 有 {len(group)} 条重复记录 (time={unique_times[0]})")
+                
+                # 去重（保留第一条）
+                original_count = len(co_def)
+                config_dict['M4_ChangeoverDefinition'] = co_def.drop_duplicates(
+                    subset=['changeover_id', 'line'], keep='first'
+                )
+                removed_count = original_count - len(config_dict['M4_ChangeoverDefinition'])
+                print(f"  🔧 已去除 {removed_count} 条重复记录")
+            else:
+                print(f"  ✅ Changeover Definition 无重复定义")
+        
+        # Module4 配置表映射（为了向后兼容）
+        print(f"\n🔧 正在映射 Module4 配置表...")
+        module4_mappings = {
+            'M4_MaterialLocationLineCfg': 'MaterialLocationLineCfg',
+            'M4_LineCapacity': 'LineCapacity',
+            'M4_ChangeoverMatrix': 'ChangeoverMatrix',
+            'M4_ChangeoverDefinition': 'ChangeoverDefinition',
+            'M4_ProductionReliability': 'ProductionReliability'
+        }
+
+        mapped_count = 0
+        for original_key, mapped_key in module4_mappings.items():
+            if original_key in config_dict and not config_dict[original_key].empty:
+                config_dict[mapped_key] = config_dict[original_key]
+                print(f"  🔧 映射 {original_key} → {mapped_key}")
+                mapped_count += 1
+
+        if mapped_count > 0:
+            print(f"✅ 已映射 {mapped_count} 个 Module4 配置表")
+        else:
+            print(f"✅ 无需映射 Module4 配置表")
+        
         return config_dict
         
     except Exception as e:
@@ -436,7 +862,8 @@ def run_integrated_simulation(
     config_path: str,
     start_date: str,
     end_date: str,
-    output_base_dir: str = "./integrated_output"
+    output_base_dir: str = "./integrated_output",
+    force_restart: bool = False
 ):
     """
     运行完整的集成仿真
@@ -446,6 +873,7 @@ def run_integrated_simulation(
         start_date: 仿真开始日期 (YYYY-MM-DD)
         end_date: 仿真结束日期 (YYYY-MM-DD)
         output_base_dir: 输出基础目录
+        force_restart: 强制从头开始，忽略续跑能力
     """
     print(f"🚀 开始集成仿真: {start_date} 到 {end_date}")
     print("=" * 60)
@@ -466,8 +894,40 @@ def run_integrated_simulation(
     
     print("✅ 配置验证通过，开始仿真...")
     
-    # 2. 初始化时间管理器
-    time_manager = initialize_time_manager(start_date)
+    # 2. 检查续跑能力
+    actual_start_date = start_date
+    is_resuming = False
+    resume_info = None
+    
+    if force_restart:
+        print(f"🔄 强制重启模式：忽略任何现有状态，从头开始")
+    else:
+        resume_info = check_resume_capability(output_base_dir, start_date, end_date)
+        
+        if resume_info.get('already_completed', False):
+            print(f"🎉 仿真已完成！最后处理日期: {resume_info['last_complete_date']}")
+            print(f"   总共处理了 {resume_info['days_completed']} 天")
+            return {
+                'validation_passed': True,
+                'simulation_completed': True,
+                'already_completed': True,
+                'dates_processed': resume_info['days_completed'],
+                'last_complete_date': resume_info['last_complete_date']
+            }
+        elif resume_info['can_resume']:
+            print(f"🔄 检测到未完成的仿真，支持续跑:")
+            print(f"   已完成: {resume_info['days_completed']} 天 (到 {resume_info['last_complete_date']})")
+            print(f"   剩余: {resume_info['days_remaining']} 天 (从 {resume_info['resume_from_date']} 开始)")
+            
+            # 提供选择（在实际实现中可以加入用户确认）
+            print(f"   ✅ 将从 {resume_info['resume_from_date']} 继续运行")
+            actual_start_date = resume_info['resume_from_date'] 
+            is_resuming = True
+        else:
+            print(f"📝 未发现可续跑的状态，将从头开始")
+    
+    # 3. 初始化时间管理器
+    time_manager = initialize_time_manager(actual_start_date)
     
     # 3. 创建输出目录
     output_dir = Path(output_base_dir)
@@ -498,22 +958,42 @@ def run_integrated_simulation(
         output_dir=str(orchestrator_output_dir)
     )
     
-    # 设置初始库存
-    if 'M1_InitialInventory' in config_dict and not config_dict['M1_InitialInventory'].empty:
-        orchestrator.initialize_inventory(config_dict['M1_InitialInventory'])
+    if is_resuming:
+        # 续跑模式：恢复状态
+        print(f"\n🔄 续跑模式：恢复Orchestrator状态")
+        restore_orchestrator_state(orchestrator, resume_info['last_complete_date'], output_base_dir)
+        
+        # 设置空间容量（续跑时也需要重新设置空间容量配置）
+        if 'Global_SpaceCapacity' in config_dict and not config_dict['Global_SpaceCapacity'].empty:
+            orchestrator.set_space_capacity(config_dict['Global_SpaceCapacity'])
     else:
-        print("⚠️  未找到初始库存配置，使用空库存")
-        orchestrator.initialize_inventory(pd.DataFrame(columns=['material', 'location', 'quantity']))
+        # 全新开始：设置初始状态
+        print(f"\n🆕 全新开始：设置初始状态")
+        
+        # 设置初始库存
+        if 'M1_InitialInventory' in config_dict and not config_dict['M1_InitialInventory'].empty:
+            orchestrator.initialize_inventory(config_dict['M1_InitialInventory'])
+        else:
+            print("⚠️  未找到初始库存配置，使用空库存")
+            orchestrator.initialize_inventory(pd.DataFrame(columns=['material', 'location', 'quantity']))
+        
+        # 设置空间容量
+        if 'Global_SpaceCapacity' in config_dict and not config_dict['Global_SpaceCapacity'].empty:
+            orchestrator.set_space_capacity(config_dict['Global_SpaceCapacity'])
+        else:
+            print("⚠️  未找到空间容量配置")
     
-    # 设置空间容量
-    if 'Global_SpaceCapacity' in config_dict and not config_dict['Global_SpaceCapacity'].empty:
-        orchestrator.set_space_capacity(config_dict['Global_SpaceCapacity'])
+    # 生成仿真日期范围（使用实际开始日期）
+    sim_dates = pd.date_range(actual_start_date, end_date, freq='D')
+    total_days = len(pd.date_range(start_date, end_date, freq='D'))
+    
+    if is_resuming:
+        print(f"📅 续跑日期范围: {len(sim_dates)} 天 (剩余)")
+        print(f"   原始总天数: {total_days}")
+        print(f"   已完成: {resume_info['days_completed']} 天")
+        print(f"   剩余处理: {len(sim_dates)} 天")
     else:
-        print("⚠️  未找到空间容量配置")
-    
-    # 生成仿真日期范围
-    sim_dates = pd.date_range(start_date, end_date, freq='D')
-    print(f"📅 仿真日期范围: {len(sim_dates)} 天")
+        print(f"📅 仿真日期范围: {len(sim_dates)} 天")
     
     # 每日循环执行
     all_results = {
@@ -525,7 +1005,15 @@ def run_integrated_simulation(
     }
     
     for i, current_date in enumerate(sim_dates, 1):
-        print(f"\n{'='*20} 第 {i}/{len(sim_dates)} 天: {current_date.strftime('%Y-%m-%d')} {'='*20}")
+        # 计算实际的总进度（考虑续跑情况）
+        if is_resuming:
+            actual_day_number = resume_info['days_completed'] + i
+            total_original_days = total_days
+            progress_info = f"第 {actual_day_number}/{total_original_days} 天 (续跑第 {i}/{len(sim_dates)} 天)"
+        else:
+            progress_info = f"第 {i}/{len(sim_dates)} 天"
+            
+        print(f"\n{'='*20} {progress_info}: {current_date.strftime('%Y-%m-%d')} {'='*20}")
         
         # ==================== 每日开始：GR入库处理 ====================
         try:
@@ -642,17 +1130,17 @@ def run_integrated_simulation(
                 # 获取部署计划数据
                 if m5_result and 'deployment_plan' in m5_result:
                     deployment_plan_df = m5_result['deployment_plan']
-                    print(f"    🔍 Module5返回的部署计划: {len(deployment_plan_df)} 条记录")
+                    # print(f"    🔍 Module5返回的部署计划: {len(deployment_plan_df)} 条记录")
                     
                     if not deployment_plan_df.empty:
-                        print(f"    📊 部署计划示例数据:")
-                        print(f"    列名: {list(deployment_plan_df.columns)}")
-                        if len(deployment_plan_df) > 0:
-                            first_row = deployment_plan_df.iloc[0]
-                            print(f"    第一行数据: {dict(first_row)}")
-                            if 'deployed_qty_invCon' in deployment_plan_df.columns:
-                                qty_stats = deployment_plan_df['deployed_qty_invCon'].describe()
-                                print(f"    deployed_qty_invCon统计: {qty_stats}")
+                        # print(f"    📊 部署计划示例数据:")
+                        # print(f"    列名: {list(deployment_plan_df.columns)}")
+                        # if len(deployment_plan_df) > 0:
+                        #     first_row = deployment_plan_df.iloc[0]
+                        #     print(f"    第一行数据: {dict(first_row)}")
+                        #     if 'deployed_qty_invCon' in deployment_plan_df.columns:
+                        #         qty_stats = deployment_plan_df['deployed_qty_invCon'].describe()
+                        #         print(f"    deployed_qty_invCon统计: {qty_stats}")
                         
                         # 过滤出有实际部署量的计划，排除自循环（sending=receiving）
                         valid_deployment = deployment_plan_df[
@@ -680,11 +1168,11 @@ def run_integrated_simulation(
                             # 🔧 标准化标识符字段，确保数据类型一致性
                             m5_deployment_df = _normalize_identifiers(m5_deployment_df)
                             
-                            print(f"    ✅ 最终传递给Orchestrator的数据: {len(m5_deployment_df)} 条")
-                            if len(m5_deployment_df) > 0:
-                                final_qty_stats = m5_deployment_df['deployed_qty'].describe()
-                                print(f"    deployed_qty统计: {final_qty_stats}")
-                                print(f"    数据类型: material={m5_deployment_df['material'].dtype}, sending={m5_deployment_df['sending'].dtype}, receiving={m5_deployment_df['receiving'].dtype}")
+                            # print(f"    ✅ 最终传递给Orchestrator的数据: {len(m5_deployment_df)} 条")
+                            # if len(m5_deployment_df) > 0:
+                            #     final_qty_stats = m5_deployment_df['deployed_qty'].describe()
+                            #     print(f"    deployed_qty统计: {final_qty_stats}")
+                            #     print(f"    数据类型: material={m5_deployment_df['material'].dtype}, sending={m5_deployment_df['sending'].dtype}, receiving={m5_deployment_df['receiving'].dtype}")
                             
                             # 🔄 立即处理M5 deployment，更新open deployment
                             print(f"    📦 立即处理M5 deployment，更新open deployment...")
@@ -810,7 +1298,7 @@ def run_integrated_simulation(
     
     # 生成汇总报告
     print(f"\n📊 正在生成汇总报告...")
-    summary_generator = SummaryReportGenerator(str(output_dir))
+    summary_generator = SummaryReportGenerator(str(output_dir), config_dict)
     summary_reports = summary_generator.generate_all_reports(start_date, end_date)
     
     # 写入库存平衡检查报告
@@ -823,12 +1311,23 @@ def run_integrated_simulation(
     for key, value in final_stats.items():
         print(f"  {key}: {value}")
     
-    print(f"\n🎉 集成仿真完成!")
+    if is_resuming:
+        total_processed = resume_info['days_completed'] + len(sim_dates)
+        print(f"\n🎉 续跑仿真完成!")
+        print(f"   本次处理: {len(sim_dates)} 天")
+        print(f"   总共完成: {total_processed} 天")
+    else:
+        total_processed = len(sim_dates)
+        print(f"\n🎉 集成仿真完成!")
+        print(f"   总共处理: {total_processed} 天")
     
     return {
         'validation_passed': True,
         'simulation_completed': True,
-        'dates_processed': len(sim_dates),
+        'is_resuming': is_resuming,
+        'dates_processed_this_run': len(sim_dates),
+        'total_dates_processed': total_processed if is_resuming else len(sim_dates),
+        'resume_info': resume_info if is_resuming else None,
         'results': all_results,
         'final_stats': final_stats,
         'output_directory': output_base_dir,
@@ -856,6 +1355,12 @@ def main():
     parser.add_argument("--output", "-o", 
                        default=None,
                        help="输出目录 (默认: 根据配置文件名生成)")
+    parser.add_argument("--force-restart", 
+                       action="store_true",
+                       help="强制从头开始，忽略续跑能力 (默认: False)")
+    parser.add_argument("--check-resume", 
+                       action="store_true",
+                       help="仅检查续跑状态，不执行仿真 (默认: False)")
     
     args = parser.parse_args()
     
@@ -871,17 +1376,57 @@ def main():
         args.output = f"./{config_name}_output"
         print(f"💫 使用默认输出目录: {args.output}")
     
+    # 处理续跑检查选项
+    if args.check_resume:
+        print(f"🔍 检查续跑状态...")
+        resume_info = check_resume_capability(args.output, args.start_date, args.end_date)
+        
+        print(f"\n📊 续跑状态报告:")
+        print(f"  输出目录: {args.output}")
+        print(f"  原始日期范围: {args.start_date} 到 {args.end_date}")
+        
+        if resume_info.get('already_completed', False):
+            print(f"  ✅ 仿真已完成！")
+            print(f"     最后处理日期: {resume_info['last_complete_date']}")
+            print(f"     总处理天数: {resume_info['days_completed']}")
+        elif resume_info['can_resume']:
+            print(f"  🔄 可以续跑！")
+            print(f"     已完成: {resume_info['days_completed']} 天 (到 {resume_info['last_complete_date']})")
+            print(f"     剩余: {resume_info['days_remaining']} 天 (从 {resume_info['resume_from_date']} 开始)")
+        else:
+            print(f"  📝 无法续跑，需要从头开始")
+            print(f"     需要处理: {resume_info['days_remaining']} 天")
+        
+        return  # 仅检查，不执行
+    
+    # 处理强制重启选项
+    if args.force_restart:
+        print(f"🔄 强制重启模式：将从头开始，忽略任何现有状态")
+        # 可以考虑删除现有输出目录，或者修改run_integrated_simulation函数来支持强制重启
+        # 这里暂时通过添加标志来实现
+    
     try:
+        # 添加强制重启参数（需要修改run_integrated_simulation函数签名）
         result = run_integrated_simulation(
             config_path=args.config,
             start_date=args.start_date,
             end_date=args.end_date,
-            output_base_dir=args.output
+            output_base_dir=args.output,
+            force_restart=args.force_restart  # 新增参数
         )
         
         print(f"\n✅ 仿真结果:")
-        print(f"  处理天数: {result.get('dates_processed', 0)}")
+        if result.get('is_resuming', False):
+            print(f"  续跑模式: 是")
+            print(f"  本次处理天数: {result.get('dates_processed_this_run', 0)}")
+            print(f"  总处理天数: {result.get('total_dates_processed', 0)}")
+        else:
+            print(f"  全新运行: 是")  
+            print(f"  处理天数: {result.get('dates_processed_this_run', 0)}")
         print(f"  输出目录: {result.get('output_directory', 'Unknown')}")
+        
+        if result.get('already_completed', False):
+            print(f"  📝 注意: 仿真之前已完成，无需处理")
         
     except Exception as e:
         print(f"❌ 集成仿真失败: {e}")

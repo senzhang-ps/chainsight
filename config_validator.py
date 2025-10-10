@@ -436,15 +436,32 @@ class ConfigValidator:
                     self.vm.add_warning("CrossModule", "Consistency", 
                                       f"M1_InitialInventory contains locations that are not defined as 'location' in Global_Network (they might only be in 'sourcing'): {missing_in_network_locations}")
                 
-                # 输出详细的验证信息
-                self.vm.add_info("CrossModule", "ValidationDetails", 
-                               f"Network locations: {sorted(network_locations)}")
-                self.vm.add_info("CrossModule", "ValidationDetails", 
-                               f"Network sourcings: {sorted(network_sourcings)}")
-                self.vm.add_info("CrossModule", "ValidationDetails", 
-                               f"All network places: {sorted(all_network_places)}")
-                self.vm.add_info("CrossModule", "ValidationDetails", 
-                               f"Initial inventory locations: {sorted(inventory_locations)}")
+                # 输出详细的验证信息（安全排序，处理混合数据类型）
+                try:
+                    network_locations_sorted = sorted([str(x) for x in network_locations])
+                    network_sourcings_sorted = sorted([str(x) for x in network_sourcings])
+                    all_network_places_sorted = sorted([str(x) for x in all_network_places])
+                    inventory_locations_sorted = sorted([str(x) for x in inventory_locations])
+                    
+                    self.vm.add_info("CrossModule", "ValidationDetails", 
+                                   f"Network locations: {network_locations_sorted}")
+                    self.vm.add_info("CrossModule", "ValidationDetails", 
+                                   f"Network sourcings: {network_sourcings_sorted}")
+                    self.vm.add_info("CrossModule", "ValidationDetails", 
+                                   f"All network places: {all_network_places_sorted}")
+                    self.vm.add_info("CrossModule", "ValidationDetails", 
+                                   f"Initial inventory locations: {inventory_locations_sorted}")
+                except Exception as e:
+                    self.vm.add_warning("CrossModule", "ValidationDetails", 
+                                      f"Could not sort location data for display due to mixed data types: {e}")
+                    self.vm.add_info("CrossModule", "ValidationDetails", 
+                                   f"Network locations count: {len(network_locations)}")
+                    self.vm.add_info("CrossModule", "ValidationDetails", 
+                                   f"Network sourcings count: {len(network_sourcings)}")
+                    self.vm.add_info("CrossModule", "ValidationDetails", 
+                                   f"All network places count: {len(all_network_places)}")
+                    self.vm.add_info("CrossModule", "ValidationDetails", 
+                                   f"Initial inventory locations count: {len(inventory_locations)}")
     
         # 验证需求优先级配置的一致性
         if 'Global_DemandPriority' in config_dict and not config_dict['Global_DemandPriority'].empty:

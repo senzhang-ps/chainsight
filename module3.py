@@ -221,10 +221,10 @@ def assign_location_layers(network_df: pd.DataFrame) -> pd.DataFrame:
     if not true_roots:
         true_roots = potential_roots
     
-    print(f"🔍 自动识别网络层级:")
-    print(f"  总地点数: {len(all_locations)}")
-    print(f"  潜在根节点: {potential_roots}")
-    print(f"  识别出的根节点: {true_roots}")
+    # print(f"🔍 自动识别网络层级:")
+    # print(f"  总地点数: {len(all_locations)}")
+    # print(f"  潜在根节点: {potential_roots}")
+    # print(f"  识别出的根节点: {true_roots}")
     
     # 第五步：从根节点开始分配层级
     layer_dict = {}
@@ -233,7 +233,7 @@ def assign_location_layers(network_df: pd.DataFrame) -> pd.DataFrame:
     # 根节点从layer 0开始
     for root in true_roots:
         queue.append((root, 0))
-        print(f"  📍 根节点: {root} -> Layer 0")
+        # print(f"  📍 根节点: {root} -> Layer 0")
     
     # 广度优先遍历分配层级
     while queue:
@@ -245,7 +245,7 @@ def assign_location_layers(network_df: pd.DataFrame) -> pd.DataFrame:
         # 子节点层级 = 父节点层级 + 1
         for child in children.get(loc, []):
             queue.append((child, layer + 1))
-            print(f"  📍 子节点: {child} -> Layer {layer + 1} (父节点: {loc})")
+            # print(f"  📍 子节点: {child} -> Layer {layer + 1} (父节点: {loc})")
     
     # 第六步：处理未连接或孤立的节点
     unassigned = [loc for loc in all_locations if loc not in layer_dict]
@@ -253,7 +253,7 @@ def assign_location_layers(network_df: pd.DataFrame) -> pd.DataFrame:
         max_layer = max(layer_dict.values()) if layer_dict else 0
         for loc in unassigned:
             layer_dict[loc] = max_layer + 1
-            print(f"  📍 孤立节点: {loc} -> Layer {max_layer + 1}")
+            # print(f"  📍 孤立节点: {loc} -> Layer {max_layer + 1}")
     
     # 第七步：生成层级映射DataFrame
     layer_df = pd.DataFrame([
@@ -264,8 +264,8 @@ def assign_location_layers(network_df: pd.DataFrame) -> pd.DataFrame:
     # 按层级排序
     layer_df = layer_df.sort_values('layer')
     
-    print(f"  ✅ 层级分配完成，共 {len(layer_df)} 个地点")
-    print(f"  层级范围: {layer_df['layer'].min()} - {layer_df['layer'].max()}")
+    # print(f"  ✅ 层级分配完成，共 {len(layer_df)} 个地点")
+    # print(f"  层级范围: {layer_df['layer'].min()} - {layer_df['layer'].max()}")
     
     return layer_df
 
@@ -394,11 +394,11 @@ def determine_lead_time(
 
         # 添加调试信息以追踪问题
         final_leadtime = max(0, int(leadtime))
-        if material == '80813644' and receiving == 'C816':
-            print(f"    Debug: determine_lead_time for {material}@{receiving}")
-            print(f"      sending={sending}, receiving={receiving}, location_type={location_type}")
-            print(f"      PDT={PDT}, GR={GR}, MCT={MCT}")
-            print(f"      计算leadtime={leadtime}, 最终={final_leadtime}")
+        # if material == '80813644' and receiving == 'C816':
+        #     print(f"    Debug: determine_lead_time for {material}@{receiving}")
+        #     print(f"      sending={sending}, receiving={receiving}, location_type={location_type}")
+        #     print(f"      PDT={PDT}, GR={GR}, MCT={MCT}")
+        #     print(f"      计算leadtime={leadtime}, 最终={final_leadtime}")
 
         return final_leadtime, ""
 
@@ -597,10 +597,10 @@ def calculate_daily_net_demand(
                     AO_local = float(pd.to_numeric(od['quantity'], errors='coerce').fillna(0).sum())
                     # 添加调试信息以追踪问题
                     if AO_local > 0:
-                        print(f"    Debug: AO_local={AO_local} for {material}@{location}, horizon_end={horizon_end.date()}")
+                        # print(f"    Debug: AO_local={AO_local} for {material}@{location}, horizon_end={horizon_end.date()}")
                         for _, ao_row in od.iterrows():
                             ao_date = pd.to_datetime(ao_row['date'])
-                            print(f"      AO订单: 日期={ao_date.date()}, 数量={ao_row['quantity']}")
+                            # print(f"      AO订单: 日期={ao_date.date()}, 数量={ao_row['quantity']}")
             else:
                 # 如果没有date列，AO_local保持为0
                 pass
@@ -781,10 +781,10 @@ def run_mrp_layered_simulation_daily(
     # 标准化标识符字段，确保类型一致性
     material_locations = _normalize_identifiers(material_locations)
     
-    print(f"🔍 扩展后的material-location组合:")
-    print(f"  原始network配置: {len(active_network)} 条")
-    print(f"  扩展后组合: {len(material_locations)} 条")
-    print(f"  包含的根节点: {[loc for loc in all_locations_in_layers if location_layer.get(loc, -1) == 0]}")
+    # print(f"🔍 扩展后的material-location组合:")
+    # print(f"  原始network配置: {len(active_network)} 条")
+    # print(f"  扩展后组合: {len(material_locations)} 条")
+    # print(f"  包含的根节点: {[loc for loc in all_locations_in_layers if location_layer.get(loc, -1) == 0]}")
     
     future_production_df = all_production_df.copy() if not all_production_df.empty and 'available_date' in all_production_df.columns else pd.DataFrame()
     if not future_production_df.empty:
@@ -804,7 +804,7 @@ def run_mrp_layered_simulation_daily(
         layer_mask = material_locations_df['location'].apply(lambda loc: location_layer.get(loc, -1) == layer)
         layer_nodes = material_locations_df[layer_mask]
         
-        print(f"   处理Layer {layer}: {len(layer_nodes)} 个节点")
+        # print(f"   处理Layer {layer}: {len(layer_nodes)} 个节点")
         
         for _, ml in layer_nodes.iterrows():
             material = str(ml['material'])
@@ -856,7 +856,7 @@ def run_mrp_layered_simulation_daily(
                     # 这是根节点（如plant），设置默认值
                     location_type = 'Plant'
                     horizon = 1
-                    print(f"     自动识别根节点: {material}@{location} (Layer 0)")
+                    # print(f"     自动识别根节点: {material}@{location} (Layer 0)")
                 else:
                     # 其他未配置的节点
                     location_type = 'DC'
@@ -902,7 +902,7 @@ def run_mrp_layered_simulation_daily(
                         # 向上传递是跨节点调运，需要应用MOQ/RV
                         adjusted_gap = apply_moq_rv(gap_value, moq, rv, is_cross_node=True)
                         adjusted_gaps[demand_element] = adjusted_gap
-                        print(f"      📦 {demand_element} gap: 原始={gap_value:.2f} → MOQ/RV调整={adjusted_gap:.2f} (MOQ={moq}, RV={rv})")
+                        # print(f"      📦 {demand_element} gap: 原始={gap_value:.2f} → MOQ/RV调整={adjusted_gap:.2f} (MOQ={moq}, RV={rv})")
                     else:
                         adjusted_gaps[demand_element] = 0
                 
@@ -952,10 +952,10 @@ def run_mrp_layered_simulation_daily(
         # ★关键：本层所有节点gap聚合后再传递给父层
         downstream_gap_dict = parent_gap_accum
         
-        if parent_gap_accum:
-            print(f"    📊 Layer {layer} gap汇总:")
-            for (mat, loc), gaps in parent_gap_accum.items():
-                print(f"      {mat}@{loc}: AO={gaps['AO']:.2f}, forecast={gaps['FC']:.2f}, safety={gaps['SS']:.2f}")
+        # if parent_gap_accum:
+        #     print(f"    📊 Layer {layer} gap汇总:")
+        #     for (mat, loc), gaps in parent_gap_accum.items():
+        #         print(f"      {mat}@{loc}: AO={gaps['AO']:.2f}, forecast={gaps['FC']:.2f}, safety={gaps['SS']:.2f}")
 
     # 生成最终净需求DataFrame
     net_demand_df = pd.DataFrame(all_net_demand_records)
@@ -982,11 +982,11 @@ def run_mrp_layered_simulation_daily(
     # 确保返回的是DataFrame类型
     final_df = pd.DataFrame(net_demand_df) if not isinstance(net_demand_df, pd.DataFrame) else net_demand_df
     
-    print(f"✅ MRP模拟完成，生成 {len(final_df)} 条netdemand记录")
-    if not final_df.empty:
-        print(f"  涉及地点: {sorted(final_df['location'].unique())}")
-        print(f"  涉及物料: {sorted(final_df['material'].unique())}")
-        print(f"  层级分布: {dict(final_df['layer'].value_counts())}")
+    # print(f"✅ MRP模拟完成，生成 {len(final_df)} 条netdemand记录")
+    # if not final_df.empty:
+    #     print(f"  涉及地点: {sorted(final_df['location'].unique())}")
+    #     print(f"  涉及物料: {sorted(final_df['material'].unique())}")
+    #     print(f"  层级分布: {dict(final_df['layer'].value_counts())}")
     
     return final_df
 
@@ -1029,7 +1029,7 @@ def run_integrated_mode(
         dict: 包含输出结果的字典
     """
     print(f"🔄 Module3 运行于集成模式")
-    print(f"📊 模拟模式：所有模块只处理模拟周期内的数据")
+    # print(f"📊 模拟模式：所有模块只处理模拟周期内的数据")
     
     # 加载静态配置数据
     safety_stock_df = config_dict.get('M3_SafetyStock', pd.DataFrame())
@@ -1058,20 +1058,20 @@ def run_integrated_mode(
     
     # 生成日期范围
     date_range = pd.date_range(start_date, end_date, freq='D')
-    print(f"处理 {len(date_range)} 天，从 {start_date} 到 {end_date}")
+    # print(f"处理 {len(date_range)} 天，从 {start_date} 到 {end_date}")
     
     all_net_demand = []
     
     for current_date in date_range:
-        print(f"\n📅 处理日期: {current_date.strftime('%Y-%m-%d')}")
+        # print(f"\n📅 处理日期: {current_date.strftime('%Y-%m-%d')}")
         
         # 从Module1加载每日数据（只处理模拟周期内的数据）
         try:
             module1_daily_data = load_module1_daily_outputs(module1_output_dir, current_date)
             supply_demand_df = module1_daily_data.get('supply_demand_df', pd.DataFrame())
             today_shipment_df = module1_daily_data.get('shipment_df', pd.DataFrame())
-            print(f"  ✅ 从 Module1 加载了 {len(supply_demand_df)} 条供需记录")
-            print(f"  ✅ 从 Module1 加载了 {len(today_shipment_df)} 条发货记录")
+            # print(f"  ✅ 从 Module1 加载了 {len(supply_demand_df)} 条供需记录")
+            # print(f"  ✅ 从 Module1 加载了 {len(today_shipment_df)} 条发货记录")
         except Exception as e:
             print(f"  ⚠️  Module1数据加载失败: {e}")
             supply_demand_df = pd.DataFrame()
@@ -1096,12 +1096,12 @@ def run_integrated_mode(
             open_deployment_df = _normalize_identifiers(open_deployment_df)
             delivery_shipment_df = _normalize_identifiers(delivery_shipment_df)
 
-            print(f"  ✅ 从 Orchestrator 加载了 {len(beginning_inventory_df)} 条期初库存记录")
-            print(f"  ✅ 从 Orchestrator 加载了 {len(in_transit_df)} 条在途记录")
-            print(f"  ✅ 从 Orchestrator 加载了 {len(delivery_gr_df)} 条收货记录")
-            print(f"  ✅ 从 Orchestrator 加载了 {len(all_production_df)} 条生产记录")
-            print(f"  ✅ 从 Orchestrator 加载了 {len(open_deployment_df)} 条开放部署记录")
-            print(f"  ✅ 从 Orchestrator 加载了 {len(delivery_shipment_df)} 条发运记录")
+            # print(f"  ✅ 从 Orchestrator 加载了 {len(beginning_inventory_df)} 条期初库存记录")
+            # print(f"  ✅ 从 Orchestrator 加载了 {len(in_transit_df)} 条在途记录")
+            # print(f"  ✅ 从 Orchestrator 加载了 {len(delivery_gr_df)} 条收货记录")
+            # print(f"  ✅ 从 Orchestrator 加载了 {len(all_production_df)} 条生产记录")
+            # print(f"  ✅ 从 Orchestrator 加载了 {len(open_deployment_df)} 条开放部署记录")
+            # print(f"  ✅ 从 Orchestrator 加载了 {len(delivery_shipment_df)} 条发运记录")
         except Exception as e:
             print(f"  ⚠️  Orchestrator数据加载失败: {e}")
             beginning_inventory_df = pd.DataFrame()
@@ -1130,7 +1130,7 @@ def run_integrated_mode(
                 delivery_shipment_df=delivery_shipment_df,
                 deploy_config_df=deploy_config_df  # 🔧 新增：传递MOQ/RV配置
             )
-            print(f"  ✅ 计算完成，生成 {len(net_demand_df)} 条净需求记录")
+            # print(f"  ✅ 计算完成，生成 {len(net_demand_df)} 条净需求记录")
         except Exception as e:
             print(f"  ❌ 净需求计算失败: {e}")
             import traceback
@@ -1148,16 +1148,16 @@ def run_integrated_mode(
             
             with pd.ExcelWriter(daily_output_file, engine='openpyxl') as writer:
                 net_demand_df.to_excel(writer, index=False, sheet_name='NetDemand')
-            print(f"  ✅ 已保存每日输出: {daily_output_file}")
+            # print(f"  ✅ 已保存每日输出: {daily_output_file}")
         except Exception as e:
             print(f"  ⚠️  保存失败: {e}")
         
         all_net_demand.extend(net_demand_df.to_dict('records') if not net_demand_df.empty else [])
     
     print(f"\n✅ Module3 集成模式处理完成")
-    print(f"  处理了 {len(date_range)} 天")
-    print(f"  生成了 {len(all_net_demand)} 条Net Demand记录")
-    print(f"  所有模块只处理模拟周期内的数据")
+    # print(f"  处理了 {len(date_range)} 天")
+    # print(f"  生成了 {len(all_net_demand)} 条Net Demand记录")
+    # print(f"  所有模块只处理模拟周期内的数据")
     
     return {
         'net_demand_count': len(all_net_demand),

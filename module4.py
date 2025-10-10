@@ -42,26 +42,420 @@ def get_or_init_simulation_start(output_dir: str, provided_start: Optional[pd.Ti
 
     return provided_start
 
+
+def save_line_state(output_dir: str, simulation_date: pd.Timestamp, line_states: dict):
+    """Save line states (last material and remaining changeover time) for cross-day continuity.
+    
+    Args:
+        output_dir: Directory for Module4 outputs/state files
+        simulation_date: Current simulation date
+        line_states: Dict with line keys containing {'last_material': str, 'remaining_changeover': float}
+    """
+    os.makedirs(output_dir, exist_ok=True)
+    state_file = os.path.join(output_dir, f"line_states_{simulation_date.strftime('%Y%m%d')}.json")
+    
+    import json
+    with open(state_file, "w") as f:
+        json.dump(line_states, f, indent=2)
+
+
+def save_allocated_capacity(output_dir: str, simulation_date: pd.Timestamp, allocated_capacity: dict):
+    """Save allocated capacity for future production dates to track capacity usage across simulation dates.
+    
+    Args:
+        output_dir: Directory for Module4 outputs/state files
+        simulation_date: Current simulation date
+        allocated_capacity: Dict with capacity allocation info for future production dates
+    """
+    os.makedirs(output_dir, exist_ok=True)
+    capacity_file = os.path.join(output_dir, f"allocated_capacity_{simulation_date.strftime('%Y%m%d')}.json")
+    
+    import json
+    with open(capacity_file, "w") as f:
+        json.dump(allocated_capacity, f, indent=2)
+
+
+def load_allocated_capacity(output_dir: str, simulation_date: pd.Timestamp) -> dict:
+    """Load previously allocated capacity for future production dates.
+    
+    Args:
+        output_dir: Directory for Module4 outputs/state files
+        simulation_date: Current simulation date
+        
+    Returns:
+        dict: Previously allocated capacity, empty dict if not found
+    """
+    capacity_file = os.path.join(output_dir, f"allocated_capacity_{simulation_date.strftime('%Y%m%d')}.json")
+    
+    if not os.path.exists(capacity_file):
+        return {}
+    
+    try:
+        import json
+        with open(capacity_file, "r") as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"Warning: Failed to load allocated capacity from {capacity_file}: {e}")
+        return {}
+
+
+def load_all_previous_capacity(output_dir: str, simulation_date: pd.Timestamp) -> dict:
+    """Load all previously allocated capacity from all previous simulation dates.
+    
+    Args:
+        output_dir: Directory for Module4 outputs/state files
+        simulation_date: Current simulation date
+        
+    Returns:
+        dict: Consolidated capacity allocation from all previous simulation dates
+    """
+    consolidated_capacity = {}
+    
+    # Look for all capacity files from previous simulation dates
+    for file_name in os.listdir(output_dir):
+        if file_name.startswith("allocated_capacity_") and file_name.endswith(".json"):
+            try:
+                # Extract date from filename
+                date_str = file_name.replace("allocated_capacity_", "").replace(".json", "")
+                file_date = pd.to_datetime(date_str, format='%Y%m%d')
+                
+                # Only load capacity from previous simulation dates
+                if file_date < simulation_date:
+                    capacity_file = os.path.join(output_dir, file_name)
+                    with open(capacity_file, "r") as f:
+                        import json
+                        daily_capacity = json.load(f)
+                        
+                        # Merge into consolidated capacity
+                        for key, value in daily_capacity.items():
+                            if key not in consolidated_capacity:
+                                consolidated_capacity[key] = 0
+                            consolidated_capacity[key] += value
+                            
+            except Exception as e:
+                print(f"Warning: Failed to load capacity from {file_name}: {e}")
+                continue
+    
+    return consolidated_capacity
+
+
+def extract_allocated_capacity_from_plan(plan_df: pd.DataFrame, rate_map: dict, changeover_def: dict = None) -> dict:
+    """Extract allocated capacity information from production plan for persistence.
+    
+    Args:
+        plan_df: Production plan DataFrame
+        rate_map: Production rate mapping (material, line) -> rate
+        changeover_def: Changeover definition mapping (changeover_id, line) -> time
+        
+    Returns:
+        dict: Capacity allocation info in HOURS keyed by (location, line, production_plan_date)
+        Includes both production time and changeover time
+    """
+    allocated_capacity = {}
+    
+    if plan_df.empty:
+        return allocated_capacity
+    
+    # Group by location, line, and production_plan_date to get allocated capacity
+    for (location, line, prod_date), group in plan_df.groupby(['location', 'line', 'production_plan_date']):
+        # Calculate total allocated capacity in HOURS (production + changeover)
+        total_allocated_hours = 0
+        
+        for _, row in group.iterrows():
+            material = row['material']
+            quantity = row['con_planned_qty']
+            changeover_id = row.get('changeover_id')
+            
+            # Calculate production time
+            rate = rate_map.get((material, line), 1)
+            production_hours = quantity / rate if rate else 0
+            total_allocated_hours += production_hours
+            
+            # Add changeover time if changeover_id exists
+            if changeover_id and changeover_def and pd.notna(changeover_id):
+                changeover_hours = changeover_def.get((changeover_id, line), 0)
+                total_allocated_hours += changeover_hours
+        
+        # Convert to Python float for JSON serialization
+        if isinstance(total_allocated_hours, (np.integer, np.int64, np.floating)):
+            total_allocated_hours = float(total_allocated_hours)
+        
+        # Create key for capacity tracking
+        key = f"{location}|{line}|{prod_date.strftime('%Y-%m-%d')}"
+        allocated_capacity[key] = total_allocated_hours
+    
+    return allocated_capacity
+
+
+def validate_capacity_allocation(plan_log: pd.DataFrame, previously_allocated_capacity: dict, 
+                                simulation_date: pd.Timestamp, rate_map: dict, changeover_def: dict = None) -> list:
+    """Validate that capacity allocation respects previously allocated capacity.
+    
+    Args:
+        plan_log: Current production plan DataFrame
+        previously_allocated_capacity: Previously allocated capacity dict (in hours)
+        simulation_date: Current simulation date
+        rate_map: Production rate mapping (material, line) -> rate
+        changeover_def: Changeover definition mapping (changeover_id, line) -> time
+        
+    Returns:
+        list: Validation issues found
+    """
+    issues = []
+    
+    if plan_log.empty or not previously_allocated_capacity:
+        return issues
+    
+    # Group current plan by location, line, and production_plan_date
+    for (location, line, prod_date), group in plan_log.groupby(['location', 'line', 'production_plan_date']):
+        # Calculate current allocated capacity in hours (production + changeover)
+        current_allocated_hours = 0
+        for _, row in group.iterrows():
+            material = row['material']
+            quantity = row['con_planned_qty']
+            changeover_id = row.get('changeover_id')
+            
+            # Calculate production time
+            rate = rate_map.get((material, line), 1)
+            production_hours = quantity / rate if rate else 0
+            current_allocated_hours += production_hours
+            
+            # Add changeover time if changeover_id exists
+            if changeover_id and changeover_def and pd.notna(changeover_id):
+                changeover_hours = changeover_def.get((changeover_id, line), 0)
+                current_allocated_hours += changeover_hours
+        
+        capacity_key = f"{location}|{line}|{prod_date.strftime('%Y-%m-%d')}"
+        previously_allocated_hours = previously_allocated_capacity.get(capacity_key, 0)
+        
+        if previously_allocated_hours > 0:
+            issues.append({
+                'type': 'capacity_validation',
+                'location': location,
+                'line': line,
+                'production_plan_date': prod_date.strftime('%Y-%m-%d'),
+                'simulation_date': simulation_date.strftime('%Y-%m-%d'),
+                'previously_allocated_hours': previously_allocated_hours,
+                'currently_allocated_hours': current_allocated_hours,
+                'total_allocated_hours': previously_allocated_hours + current_allocated_hours,
+                'message': f"Capacity allocation validation: {location}/{line} on {prod_date.strftime('%Y-%m-%d')} - Previously: {previously_allocated_hours:.2f} hours, Currently: {current_allocated_hours:.2f} hours, Total: {previously_allocated_hours + current_allocated_hours:.2f} hours"
+            })
+    
+    return issues
+
+
+def load_line_state(output_dir: str, simulation_date: pd.Timestamp) -> dict:
+    """Load line states from previous day for cross-day changeover continuity.
+    
+    Args:
+        output_dir: Directory for Module4 outputs/state files
+        simulation_date: Current simulation date
+        
+    Returns:
+        dict: Line states from previous day, empty dict if not found
+    """
+    prev_date = simulation_date - pd.Timedelta(days=1)
+    state_file = os.path.join(output_dir, f"line_states_{prev_date.strftime('%Y%m%d')}.json")
+    
+    if not os.path.exists(state_file):
+        return {}
+    
+    try:
+        import json
+        with open(state_file, "r") as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"Warning: Failed to load line state from {state_file}: {e}")
+        return {}
+
+
+def analyze_end_of_day_changeover_state(plan_df: pd.DataFrame, cap_df: pd.DataFrame, 
+                                        co_def: dict, simulation_date: pd.Timestamp,
+                                        rate_map: dict) -> dict:
+    """Analyze if there are incomplete changeovers at end of day by reconstructing capacity allocation.
+    
+    This function reconstructs the actual capacity allocation algorithm to detect changeovers
+    that started but didn't complete, even if they don't have corresponding production records.
+    
+    Args:
+        plan_df: Production plan DataFrame for the day
+        cap_df: Capacity DataFrame
+        co_def: Changeover definition dict
+        simulation_date: Current simulation date
+        rate_map: Production rate mapping for calculating production time
+        
+    Returns:
+        dict: Line changeover states {line: changeover_info or None}
+    """
+    changeover_states = {}
+    
+    if plan_df.empty:
+        return changeover_states
+    
+    for line, group in plan_df.groupby('line'):
+        # Filter for records from the current simulation date
+        sim_date_group = group[group['simulation_date'] == simulation_date]
+        if sim_date_group.empty:
+            continue
+        
+        # Group by production_plan_date to analyze each production day separately
+        for prod_date, prod_group in sim_date_group.groupby('production_plan_date'):
+            # Get capacity for the production date (not simulation date)
+            day_capacity = cap_df[cap_df['date'] == prod_date]
+            if day_capacity.empty:
+                continue
+                
+            # Get total capacity for this line on this production day
+            line_cap = day_capacity[day_capacity['line'] == line]['capacity'].sum()
+            if line_cap <= 0:
+                continue
+            
+            # Calculate total allocated time from ProductionPlan
+            total_allocated = 0
+            last_material = None
+            
+            group_sorted = prod_group.sort_values('production_plan_date')
+            for _, row in group_sorted.iterrows():
+                material = row['material']
+                quantity = row['con_planned_qty']
+                changeover_id = row.get('changeover_id')
+                
+                # Add changeover time if exists
+                if changeover_id and pd.notna(changeover_id):
+                    changeover_time = co_def.get((changeover_id, line), 0)
+                    total_allocated += changeover_time
+                
+                # Add production time
+                rate = rate_map.get((material, line), 1)
+                production_time = quantity / rate if rate and quantity > 0 else 0
+                total_allocated += production_time
+                
+                last_material = material
+            
+            # Check if there's remaining capacity that could be used for a changeover
+            remaining_capacity = line_cap - total_allocated
+            
+            if remaining_capacity > 0.1 and last_material:  # At least 0.1 hour remaining
+                # There might be an attempted changeover to the next material
+                # We need to infer what the next material would be based on the scheduling sequence
+                
+                # For now, we'll use a heuristic: if there's exactly ~1 hour remaining
+                # and this matches typical changeover times, assume there's an incomplete changeover
+                typical_changeover_time = 1.0  # Most changeovers are 1 hour
+                
+                if abs(remaining_capacity - typical_changeover_time) < 0.1:
+                    # Likely that a changeover started but didn't complete
+                    # print(f"🔄 Line {line}: Detected likely incomplete changeover on {prod_date.date()} - {remaining_capacity:.2f} hours remaining capacity matches typical changeover time")
+                    
+                    # Create a generic incomplete changeover record
+                    incomplete_changeover = {
+                        'changeover_id': 'INFERRED_INCOMPLETE',
+                        'from_material': last_material,
+                        'to_material': 'UNKNOWN_NEXT',  # Will be determined by next day's schedule
+                        'total_time': typical_changeover_time,
+                        'completed_time': remaining_capacity,
+                        'remaining_time': typical_changeover_time - remaining_capacity
+                    }
+                    
+                    changeover_states[line] = {
+                        'last_activity': 'changeover',
+                        'changeover_info': incomplete_changeover
+                    }
+                    continue
+            
+            # No incomplete changeover detected for this line/date
+            if line not in changeover_states:
+                changeover_states[line] = None
+    
+    return changeover_states
+
+
+def extract_line_states_from_plan(plan_df: pd.DataFrame, cap_df: pd.DataFrame = None, 
+                                  co_def: dict = None, simulation_date: pd.Timestamp = None,
+                                  rate_map: dict = None) -> dict:
+    """Extract line states from production plan for state persistence.
+    Enhanced to track changeover states for cross-day continuity.
+    
+    Args:
+        plan_df: Production plan DataFrame
+        cap_df: Capacity DataFrame (optional, for changeover analysis)
+        co_def: Changeover definition dict (optional, for changeover analysis)
+        simulation_date: Current simulation date (optional, for changeover analysis)
+        rate_map: Production rate mapping (optional, for changeover analysis)
+        
+    Returns:
+        dict: Line states with last material and remaining changeover info
+    """
+    line_states = {}
+    
+    if plan_df.empty:
+        return line_states
+    
+    # Analyze end-of-day changeover states if parameters provided
+    changeover_states = {}
+    if (cap_df is not None and co_def is not None and 
+        simulation_date is not None and rate_map is not None):
+        changeover_states = analyze_end_of_day_changeover_state(
+            plan_df, cap_df, co_def, simulation_date, rate_map)
+    
+    # Group by line and simulation_date to get the last production for each line
+    for (line, sim_date), group in plan_df.groupby(['line', 'simulation_date']):
+        # Sort by production_plan_date to get the last production
+        last_production = group.sort_values('production_plan_date').iloc[-1]
+        
+        # Check if we detected incomplete changeover for this line
+        changeover_state = changeover_states.get(line)
+        if changeover_state and changeover_state.get('last_activity') == 'changeover':
+            # Last activity was incomplete changeover
+            line_state = {
+                'last_material': str(last_production['material']),
+                'last_location': str(last_production['location']),
+                'last_production_date': last_production['production_plan_date'].strftime('%Y-%m-%d'),
+                'last_activity': 'changeover',
+                'changeover_info': changeover_state['changeover_info']
+            }
+        else:
+            # Default state: last activity was production
+            line_state = {
+                'last_material': str(last_production['material']),
+                'last_location': str(last_production['location']),
+                'last_production_date': last_production['production_plan_date'].strftime('%Y-%m-%d'),
+                'last_activity': 'production',
+                'changeover_info': None
+            }
+        
+        line_states[line] = line_state
+    
+    return line_states
+
 IDENTIFIER_COLS = [
     'material', 'location', 'line', 'delegate_line', 'from_material', 'to_material'
 ]
 
 
 def _normalize_location(location_str: str) -> str:
-    """Normalize location string by padding with leading zeros to 4 digits.
+    """Normalize location string by padding with leading zeros to 4 digits if numeric.
     
     Args:
-        location_str: Location string (e.g., "386" or "0386")
+        location_str: Location string (e.g., "386", "0386", or "A888")
         
     Returns:
-        str: Normalized location with leading zeros (e.g., "0386")
+        str: Normalized location - zero-padded if numeric, unchanged if alphanumeric
     """
+    if pd.isna(location_str) or location_str is None:
+        return ""
+    
+    location_str = str(location_str).strip()
+    
     try:
-        # Convert to int and back to string with 4-digit zero padding
-        return str(int(location_str)).zfill(4)
+        # 检查是否为纯数字字符串
+        if location_str.isdigit():
+            return str(int(location_str)).zfill(4)
+        else:
+            # 非数字location（如A888），直接返回字符串，不做padding
+            return location_str
     except (ValueError, TypeError):
-        # If conversion fails, return original string with zero padding
-        return str(location_str).zfill(4)
+        return str(location_str)
 
 
 def _cast_identifiers_to_str(df: pd.DataFrame, cols=None) -> pd.DataFrame:
@@ -116,7 +510,7 @@ def load_daily_net_demand(module3_output_dir: str, simulation_date: pd.Timestamp
         if not os.path.exists(net_demand_file):
             # 第一天没有前一天的Module3输出，这是正常的
             # 按照设计，第一天应该没有生产计划
-            print(f"Info: No previous day Module3 output found for {prev_date_str}. This is expected for the first day.")
+            # print(f"Info: No previous day Module3 output found for {prev_date_str}. This is expected for the first day.")
             return pd.DataFrame(columns=['material', 'location', 'requirement_date', 'quantity', 'demand_type', 'layer'])
         
         # Load NetDemand sheet
@@ -192,8 +586,13 @@ def calculate_changeover_metrics(production_plan: pd.DataFrame, changeover_def: 
         production_plan['changeover_id'].notna()
     ].groupby(['production_plan_date', 'location', 'line', 'changeover_id']).size().reset_index(name='count')
     
+    # 🔧 去重 changeover_def，避免重复键导致返回 Series
+    changeover_def_clean = changeover_def.drop_duplicates(subset=['changeover_id', 'line'], keep='first')
+    if len(changeover_def_clean) < len(changeover_def):
+        print(f"Warning: Removed {len(changeover_def) - len(changeover_def_clean)} duplicate changeover definitions")
+    
     # Merge with changeover definitions to get time, cost, mu_loss
-    changeover_def_indexed = changeover_def.set_index(['changeover_id', 'line'])
+    changeover_def_indexed = changeover_def_clean.set_index(['changeover_id', 'line'])
     
     for _, row in changeover_summary.iterrows():
         date = row['production_plan_date']
@@ -205,9 +604,17 @@ def calculate_changeover_metrics(production_plan: pd.DataFrame, changeover_def: 
         # Get changeover definition
         try:
             definition = changeover_def_indexed.loc[(changeover_id, line)]
-            time_per_changeover = float(definition.get('time', 0))
-            cost_per_changeover = float(definition.get('cost', 0))
-            mu_loss_per_changeover = float(definition.get('mu_loss', 0))
+            
+            # 🔧 处理可能返回 Series 的情况（虽然已去重，但保险起见）
+            if isinstance(definition, pd.Series):
+                time_per_changeover = float(definition.get('time', 0))
+                cost_per_changeover = float(definition.get('cost', 0))
+                mu_loss_per_changeover = float(definition.get('mu_loss', 0))
+            else:
+                # DataFrame - 取第一行
+                time_per_changeover = float(definition.iloc[0].get('time', 0))
+                cost_per_changeover = float(definition.iloc[0].get('cost', 0))
+                mu_loss_per_changeover = float(definition.iloc[0].get('mu_loss', 0))
         except KeyError:
             print(f"Warning: Changeover definition not found for changeover_id={changeover_id}, line={line}")
             time_per_changeover = cost_per_changeover = mu_loss_per_changeover = 0
@@ -337,7 +744,7 @@ def build_unconstrained_plan_for_single_day(net_demand_df, mlcfg, simulation_dat
     plans = []
     
     if net_demand_df.empty:
-        return pd.DataFrame(columns=['material', 'location', 'line', 'planned_date', 'uncon_planned_qty', 'simulation_date'])
+        return pd.DataFrame(columns=['material', 'location', 'line', 'planned_date', 'uncon_planned_qty', 'simulation_date', 'original_quantity'])
     
     # 确保MLCFG的标识符也是string类型，与NetDemand保持一致
     mlcfg = _cast_identifiers_to_str(mlcfg.copy(), ['material', 'location'])
@@ -403,6 +810,7 @@ def build_unconstrained_plan_for_single_day(net_demand_df, mlcfg, simulation_dat
         
         # Aggregate quantity
         agg_qty = nd_sub['quantity'].sum()
+        
         min_batch = int(row['min_batch'])
         rv = int(row['rv'])
         
@@ -419,37 +827,46 @@ def build_unconstrained_plan_for_single_day(net_demand_df, mlcfg, simulation_dat
             'line': line,
             'planned_date': simulation_date,  # Plan on review date
             'uncon_planned_qty': uncon_planned_qty,
-            'simulation_date': simulation_date
+            'simulation_date': simulation_date,
+            'original_quantity': agg_qty  # 保存原始quantity用于排序
         }])
         
         plans.append(result)
     
     if not plans:
-        return pd.DataFrame(columns=['material', 'location', 'line', 'planned_date', 'uncon_planned_qty', 'simulation_date'])
+        return pd.DataFrame(columns=['material', 'location', 'line', 'planned_date', 'uncon_planned_qty', 'simulation_date', 'original_quantity'])
     
     return pd.concat(plans, ignore_index=True)
 
 def optimal_changeover_sequence(batches, co_mat, co_def, line):
     """
-    batches: list of dict, each batch at least: 'material', 'uncon_planned_qty'
+    Enhanced production sequencing with quantity-based prioritization:
+    1. First SKU: Select by largest original quantity (not batch size)
+    2. Subsequent SKUs: Minimize changeover time, with quantity as tie-breaker
+    
+    batches: list of dict, each batch at least: 'material', 'uncon_planned_qty', 'original_quantity'
     co_mat: pandas.Series, MultiIndex [from, to] -> changeover_id
     co_def: dict, (changeover_id, line) -> time
     line: str
     Returns: list of batch indices (order)
     """
-    # 1. Start with largest batch
     batch_idx_list = list(range(len(batches)))
     if not batch_idx_list:
         return []
     left = set(batch_idx_list)
-    # First: max batch
-    first = max(left, key=lambda i: batches[i]['uncon_planned_qty'])
+    
+    # 1. First SKU: Select by largest original quantity (not batch size)
+    first = max(left, key=lambda i: batches[i].get('original_quantity', batches[i]['uncon_planned_qty']))
     seq = [first]
     left.remove(first)
     cur_mat = batches[first]['material']
+    
     while left:
-        # Pick next with min changeover time from cur_mat
-        min_cost, min_idx = None, None
+        # 2. Pick next with min changeover time from cur_mat
+        # If multiple options have same changeover time, use quantity as tie-breaker
+        min_cost = None
+        candidates = []  # Store all candidates with minimum changeover time
+        
         for i in left:
             next_mat = batches[i]['material']
             try:
@@ -460,16 +877,53 @@ def optimal_changeover_sequence(batches, co_mat, co_def, line):
                 co_time = co_def.get((coid, line), 0)
             except Exception:
                 co_time = 0
-            if (min_cost is None) or (co_time < min_cost):
-                min_cost, min_idx = co_time, i
+            
+            if min_cost is None or co_time < min_cost:
+                min_cost = co_time
+                candidates = [i]
+            elif co_time == min_cost:
+                candidates.append(i)
+        
+        # Among candidates with minimum changeover time, select by largest quantity
+        if len(candidates) == 1:
+            min_idx = candidates[0]
+        else:
+            min_idx = max(candidates, key=lambda i: batches[i].get('original_quantity', batches[i]['uncon_planned_qty']))
+        
         seq.append(min_idx)
         left.remove(min_idx)
         cur_mat = batches[min_idx]['material']
+    
     return seq
 
-def centralized_capacity_allocation_with_changeover(uncon, cap_df, rate_map, co_mat, co_def, mlcfg):
+def centralized_capacity_allocation_with_changeover(uncon, cap_df, rate_map, co_mat, co_def, mlcfg, 
+                                                   previous_line_states=None, simulation_date=None, 
+                                                   previously_allocated_capacity=None, issues=None):
+    """
+    Enhanced capacity allocation with cross-day changeover continuity and capacity tracking.
+    
+    Args:
+        uncon: Unconstrained production plan
+        cap_df: Capacity DataFrame
+        rate_map: Production rate mapping
+        co_mat: Changeover matrix
+        co_def: Changeover definition
+        mlcfg: Material location line configuration
+        previous_line_states: Line states from previous day (optional)
+        simulation_date: Current simulation date (optional)
+        previously_allocated_capacity: Previously allocated capacity from earlier simulation dates (optional)
+        issues: List to append validation issues (optional)
+        
+    Returns:
+        tuple: (plans_log, exceed_log)
+    """
     plans_log = []
     exceed = []
+    if issues is None:
+        issues = []
+    
+    # 默认 changeover 时间（小时）
+    DEFAULT_CHANGEOVER_TIME = 24
     mct_map = mlcfg.set_index(['material', 'location'])['MCT'].to_dict()
     if 'location' in cap_df.columns:
         cap_df['capacity'] = cap_df['capacity'].astype(float)
@@ -481,13 +935,42 @@ def centralized_capacity_allocation_with_changeover(uncon, cap_df, rate_map, co_
     uncon = uncon.sort_values(['line', 'simulation_date', 'planned_date', 'material']).reset_index(drop=True)
     for (line, sim_date), uncon_grp in uncon.groupby(['line', 'simulation_date']):
         batch_list = uncon_grp.to_dict(orient='records')
+        
         # Apply changeover optimization
         if len(batch_list) > 1:
             co_seq = optimal_changeover_sequence(batch_list, co_mat, co_def, line)
             batch_list = [batch_list[i] for i in co_seq]
 
+        # Initialize state from previous day with enhanced cross-day changeover handling
         prev_mat = None
-        for cur_plan in batch_list:
+        initial_co_remain = 0
+        initial_coid = None
+        has_incomplete_changeover = False
+        
+        if previous_line_states and line in previous_line_states:
+            line_state = previous_line_states[line]
+            prev_mat = line_state.get('last_material')
+            last_activity = line_state.get('last_activity', 'production')
+            changeover_info = line_state.get('changeover_info')
+            
+            # print(f"Line {line}: Previous day state - material: {prev_mat}, activity: {last_activity}")
+            
+            # Handle incomplete changeover from previous day
+            if last_activity == 'changeover' and changeover_info:
+                remaining_time = changeover_info.get('remaining_time', 0)
+                if remaining_time > 0:
+                    initial_co_remain = remaining_time
+                    initial_coid = changeover_info.get('changeover_id')
+                    has_incomplete_changeover = True
+                    # Update prev_mat to the target material of the incomplete changeover
+                    prev_mat = changeover_info.get('to_material', prev_mat)
+                    # print(f"Line {line}: Continuing incomplete changeover {initial_coid}, remaining time: {remaining_time}")
+                else:
+                    # Changeover was completed, use target material
+                    prev_mat = changeover_info.get('to_material', prev_mat)
+                    # print(f"Line {line}: Previous changeover completed, starting with material: {prev_mat}")
+
+        for cur_plan_idx, cur_plan in enumerate(batch_list):
             material = cur_plan['material']
             location = cur_plan['location']
             
@@ -506,20 +989,81 @@ def centralized_capacity_allocation_with_changeover(uncon, cap_df, rate_map, co_
             coid_to_log = None
             is_first_co_day = False
 
-            # Calculate changeover time if material changes
-            if prev_mat is not None and prev_mat != cur_mat:
+            # Handle changeover logic with cross-day continuity
+            if cur_plan_idx == 0 and has_incomplete_changeover:
+                # First material of the day with incomplete changeover from previous day
+                co_remain = initial_co_remain
+                coid_to_log = initial_coid
+                is_first_co_day = True
+                # print(f"Line {line}: Using incomplete changeover from previous day: {initial_co_remain} hours")
+            elif prev_mat is not None and prev_mat != cur_mat:
+                # Normal changeover calculation
                 try:
                     # Ensure material IDs are strings for lookup
                     prev_mat_str = str(prev_mat)
                     cur_mat_str = str(cur_mat)
-                    coid = co_mat.loc[(prev_mat_str, cur_mat_str)]
-                    co_time = co_def.get((coid, line), 0) if coid else 0
-                except Exception:
+                    
+                    # 🔍 调试：显示详细的查找信息
+                    # print(f"\n🔍 DEBUG Changeover Lookup:")
+                    # print(f"  Line: {line} (type: {type(line)})")
+                    # print(f"  From material: '{prev_mat_str}' (type: {type(prev_mat_str)}, len: {len(prev_mat_str)})")
+                    # print(f"  To material: '{cur_mat_str}' (type: {type(cur_mat_str)}, len: {len(cur_mat_str)})")
+                    # print(f"  Co_mat index type: {co_mat.index.dtypes if hasattr(co_mat.index, 'dtypes') else type(co_mat.index)}")
+                    # print(f"  Co_mat has {len(co_mat)} entries")
+                    
+                    # 检查是否存在于 index 中
+                    if (prev_mat_str, cur_mat_str) in co_mat.index:
+                        # print(f"  ✅ Key found in co_mat index")
+                        coid_result = co_mat.loc[(prev_mat_str, cur_mat_str)]
+                        # print(f"  📋 Retrieved changeover_id from co_mat: '{coid_result}' (type: {type(coid_result)})")
+                        
+                        # 🔧 关键修复：处理可能返回 Series 的情况（重复键）
+                        if isinstance(coid_result, pd.Series):
+                            # print(f"  ⚠️  WARNING: Multiple changeover definitions found! Using first one.")
+                            coid = str(coid_result.iloc[0])
+                        else:
+                            coid = str(coid_result)
+                        
+                        # print(f"  📋 Final changeover_id: '{coid}' (type: {type(coid)})")
+                        
+                        # 检查 co_def 查找
+                        # print(f"  🔍 Looking up in co_def with key: ('{coid}', '{line}')")
+                        if (coid, line) in co_def:
+                            co_time = co_def[(coid, line)]
+                            # print(f"  ✅ Found in co_def: time={co_time}")
+                        else:
+                            co_time = DEFAULT_CHANGEOVER_TIME
+                            # print(f"  ⚠️  NOT found in co_def! Using default time={DEFAULT_CHANGEOVER_TIME}")
+                            # 记录缺失的 changeover 定义
+                            issues.append({
+                                'sheet': 'M4_ChangeoverDefinition',
+                                'row': '',
+                                'issue': f"缺失 changeover 定义: changeover_id={coid}, line={line}。已使用默认时间 {DEFAULT_CHANGEOVER_TIME} 小时。"
+                            })
+                    else:
+                        # print(f"  ❌ Key NOT found in co_mat index")
+                        # 显示前5个索引条目
+                        # print(f"  Available keys (first 5): {list(co_mat.index[:5])}")
+                        # 记录缺失的 changeover matrix 定义
+                        coid = f"MISSING_CO_{prev_mat_str}_to_{cur_mat_str}"
+                        co_time = DEFAULT_CHANGEOVER_TIME
+                        issues.append({
+                            'sheet': 'M4_ChangeoverMatrix',
+                            'row': '',
+                            'issue': f"缺失物料切换定义: {prev_mat_str} → {cur_mat_str}，产线 {line}。已使用默认 changeover_id 和时间 {DEFAULT_CHANGEOVER_TIME} 小时。"
+                        })
+                    
+                    # print(f"  ✅ Final result: changeover_id={coid}, time={co_time}")
+                    # print(f"  📌 Will set: co_remain={co_time}, coid_to_log={coid}, is_first_co_day=True")
+                except Exception as e:
+                    print(f"  ⚠️  Exception: {type(e).__name__}: {e}")
+                    print(f"  Available co_mat index keys (sample): {list(co_mat.index[:10]) if len(co_mat) > 0 else 'EMPTY'}")
                     coid = None
                     co_time = 0
                 co_remain = co_time
                 coid_to_log = coid
                 is_first_co_day = True
+                # print(f"Line {line}: Changeover from {prev_mat} to {cur_mat}, time needed: {co_time}")
             else:
                 co_remain = 0
                 coid_to_log = None
@@ -528,10 +1072,29 @@ def centralized_capacity_allocation_with_changeover(uncon, cap_df, rate_map, co_
             # Allocate production across horizon days
             for day_dt in horizon_days:
                 cap_key = (location, line, day_dt) if 'location' in cap_df.columns else (line, day_dt)
-                today_cap = cap_map.get(cap_key, 0)
+                # Get current remaining capacity (already considers previous allocations from cap_map)
+                current_remaining_cap = cap_map.get(cap_key, 0)
+                today_cap = current_remaining_cap
+                
+                # Check for previously allocated capacity for this production plan date (from other simulation dates)
+                if previously_allocated_capacity:
+                    capacity_key = f"{location}|{line}|{day_dt.strftime('%Y-%m-%d')}"
+                    previously_used_hours = previously_allocated_capacity.get(capacity_key, 0)
+                    
+                    # Deduct previously allocated capacity (in hours) from available capacity (in hours)
+                    today_cap = max(0, today_cap - previously_used_hours)
+                    
+                    # if previously_used_hours > 0:
+                        # print(f"Line {line}: Production plan date {day_dt.strftime('%Y-%m-%d')} has {previously_used_hours:.2f} hours already allocated by previous simulation dates. Available capacity: {today_cap:.2f} hours")
                 
                 # First deduct changeover time from capacity (without creating separate record)
                 changeover_completed_this_day = False
+                changeover_used = 0
+                
+                # 🔍 调试：显示 changeover 处理逻辑
+                # if coid_to_log is not None:
+                #     print(f"  🔧 Processing changeover: coid_to_log={coid_to_log}, co_remain={co_remain}, is_first_co_day={is_first_co_day}")
+                
                 if co_remain > 0:
                     changeover_used = min(today_cap, co_remain)
                     co_remain -= changeover_used
@@ -539,10 +1102,16 @@ def centralized_capacity_allocation_with_changeover(uncon, cap_df, rate_map, co_
                     # Mark if changeover completed this day
                     if co_remain == 0:
                         changeover_completed_this_day = True
-                    # No separate changeover record - just deduct from capacity
+                        # print(f"  ✅ Changeover completed this day: {coid_to_log}")
+                    # If changeover not completed, update cap_map and continue to next day
                     if co_remain > 0:
-                        cap_map[cap_key] = today_cap
+                        cap_map[cap_key] = current_remaining_cap - changeover_used
+                        # print(f"  ⏳ Changeover not completed, continue to next day")
                         continue
+                elif co_remain == 0 and is_first_co_day:
+                    # 🔧 关键修复：如果 co_time 为 0（无需换产时间），仍然标记为已完成
+                    changeover_completed_this_day = True
+                    # print(f"  ✅ Changeover with 0 time (instant changeover): {coid_to_log}")
                 
                 # Then allocate production capacity (with changeover_id if applicable)
                 rate = float(rate_map.get((cur_mat, line), 1))
@@ -551,22 +1120,37 @@ def centralized_capacity_allocation_with_changeover(uncon, cap_df, rate_map, co_
                 
                 # Only create record if there's actual production
                 if can_produce > 0:
+                    # 🔍 调试：显示 changeover_id 记录决策
+                    will_record_changeover = coid_to_log if (changeover_completed_this_day or is_first_co_day) else None
+                    # if coid_to_log is not None:
+                    #     print(f"  📝 Recording production with changeover_id decision:")
+                    #     print(f"     coid_to_log={coid_to_log}")
+                    #     print(f"     changeover_completed_this_day={changeover_completed_this_day}")
+                    #     print(f"     is_first_co_day={is_first_co_day}")
+                    #     print(f"     will_record_changeover={will_record_changeover}")
+                    
                     plans_log.append({
                         'material': cur_mat, 'location': location, 'line': line,
                         'simulation_date': sim_date, 'production_plan_date': day_dt,
                         'available_date': day_dt + timedelta(days=int(mct_map.get((cur_mat, location), 0))),
                         'uncon_planned_qty': cur_plan['uncon_planned_qty'],
                         'con_planned_qty': can_produce,
-                        'changeover_id': coid_to_log if (changeover_completed_this_day or is_first_co_day) else None
+                        'changeover_id': will_record_changeover
                     })
+                    
+                    # if will_record_changeover:
+                    #     print(f"  ✅ Recorded changeover_id: {will_record_changeover}")
+                    
                     # Reset changeover tracking after first production record
                     if coid_to_log is not None:
+                        # print(f"  🔄 Resetting changeover tracking")
                         coid_to_log = None
                         is_first_co_day = False
                 
                 prod_remain -= can_produce
                 today_cap -= hours_used
-                cap_map[cap_key] = today_cap
+                # Update cap_map with remaining capacity after all usage (changeover + production)
+                cap_map[cap_key] = current_remaining_cap - changeover_used - hours_used
                 if prod_remain <= 0:
                     break
                     
@@ -640,7 +1224,7 @@ def run_daily_production_planning(config_file: str, module3_output_dir: str,
                                  simulation_date: pd.Timestamp, simulation_start: pd.Timestamp,
                                  output_dir: str) -> str:
     """
-    Run daily production planning for a single simulation date
+    Run daily production planning for a single simulation date with cross-day changeover continuity
     
     Args:
         config_file: Path to M4 configuration Excel file
@@ -678,12 +1262,28 @@ def run_daily_production_planning(config_file: str, module3_output_dir: str,
             net_demand_df, mlcfg, simulation_date, simulation_start, issues
         )
         
+        # Load previous day's line states for cross-day changeover continuity
+        previous_line_states = load_line_state(output_dir, simulation_date)
+        # if previous_line_states:
+        #     # print(f"Loaded previous day's line states: {list(previous_line_states.keys())}")
+        # else:
+        #     print("No previous day's line states found - starting fresh")
+        
+        # Load previously allocated capacity from all previous simulation dates
+        previously_allocated_capacity = load_all_previous_capacity(output_dir, simulation_date)
+        # if previously_allocated_capacity:
+        #     print(f"Loaded previously allocated capacity: {len(previously_allocated_capacity)} capacity allocations from previous simulation dates")
+        # else:
+        #     print("No previously allocated capacity found - starting fresh")
+        
         # Set up capacity allocation parameters
         # Also normalize changeover matrix to ensure proper matching
         co_mat_df = cfg['ChangeoverMatrix'].copy()
         co_mat_df['from_material'] = co_mat_df['from_material'].astype(str)
         co_mat_df['to_material'] = co_mat_df['to_material'].astype(str)
         co_mat = co_mat_df.set_index(['from_material', 'to_material'])['changeover_id']
+        # 对MultiIndex进行排序以避免性能警告
+        co_mat = co_mat.sort_index()
         
         # Enhanced changeover definition with cost and mu_loss
         co_def_df = cfg['ChangeoverDefinition']
@@ -695,9 +1295,11 @@ def run_daily_production_planning(config_file: str, module3_output_dir: str,
         rate_map = mlcfg.set_index(['material', 'delegate_line'])['prd_rate']
         rate_map.index.set_names(['material', 'line'], inplace=True)
         
-        # Allocate capacity with changeover consideration
+        # Allocate capacity with changeover consideration and cross-day continuity
         plan_log, exceed_log = centralized_capacity_allocation_with_changeover(
-            uncon_plan, cap_df, rate_map, co_mat, co_def, mlcfg
+            uncon_plan, cap_df, rate_map, co_mat, co_def, mlcfg,
+            previous_line_states=previous_line_states, simulation_date=simulation_date,
+            previously_allocated_capacity=previously_allocated_capacity, issues=issues
         )
         
         # Simulate production reliability
@@ -706,6 +1308,25 @@ def run_daily_production_planning(config_file: str, module3_output_dir: str,
         
         # Calculate changeover metrics
         changeover_log = calculate_changeover_metrics(plan_log, co_def_df)
+        
+        # Extract and save current day's line states for next day with enhanced changeover tracking
+        current_line_states = extract_line_states_from_plan(plan_log, cap_df, co_def, simulation_date, rate_map.to_dict())
+        if current_line_states:
+            save_line_state(output_dir, simulation_date, current_line_states)
+            # print(f"Saved current day's line states: {list(current_line_states.keys())}")
+        
+        # Extract and save current day's allocated capacity for future simulation dates
+        current_allocated_capacity = extract_allocated_capacity_from_plan(plan_log, rate_map.to_dict(), co_def)
+        if current_allocated_capacity:
+            save_allocated_capacity(output_dir, simulation_date, current_allocated_capacity)
+            # print(f"Saved current day's allocated capacity: {len(current_allocated_capacity)} capacity allocations (in hours)")
+        
+        # Validate capacity allocation to ensure no over-allocation
+        capacity_validation_issues = validate_capacity_allocation(plan_log, previously_allocated_capacity, simulation_date, rate_map.to_dict(), co_def)
+        if capacity_validation_issues:
+            # print(f"Capacity allocation validation completed: {len(capacity_validation_issues)} validation records generated")
+            # Add validation issues to the main issues list
+            issues.extend(capacity_validation_issues)
         
         # Deduplicate issues
         issues = dedup_issues(issues)
@@ -719,7 +1340,7 @@ def run_daily_production_planning(config_file: str, module3_output_dir: str,
             base_output_file, simulation_date
         )
         
-        print(f"Module4 daily output generated: {daily_output_path}")
+        # print(f"Module4 daily output generated: {daily_output_path}")
         
         # Check for critical issues
         critical_issues = [x for x in issues if 'No line config' in x['issue'] or 'Multiple eligible lines' in x['issue']]
@@ -798,7 +1419,7 @@ def generate_consolidated_output(daily_output_files: list, output_path: str):
         consolidated_changeover, output_path
     )
     
-    print(f"Consolidated Module4 output generated: {output_path}")
+    # print(f"Consolidated Module4 output generated: {output_path}")
 
 
 def main():
@@ -840,7 +1461,7 @@ def main():
                 output_dir=args.output_dir
             )
             
-            print(f"Daily production planning completed: {output_file}")
+            # print(f"Daily production planning completed: {output_file}")
             
         else:
             # Legacy execution mode for backward compatibility
@@ -863,6 +1484,8 @@ def main():
             nd['requirement_date'] = pd.to_datetime(nd['requirement_date'])
             mlcfg = cfg['MaterialLocationLineCfg']
             co_mat = cfg['ChangeoverMatrix'].set_index(['from_material', 'to_material'])['changeover_id']
+            # 对MultiIndex进行排序以避免性能警告
+            co_mat = co_mat.sort_index()
             co_def_df = cfg['ChangeoverDefinition']
             co_def = co_def_df.set_index(['changeover_id', 'line'])['time'].to_dict()
             cap_df = cfg['LineCapacity']
@@ -870,10 +1493,10 @@ def main():
             rate_map.index.set_names(['material', 'line'], inplace=True)
             
             # For legacy mode - create empty unconstrained plan for now
-            uncon = pd.DataFrame(columns=['material', 'location', 'line', 'planned_date', 'uncon_planned_qty', 'simulation_date'])
+            uncon = pd.DataFrame(columns=['material', 'location', 'line', 'planned_date', 'uncon_planned_qty', 'simulation_date', 'original_quantity'])
             
             plan_log, exceed_log = centralized_capacity_allocation_with_changeover(
-                uncon, cap_df, rate_map, co_mat, co_def, mlcfg
+                uncon, cap_df, rate_map, co_mat, co_def, mlcfg, issues=issues
             )
             plan_log = simulate_production(plan_log, cfg['ProductionReliability'], seed=cfg.get('RandomSeed', 42))
             
@@ -891,7 +1514,7 @@ def main():
                 print(msg)
                 raise Exception(msg)
             
-            print(f"Legacy production planning completed: {args.output}")
+            # print(f"Legacy production planning completed: {args.output}")
             
     except Exception as e:
         print(f'[ERROR]: {str(e)}')

@@ -11,16 +11,18 @@ import glob
 class SummaryReportGenerator:
     """汇总报告生成器"""
     
-    def __init__(self, output_base_dir: str):
+    def __init__(self, output_base_dir: str, config_dict: dict = None):
         """
         初始化汇总报告生成器
         
         Args:
             output_base_dir: 输出基础目录
+            config_dict: 配置数据字典（可选，用于获取safety stock等配置信息）
         """
         self.output_base_dir = Path(output_base_dir)
         self.summary_dir = self.output_base_dir / "summary"
         self.summary_dir.mkdir(parents=True, exist_ok=True)
+        self.config_dict = config_dict or {}
         
         # 各模块输出目录
         self.module_dirs = {
@@ -31,6 +33,34 @@ class SummaryReportGenerator:
             'module6': self.output_base_dir / "module6",
             'orchestrator': self.output_base_dir / "orchestrator"
         }
+    
+    @staticmethod
+    def _normalize_material_value(material_str: str) -> str:
+        """标准化 material 值：移除.0后缀"""
+        if not material_str or material_str in ['nan', 'None', '']:
+            return ""
+        try:
+            # 如果是数字，移除.0后缀
+            if '.' in material_str and material_str.replace('.', '').replace('-', '').isdigit():
+                return str(int(float(material_str)))
+            return material_str.strip()
+        except:
+            return material_str.strip()
+    
+    @staticmethod
+    def _normalize_location_value(location_str: str) -> str:
+        """标准化 location 值：纯数字补齐为4位，字母数字保持原样"""
+        if not location_str or location_str in ['nan', 'None', '']:
+            return ""
+        location_str = str(location_str).strip()
+        try:
+            # 如果是纯数字，补齐为4位
+            if location_str.isdigit():
+                return str(int(location_str)).zfill(4)
+            # 字母数字混合，保持原样
+            return location_str
+        except:
+            return location_str
     
     def generate_all_reports(self, start_date: str, end_date: str) -> Dict[str, str]:
         """
@@ -45,6 +75,10 @@ class SummaryReportGenerator:
         """
         print(f"📊 开始生成汇总报告 ({start_date} 到 {end_date})")
         
+        # 保存日期范围，用于后续过滤
+        self.start_date = pd.to_datetime(start_date)
+        self.end_date = pd.to_datetime(end_date)
+        
         report_files = {}
         
         # 收集所有天的数据文件
@@ -58,6 +92,7 @@ class SummaryReportGenerator:
         report_files['production_plan'] = self._generate_production_report(daily_files)
         report_files['delivery_plan'] = self._generate_delivery_report(daily_files)
         report_files['truck_usage'] = self._generate_truck_usage_report(daily_files)
+        report_files['historical_inventory'] = self._generate_historical_inventory_report(start_date, end_date)
         
         print(f"✅ 汇总报告生成完成，输出目录: {self.summary_dir}")
         return report_files
@@ -105,38 +140,145 @@ class SummaryReportGenerator:
         all_shipments = []
         all_cuts = []
         
-        # 收集所有天的数据
+        # 收集所有天的数据，并添加simulation_date
         for file_path in daily_files['module1']:
             try:
+                # 从文件名提取simulation_date
+                simulation_date = self._extract_date_from_filename(file_path)
+                
                 xl = pd.ExcelFile(file_path)
                 
                 if 'OrderLog' in xl.sheet_names:
                     orders_df = xl.parse('OrderLog')
+                    if not orders_df.empty and simulation_date:
+                        orders_df['simulation_date'] = simulation_date
                     all_orders.append(orders_df)
                 
                 if 'ShipmentLog' in xl.sheet_names:
                     shipments_df = xl.parse('ShipmentLog')
+                    if not shipments_df.empty and simulation_date:
+                        shipments_df['simulation_date'] = simulation_date
                     all_shipments.append(shipments_df)
                 
                 if 'CutLog' in xl.sheet_names:
                     cuts_df = xl.parse('CutLog')
+                    if not cuts_df.empty and simulation_date:
+                        cuts_df['simulation_date'] = simulation_date
                     all_cuts.append(cuts_df)
             except Exception as e:
                 print(f"Warning: Failed to read {file_path}: {e}")
         
-        # 合并数据并输出
-        with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
-            if all_orders:
-                combined_orders = pd.concat(all_orders, ignore_index=True)
-                combined_orders.to_excel(writer, sheet_name='FullOrderLog', index=False)
+        # 合并并汇总数据
+        summary_data = []
+        
+        # 合并所有数据
+        combined_orders = pd.concat(all_orders, ignore_index=True) if all_orders else pd.DataFrame()
+        combined_shipments = pd.concat(all_shipments, ignore_index=True) if all_shipments else pd.DataFrame()
+        combined_cuts = pd.concat(all_cuts, ignore_index=True) if all_cuts else pd.DataFrame()
+        
+        # 🔧 关键修复：去除重复的 AO 订单
+        # AO 订单可能在多个 simulation_date 被重复记录，需要按唯一键去重
+        if not combined_orders.empty:
+            original_count = len(combined_orders)
+            # 按 date, material, location, demand_type, quantity 去重（保留第一条）
+            dedup_cols = ['date', 'material', 'location', 'quantity']
+            if 'demand_type' in combined_orders.columns:
+                dedup_cols.append('demand_type')
+            combined_orders = combined_orders.drop_duplicates(subset=dedup_cols, keep='first')
+            dedup_count = len(combined_orders)
+            if original_count != dedup_count:
+                print(f"📊 OrderLog 去重：原始 {original_count} 条 → 去重后 {dedup_count} 条（移除了 {original_count - dedup_count} 条重复的 AO 订单）")
+        
+        # 🔍 调试：显示 CutLog 数据
+        # print(f"\n🔍 Order Shipment Cut Report 数据统计:")
+        # print(f"  OrderLog 记录数: {len(combined_orders)}")
+        # print(f"  ShipmentLog 记录数: {len(combined_shipments)}")
+        # print(f"  CutLog 记录数: {len(combined_cuts)}")
+        # if not combined_cuts.empty:
+        #     print(f"  CutLog 前5条记录:")
+        #     print(combined_cuts.head())
+        
+        # 构建汇总表
+        if not combined_orders.empty or not combined_shipments.empty or not combined_cuts.empty:
+            # 准备订单数据（去掉 demand_type，合并所有类型的订单）
+            if not combined_orders.empty:
+                order_agg = combined_orders.groupby(
+                    ['date', 'material', 'location', 'simulation_date'], 
+                    dropna=False
+                ).agg({'quantity': 'sum'}).reset_index()
+                order_agg.rename(columns={'quantity': 'order_qty'}, inplace=True)
+            else:
+                order_agg = pd.DataFrame(columns=['date', 'material', 'location', 'simulation_date', 'order_qty'])
             
-            if all_shipments:
-                combined_shipments = pd.concat(all_shipments, ignore_index=True)
-                combined_shipments.to_excel(writer, sheet_name='FullShipmentLog', index=False)
+            # 准备发货数据（去掉 demand_type，合并所有类型的发货）
+            if not combined_shipments.empty:
+                shipment_agg = combined_shipments.groupby(
+                    ['date', 'material', 'location', 'simulation_date'], 
+                    dropna=False
+                ).agg({'quantity': 'sum'}).reset_index()
+                shipment_agg.rename(columns={'quantity': 'shipment_qty'}, inplace=True)
+            else:
+                shipment_agg = pd.DataFrame(columns=['date', 'material', 'location', 'simulation_date', 'shipment_qty'])
             
-            if all_cuts:
-                combined_cuts = pd.concat(all_cuts, ignore_index=True)
-                combined_cuts.to_excel(writer, sheet_name='FullCutLog', index=False)
+            # 准备缺货数据（去掉 demand_type，合并所有类型的缺货）
+            if not combined_cuts.empty:
+                cut_agg = combined_cuts.groupby(
+                    ['date', 'material', 'location', 'simulation_date'], 
+                    dropna=False
+                ).agg({'quantity': 'sum'}).reset_index()
+                cut_agg.rename(columns={'quantity': 'cut_qty'}, inplace=True)
+            else:
+                cut_agg = pd.DataFrame(columns=['date', 'material', 'location', 'simulation_date', 'cut_qty'])
+            
+            # 合并三个汇总表
+            summary = order_agg.merge(
+                shipment_agg, 
+                on=['date', 'material', 'location', 'simulation_date'], 
+                how='outer'
+            )
+            summary = summary.merge(
+                cut_agg, 
+                on=['date', 'material', 'location', 'simulation_date'], 
+                how='outer'
+            )
+            
+            # 填充缺失值为0
+            summary['order_qty'] = summary['order_qty'].fillna(0).infer_objects(copy=False).astype(int)
+            summary['shipment_qty'] = summary['shipment_qty'].fillna(0).infer_objects(copy=False).astype(int)
+            summary['cut_qty'] = summary['cut_qty'].fillna(0).infer_objects(copy=False).astype(int)
+            
+            # 🔧 过滤掉超出模拟日期范围的数据
+            if 'date' in summary.columns:
+                original_count = len(summary)
+                summary['date'] = pd.to_datetime(summary['date'])
+                summary = summary[summary['date'] <= self.end_date]
+                filtered_count = len(summary)
+                if original_count != filtered_count:
+                    print(f"📊 过滤超出日期范围的记录：{original_count} 条 → {filtered_count} 条（移除了 {original_count - filtered_count} 条超出 {self.end_date.date()} 的记录）")
+            
+            # 🔧 验证：计算 cut_qty 是否等于 order - shipment
+            summary['calculated_cut'] = (summary['order_qty'] - summary['shipment_qty']).clip(lower=0)
+            
+            # 检查不一致的记录
+            inconsistent = summary[summary['cut_qty'] != summary['calculated_cut']]
+            if not inconsistent.empty:
+                print(f"\n⚠️  发现 {len(inconsistent)} 条 cut_qty 不一致的记录:")
+                print(f"  (cut_qty 应该 = max(0, order_qty - shipment_qty))")
+                print(inconsistent[['date', 'material', 'location', 'order_qty', 'shipment_qty', 'cut_qty', 'calculated_cut']].head(10))
+            
+            # 移除临时列
+            summary = summary.drop(columns=['calculated_cut'])
+            
+            # 按日期和物料排序
+            summary = summary.sort_values(['simulation_date', 'date', 'material', 'location'])
+            
+            # 调整列顺序（去掉 demand_type）
+            column_order = ['simulation_date', 'date', 'material', 'location', 'order_qty', 'shipment_qty', 'cut_qty']
+            summary = summary[column_order]
+            
+            # 输出到Excel
+            with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
+                summary.to_excel(writer, sheet_name='OrderShipmentCutSummary', index=False)
         
         return str(output_file)
     
@@ -160,6 +302,26 @@ class SummaryReportGenerator:
         
         if all_deliveries:
             combined_deliveries = pd.concat(all_deliveries, ignore_index=True)
+            
+            # 🔧 过滤掉超出模拟日期范围的数据
+            original_count = len(combined_deliveries)
+            date_cols_to_filter = ['planned_deploy_date', 'actual_ship_date', 'date']
+            for col in date_cols_to_filter:
+                if col in combined_deliveries.columns:
+                    combined_deliveries[col] = pd.to_datetime(combined_deliveries[col], errors='coerce')
+            
+            # 只保留 planned_deploy_date 或 actual_ship_date 在范围内的记录
+            if 'planned_deploy_date' in combined_deliveries.columns or 'actual_ship_date' in combined_deliveries.columns:
+                mask = pd.Series([True] * len(combined_deliveries))
+                if 'planned_deploy_date' in combined_deliveries.columns:
+                    mask = mask & ((combined_deliveries['planned_deploy_date'].isna()) | (combined_deliveries['planned_deploy_date'] <= self.end_date))
+                if 'actual_ship_date' in combined_deliveries.columns:
+                    mask = mask & ((combined_deliveries['actual_ship_date'].isna()) | (combined_deliveries['actual_ship_date'] <= self.end_date))
+                combined_deliveries = combined_deliveries[mask]
+                
+                filtered_count = len(combined_deliveries)
+                if original_count != filtered_count:
+                    print(f"📊 Delivery Plan 过滤：{original_count} 条 → {filtered_count} 条（移除了 {original_count - filtered_count} 条超出日期范围的记录）")
             
             # 按需求添加字段: date, material, sending, receiving, planned_qty, delivered_qty, planned_deploy_date, actual_ship_date
             required_columns = ['date', 'material', 'sending', 'receiving', 'planned_qty', 'delivered_qty', 'planned_deploy_date', 'actual_ship_date']
@@ -187,6 +349,18 @@ class SummaryReportGenerator:
         if all_usage:
             combined_usage = pd.concat(all_usage, ignore_index=True)
             
+            # 🔧 过滤掉超出模拟日期范围的数据
+            if 'date' in combined_usage.columns:
+                original_count = len(combined_usage)
+                combined_usage['date'] = pd.to_datetime(combined_usage['date'], errors='coerce')
+                combined_usage = combined_usage[
+                    (combined_usage['date'].isna()) | 
+                    (combined_usage['date'] <= self.end_date)
+                ]
+                filtered_count = len(combined_usage)
+                if original_count != filtered_count:
+                    print(f"📊 Truck Usage 过滤：{original_count} 条 → {filtered_count} 条（移除了 {original_count - filtered_count} 条超出日期范围的记录）")
+            
             # 按需求字段: date, sending, receiving, truck_type, available_trucks, used_trucks, wfr, vfr
             
             with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
@@ -212,6 +386,18 @@ class SummaryReportGenerator:
         if all_exceeds:
             combined_exceeds = pd.concat(all_exceeds, ignore_index=True)
             
+            # 🔧 过滤掉超出模拟日期范围的数据
+            if 'date' in combined_exceeds.columns:
+                original_count = len(combined_exceeds)
+                combined_exceeds['date'] = pd.to_datetime(combined_exceeds['date'], errors='coerce')
+                combined_exceeds = combined_exceeds[
+                    (combined_exceeds['date'].isna()) | 
+                    (combined_exceeds['date'] <= self.end_date)
+                ]
+                filtered_count = len(combined_exceeds)
+                if original_count != filtered_count:
+                    print(f"📊 Capacity Exceed 过滤：{original_count} 条 → {filtered_count} 条（移除了 {original_count - filtered_count} 条超出日期范围的记录）")
+            
             with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
                 combined_exceeds.to_excel(writer, sheet_name='FullCapacityExceed', index=False)
         
@@ -233,10 +419,30 @@ class SummaryReportGenerator:
                 print(f"Warning: Failed to read {file_path}: {e}")
         
         if all_changeovers:
-            combined_changeovers = pd.concat(all_changeovers, ignore_index=True)
-            
-            with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
-                combined_changeovers.to_excel(writer, sheet_name='FullChangeoverLog', index=False)
+            # 过滤掉空的 DataFrame 以避免 FutureWarning
+            non_empty_changeovers = [df for df in all_changeovers if not df.empty]
+            if non_empty_changeovers:
+                combined_changeovers = pd.concat(non_empty_changeovers, ignore_index=True)
+                
+                # 🔧 过滤掉超出模拟日期范围的数据
+                original_count = len(combined_changeovers)
+                date_cols_to_filter = ['changeover_start_date', 'changeover_end_date', 'date']
+                for col in date_cols_to_filter:
+                    if col in combined_changeovers.columns:
+                        combined_changeovers[col] = pd.to_datetime(combined_changeovers[col], errors='coerce')
+                
+                # 只保留 changeover_end_date 在范围内的记录
+                if 'changeover_end_date' in combined_changeovers.columns:
+                    combined_changeovers = combined_changeovers[
+                        (combined_changeovers['changeover_end_date'].isna()) | 
+                        (combined_changeovers['changeover_end_date'] <= self.end_date)
+                    ]
+                    filtered_count = len(combined_changeovers)
+                    if original_count != filtered_count:
+                        print(f"📊 Changeover Log 过滤：{original_count} 条 → {filtered_count} 条（移除了 {original_count - filtered_count} 条超出日期范围的记录）")
+                
+                with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
+                    combined_changeovers.to_excel(writer, sheet_name='FullChangeoverLog', index=False)
         
         return str(output_file)
     
@@ -257,6 +463,25 @@ class SummaryReportGenerator:
         
         if all_deployments:
             combined_deployments = pd.concat(all_deployments, ignore_index=True)
+            
+            # 🔧 过滤掉超出模拟日期范围的数据
+            original_count = len(combined_deployments)
+            # Deployment 可能的日期字段：deployment_date, arrival_date, ship_date 等
+            date_cols_to_filter = ['deployment_date', 'arrival_date', 'ship_date', 'date']
+            for col in date_cols_to_filter:
+                if col in combined_deployments.columns:
+                    combined_deployments[col] = pd.to_datetime(combined_deployments[col], errors='coerce')
+            
+            # 过滤：如果有任何日期列，只保留日期在范围内的记录
+            mask = pd.Series([True] * len(combined_deployments))
+            for col in ['deployment_date', 'arrival_date', 'ship_date', 'date']:
+                if col in combined_deployments.columns:
+                    mask = mask & ((combined_deployments[col].isna()) | (combined_deployments[col] <= self.end_date))
+            
+            combined_deployments = combined_deployments[mask]
+            filtered_count = len(combined_deployments)
+            if original_count != filtered_count:
+                print(f"📊 Deployment Plan 过滤：{original_count} 条 → {filtered_count} 条（移除了 {original_count - filtered_count} 条超出日期范围的记录）")
             
             with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
                 combined_deployments.to_excel(writer, sheet_name='FullDeploymentPlan', index=False)
@@ -281,6 +506,23 @@ class SummaryReportGenerator:
         if all_productions:
             combined_productions = pd.concat(all_productions, ignore_index=True)
             
+            # 🔧 过滤掉超出模拟日期范围的数据
+            original_count = len(combined_productions)
+            date_cols_to_filter = ['available_date', 'production_plan_date']
+            for col in date_cols_to_filter:
+                if col in combined_productions.columns:
+                    combined_productions[col] = pd.to_datetime(combined_productions[col], errors='coerce')
+            
+            # 只保留 available_date 在范围内的记录（这是实际产品可用的日期）
+            if 'available_date' in combined_productions.columns:
+                combined_productions = combined_productions[
+                    (combined_productions['available_date'].isna()) | 
+                    (combined_productions['available_date'] <= self.end_date)
+                ]
+                filtered_count = len(combined_productions)
+                if original_count != filtered_count:
+                    print(f"📊 Production Plan 过滤：{original_count} 条 → {filtered_count} 条（移除了 {original_count - filtered_count} 条超出日期范围的记录）")
+            
             with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
                 combined_productions.to_excel(writer, sheet_name='FullProductionPlan', index=False)
         
@@ -294,3 +536,202 @@ class SummaryReportGenerator:
             date_str = match.group(1)
             return pd.to_datetime(date_str, format='%Y%m%d').strftime('%Y-%m-%d')
         return None
+    
+    def _generate_historical_inventory_report(self, start_date: str, end_date: str) -> str:
+        """生成历史库存记录CSV报告"""
+        output_file = self.summary_dir / "historical_inventory_record.csv"
+        
+        date_range = pd.date_range(start_date, end_date, freq='D')
+        orchestrator_dir = self.module_dirs['orchestrator']
+        module1_dir = self.module_dirs['module1']
+        
+        # 读取safety stock配置
+        safety_stock_dict = {}
+        if 'M3_SafetyStock' in self.config_dict and not self.config_dict['M3_SafetyStock'].empty:
+            ss_df = self.config_dict['M3_SafetyStock'].copy()
+            # 确保日期格式
+            if 'date' in ss_df.columns:
+                ss_df['date'] = pd.to_datetime(ss_df['date'])
+            for _, row in ss_df.iterrows():
+                material = self._normalize_material_value(str(row['material']))
+                location = self._normalize_location_value(str(row['location']))
+                key = (material, location)
+                # 使用最新的safety stock值（如果有多个日期）
+                safety_stock_dict[key] = int(row.get('safety_stock_qty', 0))
+        
+        all_records = []
+        
+        for date in date_range:
+            date_str = date.strftime('%Y-%m-%d')
+            date_str_file = date.strftime('%Y%m%d')
+            
+            # 初始化当日数据容器
+            ending_inv_dict = {}
+            in_transit_dict = {}
+            production_gr_dict = {}
+            delivery_gr_dict = {}
+            order_dict = {}
+            shipment_dict = {}
+            delivery_ship_dict = {}
+            supply_demand_dict = {}
+            
+            # 1. 读取期末库存 (unrestricted_inventory)
+            inv_file = orchestrator_dir / f"unrestricted_inventory_{date_str_file}.csv"
+            if inv_file.exists():
+                try:
+                    inv_df = pd.read_csv(inv_file)
+                    for _, row in inv_df.iterrows():
+                        # 🔧 确保使用标准化的 material 和 location
+                        material = self._normalize_material_value(str(row['material']))
+                        location = self._normalize_location_value(str(row['location']))
+                        key = (material, location)
+                        ending_inv_dict[key] = int(row['quantity'])
+                except Exception as e:
+                    print(f"Warning: Failed to read {inv_file}: {e}")
+            
+            # 2. 读取在途库存 (planning_intransit)
+            intransit_file = orchestrator_dir / f"planning_intransit_{date_str_file}.csv"
+            if intransit_file.exists():
+                try:
+                    intransit_df = pd.read_csv(intransit_file)
+                    if not intransit_df.empty:
+                        # 按接收地点汇总在途数量
+                        for _, row in intransit_df.iterrows():
+                            material = self._normalize_material_value(str(row['material']))
+                            location = self._normalize_location_value(str(row['receiving']))
+                            key = (material, location)
+                            in_transit_dict[key] = in_transit_dict.get(key, 0) + int(row['quantity'])
+                except Exception as e:
+                    print(f"Warning: Failed to read {intransit_file}: {e}")
+            
+            # 3. 读取生产入库 (production_gr)
+            prod_gr_file = orchestrator_dir / f"production_gr_{date_str_file}.csv"
+            if prod_gr_file.exists():
+                try:
+                    prod_gr_df = pd.read_csv(prod_gr_file)
+                    if not prod_gr_df.empty:
+                        for _, row in prod_gr_df.iterrows():
+                            material = self._normalize_material_value(str(row['material']))
+                            location = self._normalize_location_value(str(row['location']))
+                            key = (material, location)
+                            production_gr_dict[key] = production_gr_dict.get(key, 0) + int(row['quantity'])
+                except Exception as e:
+                    print(f"Warning: Failed to read {prod_gr_file}: {e}")
+            
+            # 4. 读取配送入库 (delivery_gr)
+            del_gr_file = orchestrator_dir / f"delivery_gr_{date_str_file}.csv"
+            if del_gr_file.exists():
+                try:
+                    del_gr_df = pd.read_csv(del_gr_file)
+                    if not del_gr_df.empty:
+                        for _, row in del_gr_df.iterrows():
+                            material = self._normalize_material_value(str(row['material']))
+                            location = self._normalize_location_value(str(row['receiving']))
+                            key = (material, location)
+                            delivery_gr_dict[key] = delivery_gr_dict.get(key, 0) + int(row['quantity'])
+                except Exception as e:
+                    print(f"Warning: Failed to read {del_gr_file}: {e}")
+            
+            # 5. 读取订单 (order from module1)
+            order_file = module1_dir / f"module1_output_{date_str_file}.xlsx"
+            if order_file.exists():
+                try:
+                    xl = pd.ExcelFile(order_file)
+                    if 'OrderLog' in xl.sheet_names:
+                        order_df = xl.parse('OrderLog')
+                        # 只统计当日到期的订单
+                        today_orders = order_df[pd.to_datetime(order_df['date']) == date]
+                        if not today_orders.empty:
+                            for _, row in today_orders.iterrows():
+                                material = self._normalize_material_value(str(row['material']))
+                                location = self._normalize_location_value(str(row['location']))
+                                key = (material, location)
+                                order_dict[key] = order_dict.get(key, 0) + int(row['quantity'])
+                    
+                    # 读取供需日志 (supply demand log)
+                    if 'SupplyDemandLog' in xl.sheet_names:
+                        sd_df = xl.parse('SupplyDemandLog')
+                        if not sd_df.empty and 'date' in sd_df.columns:
+                            # 只统计当日的供需数据
+                            today_sd = sd_df[pd.to_datetime(sd_df['date']) == date]
+                            if not today_sd.empty:
+                                for _, row in today_sd.iterrows():
+                                    material = self._normalize_material_value(str(row['material']))
+                                    location = self._normalize_location_value(str(row['location']))
+                                    key = (material, location)
+                                    # 汇总所有demand_element的quantity
+                                    supply_demand_dict[key] = supply_demand_dict.get(key, 0) + int(row.get('quantity', 0))
+                except Exception as e:
+                    print(f"Warning: Failed to read orders/supply-demand from {order_file}: {e}")
+            
+            # 6. 读取发货 (shipment from orchestrator)
+            shipment_file = orchestrator_dir / f"shipment_log_{date_str_file}.csv"
+            if shipment_file.exists():
+                try:
+                    shipment_df = pd.read_csv(shipment_file)
+                    if not shipment_df.empty:
+                        for _, row in shipment_df.iterrows():
+                            material = self._normalize_material_value(str(row['material']))
+                            location = self._normalize_location_value(str(row['location']))
+                            key = (material, location)
+                            shipment_dict[key] = shipment_dict.get(key, 0) + int(row['quantity'])
+                except Exception as e:
+                    print(f"Warning: Failed to read {shipment_file}: {e}")
+            
+            # 7. 读取配送发货 (delivery_shipment from orchestrator)
+            del_ship_file = orchestrator_dir / f"delivery_shipment_log_{date_str_file}.csv"
+            if del_ship_file.exists():
+                try:
+                    del_ship_df = pd.read_csv(del_ship_file)
+                    if not del_ship_df.empty:
+                        for _, row in del_ship_df.iterrows():
+                            material = self._normalize_material_value(str(row['material']))
+                            location = self._normalize_location_value(str(row['sending']))
+                            key = (material, location)
+                            delivery_ship_dict[key] = delivery_ship_dict.get(key, 0) + int(row['quantity'])
+                except Exception as e:
+                    print(f"Warning: Failed to read {del_ship_file}: {e}")
+            
+            # 整合所有数据 - 以期末库存为基准，包含所有出现过的 (material, location)
+            all_keys = set()
+            all_keys.update(ending_inv_dict.keys())
+            all_keys.update(in_transit_dict.keys())
+            all_keys.update(production_gr_dict.keys())
+            all_keys.update(delivery_gr_dict.keys())
+            all_keys.update(order_dict.keys())
+            all_keys.update(shipment_dict.keys())
+            all_keys.update(delivery_ship_dict.keys())
+            all_keys.update(supply_demand_dict.keys())
+            all_keys.update(safety_stock_dict.keys())
+            
+            for material, location in sorted(all_keys):
+                record = {
+                    'date': date_str,
+                    'material': material,
+                    'location': location,
+                    'ending_inventory': ending_inv_dict.get((material, location), 0),
+                    'in_transit': in_transit_dict.get((material, location), 0),
+                    'production_gr': production_gr_dict.get((material, location), 0),
+                    'delivery_gr': delivery_gr_dict.get((material, location), 0),
+                    'order': order_dict.get((material, location), 0),
+                    'shipment': shipment_dict.get((material, location), 0),
+                    'delivery_ship': delivery_ship_dict.get((material, location), 0),
+                    'supply_demand': supply_demand_dict.get((material, location), 0),
+                    'safety_stock': safety_stock_dict.get((material, location), 0)
+                }
+                all_records.append(record)
+        
+        # 创建DataFrame并输出为CSV
+        if all_records:
+            historical_df = pd.DataFrame(all_records)
+            historical_df.to_csv(output_file, index=False)
+            print(f"📊 历史库存记录已生成: {output_file} ({len(historical_df)} 条记录)")
+        else:
+            # 创建空文件，包含列头
+            empty_df = pd.DataFrame(columns=['date', 'material', 'location', 'ending_inventory', 
+                                            'in_transit', 'production_gr', 'delivery_gr', 
+                                            'order', 'shipment', 'delivery_ship', 'supply_demand', 'safety_stock'])
+            empty_df.to_csv(output_file, index=False)
+            print(f"⚠️  历史库存记录为空，已创建空文件: {output_file}")
+        
+        return str(output_file)

@@ -31,8 +31,8 @@ def _normalize_identifiers(df: pd.DataFrame) -> pd.DataFrame:
         if col in df.columns:
             # Convert to string and handle NaN values
             df[col] = df[col].astype('string')
-            # Apply specific normalization for location
-            if col == 'location':
+            # Apply specific normalization for location-type fields
+            if col in ['location', 'sending', 'receiving', 'sourcing']:
                 df[col] = df[col].apply(_normalize_location)
             # Apply specific normalization for material
             elif col == 'material':
@@ -368,7 +368,7 @@ def apply_grouped_moq_rv(demand_rows, location):
         # 对组合后的总量应用MOQ/RV
         adjusted_total = apply_moq_rv(total_qty, moq, rv, is_cross_node=is_cross_node)
         
-        print(f"      📦 路径组 {sending}→{receiving} [{demand_element}]: 原始={total_qty} → 调整={adjusted_total} (MOQ={moq}, 跨节点={is_cross_node})")
+        # print(f"      📦 路径组 {sending}→{receiving} [{demand_element}]: 原始={total_qty} → 调整={adjusted_total} (MOQ={moq}, 跨节点={is_cross_node})")
         
         # 将调整后的总量按原始比例分配回各个需求项
         if total_qty > 0:
@@ -631,7 +631,7 @@ def load_integrated_config(
                     m1_supply_demand = xl.parse('SupplyDemandLog')
                     if not m1_supply_demand.empty:
                         config['SupplyDemandLog'] = m1_supply_demand
-                        print(f"  ✅ 从 Module1 加载了 {len(m1_supply_demand)} 条 SupplyDemandLog 数据")
+                        # print(f"  ✅ 从 Module1 加载了 {len(m1_supply_demand)} 条 SupplyDemandLog 数据")
         except Exception as e:
             print(f"  ⚠️  无法从 Module1 加载数据: {e}")
     
@@ -658,7 +658,7 @@ def load_integrated_config(
                     if col in prod_gr.columns:
                         prod_gr[col] = pd.to_numeric(prod_gr[col], errors='coerce').fillna(0)
                 config['ProductionPlan'] = prod_gr
-                print(f"  ✅ 从 Orchestrator 加载了 {len(prod_gr)} 条生产计划数据（仅历史生产GR，修复重复计算）")
+                # print(f"  ✅ 从 Orchestrator 加载了 {len(prod_gr)} 条生产计划数据（仅历史生产GR，修复重复计算）")
             else:
                 print(f"  ⚠️  Orchestrator当日无历史生产GR数据")
         except Exception as e:
@@ -677,7 +677,7 @@ def load_integrated_config(
                         if col in m4_production.columns:
                             m4_production[col] = pd.to_numeric(m4_production[col], errors='coerce').fillna(0)
                     config['ProductionPlan'] = m4_production
-                    print(f"  ✅ 回退：从 Module4 加载了 {len(m4_production)} 条生产计划数据")
+                    # print(f"  ✅ 回退：从 Module4 加载了 {len(m4_production)} 条生产计划数据")
         except Exception as e:
             print(f"  ⚠️  无法从 Module4 加载 ProductionPlan: {e}")   
 
@@ -704,7 +704,7 @@ def load_integrated_config(
             config['DeliveryGR'] = load_orchestrator_delivery_gr(orchestrator, current_date)
             config['OpenDeployment'] = load_orchestrator_open_deployment(orchestrator, current_date)
             config['ReceivingSpace'] = orchestrator.get_space_quota_view(date_str)
-            print(f"  ✅ 从 Orchestrator 加载了动态数据（使用期初库存基础）")
+            # print(f"  ✅ 从 Orchestrator 加载了动态数据（使用期初库存基础）")
         except Exception as e:
             print(f"  ⚠️  从 Orchestrator 加载动态数据失败: {e}")
             # 使用空数据作为备选
@@ -1062,8 +1062,11 @@ def push_softpush_allocation(
 ):
     """
     对push/soft-push模式节点，分配剩余库存到下游receiving, 输出push补货计划行
-    修正：planned_delivery_date = date + leadtime (按LeadTime表查)
-    修复：使用剩余库存而不是全部库存进行Push补货分配
+    修复：
+    1. sending site safety基于simulation_date
+    2. receiving site safety基于simulation_date + leadtime  
+    3. 如果所有receiving sites的safety都是0，则无需分配
+    4. push和soft push都按receiving site的safety权重分配
     """
     pushpull = config['PushPullModel']
     safety_stock = config['SafetyStock']
@@ -1074,8 +1077,8 @@ def push_softpush_allocation(
     
     # 🔧 修复：计算已分配给正常需求的库存
     allocated_inventory = {}
-    print(f"\n🔍 调试Push补货库存分配（{sim_date}）:")
-    print(f"   传入的deployment_plan_rows数量: {len(deployment_plan_rows)}")
+    # print(f"\n🔍 调试Push补货库存分配（{sim_date}）:")
+    # print(f"   传入的deployment_plan_rows数量: {len(deployment_plan_rows)}")
     
     for row in deployment_plan_rows:
         # 只计算非Push补货的分配量，且只计算跨节点调拨
@@ -1084,9 +1087,9 @@ def push_softpush_allocation(
             key = (row['material'], row['sending'])
             qty = row.get('deployed_qty_invCon', 0)
             allocated_inventory[key] = allocated_inventory.get(key, 0) + qty
-            print(f"   正常需求分配: {key} += {qty} (demand_element: {row.get('demand_element', 'N/A')})")
+    #         print(f"   正常需求分配: {key} += {qty} (demand_element: {row.get('demand_element', 'N/A')})")
     
-    print(f"   计算得到的已分配库存: {allocated_inventory}")
+    # print(f"   计算得到的已分配库存: {allocated_inventory}")
     
     group_keys = {(row['material'], row['sending']) for row in deployment_plan_rows}
     for mat, sending in group_keys:
@@ -1104,9 +1107,7 @@ def push_softpush_allocation(
         already_allocated = allocated_inventory.get((mat, sending), 0)
         soh = max(0, total_soh - already_allocated)
         
-        print(f"     总库存: {total_soh}")
-        print(f"     已分配: {already_allocated}")
-        print(f"     剩余库存: {soh}")
+        # print(f"     材料{mat}@{sending}: 总库存={total_soh}, 已分配={already_allocated}, 剩余库存={soh}")
         
         if soh <= 0:
             continue  # 如果没有剩余库存，跳过Push补货
@@ -1120,35 +1121,34 @@ def push_softpush_allocation(
         else:
             lsk, day = 1, 1
         
-        # 使用统一的筛选逻辑计算filter_end
-        filter_end = sim_date + pd.Timedelta(days=lsk - 1)
-        ss = safety_stock[
-            (safety_stock['material'] == mat) & (safety_stock['location'].isin(recs))
-        ]
-        ss = ss[pd.to_datetime(ss['date']) == filter_end]
-        total_ss = ss['safety_stock_qty'].sum()
-        for _, row in ss.iterrows():
-            loc = row['location']
-            ss_val = row['safety_stock_qty']
-            if model == 'push':
-                if total_ss > 0:
-                    qty = soh * ss_val / total_ss
-                else:
-                    qty = 0
-            else:  # soft push
-                # 计算本层site的safety
-                own_ss = 0
-                ss_self = safety_stock[
-                    (safety_stock['material'] == mat) & (safety_stock['location'] == sending)
-                ]
-                if not ss_self.empty:
-                    own_ss = ss_self['safety_stock_qty'].sum()
-                qty_avail = max(0, soh - own_ss)
-                qty = qty_avail * ss_val / total_ss if total_ss > 0 else 0
-            qty = int(np.floor(qty))
-            # 关键：查leadtime，使用与Module3一致的逻辑
-            # MCT是微生物检测时间，与sending site相关
-            # 获取sending location的location_type
+        # 🔧 修复1: 计算sending site的安全库存 (基于simulation_date)
+        sending_ss = 0
+        if model == 'soft push':
+            ss_self = safety_stock[
+                (safety_stock['material'] == mat) & (safety_stock['location'] == sending)
+            ]
+            ss_self_filtered = ss_self[pd.to_datetime(ss_self['date']) == sim_date] if not ss_self.empty else pd.DataFrame()
+            if not ss_self_filtered.empty:
+                sending_ss = ss_self_filtered['safety_stock_qty'].sum()
+            else:
+                print(f"     Warning: 没有找到{sim_date.date()}的sending安全库存配置，{sending}材料{mat}默认为0")
+        
+        # 计算可用库存
+        if model == 'push':
+            available_soh = soh  # push使用全部剩余库存
+        else:  # soft push
+            available_soh = max(0, soh - sending_ss)  # soft push扣除sending的安全库存
+        
+        # print(f"     {model}可用库存: {available_soh} (sending_ss={sending_ss})")
+        
+        if available_soh <= 0:
+            continue
+            
+        # 🔧 修复2: 准备receiving sites的安全库存数据 (基于simulation_date + leadtime)
+        receiving_ss_data = []
+        
+        for loc in recs:
+            # 计算leadtime
             sending_location_type = get_sending_location_type(
                 material=str(mat),
                 sending=str(sending),
@@ -1165,28 +1165,73 @@ def push_softpush_allocation(
                 material=str(mat)
             )
             if error_msg:
-                print(f"Warning: push/soft push {error_msg} for {sending}->{loc}, using default leadtime=1")
+                print(f"     Warning: {error_msg} for {sending}->{loc}, using default leadtime=1")
                 leadtime = 1
-            planned_delivery_date = sim_date + timedelta(days=leadtime)
-            plan = {
-                'date': sim_date,
-                'material': mat,
-                'sending': sending,
-                'receiving': loc,
-                'demand_qty': 0,
-                'demand_element': 'push replenishment' if model=='push' else 'soft push replenishment',
-                'planned_qty': qty,
-                'deployed_qty_invCon_push': qty,
-                'planned_delivery_date': planned_delivery_date,
-            }
-            plan['deployed_qty_invCon'] = plan['deployed_qty_invCon_push']  # 兼容后续空间分配和库存统计
-            plan_rows_push.append(plan)
+            
+            # 基于leadtime end date查找receiving site的安全库存
+            leadtime_end_date = sim_date + pd.Timedelta(days=leadtime)
+            loc_ss = safety_stock[
+                (safety_stock['material'] == mat) & (safety_stock['location'] == loc)
+            ]
+            
+            loc_ss_filtered = loc_ss[pd.to_datetime(loc_ss['date']) == leadtime_end_date] if not loc_ss.empty else pd.DataFrame()
+            if loc_ss_filtered.empty:
+                if not loc_ss.empty:
+                    print(f"     Warning: 没有找到{leadtime_end_date.date()}的receiving安全库存配置，{loc}材料{mat}默认为0")
+                ss_qty = 0
+            else:
+                ss_qty = loc_ss_filtered['safety_stock_qty'].sum()
+            
+            receiving_ss_data.append({
+                'location': loc,
+                'safety_stock_qty': ss_qty,
+                'leadtime': leadtime,
+                'leadtime_end_date': leadtime_end_date
+            })
+        
+        # 计算total receiving safety stock
+        total_receiving_ss = sum(item['safety_stock_qty'] for item in receiving_ss_data)
+        
+        # print(f"     下游位置安全库存总计: {total_receiving_ss}")
+        
+        # 🔧 修复3: 如果所有receiving sites的safety都是0，则无需分配
+        if total_receiving_ss == 0:
+            # print(f"     所有receiving sites的安全库存都为0，无需分配")
+            continue
+        
+        # 🔧 修复4: push和soft push都按receiving site的safety权重分配
+        for item in receiving_ss_data:
+            loc = item['location']
+            ss_val = item['safety_stock_qty']
+            leadtime = item['leadtime']
+            
+            qty = available_soh * ss_val / total_receiving_ss
+            qty = int(np.floor(qty))
+            
+            if qty > 0:
+                planned_delivery_date = sim_date + timedelta(days=leadtime)
+                plan = {
+                    'date': sim_date,
+                    'material': mat,
+                    'sending': sending,
+                    'receiving': loc,
+                    'demand_qty': 0,
+                    'demand_element': 'push replenishment' if model=='push' else 'soft push replenishment',
+                    'planned_qty': qty,
+                    'deployed_qty_invCon_push': qty,
+                    'planned_delivery_date': planned_delivery_date,
+                }
+                plan['deployed_qty_invCon'] = plan['deployed_qty_invCon_push']  # 兼容后续空间分配和库存统计
+                plan_rows_push.append(plan)
+                
+                # print(f"     {model}分配: {loc} = {qty} (权重={ss_val}/{total_receiving_ss})")
     return plan_rows_push
 
 
 def apply_receiving_space_quota(deployment_plan_rows, receiving_space, sim_date, demand_priority_map):
     """
     在所有调运计划明细生成后，按receiving space quota再分配，更新deployed_qty，unfulfilled log
+    修复：仅对跨节点调运（sending != receiving）应用receiving space quota限制
     """
     df = pd.DataFrame(deployment_plan_rows)
     if df.empty:
@@ -1207,52 +1252,80 @@ def apply_receiving_space_quota(deployment_plan_rows, receiving_space, sim_date,
             (receiving_space['receiving'] == recv) & (pd.to_datetime(receiving_space['date']) == date)
         ]
         quota = quota_row['max_qty'].iloc[0] if not quota_row.empty else np.inf
-        if grp['deployed_qty_invCon'].sum() <= quota:
-            df.loc[grp.index, 'deployed_qty'] = grp['deployed_qty_invCon']
-            df.loc[grp.index, 'quota'] = quota
+        
+        # 🔧 修复：仅计算跨节点调运的quantity占用quota
+        cross_node_grp = grp[grp['sending'] != grp['receiving']]
+        self_fulfillment_grp = grp[grp['sending'] == grp['receiving']]
+        
+        # 自我需求满足不占用quota，直接通过
+        df.loc[self_fulfillment_grp.index, 'deployed_qty'] = self_fulfillment_grp['deployed_qty_invCon']
+        df.loc[self_fulfillment_grp.index, 'quota'] = np.inf  # 自我满足不受quota限制
+        
+        if cross_node_grp.empty:
+            # 如果没有跨节点调运，跳过quota检查
             continue
-        # 空间不足，按优先级+权重分配
-        rows = grp.to_dict(orient='records')
-        total = sum(r['deployed_qty_invCon'] for r in rows)
-        # 按优先级
-        rows_sorted = sorted(rows, key=lambda r: demand_priority_map.get(r['demand_element'], 99))
+            
+        # 仅检查跨节点调运是否超过quota
+        cross_node_total = cross_node_grp['deployed_qty_invCon'].sum()
+        if cross_node_total <= quota:
+            df.loc[cross_node_grp.index, 'deployed_qty'] = cross_node_grp['deployed_qty_invCon']
+            df.loc[cross_node_grp.index, 'quota'] = quota
+            continue
+        # 跨节点调运空间不足，按优先级+权重分配（仅处理跨节点调运）
+        cross_node_rows = cross_node_grp.to_dict(orient='records')
+        
+        # 按优先级对跨节点调运进行排序和分组
+        rows_sorted = sorted(cross_node_rows, key=lambda r: demand_priority_map.get(r['demand_element'], 99))
         grouped = {}
         for r in rows_sorted:
             p = demand_priority_map.get(r['demand_element'], 99)
             grouped.setdefault(p, []).append(r)
+        
         left = quota
-        deploy_qtys = {i: 0 for i in range(len(rows))}
+        deploy_qtys = {i: 0 for i in range(len(cross_node_rows))}
+        
         for priority in sorted(grouped):
             group = grouped[priority]
             group_total = sum(r['deployed_qty_invCon'] for r in group)
             if left >= group_total:
                 for r in group:
-                    idx = rows.index(r)
+                    idx = cross_node_rows.index(r)
                     deploy_qtys[idx] = r['deployed_qty_invCon']
                 left -= group_total
             else:
                 allocated = 0
                 for r in group:
-                    idx = rows.index(r)
+                    idx = cross_node_rows.index(r)
                     weight = r['deployed_qty_invCon'] / group_total if group_total > 0 else 0
                     q = int(left * weight)
                     deploy_qtys[idx] = min(q, r['deployed_qty_invCon'])
                     allocated += deploy_qtys[idx]
                 left -= allocated
                 # 不再分配
-        # 更新实际分配
+                break
+        
+        # 更新跨节点调运的实际分配
         for idx, qty in deploy_qtys.items():
-            i = grp.index[idx]
-            df.at[i, 'deployed_qty'] = qty
-            df.at[i, 'quota'] = quota
-            gap = rows[idx]['deployed_qty_invCon'] - qty
+            original_row = cross_node_rows[idx]
+            # 找到原始DataFrame中对应的索引
+            original_idx = cross_node_grp[
+                (cross_node_grp['sending'] == original_row['sending']) &
+                (cross_node_grp['receiving'] == original_row['receiving']) &
+                (cross_node_grp['material'] == original_row['material']) &
+                (cross_node_grp['demand_element'] == original_row['demand_element'])
+            ].index[0]
+            
+            df.at[original_idx, 'deployed_qty'] = qty
+            df.at[original_idx, 'quota'] = quota
+            
+            gap = original_row['deployed_qty_invCon'] - qty
             if gap > 0:
                 unfulfilled.append({
                     'date': date,
-                    'sending': rows[idx]['sending'],
-                    'receiving': rows[idx]['receiving'],
-                    'demand_qty': rows[idx]['demand_qty'],
-                    'demand_element': rows[idx]['demand_element'],
+                    'sending': original_row['sending'],
+                    'receiving': original_row['receiving'],
+                    'demand_qty': original_row['demand_qty'],
+                    'demand_element': original_row['demand_element'],
                     'unfulfilled_qty': gap,
                     'reason': "space constraint"
                 })
@@ -1310,7 +1383,7 @@ def main(
     # 判断运行模式
     if config_dict is not None:
         # 集成模式 - 完成的集成数据加载
-        print("\n🔄 Module5 运行于集成模式")
+        # print("\n🔄 Module5 运行于集成模式")
         current_date_obj = pd.to_datetime(current_date) if current_date else None
         config = load_integrated_config(
             config_dict, module1_output_dir, module4_output_path, 
@@ -1323,7 +1396,7 @@ def main(
             output_path = f"./Module5Output_{current_date_obj.strftime('%Y%m%d')}.xlsx" if current_date_obj else "./Module5Output.xlsx"
     else:
         # 独立模式 - 保持往后兼容
-        print("\n📜 Module5 运行于独立模式") 
+        # print("\n📜 Module5 运行于独立模式") 
         config = load_config(input_path)
         sim_dates = pd.date_range(sim_start, sim_end, freq='D')
     
@@ -1390,9 +1463,9 @@ def main(
 
     for sim_date in sim_dates:
         # === 优化的日志输出 ===
-        print(f"\n{'='*60}")
-        print(f"📅 仿真日期: {sim_date.strftime('%Y-%m-%d')}")
-        print(f"{'='*60}")
+        # print(f"\n{'='*60}")
+        # print(f"📅 仿真日期: {sim_date.strftime('%Y-%m-%d')}")
+        # print(f"{'='*60}")
 
         # ===== 库存计算逻辑重构 (修复重复计算问题) =====
         # 🔄 新的库存计算公式: 基于期初库存避免重复计算
@@ -1413,53 +1486,53 @@ def main(
         future_production = {}
         if not production_plan.empty:
             # 🔍 调试生产计划数据
-            print(f"\n🔍 调试生产计划数据:")
-            print(f"   生产计划总条目: {len(production_plan)}")
-            print(f"   生产计划列: {production_plan.columns.tolist()}")
+            # print(f"\n🔍 调试生产计划数据:")
+            # print(f"   生产计划总条目: {len(production_plan)}")
+            # print(f"   生产计划列: {production_plan.columns.tolist()}")
             
             # 检查所有当日生产计划
             all_today = production_plan[production_plan['available_date'] == sim_date]
-            print(f"   所有当日生产计划: {len(all_today)} 条")
-            for _, row in all_today.iterrows():
-                print(f"   - {row.get('material')}@{row.get('location')}: {row.get('quantity')}")
+            # print(f"   所有当日生产计划: {len(all_today)} 条")
+            # for _, row in all_today.iterrows():
+                # print(f"   - {row.get('material')}@{row.get('location')}: {row.get('quantity')}")
             
             # 查看当日的80813644@0386生产计划
-            debug_today = production_plan[
-                (production_plan['available_date'] == sim_date) & 
-                (production_plan['material'] == '80813644') & 
-                (production_plan['location'] == '0386')
-            ]
-            if not debug_today.empty:
-                print(f"   当日80813644@0386生产计划: {len(debug_today)} 条")
-                for _, row in debug_today.iterrows():
-                    print(f"   - material: {row.get('material')}, location: {row.get('location')}")
-                    print(f"     produced_qty: {row.get('produced_qty')}, planned_qty: {row.get('planned_qty')}")
-                    print(f"     quantity: {row.get('quantity')}, available_date: {row.get('available_date')}")
+            # debug_today = production_plan[
+            #     (production_plan['available_date'] == sim_date) & 
+            #     (production_plan['material'] == '80813644') & 
+            #     (production_plan['location'] == '0386')
+            # ]
+            # if not debug_today.empty:
+            #     print(f"   当日80813644@0386生产计划: {len(debug_today)} 条")
+            #     for _, row in debug_today.iterrows():
+            #         print(f"   - material: {row.get('material')}, location: {row.get('location')}")
+            #         print(f"     produced_qty: {row.get('produced_qty')}, planned_qty: {row.get('planned_qty')}")
+            #         print(f"     quantity: {row.get('quantity')}, available_date: {row.get('available_date')}")
                     
             # 🔍 重要：对比历史生产入库vs计划生产
             if orchestrator:
                 date_str = sim_date.strftime('%Y-%m-%d')
-                print(f"\n🔍 对比历史生产入库 vs 计划生产:")
+                # print(f"\n🔍 对比历史生产入库 vs 计划生产:")
                 # 获取当日历史生产GR
-                prod_gr_view = orchestrator.get_production_gr_view(date_str)
-                print(f"   当日历史生产GR条目: {len(prod_gr_view) if not prod_gr_view.empty else 0}")
-                if not prod_gr_view.empty:
-                    for _, row in prod_gr_view.iterrows():
-                        print(f"   - 历史GR: {row.get('material')}@{row.get('location')}: {row.get('quantity')}")
+                # prod_gr_view = orchestrator.get_production_gr_view(date_str)
+                # print(f"   当日历史生产GR条目: {len(prod_gr_view) if not prod_gr_view.empty else 0}")
+                # if not prod_gr_view.empty:
+                #     for _, row in prod_gr_view.iterrows():
+                #         print(f"   - 历史GR: {row.get('material')}@{row.get('location')}: {row.get('quantity')}")
                 
-                # 获取计划生产backlog
-                if hasattr(orchestrator, 'production_plan_backlog'):
-                    backlog_today = [p for p in orchestrator.production_plan_backlog 
-                                   if pd.to_datetime(p.get('available_date')).normalize() == sim_date.normalize()]
-                    print(f"   当日计划生产backlog条目: {len(backlog_today)}")
-                    for record in backlog_today:
-                        print(f"   - 计划backlog: {record.get('material')}@{record.get('location')}: {record.get('quantity')}")
-                else:
-                    print(f"   Orchestrator没有production_plan_backlog属性")
+                # # 获取计划生产backlog
+                # if hasattr(orchestrator, 'production_plan_backlog'):
+                #     backlog_today = [p for p in orchestrator.production_plan_backlog 
+                #                    if pd.to_datetime(p.get('available_date')).normalize() == sim_date.normalize()]
+                #     print(f"   当日计划生产backlog条目: {len(backlog_today)}")
+                #     for record in backlog_today:
+                #         print(f"   - 计划backlog: {record.get('material')}@{record.get('location')}: {record.get('quantity')}")
+                # else:
+                #     print(f"   Orchestrator没有production_plan_backlog属性")
             
-            # 当日生产 (available_date = sim_date) —— 用 produced_qty
+            # # 当日生产 (available_date = sim_date) —— 用 produced_qty
             today_prod = production_plan[production_plan['available_date'] == sim_date]
-            print(f"   当日生产条目: {len(today_prod)}")
+            # print(f"   当日生产条目: {len(today_prod)}")
             for _, row in today_prod.iterrows():
                 k = (row['material'], row['location'])
                 if 'produced_qty' in row and pd.notna(row['produced_qty']):
@@ -1471,8 +1544,8 @@ def main(
                 else:
                     qty_today = 0
                 today_production_gr[k] = today_production_gr.get(k, 0) + qty_today
-                if k[0] == '80813644' and k[1] == '0386':
-                    print(f"   添加80813644@0386生产: {qty_today} (累计: {today_production_gr[k]})")
+                # if k[0] == '80813644' and k[1] == '0386':
+                    # print(f"   添加80813644@0386生产: {qty_today} (累计: {today_production_gr[k]})")
 
             # 未来生产 (available_date > sim_date) —— 用 uncon_planned_qty
             future_prod = production_plan[production_plan['available_date'] > sim_date]
@@ -1546,61 +1619,61 @@ def main(
             open_deployment=open_deployment
         )
         
-        print(f"🔍 库存计算基础: 期初库存 {len(beginning_inventory)} 项, 预测库存 {len([k for k, v in projected_soh.items() if v > 0])} 项有库存, 当日可用库存 {len([k for k, v in dynamic_soh.items() if v > 0])} 项有库存")
+        # print(f"🔍 库存计算基础: 期初库存 {len(beginning_inventory)} 项, 预测库存 {len([k for k, v in projected_soh.items() if v > 0])} 项有库存, 当日可用库存 {len([k for k, v in dynamic_soh.items() if v > 0])} 项有库存")
         
         # 🔍 调试：详细分析80813644@0386的库存计算
-        debug_key = ('80813644', '0386')
-        if debug_key in beginning_inventory or debug_key in dynamic_soh:
-            print(f"\n🔍 调试80813644@0386库存计算:")
-            print(f"   期初库存 (beginning_inventory): {beginning_inventory.get(debug_key, 0)}")
-            print(f"   交付入库 (delivery_gr): {delivery_gr.get(debug_key, 0)}")
-            print(f"   当日生产入库 (today_production_gr): {today_production_gr.get(debug_key, 0)}")
-            print(f"   当日发货出库 (today_shipment): {today_shipment.get(debug_key, 0)}")
-            print(f"   开放部署扣减 (open_deployment): {open_deployment.get(debug_key, 0)}")
-            calculated = (beginning_inventory.get(debug_key, 0) + 
-                         delivery_gr.get(debug_key, 0) + 
-                         today_production_gr.get(debug_key, 0) - 
-                         today_shipment.get(debug_key, 0) - 
-                         open_deployment.get(debug_key, 0))
-            print(f"   计算结果 = {beginning_inventory.get(debug_key, 0)} + {delivery_gr.get(debug_key, 0)} + {today_production_gr.get(debug_key, 0)} - {today_shipment.get(debug_key, 0)} - {open_deployment.get(debug_key, 0)} = {calculated}")
-            print(f"   dynamic_soh实际值: {dynamic_soh.get(debug_key, 0)}")
+        # debug_key = ('80813644', '0386')
+        # if debug_key in beginning_inventory or debug_key in dynamic_soh:
+        #     print(f"\n🔍 调试80813644@0386库存计算:")
+        #     print(f"   期初库存 (beginning_inventory): {beginning_inventory.get(debug_key, 0)}")
+        #     print(f"   交付入库 (delivery_gr): {delivery_gr.get(debug_key, 0)}")
+        #     print(f"   当日生产入库 (today_production_gr): {today_production_gr.get(debug_key, 0)}")
+        #     print(f"   当日发货出库 (today_shipment): {today_shipment.get(debug_key, 0)}")
+        #     print(f"   开放部署扣减 (open_deployment): {open_deployment.get(debug_key, 0)}")
+        #     calculated = (beginning_inventory.get(debug_key, 0) + 
+        #                  delivery_gr.get(debug_key, 0) + 
+        #                  today_production_gr.get(debug_key, 0) - 
+        #                  today_shipment.get(debug_key, 0) - 
+        #                  open_deployment.get(debug_key, 0))
+        #     print(f"   计算结果 = {beginning_inventory.get(debug_key, 0)} + {delivery_gr.get(debug_key, 0)} + {today_production_gr.get(debug_key, 0)} - {today_shipment.get(debug_key, 0)} - {open_deployment.get(debug_key, 0)} = {calculated}")
+        #     print(f"   dynamic_soh实际值: {dynamic_soh.get(debug_key, 0)}")
             
-            # 🔍 调试today_production_gr的具体来源
-            print(f"\n🔍 调试today_production_gr的来源:")
-            print(f"   today_production_gr总条目: {len(today_production_gr)}")
-            for key, qty in today_production_gr.items():
-                if key[0] == '80813644' and key[1] == '0386':
-                    print(f"   发现80813644@0386的生产入库: {qty}")
+            # # 🔍 调试today_production_gr的具体来源
+            # print(f"\n🔍 调试today_production_gr的来源:")
+            # print(f"   today_production_gr总条目: {len(today_production_gr)}")
+            # for key, qty in today_production_gr.items():
+            #     if key[0] == '80813644' and key[1] == '0386':
+            #         print(f"   发现80813644@0386的生产入库: {qty}")
             
             # 对比Orchestrator的unrestricted_inventory
-            if orchestrator:
-                date_str = current_date.strftime('%Y-%m-%d') if hasattr(current_date, 'strftime') else str(current_date)
-                orch_inventory = orchestrator.get_unrestricted_inventory_view(date_str)
-                orch_row = orch_inventory[(orch_inventory['material'] == '80813644') & (orch_inventory['location'] == '0386')]
-                if not orch_row.empty:
-                    orch_qty = orch_row.iloc[0]['quantity']
-                    print(f"   Orchestrator unrestricted_inventory: {orch_qty}")
-                    print(f"   差异: dynamic_soh({dynamic_soh.get(debug_key, 0)}) - unrestricted({orch_qty}) = {dynamic_soh.get(debug_key, 0) - orch_qty}")
+            # if orchestrator:
+            #     date_str = current_date.strftime('%Y-%m-%d') if hasattr(current_date, 'strftime') else str(current_date)
+            #     orch_inventory = orchestrator.get_unrestricted_inventory_view(date_str)
+            #     orch_row = orch_inventory[(orch_inventory['material'] == '80813644') & (orch_inventory['location'] == '0386')]
+            #     if not orch_row.empty:
+            #         orch_qty = orch_row.iloc[0]['quantity']
+                    # print(f"   Orchestrator unrestricted_inventory: {orch_qty}")
+                    # print(f"   差异: dynamic_soh({dynamic_soh.get(debug_key, 0)}) - unrestricted({orch_qty}) = {dynamic_soh.get(debug_key, 0) - orch_qty}")
                     
                     # 🔍 调试Orchestrator当日历史生产入库记录
-                    print(f"\n🔍 调试Orchestrator当日历史生产入库:")
-                    if hasattr(orchestrator, 'production_gr'):
-                        prod_records = [p for p in orchestrator.production_gr if 
-                                      p.get('date') == date_str and 
-                                      p.get('material') == '80813644' and 
-                                      p.get('location') == '0386']
-                        print(f"   Orchestrator当日历史生产入库记录数: {len(prod_records)}")
-                        total_orch_prod = sum(p.get('quantity', 0) for p in prod_records)
-                        print(f"   Orchestrator当日历史生产入库总量: {total_orch_prod}")
-                        for record in prod_records:
-                            print(f"   - {record}")
-                    else:
-                        print(f"   Orchestrator没有production_gr属性")
+                    # print(f"\n🔍 调试Orchestrator当日历史生产入库:")
+                    # if hasattr(orchestrator, 'production_gr'):
+                    #     prod_records = [p for p in orchestrator.production_gr if 
+                    #                   p.get('date') == date_str and 
+                    #                   p.get('material') == '80813644' and 
+                    #                   p.get('location') == '0386']
+                    #     print(f"   Orchestrator当日历史生产入库记录数: {len(prod_records)}")
+                    #     total_orch_prod = sum(p.get('quantity', 0) for p in prod_records)
+                    #     print(f"   Orchestrator当日历史生产入库总量: {total_orch_prod}")
+                    #     for record in prod_records:
+                    #         print(f"   - {record}")
+                    # else:
+                    #     print(f"   Orchestrator没有production_gr属性")
         up_gap_next = {}
 
         for layer in layer_list:
-            print(f"\n📦 处理层级 {layer}")
-            print(f"{'-'*40}")
+            # print(f"\n📦 处理层级 {layer}")
+            # print(f"{'-'*40}")
             
             # 组合所有material-location对（包含 OrderLog和safety stock）
             materials_union = set(config['SupplyDemandLog']['material'].unique())
@@ -1624,15 +1697,15 @@ def main(
             for mat, loc in all_pairs:
                 node_key = (mat, loc)
                 current_stock = dynamic_soh.get(node_key, 0)
-                print(f"📍 节点: {mat}@{loc} [可用库存: {current_stock}]")
+                # print(f"📍 节点: {mat}@{loc} [可用库存: {current_stock}]")
                 
                 demand_rows = collect_node_demands(mat, loc, sim_date, config, up_gap_buffer)
                 if not demand_rows:
-                    print(f"   ⚠️  无需求需要处理")
+                    # print(f"   ⚠️  无需求需要处理")
                     continue
                 
                 demand_types = [d['demand_element'] for d in demand_rows]
-                print(f"   📋 需求类型: {', '.join(demand_types)}")
+                # print(f"   📋 需求类型: {', '.join(demand_types)}")
                 
                 # 🔧 修复：MOQ/RV应用逻辑移至调拨计划生成阶段，根据实际的sending/receiving关系决定
                 # 此处先将planned_qty设为demand_qty，稍后在生成plan_row时再决定是否应用MOQ/RV
@@ -1649,7 +1722,7 @@ def main(
                 # 🔧 修复：使用分组MOQ/RV逻辑计算总需求量
                 adjusted_qtys = apply_grouped_moq_rv(demand_rows, loc)
                 total_actual_demand = sum(adjusted_qtys.values())
-                print(f"   📊 总需求: {total_actual_demand}, 可用库存: {current_stock}")
+                # print(f"   📊 总需求: {total_actual_demand}, 可用库存: {current_stock}")
                 
                 for priority in sorted(grouped):
                     group = grouped[priority]
@@ -1658,13 +1731,13 @@ def main(
                     for i, d in enumerate(demand_rows):
                         if d in group:
                             group_actual_demand += adjusted_qtys.get(i, d['demand_qty'])
-                    print(f"   🔢 优先级 {priority}: 需求 {group_actual_demand}")
+                    # print(f"   🔢 优先级 {priority}: 需求 {group_actual_demand}")
                     
                     # 如果没有剩余库存，所有后续优先级都分配0
                     if current_stock <= 0:
                         for d in group:
                             d['deployed_qty_invCon'] = 0
-                        print(f"      ❌ 无剩余库存，跳过")
+                        # print(f"      ❌ 无剩余库存，跳过")
                         continue
                     
                     if group_actual_demand == 0:
@@ -1679,7 +1752,7 @@ def main(
                                 adjusted_qty = adjusted_qtys.get(i, d['demand_qty'])
                                 d['deployed_qty_invCon'] = adjusted_qty
                         current_stock -= group_actual_demand
-                        print(f"      ✅ 库存充足，完全满足")
+                        # print(f"      ✅ 库存充足，完全满足")
                     else:
                         # 库存不足，按权重分配所有剩余库存给当前优先级
                         # 关键修复：用完库存后，后续优先级不再分配
@@ -1692,7 +1765,7 @@ def main(
                         # 重新计算实际分配量
                         actual_allocated = sum(d['deployed_qty_invCon'] for d in group)
                         current_stock = 0  # 关键修复：库存不足时，用完所有库存，后续优先级不再分配
-                        print(f"      ⚠️  库存不足，部分满足 {actual_allocated}/{group_actual_demand}，后续优先级不再分配")
+                        # print(f"      ⚠️  库存不足，部分满足 {actual_allocated}/{group_actual_demand}，后续优先级不再分配")
                         
                         # 为后续优先级预设0分配
                         remaining_priorities = [p for p in sorted(grouped) if p > priority]
@@ -1708,7 +1781,7 @@ def main(
                             is_cross_node = (loc != receiving)
                             adjusted_qty = adjusted_qtys.get(i, d['demand_qty'])
                             status = "✅" if d['deployed_qty_invCon'] == adjusted_qty else "⚠️"
-                            print(f"      {status} [{d['demand_element']}] 原始需求={d['demand_qty']} 计划={adjusted_qty} 分配={d['deployed_qty_invCon']} 跨节点={is_cross_node}")
+                            # print(f"      {status} [{d['demand_element']}] 原始需求={d['demand_qty']} 计划={adjusted_qty} 分配={d['deployed_qty_invCon']} 跨节点={is_cross_node}")
 
                 # 处理GAP和生成调拨计划
                 gap_count = 0
@@ -1745,10 +1818,10 @@ def main(
                             'reason': "supply shortage"
                         })
                         
-                        print(f"      🔼 需求缺口: {gap_qty} [{d['demand_element']}] → 上游 {up_loc} (is_cross_node: {is_cross_node}, adjusted_qty: {adjusted_qty})")
+                        # print(f"      🔼 需求缺口: {gap_qty} [{d['demand_element']}] → 上游 {up_loc} (is_cross_node: {is_cross_node}, adjusted_qty: {adjusted_qty})")
                 
-                if gap_count == 0:
-                    print(f"      🟢 无需求缺口")
+                # if gap_count == 0:
+                    # print(f"      🟢 无需求缺口")
                 
                 # 生成调拨计划行
                 for i, d in enumerate(demand_rows):
@@ -1798,7 +1871,7 @@ def main(
                     }
                     deployment_plan_rows.append(plan_row)
 
-            print(f"\n✅ 层级 {layer} 处理完成，向上游传递 {sum(len(v) for v in up_gap_next.values())} 个需求缺口")
+            # print(f"\n✅ 层级 {layer} 处理完成，向上游传递 {sum(len(v) for v in up_gap_next.values())} 个需求缺口")
 
             # 更新GAP缓冲区
             up_gap_buffer = up_gap_next.copy()
@@ -1807,7 +1880,7 @@ def main(
         plan_push = push_softpush_allocation(deployment_plan_rows, config, dynamic_soh, sim_date)
         if plan_push:
             deployment_plan_rows.extend(plan_push)
-            print(f"\n🔄 Push/Soft-push 补货: 生成 {len(plan_push)} 条补货计划")
+            # print(f"\n🔄 Push/Soft-push 补货: 生成 {len(plan_push)} 条补货计划")
 
         # 更新库存（基于当日事务流水）
         deployed_dict = {}
@@ -1852,9 +1925,9 @@ def main(
                 'ending_soh': end_soh
             })
         
-        print(f"\n📊 当日统计:")
-        print(f"   总调拨计划数: {len(deployment_plan_rows)}")
-        print(f"   未满足需求数: {len([r for r in unfulfilled_rows if r['date'] == sim_date])}")
+        # print(f"\n📊 当日统计:")
+        # print(f"   总调拨计划数: {len(deployment_plan_rows)}")
+        # print(f"   未满足需求数: {len([r for r in unfulfilled_rows if r['date'] == sim_date])}")
 
     # 应用收货空间配额
     deployment_plan_rows_df, unfulfilled_space = apply_receiving_space_quota(
@@ -1901,13 +1974,13 @@ def main(
     #         import traceback
     #         traceback.print_exc()
     
-    print(f"\n{'='*60}")
-    print(f"🎉 仿真完成! 所有层级已处理完毕")
-    print(f"💾 调拨计划已保存至: {output_path}")
-    print(f"📈 总调拨计划数: {len(deployment_plan_rows_df)}")
-    print(f"📝 未满足需求数: {len(unfulfilled_all)}")
-    print(f"✅ 修复重复计算问题: 使用期初库存作为计算基础")
-    print(f"{'='*60}")
+    # print(f"\n{'='*60}")
+    # print(f"🎉 仿真完成! 所有层级已处理完毕")
+    # print(f"💾 调拨计划已保存至: {output_path}")
+    # print(f"📈 总调拨计划数: {len(deployment_plan_rows_df)}")
+    # print(f"📝 未满足需求数: {len(unfulfilled_all)}")
+    # print(f"✅ 修复重复计算问题: 使用期初库存作为计算基础")
+    # print(f"{'='*60}")
     
     # 返回结果用于集成模式
     return {

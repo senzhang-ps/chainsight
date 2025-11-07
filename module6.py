@@ -474,7 +474,7 @@ def run_daily_physical_flow(
     orchestrator: object,
     current_date: pd.Timestamp,
     output_dir: str,
-    max_wait_days: int = 7,
+    max_wait_days: int = 30,
     random_seed: int = None
 ) -> dict:
     """
@@ -594,7 +594,7 @@ def run_physical_flow_module(
     current_date: str = None,
     output_path: str = None,
     # Common parameters
-    max_wait_days: int = 7,
+    max_wait_days: int = 30,
     random_seed: int = None
 ):
     # 判断运行模式
@@ -831,26 +831,11 @@ def run_physical_flow_module(
                 continue
             planned_date = pd.to_datetime(st['planned'])
             waiting_days = (sim_date - planned_date).days + 1
-            if waiting_days > max_wait_days:
-                continue
-            
-            # 集成模式：直接处理所有open deployment数据，无需时间过滤
-            # 因为Orchestrator已经管理了部署计划的生命周期，确保数据的合理性
-            if config_dict is not None:
-                # 集成模式：信任Orchestrator的数据，直接处理
-                pass  # 无需额外时间过滤
-            else:
-                # 独立模式：保持原逻辑，只处理当天及过去的计划
-                if planned_date > sim_date:
-                    continue
-                    
+            # 原逻辑: waiting_days > max_wait_days 则直接过滤导致永不发运
+            # 修复: 不再直接跳过, 允许进入后续强制发运判断
+            # if waiting_days > max_wait_days:
+            #     continue
             full = dp_dict[uid]
-            
-            # 调试：记录跨节点计划的详细信息
-            route_type = "自循环" if full['sending'] == full['receiving'] else "跨节点"
-            # if route_type == "跨节点":
-            #     # print(f"    🔍 跨节点计划 {uid}: {full['sending']}->{full['receiving']}, planned={planned_date.date()}, waiting={waiting_days}天, qty={st['qty']}")
-            
             pending_rows.append({
                 'ori_deployment_uid': uid,
                 'material': full['material'],
@@ -1042,10 +1027,16 @@ def run_physical_flow_module(
                     bypass, rule_id = should_bypass_mdq(context, bypass_rules, evaluator)
 
                     trigger_cause = None
+                    # 计算当前车中最高等待天数用于强制触发
+                    max_wait_in_load = max((r['demand_row']['waiting_days'] for r in load_records), default=0)
                     if load_records and (wfr >= wfr_th or vfr >= vfr_th):
                         trigger_cause = 'threshold'
                     elif load_records and bypass:
                         trigger_cause = 'bypass'
+                    # 新增：等待天数达到上限时强制发运（即使未达阈值也未命中bypass）
+                    elif load_records and max_wait_in_load >= max_wait_days:
+                        trigger_cause = 'force_wait_timeout'
+                    # print(f"  🚦 触发原因: {trigger_cause}")
 
                     if trigger_cause:
                         # —— 触发后再尽量贴近 1.0（仍不超）——
@@ -1173,6 +1164,7 @@ def run_physical_flow_module(
                                     'context_snapshot': str(context),
                                     'vehicle_uid': vehicle_uid
                                 })
+                        # force_wait_timeout 不记录 bypass_log
 
                         # 更新remaining_demands，移除已处理完毕的需求
                         remaining_demands = remaining_demands[remaining_demands['deployed_qty'] > 0].copy()
@@ -1187,16 +1179,18 @@ def run_physical_flow_module(
                 uid = row['ori_deployment_uid']
                 if agg_status[uid]['qty'] <= 0:
                     continue
-                agg_status[uid]['waiting'] += 1
-                if agg_status[uid]['waiting'] > max_wait_days:
+                # 原逻辑使用 agg_status['waiting'] 累加；改为使用真实 waiting_days 判断
+                waiting_days = row['waiting_days']
+                if waiting_days > max_wait_days:
                     unsat_log.append({
                         'ori_deployment_uid': uid, 'material': row['material'],
                         'sending': sending, 'receiving': receiving, 'demand_element': row['demand_element'],
                         'planned_deployment_date': row['planned_deployment_date'],
-                        'simulation_date': sim_date, 'waiting_days': agg_status[uid]['waiting'],
+                        'simulation_date': sim_date, 'waiting_days': waiting_days,
                         'accumulated_qty': agg_status[uid]['qty'], 'min_MDQ': route_mdq,
                         'reason': 'waited_too_long'
                     })
+                    # 终止后续再尝试，避免永久积压
                     agg_status[uid]['qty'] = 0
 
     # ---------------------- Usage summary ----------------------

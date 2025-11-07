@@ -1140,15 +1140,16 @@ def run_integrated_mode(
         # 保存每日输出
         daily_output_file = f"{output_dir}/Module3Output_{current_date.strftime('%Y%m%d')}.xlsx"
         try:
-            # 强制确保标识符字段为字符串类型，避免Excel保存/读取时的类型转换问题
-            if not net_demand_df.empty:
-                for col in ['material', 'location']:
-                    if col in net_demand_df.columns:
-                        net_demand_df[col] = net_demand_df[col].astype(str)
-            
+            expected_cols = ['material','location','requirement_date','quantity','demand_element','layer','simulation_date','horizon_days']
+            if net_demand_df.empty:
+                net_demand_df = pd.DataFrame(columns=expected_cols)
+            else:
+                for c in expected_cols:
+                    if c not in net_demand_df.columns:
+                        net_demand_df[c] = pd.Series(dtype='object')
+                net_demand_df = net_demand_df[expected_cols]
             with pd.ExcelWriter(daily_output_file, engine='openpyxl') as writer:
                 net_demand_df.to_excel(writer, index=False, sheet_name='NetDemand')
-            # print(f"  ✅ 已保存每日输出: {daily_output_file}")
         except Exception as e:
             print(f"  ⚠️  保存失败: {e}")
         

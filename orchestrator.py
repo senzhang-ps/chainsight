@@ -953,10 +953,14 @@ class Orchestrator:
         _normalize_identifiers(inventory_change_df).to_csv(self.output_dir / f"inventory_change_log_{date_str}.csv", index=False)
         # print(f"  📊 已生成库存变动日志: {len(inventory_change_df)} 条记录")
         
-        # Save daily logs
+        # Save daily logs (改为无论是否有事件都输出文件，含表头)
+        logs_file = self.output_dir / f"daily_logs_{date_str}.csv"
         if self.daily_logs:
             logs_df = pd.DataFrame(self.daily_logs)
-            logs_df.to_csv(self.output_dir / f"daily_logs_{date_str}.csv", index=False)
+        else:
+            # 保证列头一致
+            logs_df = pd.DataFrame(columns=['timestamp', 'date', 'event_type', 'message'])
+        logs_df.to_csv(logs_file, index=False)
     
     def _log_event(self, event_type: str, message: str):
         """

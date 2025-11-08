@@ -13,6 +13,8 @@ import os
 from pandas.errors import EmptyDataError, ParserError
 import logging
 
+import orchestrator
+
 logger = logging.getLogger(__name__)
 
 # 导入所有模块
@@ -1096,7 +1098,8 @@ def run_integrated_simulation(
         start_date=start_date,
         output_dir=str(orchestrator_output_dir)
     )
-    
+    # 设置 open deployment 的清理天数，3代表保留3天
+    orchestrator.set_past_due_cleanup_grace_days(3)
     if is_resuming:
         # 续跑模式：恢复状态
         print(f"\n🔄 续跑模式：恢复Orchestrator状态")
@@ -1157,9 +1160,11 @@ def run_integrated_simulation(
         # ==================== 每日开始：GR入库处理 ====================
         try:
             print(f"\n🌅 每日开始状态更新")
+            
             # 🔄 第0步：保存期初库存快照（在任何变动之前）
             print(f"  💾 保存期初库存快照...")
             orchestrator.save_beginning_inventory(current_date.strftime('%Y-%m-%d'))
+            orchestrator.cleanup_past_due_open_deployments(current_date.strftime('%Y-%m-%d'),grace_days=getattr(orchestrator, "cleanup_grace_days", 0),write_audit=True)
 
             # 🔄 第1步：处理当日到达的delivery GR (in-transit → inventory)
             print(f"  📦 处理当日delivery GR到达...")

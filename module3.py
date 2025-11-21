@@ -349,6 +349,37 @@ def _get_ptf_lsk(material: str, site: str, m4_mlcfg_df: pd.DataFrame | None) -> 
         lsk = int(row['LSK'])
 
     return ptf, lsk
+def _compute_root_horizon(material: str,
+                          location: str,
+                          lead_time_df: pd.DataFrame,
+                          m4_mlcfg_df: pd.DataFrame | None = None) -> int:
+    """
+    顶层(无上游)窗口口径 — 与 Module 5 对齐：
+    horizon = max(PDT+GR, MCT) + PTF + LSK - 1
+    - PDT/GR/MCT：从 Global_LeadTime 取 sending==location 的所有行的最大值（缺失当 0）
+    - PTF/LSK：从 M4_MaterialLocationLineCfg 按 (material, location) 读取；未命中默认 PTF=0, LSK=1
+    - 最终保证 horizon >= 1
+    """
+    import pandas as pd
+
+    # 1) PTF/LSK
+    ptf, lsk = _get_ptf_lsk(material=material, site=location, m4_mlcfg_df=m4_mlcfg_df)
+
+    # 2) PDT/GR/MCT（以 sending==location 的行取最大值）
+    if lead_time_df is None or lead_time_df.empty:
+        PDT = GR = MCT = 0
+    else:
+        df_loc = lead_time_df[lead_time_df['sending'].astype(str) == str(location)]
+        if df_loc.empty:
+            PDT = GR = MCT = 0
+        else:
+            PDT = int(pd.to_numeric(df_loc.get('PDT', 0), errors='coerce').fillna(0).max())
+            GR  = int(pd.to_numeric(df_loc.get('GR',  0), errors='coerce').fillna(0).max())
+            MCT = int(pd.to_numeric(df_loc.get('MCT', 0), errors='coerce').fillna(0).max())
+
+    base_lt = max(MCT, PDT + GR)
+    horizon = max(1, int(base_lt + int(ptf) + int(lsk) - 1))
+    return horizon
 
 def determine_lead_time(
     sending: str,
@@ -732,12 +763,13 @@ def run_mrp_layered_simulation_daily(
     if not demand_pool_df.empty:
         # 统一数据类型
         demand_pool_df['date'] = pd.to_datetime(demand_pool_df['date'])
-        demand_pool_df['quantity'] = demand_pool_df['quantity'].astype(float)    
+        demand_pool_df['quantity'] = demand_pool_df['quantity'].astype(float)
+
     # 分配层级
-        location_layer_df = assign_location_layers(active_network)
-        if location_layer_df.empty:
-            print(f"Warning: No location layers assigned for date {sim_date}")
-            return pd.DataFrame({'material': [], 'location': [], 'requirement_date': [], 'quantity': [], 'demand_element': [], 'layer': []})
+    location_layer_df = assign_location_layers(active_network)
+    if location_layer_df.empty:
+        print(f"Warning: No location layers assigned for date {sim_date}")
+        return pd.DataFrame({'material': [], 'location': [], 'requirement_date': [], 'quantity': [], 'demand_element': [], 'layer': []})
     location_layer = dict(zip(location_layer_df['location'], location_layer_df['layer']))
     all_layers = sorted(set(location_layer.values()), reverse=True)
     all_net_demand_records = []
@@ -792,7 +824,7 @@ def run_mrp_layered_simulation_daily(
         # 数值列统一为数值类型，缺失置 0
         for col in ['produced_qty', 'uncon_planned_qty', 'quantity']:
             if col in future_production_df.columns:
-                future_production_df[col] = pd.to_numeric(future_production_df[col], errors='coerce').fillna(0)        
+                future_production_df[col] = pd.to_numeric(future_production_df[col], errors='coerce').fillna(0)
     # 下游gap分 AO、FC、SS gap
     downstream_gap_dict = defaultdict(lambda: {'AO': 0.0, 'FC': 0.0, 'SS': 0.0})
 
@@ -819,15 +851,23 @@ def run_mrp_layered_simulation_daily(
             if not network_candidates.empty:
                 network_row = network_candidates.iloc[0]
                 upstream = network_row['sourcing']
-                
-                # 处理upstream为nan或None的情况
-                if pd.isna(upstream) or upstream is None:
+
+                # ✅ 命中 network 但 sourcing 为空/空串 → 视为顶层；根节点走 Plant 口径
+                if (pd.isna(upstream)) or (upstream is None) or (str(upstream).strip() == ''):
                     upstream = None
-                    location_type = 'DC'
-                    horizon = 1
+                    if location_layer.get(location, -1) == 0:
+                        location_type = 'Plant'
+                        horizon = _compute_root_horizon(
+                            material=str(material),
+                            location=str(location),
+                            lead_time_df=lead_time_df,
+                            m4_mlcfg_df=m4_mlcfg_df
+                        )
+                    else:
+                        location_type = 'DC'
+                        horizon = 1
                 else:
-                    # MCT是微生物检测时间，与sending site相关
-                    # 需要查找sending location的location_type
+                    # 有上游：保持原逻辑
                     sending_location_type = infer_sending_location_type(
                         network_df=active_network,
                         location_layer_df=location_layer_df,
@@ -835,30 +875,29 @@ def run_mrp_layered_simulation_daily(
                         material=str(material),
                         sim_date=sim_date
                     )
-
                     horizon, error_msg = determine_lead_time(
                         sending=str(upstream),
                         receiving=str(location),
-                        location_type=str(sending_location_type),   # ← 现在能正确识别 Plant
+                        location_type=str(sending_location_type),
                         lead_time_df=lead_time_df,
                         m4_mlcfg_df=m4_mlcfg_df,
                         material=str(material)
                     )
-                    
                     if error_msg:
                         print(f"Warning: {error_msg} for {upstream}->{location}, using default horizon=1")
                         horizon = 1
             else:
-                # 🔥 新增：处理自动识别的根节点（如plant）
-                # 这些节点在network中没有明确配置，但通过层级分析被识别为根节点
+                # 根节点（如 plant）：与 Module 5 统一口径
                 upstream = None
                 if location_layer.get(location, -1) == 0:
-                    # 这是根节点（如plant），设置默认值
                     location_type = 'Plant'
-                    horizon = 1
-                    # print(f"     自动识别根节点: {material}@{location} (Layer 0)")
+                    horizon = _compute_root_horizon(
+                        material=str(material),
+                        location=str(location),
+                        lead_time_df=lead_time_df,
+                        m4_mlcfg_df=m4_mlcfg_df
+                    )
                 else:
-                    # 其他未配置的节点
                     location_type = 'DC'
                     horizon = 1
 

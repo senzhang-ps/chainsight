@@ -893,46 +893,57 @@ def validate_config_before_run(config, validation_log):
     return validation_log
 
 def collect_node_demands(material, location, sim_date, config, up_gap_buffer):
-    supply_demand_log = config['SupplyDemandLog']
-    safety_stock = config['SafetyStock']
-    deploy_cfg = config['DeployConfig']
-    network = config['Network']
-    leadtime_df = config['LeadTime']
+    """
+    对齐规则：
+    - horizon 统一来自 determine_lead_time 口径：
+        * 有上游：horizon = determine_lead_time(upstream->location)
+        * 无上游（顶层自补）：horizon = max(MCT, PDT+GR) + PTF + LSK - 1
+    - horizon_end = sim_date + horizon
+    - 选择窗口：
+        * AO/normal（订单，来自 OrderLog）：date ∈ (sim_date, horizon_end]
+        * forecast（来自 SupplyDemandLog）：date ∈ [sim_date, horizon_end]
+        * safety：取 horizon_end 当天的目标量
+        * 其余/净需求传递（net demand for xx 等）：date ∈ [sim_date, horizon_end]
+    - 行级 leadtime：
+        * 有上游：= horizon（同一套口径）
+        * 无上游：= 0
+    """
+    import pandas as pd
+    from datetime import timedelta
 
-    # 参数
+    supply_demand_log = config['SupplyDemandLog']
+    safety_stock      = config['SafetyStock']
+    deploy_cfg        = config['DeployConfig']
+    network           = config['Network']
+    leadtime_df       = config['LeadTime']
+
+    # 读取 MOQ/RV/LSK/Day（保持你现有口径：以本节点作为 sending 去读）
     param_row = deploy_cfg[
         (deploy_cfg['material'] == material) & (deploy_cfg['sending'] == location)
     ]
     if not param_row.empty:
         moq = int(param_row.iloc[0]['moq'])
-        rv = int(param_row.iloc[0]['rv'])
-        lsk = param_row.iloc[0]['lsk']
+        rv  = int(param_row.iloc[0]['rv'])
+        lsk = param_row.iloc[0]['lsk']  # 此处 lsk/day 仅作为后续模块可能用到的元数据，窗口不再依赖它
         day = int(param_row.iloc[0]['day'])
     else:
         moq, rv, lsk, day = 1, 1, 1, 1
 
+    # 上游
     network_row = get_active_network(network, material, location, sim_date)
-    if not network_row.empty:
-        upstream = network_row.iloc[0]['sourcing']
-    else:
-        upstream = None
+    upstream = network_row.iloc[0]['sourcing'] if not network_row.empty else None
 
-    # 统一口径：通过层级判根→Plant
-    sending_location_type = get_sending_location_type(
-        material=str(material),
-        sending=str(upstream) if upstream else "",
-        sim_date=sim_date,
-        network_df=network,
-        location_layer_map=config.get('LocationLayerMap', {})
-    )
-
-    # —— 区分“窗口前置LT(lt_for_window)”与“计划行运输LT(lt_for_row)” ——
-    lt_for_row = 0
-    lt_for_window = 0
-
-    # 使用与Module3一致的提前期计算逻辑（非顶层沿用原来；顶层仅用于窗口前置）
-    if upstream and pd.notna(upstream) and str(upstream).strip():
-        lt_for_row, error_msg = determine_lead_time(
+    # 统一：发送端类型 & horizon
+    if upstream and str(upstream).strip():
+        sending_location_type = get_sending_location_type(
+            material=str(material),
+            sending=str(upstream),
+            sim_date=sim_date,
+            network_df=network,
+            location_layer_map=config.get('LocationLayerMap', {})
+        )
+        # 有上游：用 determine_lead_time 得到 horizon
+        horizon, err = determine_lead_time(
             sending=str(upstream),
             receiving=str(location),
             location_type=str(sending_location_type),
@@ -940,153 +951,131 @@ def collect_node_demands(material, location, sim_date, config, up_gap_buffer):
             m4_mlcfg_df=config.get('M4_MaterialLocationLineCfg', pd.DataFrame()),
             material=str(material)
         )
-        if error_msg:
-            print(f"Warning: {error_msg} for {upstream}->{location}, using default leadtime=1")
-            lt_for_row = 1
-        lt_for_window = lt_for_row  # 非顶层：窗口前置LT = 运输LT（保持原行为）
+        if err:
+            # 缺失或异常回退为 1
+            horizon = 1
+        leadtime_for_row = int(horizon)  # 行级 LT（跨节点）
     else:
-        # 顶层：窗口前置LT = MCT + PTF + LSK - 1；运输LT（自补货）= 0
+        # 顶层：按 Plant 公式计算 horizon = max(MCT, PDT+GR) + PTF + LSK - 1
+        # PTF/LSK 来自 M4_MaterialLocationLineCfg
         ptf, lsk_val = _get_ptf_lsk(
             material=str(material),
             site=str(location),
             m4_mlcfg_df=config.get('M4_MaterialLocationLineCfg', pd.DataFrame())
         )
-        mct_series = leadtime_df.loc[leadtime_df['sending'] == str(location), 'MCT']
-        mct_val = int(pd.to_numeric(mct_series, errors='coerce').max()) if not mct_series.empty else 0
-        lt_for_window = max(0, mct_val) + int(ptf) + int(lsk_val) - 1
-        lt_for_row = 0  # 顶层自补货行运输LT恒为0
+        # MCT/PDT/GR 来自 Global_LeadTime（以 sending==location 的行取最大值；缺失按 0）
+        df_loc = leadtime_df[leadtime_df['sending'] == str(location)]
+        MCT = int(pd.to_numeric(df_loc.get('MCT', 0), errors='coerce').fillna(0).max()) if not df_loc.empty else 0
+        PDT = int(pd.to_numeric(df_loc.get('PDT', 0), errors='coerce').fillna(0).max()) if not df_loc.empty else 0
+        GR  = int(pd.to_numeric(df_loc.get('GR',  0), errors='coerce').fillna(0).max()) if not df_loc.empty else 0
 
-    # 使用统一的planned_deploy_date筛选逻辑: [simulation_date, simulation_date + lsk - 1]
-    filter_start = sim_date
-    filter_end = sim_date + pd.Timedelta(days=int(lsk) - 1)
+        base_lt  = max(MCT, PDT + GR)
+        horizon  = max(1, int(base_lt + int(ptf) + int(lsk_val) - 1))
+        leadtime_for_row = 0  # 自补货（顶层）行级 LT 恒为 0
+
+    # horizon_end
+    horizon_end = sim_date + timedelta(days=int(horizon))
 
     demand_rows = []
 
-    # SupplyDemandLog（需求原始行）
+    # ========= 1) SDL: 预测 / 其他本地需求 =========
     sdl = supply_demand_log[
-        (supply_demand_log['material'] == material) & (supply_demand_log['location'] == location)
+        (supply_demand_log['material'] == material) &
+        (supply_demand_log['location'] == location)
     ].copy()
     if not sdl.empty:
-        # date字段代表requirement_date（需求需要的日期）
         sdl['requirement_date'] = pd.to_datetime(sdl['date'])
-        # 计算planned_deploy_date并筛选（使用窗口前置LT）
-        sdl['planned_deploy_date'] = sdl['requirement_date'] - pd.Timedelta(days=lt_for_window)
-        sdl['planned_deploy_date'] = sdl[['planned_deploy_date']].apply(
-            lambda x: max(x['planned_deploy_date'], sim_date), axis=1
-        )
-        # 使用planned_deploy_date窗口筛选
-        mask = (sdl['planned_deploy_date'] >= filter_start) & (sdl['planned_deploy_date'] <= filter_end)
-        sdl = sdl[mask]
-    for _, row in sdl.iterrows():
-        requirement_date = row['requirement_date']
-        planned_deploy_date = row['planned_deploy_date']
 
-        demand_rows.append({
-            'material': material,
-            'location': location,
-            'sending': upstream,
-            'receiving': location,
-            'demand_element': row['demand_element'],
-            'demand_qty': int(row['quantity']),
-            'planned_qty': int(row['quantity']),
-            'moq': moq,
-            'rv': rv,
-            'leadtime': lt_for_row,  # ← 改为lt_for_row
-            'requirement_date': requirement_date,
-            'plan_deploy_date': planned_deploy_date,
-        })
+        # 识别 forecast 行（完全匹配 'forecast'，忽略大小写）
+        is_fc = sdl['demand_element'].astype(str).str.lower() == 'forecast'
 
-    # SafetyStock同理
+        # forecast: [sim_date, horizon_end]
+        sdl_fc = sdl[is_fc & (sdl['requirement_date'] >= sim_date) & (sdl['requirement_date'] <= horizon_end)]
+
+        # 其他（含 net demand for xx 等）：[sim_date, horizon_end]
+        sdl_others = sdl[~is_fc & (sdl['requirement_date'] >= sim_date) & (sdl['requirement_date'] <= horizon_end)]
+
+        for _, row in pd.concat([sdl_fc, sdl_others], ignore_index=True).iterrows():
+            demand_rows.append({
+                'material': material,
+                'location': location,
+                'sending': upstream,
+                'receiving': location,
+                'demand_element': row['demand_element'],
+                'demand_qty': int(row['quantity']),
+                'planned_qty': int(row['quantity']),
+                'moq': moq,
+                'rv': rv,
+                'leadtime': leadtime_for_row if upstream else 0,  # 顶层自补 0，跨节点=统一 horizon
+                'requirement_date': row['requirement_date'],
+                'plan_deploy_date': sim_date  # 计划触发日在窗口内分配环节使用，这里先放 sim_date
+            })
+
+    # ========= 2) 安全库存：只取 horizon_end 当天 =========
     ss = safety_stock[
-        (safety_stock['material'] == material) & (safety_stock['location'] == location)
+        (safety_stock['material'] == material) &
+        (safety_stock['location'] == location)
     ].copy()
+    ss_qty = 0
     if not ss.empty:
-        # safety stock的date字段也代表requirement_date
-        ss['requirement_date'] = pd.to_datetime(ss['date'])
-        # 计算planned_deploy_date并筛选（使用窗口前置LT）
-        ss['planned_deploy_date'] = ss['requirement_date'] - pd.Timedelta(days=lt_for_window)
-        ss['planned_deploy_date'] = ss[['planned_deploy_date']].apply(
-            lambda x: max(x['planned_deploy_date'], sim_date), axis=1
-        )
-        # 使用planned_deploy_date窗口筛选
-        mask = (ss['planned_deploy_date'] >= filter_start) & (ss['planned_deploy_date'] <= filter_end)
-        ss = ss[mask]
-    for _, row in ss.iterrows():
-        requirement_date = row['requirement_date']
-        planned_deploy_date = row['planned_deploy_date']
+        ss['date'] = pd.to_datetime(ss['date'])
+        ss_end = ss[ss['date'] == horizon_end]
+        if not ss_end.empty:
+            ss_qty = int(pd.to_numeric(ss_end['safety_stock_qty'], errors='coerce').fillna(0).sum())
 
+    if ss_qty > 0:
         demand_rows.append({
             'material': material,
             'location': location,
             'sending': upstream,
             'receiving': location,
             'demand_element': 'safety',
-            'demand_qty': int(row['safety_stock_qty']),
-            'planned_qty': int(row['safety_stock_qty']),
+            'demand_qty': ss_qty,
+            'planned_qty': ss_qty,
             'moq': moq,
             'rv': rv,
-            'leadtime': lt_for_row,  # ← 改为lt_for_row
-            'requirement_date': requirement_date,
-            'plan_deploy_date': planned_deploy_date,
+            'leadtime': leadtime_for_row if upstream else 0,
+            'requirement_date': horizon_end,     # 目标日 = horizon_end
+            'plan_deploy_date': sim_date
         })
 
-    # ========= 新增：将当日版本 OrderLog（含AO/normal）纳入调运需求 =========
+    # ========= 3) 订单池（AO/normal）：[sim_date, horizon_end] =========
     order_df = config.get('OrderLog', pd.DataFrame())
     if not order_df.empty:
         orders = order_df[
-            (order_df['material'] == material) &
-            (order_df['location'] == location)
+            (order_df['material'] == material) & (order_df['location'] == location)
         ].copy()
-
         if not orders.empty:
-            # 需求日期 = 订单到期日
             orders['requirement_date'] = pd.to_datetime(orders['date'])
-            orders['demand_element'] = orders['demand_type']
-            # planned_deploy_date = requirement_date - lt_for_window（但不可早于sim_date）
-            orders['planned_deploy_date'] = orders['requirement_date'] - pd.Timedelta(days=lt_for_window)
-            orders['planned_deploy_date'] = orders['planned_deploy_date'].apply(lambda d: max(d, sim_date))
+            orders['demand_element']  = orders['demand_type']
 
-            # LSK 窗口筛选：planned_deploy_date ∈ [sim_date, sim_date + lsk - 1]
-            mask = (orders['planned_deploy_date'] >= filter_start) & (orders['planned_deploy_date'] <= filter_end)
+            # AO / normal 统一用 (sim_date, horizon_end]
+            mask = (orders['requirement_date'] >= sim_date) & (orders['requirement_date'] <= horizon_end)
             orders = orders[mask]
 
             for _, row in orders.iterrows():
-                requirement_date = row['requirement_date']
-                planned_deploy_date = row['planned_deploy_date']
                 qty = int(row['quantity'])
-
                 demand_rows.append({
                     'material': material,
                     'location': location,
                     'sending': upstream,
                     'receiving': location,
-                    'demand_element': row['demand_element'],   # 'AO' / 'normal'
+                    'demand_element': str(row['demand_element']),
                     'demand_qty': qty,
-                    'planned_qty': qty,         # MOQ/RV 稍后统一处理
+                    'planned_qty': qty,
                     'moq': moq,
                     'rv': rv,
-                    'leadtime': lt_for_row,     # ← 改为lt_for_row
-                    'requirement_date': requirement_date,
-                    'plan_deploy_date': planned_deploy_date,
+                    'leadtime': leadtime_for_row if upstream else 0,
+                    'requirement_date': row['requirement_date'],
+                    'plan_deploy_date': sim_date,
                     'orig_location': location
                 })
 
-    # gap行，这部分需要按requirement_date重新计算planned_deploy_date并筛选
+    # ========= 4) GAP 传递（上游下发的净需求）：[sim_date, horizon_end] =========
     if up_gap_buffer is not None and (material, location) in up_gap_buffer:
         for gap in up_gap_buffer[(material, location)]:
-            requirement_date = gap.get('requirement_date', None)
-            if requirement_date is None:
-                # 如果没有requirement_date，默认使用当前日期
-                requirement_date = sim_date
-                planned_deploy_date = sim_date
-            else:
-                requirement_date = pd.to_datetime(requirement_date)
-                # 基于窗口前置LT重新计算planned_deploy_date
-                planned_deploy_date = requirement_date - pd.Timedelta(days=lt_for_window)
-                planned_deploy_date = max(planned_deploy_date, sim_date)
-
-            # 检查planned_deploy_date是否在筛选窗口内
-            if planned_deploy_date >= filter_start and planned_deploy_date <= filter_end:
+            req_dt = pd.to_datetime(gap.get('requirement_date', sim_date))
+            if (req_dt >= sim_date) and (req_dt <= horizon_end):
                 demand_rows.append({
                     'material': material,
                     'location': gap.get('location', location),
@@ -1094,109 +1083,118 @@ def collect_node_demands(material, location, sim_date, config, up_gap_buffer):
                     'orig_location': gap.get('orig_location', gap.get('location', location)),
                     'sending': upstream,
                     'demand_element': gap['demand_element'],
-                    'demand_qty': gap['planned_qty'],
-                    'planned_qty': gap['planned_qty'],
+                    'demand_qty': int(gap['planned_qty']),
+                    'planned_qty': int(gap['planned_qty']),
                     'moq': moq,
                     'rv': rv,
-                    'leadtime': lt_for_row,  # ← 改为lt_for_row
-                    'requirement_date': requirement_date,
-                    'plan_deploy_date': planned_deploy_date,
+                    'leadtime': leadtime_for_row if upstream else 0,
+                    'requirement_date': req_dt,
+                    'plan_deploy_date': sim_date,
                     'from_location': gap.get('from_location', None),
                 })
+
     return demand_rows
 
 def push_softpush_allocation(
     deployment_plan_rows, config, dynamic_soh, sim_date
 ):
     """
-    对push/soft-push模式节点，分配剩余库存到下游receiving, 输出push补货计划行
-    修复：
-    1. sending site safety基于simulation_date
-    2. receiving site safety基于simulation_date + leadtime  
-    3. 如果所有receiving sites的safety都是0，则无需分配
-    4. push和soft push都按receiving site的safety权重分配
+    对 push / soft-push 节点，把真正的剩余库存按下游 safety 权重分配为补货计划行。
+    修复点：
+      1) 本节点当日若存在未满足的非 push 需求（含自满足 & 跨节点），则不触发 push
+      2) 已分配库存：当日、非 push 行（含自满足）都会扣减，避免误判“剩余”
+      3) receiving 端安全库存按 (sim_date + leadtime) 取值
+      4) 若下游 safety 总和为 0 或无下游，则不分配
+      5) 最大余数法分配，消灭向下取整尾差
     """
-    pushpull = config['PushPullModel']
-    safety_stock = config['SafetyStock']
-    leadtime_df = config['LeadTime']
+    import pandas as pd
+    import numpy as np
+    from datetime import timedelta
+
+    pushpull   = config['PushPullModel']
+    safety     = config['SafetyStock']
+    lt_df      = config['LeadTime']
     deploy_cfg = config['DeployConfig']
-    net = config['Network']
+    net        = config['Network']
+
     plan_rows_push = []
-    
-    # 🔧 修复：计算已分配给正常需求的库存
-    allocated_inventory = {}
-    # print(f"\n🔍 调试Push补货库存分配（{sim_date}）:")
-    # print(f"   传入的deployment_plan_rows数量: {len(deployment_plan_rows)}")
-    
-    for row in deployment_plan_rows:
-        # 只计算非Push补货的分配量，且只计算跨节点调拨
-        if (row['sending'] != row['receiving'] and 
-            'push' not in row.get('demand_element', '').lower()):
-            key = (row['material'], row['sending'])
-            qty = row.get('deployed_qty_invCon', 0)
+
+    # —— 统计【当日】已分配的库存（非 push 行，含自满足 + 跨节点）——
+    allocated_inventory: dict[tuple[str, str], int] = {}
+    for r in deployment_plan_rows:
+        if 'push' in str(r.get('demand_element', '')).lower():
+            continue  # 排除 push/soft-push 自身
+        if pd.to_datetime(r.get('date')) != sim_date:
+            continue  # 仅当日
+        mat = r.get('material'); snd = r.get('sending')
+        if mat is None or snd is None:
+            continue
+        key = (mat, snd)
+        qty = int(r.get('deployed_qty_invCon', 0) or 0)
+        if qty > 0:
             allocated_inventory[key] = allocated_inventory.get(key, 0) + qty
-    #         print(f"   正常需求分配: {key} += {qty} (demand_element: {row.get('demand_element', 'N/A')})")
-    
-    # print(f"   计算得到的已分配库存: {allocated_inventory}")
-    
-    group_keys = {(row['material'], row['sending']) for row in deployment_plan_rows}
+
+    # —— 逐 (material, sending) 处理 —— 
+    group_keys = {(r['material'], r['sending']) for r in deployment_plan_rows if r.get('material') and r.get('sending')}
     for mat, sending in group_keys:
-        row_pp = pushpull[
-            (pushpull['material'] == mat) & (pushpull['sending'] == sending)
-        ]
+        # A) 当日是否仍有未满足的非 push 需求？（含自满足 & 跨节点）
+        pending_gap = any(
+            (
+                r.get('material') == mat
+                and r.get('sending') == sending
+                and 'push' not in str(r.get('demand_element', '')).lower()
+                and pd.to_datetime(r.get('date')) == sim_date
+                and int(r.get('deployed_qty_invCon', 0) or 0) < int(r.get('planned_qty', 0) or 0)
+            )
+            for r in deployment_plan_rows
+        )
+        if pending_gap:
+            continue  # 有缺口就不推
+
+        # B) 该 (mat,sending) 是否配置 push / soft push
+        row_pp = pushpull[(pushpull['material'] == mat) & (pushpull['sending'] == sending)]
         if row_pp.empty:
             continue
-        model = row_pp.iloc[0]['model']
+        model = str(row_pp.iloc[0]['model']).strip().lower()
         if model not in ['push', 'soft push']:
             continue
-        
-        # 🔧 修复：使用剩余库存而不是全部库存
-        total_soh = dynamic_soh.get((mat, sending), 0)
-        already_allocated = allocated_inventory.get((mat, sending), 0)
+
+        # C) 计算真正的剩余库存 = dynamic_soh - 当日已分配（非 push）
+        total_soh        = int(dynamic_soh.get((mat, sending), 0) or 0)
+        already_allocated = int(allocated_inventory.get((mat, sending), 0) or 0)
         soh = max(0, total_soh - already_allocated)
-        
-        # print(f"     材料{mat}@{sending}: 总库存={total_soh}, 已分配={already_allocated}, 剩余库存={soh}")
-        
         if soh <= 0:
-            continue  # 如果没有剩余库存，跳过Push补货
-        recs = net[(net['material']==mat) & (net['sourcing']==sending)]['location'].unique()
-        param_row = deploy_cfg[
-            (deploy_cfg['material'] == mat) & (deploy_cfg['sending'] == sending)
-        ]
-        if not param_row.empty:
-            lsk = int(param_row.iloc[0]['lsk'])  # 确保LSK为整数
-            day = int(param_row.iloc[0]['day'])
+            continue
+
+        # D) 读取 LSK/Day（虽当前逻辑未用到 day，但保持一致性）
+        row_cfg = deploy_cfg[(deploy_cfg['material'] == mat) & (deploy_cfg['sending'] == sending)]
+        if not row_cfg.empty:
+            lsk = int(row_cfg.iloc[0]['lsk'])
+            day = int(row_cfg.iloc[0]['day'])
         else:
             lsk, day = 1, 1
-        
-        # 🔧 修复1: 计算sending site的安全库存 (基于simulation_date)
+
+        # E) soft-push 需先保留本节点当日 safety（sim_date）
         sending_ss = 0
         if model == 'soft push':
-            ss_self = safety_stock[
-                (safety_stock['material'] == mat) & (safety_stock['location'] == sending)
-            ]
-            ss_self_filtered = ss_self[pd.to_datetime(ss_self['date']) == sim_date] if not ss_self.empty else pd.DataFrame()
-            if not ss_self_filtered.empty:
-                sending_ss = ss_self_filtered['safety_stock_qty'].sum()
-            else:
-                print(f"     Warning: 没有找到{sim_date.date()}的sending安全库存配置，{sending}材料{mat}默认为0")
-        
-        # 计算可用库存
-        if model == 'push':
-            available_soh = soh  # push使用全部剩余库存
-        else:  # soft push
-            available_soh = max(0, soh - sending_ss)  # soft push扣除sending的安全库存
-        
-        # print(f"     {model}可用库存: {available_soh} (sending_ss={sending_ss})")
-        
+            ss_self = safety[(safety['material'] == mat) & (safety['location'] == sending)]
+            ss_self = ss_self[pd.to_datetime(ss_self['date']) == sim_date] if not ss_self.empty else pd.DataFrame()
+            if not ss_self.empty:
+                sending_ss = int(ss_self['safety_stock_qty'].sum())
+        # 可用于下推的库存
+        available_soh = soh if model == 'push' else max(0, soh - sending_ss)
         if available_soh <= 0:
             continue
-            
-        # 🔧 修复2: 准备receiving sites的安全库存数据 (基于simulation_date + leadtime)
+
+        # F) 找下游 receiving 列表
+        recs = net[(net['material'] == mat) & (net['sourcing'] == sending)]['location'].dropna().unique().tolist()
+        if not recs:
+            continue  # 没有下游
+
+        # G) 构造 receiving 安全库存与 leadtime
         receiving_ss_data = []
-        
-        for loc in recs:
-            # 计算leadtime
+        for rec in recs:
+            # leadtime 计算
             sending_location_type = get_sending_location_type(
                 material=str(mat),
                 sending=str(sending),
@@ -1204,75 +1202,73 @@ def push_softpush_allocation(
                 network_df=net,
                 location_layer_map=config.get('LocationLayerMap', {})
             )
-            leadtime, error_msg = determine_lead_time(
+            leadtime, err = determine_lead_time(
                 sending=str(sending),
-                receiving=str(loc),
+                receiving=str(rec),
                 location_type=str(sending_location_type),
-                lead_time_df=leadtime_df,
+                lead_time_df=lt_df,
                 m4_mlcfg_df=config.get('M4_MaterialLocationLineCfg', pd.DataFrame()),
                 material=str(mat)
             )
-            if error_msg:
-                print(f"     Warning: {error_msg} for {sending}->{loc}, using default leadtime=1")
+            if err:
                 leadtime = 1
-            
-            # 基于leadtime end date查找receiving site的安全库存
-            leadtime_end_date = sim_date + pd.Timedelta(days=leadtime)
-            loc_ss = safety_stock[
-                (safety_stock['material'] == mat) & (safety_stock['location'] == loc)
-            ]
-            
-            loc_ss_filtered = loc_ss[pd.to_datetime(loc_ss['date']) == leadtime_end_date] if not loc_ss.empty else pd.DataFrame()
-            if loc_ss_filtered.empty:
-                if not loc_ss.empty:
-                    print(f"     Warning: 没有找到{leadtime_end_date.date()}的receiving安全库存配置，{loc}材料{mat}默认为0")
-                ss_qty = 0
-            else:
-                ss_qty = loc_ss_filtered['safety_stock_qty'].sum()
-            
+            target_date = sim_date + timedelta(days=int(leadtime))
+            ss_rec = safety[(safety['material'] == mat) & (safety['location'] == rec)]
+            ss_rec = ss_rec[pd.to_datetime(ss_rec['date']) == target_date] if not ss_rec.empty else pd.DataFrame()
+            ss_qty = int(ss_rec['safety_stock_qty'].sum()) if not ss_rec.empty else 0
+
             receiving_ss_data.append({
-                'location': loc,
-                'safety_stock_qty': ss_qty,
-                'leadtime': leadtime,
-                'leadtime_end_date': leadtime_end_date
+                'receiving': rec,
+                'ss_qty': ss_qty,
+                'leadtime': int(leadtime),
+                'planned_delivery_date': target_date
             })
-        
-        # 计算total receiving safety stock
-        total_receiving_ss = sum(item['safety_stock_qty'] for item in receiving_ss_data)
-        
-        # print(f"     下游位置安全库存总计: {total_receiving_ss}")
-        
-        # 🔧 修复3: 如果所有receiving sites的safety都是0，则无需分配
-        if total_receiving_ss == 0:
-            # print(f"     所有receiving sites的安全库存都为0，无需分配")
-            continue
-        
-        # 🔧 修复4: push和soft push都按receiving site的safety权重分配
-        for item in receiving_ss_data:
-            loc = item['location']
-            ss_val = item['safety_stock_qty']
-            leadtime = item['leadtime']
-            
-            qty = available_soh * ss_val / total_receiving_ss
-            qty = int(np.floor(qty))
-            
-            if qty > 0:
-                planned_delivery_date = sim_date + timedelta(days=leadtime)
-                plan = {
-                    'date': sim_date,
-                    'material': mat,
-                    'sending': sending,
-                    'receiving': loc,
-                    'demand_qty': 0,
-                    'demand_element': 'push replenishment' if model=='push' else 'soft push replenishment',
-                    'planned_qty': qty,
-                    'deployed_qty_invCon_push': qty,
-                    'planned_delivery_date': planned_delivery_date,
-                }
-                plan['deployed_qty_invCon'] = plan['deployed_qty_invCon_push']  # 兼容后续空间分配和库存统计
-                plan_rows_push.append(plan)
-                
-                # print(f"     {model}分配: {loc} = {qty} (权重={ss_val}/{total_receiving_ss})")
+
+        total_ss = sum(x['ss_qty'] for x in receiving_ss_data)
+        if total_ss <= 0:
+            continue  # 下游安全库存总和为 0，不推
+
+        # H) 按 safety 权重分配（最大余数法，吃掉尾差）
+        # 1) 理想配额与向下取整
+        ideal = []
+        floor_sum = 0
+        for x in receiving_ss_data:
+            share = available_soh * (x['ss_qty'] / total_ss)
+            q_floor = int(np.floor(share))
+            frac = share - q_floor
+            ideal.append((x, q_floor, frac))
+            floor_sum += q_floor
+
+        # 2) 把剩余 (available_soh - floor_sum) 份额按 frac 从大到小 +1
+        remainder = int(available_soh - floor_sum)
+        if remainder > 0:
+            ideal_sorted = sorted(ideal, key=lambda t: t[2], reverse=True)
+            for i in range(remainder):
+                x, q_floor, frac = ideal_sorted[i % len(ideal_sorted)]
+                ideal_sorted[i % len(ideal_sorted)] = (x, q_floor + 1, frac)
+            ideal = ideal_sorted
+
+        # I) 生成 push 计划行（只落 qty>0）
+        for x, qty, _ in ideal:
+            if qty <= 0:
+                continue
+            plan = {
+                'date': sim_date,
+                'material': mat,
+                'sending': sending,
+                'receiving': x['receiving'],
+                'demand_qty': 0,
+                'demand_element': 'push replenishment' if model == 'push' else 'soft push replenishment',
+                'planned_qty': int(qty),
+                'deployed_qty_invCon_push': int(qty),
+                'deployed_qty_invCon': int(qty),  # 兼容后续空间配额与库存统计
+                'planned_delivery_date': x['planned_delivery_date'],
+                'orig_location': x['receiving'],
+                'leadtime': int(x['leadtime']),
+                'is_cross_node': True
+            }
+            plan_rows_push.append(plan)
+
     return plan_rows_push
 
 
@@ -1372,6 +1368,7 @@ def apply_receiving_space_quota(deployment_plan_rows, receiving_space, sim_date,
                     'date': date,
                     'sending': original_row['sending'],
                     'receiving': original_row['receiving'],
+                    'material': original_row['material'],  # 新增
                     'demand_qty': original_row['demand_qty'],
                     'demand_element': original_row['demand_element'],
                     'unfulfilled_qty': gap,

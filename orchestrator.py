@@ -179,7 +179,7 @@ class Orchestrator:
         # UID sequence counter
         self.uid_sequence = 0
         # 过期清理的全局宽限天数（可运行时修改）
-        self.cleanup_grace_days: int = 10
+        self.cleanup_grace_days: int = 100
 
         # Daily logs for audit
         self.daily_logs: List[Dict] = []
@@ -193,6 +193,9 @@ class Orchestrator:
         
         # 🆕 新增：发运出库日志  
         self.delivery_shipment_log: List[Dict] = []  # Daily delivery shipments from Module6
+
+        # 记录当天是否应经完成过一次清理
+        self._last_cleanup_date: Optional[pd.Timestamp] = None
         
         print(f"✅ Orchestrator initialized for simulation starting {start_date}")
     
@@ -335,28 +338,9 @@ class Orchestrator:
     def get_open_deployment_view(self, date: str) -> pd.DataFrame:
         """
         Get open deployment view for specified date
-
-        进入此函数即执行“过期open deployment清理”（基于 self.cleanup_grace_days），
-        然后返回清理后的净表。并在 output_dir 打印当天的 cleanup 审计文件。
-
-        Args:
-            date: Date in YYYY-MM-DD format
-
-        Returns:
-            DataFrame with columns [material, sending, receiving, planned_deployment_date, 
-                                    deployed_qty, demand_element, ori_deployment_uid]
+        注意：本函数不再触发过期清理；清理只在 run_daily_processing() 开头执行一次。
+        返回列: [material, sending, receiving, planned_deployment_date, deployed_qty, demand_element, ori_deployment_uid]
         """
-        # 先做过期清理（可追溯）：这一步会输出 open_deployment_pastdue_cleanup_YYYYMMDD.csv
-        try:
-            self.cleanup_past_due_open_deployments(
-                date=date, 
-                grace_days=getattr(self, "cleanup_grace_days", 0), 
-                write_audit=True
-            )
-        except Exception as e:
-            # 清理失败不影响主流程，只记录日志
-            self._log_event("OPEN_DEPLOYMENT_CLEANUP_ERROR", f"{e}")
-
         records = []
         for uid, deployment_record in self.open_deployment.items():
             records.append({
@@ -368,7 +352,6 @@ class Orchestrator:
                 'demand_element': deployment_record['demand_element'],
                 'ori_deployment_uid': uid
             })
-
         df = pd.DataFrame(records)
         if df.empty:
             df = pd.DataFrame(columns=[
@@ -802,7 +785,7 @@ class Orchestrator:
                             production_df: Optional[pd.DataFrame] = None,
                             deployment_df: Optional[pd.DataFrame] = None,
                             delivery_df: Optional[pd.DataFrame] = None,
-                            grace_days: int = 0):
+                            grace_days: Optional[int] = None):
         """
         Execute daily processing in correct order: M1 → M4 → M5 → M6
         
@@ -816,8 +799,12 @@ class Orchestrator:
         self.current_date = pd.to_datetime(date).normalize()
         
         print(f"\n📅 Processing date: {date}")
-        # 清理过期的 open deployment（先清理，确保后续模块拿到的是净表）
-        self.cleanup_past_due_open_deployments(date, grace_days=grace_days, write_audit=True)
+        # ✅ 仅在每日跑批开头清理一次；grace_days 未传则使用全局 self.cleanup_grace_days
+        normalized_date_str = pd.to_datetime(date).strftime('%Y-%m-%d')
+        g = self.cleanup_grace_days if grace_days is None else int(grace_days)
+        if self._last_cleanup_date != normalized_date_str:
+            self.cleanup_past_due_open_deployments(date, grace_days=g, write_audit=True)
+            self._last_cleanup_date = normalized_date_str
 
         # Check for delivery arrivals at start of day
         self._process_delivery_arrivals(date)

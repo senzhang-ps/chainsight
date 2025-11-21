@@ -1099,7 +1099,7 @@ def run_integrated_simulation(
         output_dir=str(orchestrator_output_dir)
     )
     # 设置 open deployment 的清理天数，3代表保留3天
-    orchestrator.set_past_due_cleanup_grace_days(3)
+    orchestrator.set_past_due_cleanup_grace_days(100)
     if is_resuming:
         # 续跑模式：恢复状态
         print(f"\n🔄 续跑模式：恢复Orchestrator状态")

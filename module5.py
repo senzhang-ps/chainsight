@@ -1834,7 +1834,7 @@ def main(
                             receiving = d.get('from_location', d.get('receiving', loc))
                             is_cross_node = (loc != receiving)
                             adjusted_qty = adjusted_qtys.get(i, d['demand_qty'])
-                            status = "✅" if d['deployed_qty_invCon'] == adjusted_qty else "⚠️"
+                            # status = "✅" if d['deployed_qty_invCon'] == adjusted_qty else "⚠️"
                             # print(f"      {status} [{d['demand_element']}] 原始需求={d['demand_qty']} 计划={adjusted_qty} 分配={d['deployed_qty_invCon']} 跨节点={is_cross_node}")
                 # —— 在处理 GAP 之前，给所有需求行初始化 pipeline 相关字段 —— 
                 for d in demand_rows:
@@ -1843,68 +1843,66 @@ def main(
                     d.setdefault('deploy_from_open_deployment_inbound', 0)
                     d.setdefault('deploy_from_future_production', 0)
 
-                # —— 自补货第二轮：用 pipeline supply 覆盖剩余 gap（仅用于顶层自补结点）——
-                # 判断当前节点是否有上游
-                upstream_loc = get_upstream(loc, mat, network, sim_date)
-                is_top_level_node = (upstream_loc is None) or (pd.isna(upstream_loc)) or (str(upstream_loc).strip() == "")
+                # —— 自补货第二轮：用 pipeline supply 覆盖剩余 gap（所有节点都适用）——
 
-                if is_top_level_node:
-                    # 只考虑自补货行：receiving == 本节点 loc
-                    self_idx_list = []
-                    for idx, d in enumerate(demand_rows):
-                        receiving = d.get('from_location', d.get('receiving', loc))
-                        if receiving == loc:
-                            self_idx_list.append(idx)
+                # 只考虑本节点自补货行：receiving == 本节点 loc
+                self_idx_list = []
 
-                    # 如果没有自补货需求，直接跳过
-                    if self_idx_list:
-                        # 构造本节点自补可用的 pipeline 池
-                        node_key = (mat, loc)
-                        pool_in_transit = future_intransit.get(node_key, 0)
-                        pool_future_prod = future_production.get(node_key, 0)
-                        pool_odi = open_deployment_inbound.get(node_key, 0)
+                for idx, d in enumerate(demand_rows):
+                    receiving = d.get('from_location', d.get('receiving', loc))
+                    if receiving == loc:
+                        self_idx_list.append(idx)
 
-                        pipeline_pool_total = pool_in_transit + pool_future_prod + pool_odi
+                # 如果没有自补货需求，直接跳过 pipeline 逻辑
+                if self_idx_list:
+                    # 构造本节点自补可用的 pipeline 池
+                    node_key = (mat, loc)
+                    # ✅ 按你的要求：pipeline 用 future intransit，不动
+                    pool_in_transit = future_intransit.get(node_key, 0)
+                    pool_future_production = future_production.get(node_key, 0)
+                    pool_odi = open_deployment_inbound.get(node_key, 0)
 
-                        if pipeline_pool_total > 0:
-                            # 按优先级对自补货行排序（高优先级先用 pipeline）
-                            self_idx_sorted = sorted(
-                                self_idx_list,
-                                key=lambda i: demand_priority_map.get(demand_rows[i]['demand_element'], 99)
-                            )
+                    pipeline_pool_total = pool_in_transit + pool_odi + pool_future_production
 
-                            for idx in self_idx_sorted:
-                                d = demand_rows[idx]
-                                adjusted_qty = adjusted_qtys.get(idx, d['demand_qty'])
-                                allocated_invcon = d.get('deployed_qty_invCon', 0)
-                                raw_gap = adjusted_qty - allocated_invcon
+                    if pipeline_pool_total > 0:
+                        # 按优先级顺序，用 pipeline 覆盖自补货 gap
+                        self_idx_sorted = sorted(
+                            self_idx_list,
+                            key=lambda i: demand_priority_map.get(demand_rows[i]['demand_element'], 99)
+                        )
 
-                                if raw_gap <= 0:
-                                    continue
-                                if pipeline_pool_total <= 0:
-                                    break
+                        for idx in self_idx_sorted:
+                            d = demand_rows[idx]
+                            adjusted_qty = adjusted_qtys.get(idx, d['demand_qty'])
+                            allocated_invcon = d.get('deployed_qty_invCon', 0)
+                            raw_gap = adjusted_qty - allocated_invcon
 
-                                alloc = min(raw_gap, pipeline_pool_total)
+                            if raw_gap <= 0:
+                                continue
+                            if pipeline_pool_total <= 0:
+                                break
 
-                                # 按 in_transit -> open_deployment_inbound -> future_production 的顺序扣池
-                                alloc_intrans = min(alloc, pool_in_transit)
-                                pool_in_transit -= alloc_intrans
+                            alloc = min(raw_gap, pipeline_pool_total)
 
-                                remain1 = alloc - alloc_intrans
-                                alloc_odi = min(remain1, pool_odi)
-                                pool_odi -= alloc_odi
+                            # 按 in_transit -> open_deployment_inbound -> future_production 顺序消耗
+                            alloc_intrans = min(alloc, pool_in_transit)
+                            pool_in_transit -= alloc_intrans
 
-                                remain2 = remain1 - alloc_odi
-                                alloc_future = min(remain2, pool_future_prod)
-                                pool_future_prod -= alloc_future
+                            remain1 = alloc - alloc_intrans
+                            alloc_odi = min(remain1, pool_odi)
+                            pool_odi -= alloc_odi
 
-                                pipeline_pool_total = pool_in_transit + pool_odi + pool_future_prod
+                            remain2 = remain1 - alloc_odi
+                            alloc_future = min(remain2, pool_future_production)
+                            pool_future_production -= alloc_future
 
-                                # 记录到该需求行
-                                d['deploy_qty_with_plan_order'] += alloc
-                                d['deploy_from_in_transit'] += alloc_intrans
-                                d['deploy_from_open_deployment_inbound'] += alloc_odi
-                                d['deploy_from_future_production'] += alloc_future
+                            pipeline_pool_total = pool_in_transit + pool_odi + pool_future_production
+
+                            d['deploy_qty_with_plan_order'] += alloc
+                            d['deploy_from_in_transit'] += alloc_intrans
+                            d['deploy_from_open_deployment_inbound'] += alloc_odi
+                            d['deploy_from_future_production'] += alloc_future
+
 
                 # 处理GAP和生成调拨计划
                 gap_count = 0
@@ -1913,12 +1911,9 @@ def main(
                     is_cross_node = (loc != receiving)
                     adjusted_qty = adjusted_qtys.get(i, d['demand_qty'])
 
-                    # 顶层自补节点 + 本地需求，使用 true_gap
-                    is_self_top_node = (
-                        is_top_level_node and  # 上面 pipeline 那里算过
-                        (receiving == loc)
-                    )
-                    if is_self_top_node:
+                    # 本地自补需求使用 pipeline cover（deploy_qty_with_plan_order）
+                    is_self_node = (receiving == loc)
+                    if is_self_node:
                         plan_order_cover = d.get('deploy_qty_with_plan_order', 0)
                     else:
                         plan_order_cover = 0

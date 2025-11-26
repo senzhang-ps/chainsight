@@ -1188,17 +1188,28 @@ def dedup_issues(issues):
     return df.to_dict(orient='records')
 
 def write_output(plan, exc, issues, changeover_log, out_path, simulation_date=None):
-    """
-    Write outputs to Excel file with ChangeoverLog support and dual output structure
-    
-    Args:
-        plan: Production plan DataFrame
-        exc: Capacity exceed DataFrame 
-        issues: Validation issues list
-        changeover_log: Changeover metrics DataFrame
-        out_path: Base output file path
-        simulation_date: If provided, creates daily versioned file; otherwise creates consolidated file
-    """
+    # 🆕 列头保障函数
+    def _ensure(df, cols):
+        if df is None or df.empty:
+            return pd.DataFrame(columns=cols)
+        for c in cols:
+            if c not in df.columns:
+                df[c] = pd.Series(dtype='object')
+        return df[cols]
+    plan = _ensure(plan, [
+        'material','location','line','simulation_date','production_plan_date',
+        'available_date','uncon_planned_qty','con_planned_qty','produced_qty',
+        'changeover_id','changeover_time','changeover_time_remaining',
+        'is_first_changeover_day'
+    ])
+    exc = _ensure(exc, ['material','location','line','simulation_date','exceed_type','exceed_qty'])
+    issues_df = pd.DataFrame(issues)
+    issues_df = _ensure(issues_df, [
+        'type','location','line','production_plan_date','simulation_date',
+        'previously_allocated_hours','currently_allocated_hours',
+        'total_allocated_hours','message','issue','sheet','row'
+    ])
+    changeover_log = _ensure(changeover_log, ['date','location','line','changeover_type','count','time','cost','mu_loss'])
     # Determine output file path
     if simulation_date is not None:
         # Daily versioned output
@@ -1212,12 +1223,10 @@ def write_output(plan, exc, issues, changeover_log, out_path, simulation_date=No
         final_path = out_path
     
     with pd.ExcelWriter(final_path, engine='openpyxl') as w:
-        # Write all output sheets
         plan.to_excel(w, sheet_name='ProductionPlan', index=False)
         exc.to_excel(w, sheet_name='CapacityExceed', index=False)
-        pd.DataFrame(issues).to_excel(w, sheet_name='Validation', index=False)
+        issues_df.to_excel(w, sheet_name='Validation', index=False)
         changeover_log.to_excel(w, sheet_name='ChangeoverLog', index=False)
-    
     return final_path
 
 def run_daily_production_planning(config_file: str, module3_output_dir: str, 

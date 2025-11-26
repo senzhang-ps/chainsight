@@ -718,28 +718,33 @@ def save_module1_output_with_supply_demand(
     output_file: str,
     cut_df: pd.DataFrame = None
 ):
-    """保存Module1输出到Excel文件（包括SupplyDemandLog和CutLog）"""
+    # 🆕 统一列头保障函数
+    def _ensure_cols(df: pd.DataFrame, cols: list) -> pd.DataFrame:
+        if df is None or df.empty:
+            return pd.DataFrame(columns=cols)
+        # 缺列补列
+        for c in cols:
+            if c not in df.columns:
+                df[c] = pd.Series(dtype='object')
+        return df[cols]
     try:
         with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
-            # 确保输出时标识符字段为字符串格式
+            orders_df = _ensure_cols(orders_df, ['date','material','location','demand_type','quantity','simulation_date','advance_days'])
+            shipment_df = _ensure_cols(shipment_df, ['date','material','location','quantity','demand_type','order_id'])
+            cut_df = _ensure_cols(cut_df, ['date','material','location','quantity'])
+            supply_demand_df = _ensure_cols(supply_demand_df, ['date','material','location','quantity','demand_element'])
             _normalize_identifiers(orders_df).to_excel(writer, sheet_name='OrderLog', index=False)
             _normalize_identifiers(shipment_df).to_excel(writer, sheet_name='ShipmentLog', index=False)
-            if cut_df is not None and not cut_df.empty:
-                _normalize_identifiers(cut_df).to_excel(writer, sheet_name='CutLog', index=False)
+            _normalize_identifiers(cut_df).to_excel(writer, sheet_name='CutLog', index=False)  # 始终写
             _normalize_identifiers(supply_demand_df).to_excel(writer, sheet_name='SupplyDemandLog', index=False)
-            
-            # 创建汇总数据
             summary_data = pd.DataFrame([{
                 'Total_Orders': len(orders_df),
                 'Total_Shipments': len(shipment_df),
-                'Total_Cuts': len(cut_df) if cut_df is not None else 0,
+                'Total_Cuts': len(cut_df),
                 'Total_SupplyDemand': len(supply_demand_df),
                 'Date': orders_df['date'].iloc[0] if not orders_df.empty else 'N/A'
             }])
             summary_data.to_excel(writer, sheet_name='Summary', index=False)
-        
-        # print(f"💾 Module1 输出已保存: {output_file}")
-        
     except Exception as e:
         print(f"⚠️  Module1 输出保存失败: {e}")
 

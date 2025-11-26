@@ -10,8 +10,12 @@ from pathlib import Path
 import sys
 from datetime import datetime
 import os
-import json
-import glob
+from pandas.errors import EmptyDataError, ParserError
+import logging
+
+import orchestrator
+
+logger = logging.getLogger(__name__)
 
 # 导入所有模块
 from orchestrator import create_orchestrator
@@ -32,7 +36,6 @@ import module6
 def detect_last_complete_date(output_base_dir: str, start_date: str, end_date: str) -> str:
     """
     检测最后一个完整处理的日期
-    
     Args:
         output_base_dir: 输出基础目录
         start_date: 原始开始日期
@@ -59,17 +62,51 @@ def detect_last_complete_date(output_base_dir: str, start_date: str, end_date: s
         date_str = current_date.strftime('%Y%m%d')
         
         # 检查关键状态文件是否都存在
+        # 项目约定的完整性视图（见 .github/copilot-instructions.md §6）
+        # 新增 daily_logs 作为必须存在的 daily summary 日志
         required_files = [
             f"unrestricted_inventory_{date_str}.csv",
-            f"production_gr_{date_str}.csv", 
-            f"shipment_log_{date_str}.csv"
+            f"open_deployment_{date_str}.csv",
+            f"planning_intransit_{date_str}.csv",
+            f"space_quota_{date_str}.csv",
+            f"delivery_gr_{date_str}.csv",
+            f"production_gr_{date_str}.csv",
+            f"shipment_log_{date_str}.csv",
+            f"delivery_shipment_log_{date_str}.csv",
+            f"inventory_change_log_{date_str}.csv",
+            f"daily_logs_{date_str}.csv"
         ]
         
-        # 检查文件完整性
+        # 轻量验证：检查文件存在并能被读取（只读表头以避免加载大型文件；表头为空也视为可接受）
         all_files_exist = True
         for file_name in required_files:
             file_path = orchestrator_dir / file_name
-            if not file_path.exists():
+
+            try:
+                if not file_path.exists():
+                    logger.warning("缺失文件: %s", file_path)
+                    all_files_exist = False
+                    break
+
+                # 使用 nrows=0 只读表头（即便没有数据也不会尝试读取行）
+                # 这样"只有表头"或"无数据"不会中止续跑判断
+                pd.read_csv(file_path, nrows=0, encoding="utf-8")
+
+            except EmptyDataError:
+                # 有些日期文件只有表头或无数据，这是允许的（记录但不视为致命）
+                logger.info("CSV 只有表头或无数据（EmptyDataError，但可接受）: %s", file_path)
+                # 继续检查下一个文件
+                continue
+            except (UnicodeDecodeError, ParserError) as e:
+                logger.warning("CSV 解码/解析失败: %s -> %s", file_path, e)
+                all_files_exist = False
+                break
+            except OSError as e:
+                logger.error("文件访问错误: %s -> %s", file_path, e)
+                all_files_exist = False
+                break
+            except Exception as e:
+                logger.exception("未知错误读取文件 %s", file_path)
                 all_files_exist = False
                 break
                 
@@ -112,53 +149,105 @@ def restore_orchestrator_state(orchestrator, restore_date: str, output_base_dir:
     orchestrator_dir = output_dir / "orchestrator"
     date_str = pd.to_datetime(restore_date).strftime('%Y%m%d')
     
+    # 可调整的日志回溯天数（默认14天）
+    log_lookback_days = 14
+    
     try:
         # 1. 恢复无限制库存
         inventory_file = orchestrator_dir / f"unrestricted_inventory_{date_str}.csv"
         if inventory_file.exists():
-            inventory_df = pd.read_csv(inventory_file)
+            try:
+                inventory_df = pd.read_csv(inventory_file, dtype=object)
+            except EmptyDataError:
+                inventory_df = pd.DataFrame()
+            inventory_df = _normalize_identifiers(inventory_df) if isinstance(inventory_df, pd.DataFrame) and not inventory_df.empty else pd.DataFrame()
             # 重建库存字典
             orchestrator.unrestricted_inventory = {}
             for _, row in inventory_df.iterrows():
-                key = (str(row['material']), str(row['location']))
-                orchestrator.unrestricted_inventory[key] = float(row['quantity'])
+                mat = str(row.get('material', '')).strip()
+                loc = str(row.get('location', '')).strip()
+                key = (mat, loc)
+                try:
+                    qty = float(row.get('quantity', 0)) if pd.notna(row.get('quantity', 0)) else 0.0
+                except Exception:
+                    try:
+                        qty = float(str(row.get('quantity', 0)).strip())
+                    except Exception:
+                        qty = 0.0
+                orchestrator.unrestricted_inventory[key] = qty
             print(f"  ✅ 恢复库存记录: {len(inventory_df)} 条")
+        else:
+            orchestrator.unrestricted_inventory = {}
         
         # 2. 恢复在途库存
         intransit_file = orchestrator_dir / f"planning_intransit_{date_str}.csv"
         if intransit_file.exists():
-            intransit_df = pd.read_csv(intransit_file)
-            orchestrator.planning_intransit = intransit_df.to_dict('records')
-            print(f"  ✅ 恢复在途记录: {len(intransit_df)} 条")
+            try:
+                intransit_df = pd.read_csv(intransit_file, dtype=object)
+            except EmptyDataError:
+                intransit_df = pd.DataFrame()
+            if not intransit_df.empty:
+                intransit_df = _normalize_identifiers(intransit_df)
+                orchestrator.planning_intransit = intransit_df.to_dict('records')
+            else:
+                orchestrator.planning_intransit = []
+            print(f"  ✅ 恢复在途记录: {len(orchestrator.planning_intransit)} 条")
+        else:
+            orchestrator.planning_intransit = []
         
         # 3. 恢复开放调拨
         deployment_file = orchestrator_dir / f"open_deployment_{date_str}.csv"
         if deployment_file.exists():
-            deployment_df = pd.read_csv(deployment_file)
-            orchestrator.open_deployment = deployment_df.to_dict('records')
-            print(f"  ✅ 恢复调拨记录: {len(deployment_df)} 条")
+            try:
+                deployment_df = pd.read_csv(deployment_file, dtype=object)
+            except EmptyDataError:
+                deployment_df = pd.DataFrame()
+            if not deployment_df.empty:
+                deployment_df = _normalize_identifiers(deployment_df)
+                orchestrator.open_deployment = deployment_df.to_dict('records')
+            else:
+                orchestrator.open_deployment = []
+            print(f"  ✅ 恢复调拨记录: {len(orchestrator.open_deployment)} 条")
+        else:
+            orchestrator.open_deployment = []
         
         # 4. 恢复空间配额
         space_file = orchestrator_dir / f"space_quota_{date_str}.csv"
         if space_file.exists():
-            space_df = pd.read_csv(space_file)
-            orchestrator.space_quota = {}
-            for _, row in space_df.iterrows():
-                key = str(row['location'])
-                orchestrator.space_quota[key] = {
-                    'used': float(row['used_capacity']),
-                    'total': float(row['total_capacity'])
-                }
+            try:
+                space_df = pd.read_csv(space_file, dtype=object)
+            except EmptyDataError:
+                space_df = pd.DataFrame()
+            if not space_df.empty:
+                space_df = _normalize_identifiers(space_df)
+                orchestrator.space_quota = {}
+                for _, row in space_df.iterrows():
+                    key = str(row.get('location', '')).strip()
+                    try:
+                        used = float(row.get('used_capacity', 0) or 0)
+                    except Exception:
+                        used = 0.0
+                    try:
+                        total = float(row.get('total_capacity', 0) or 0)
+                    except Exception:
+                        total = 0.0
+                    orchestrator.space_quota[key] = {'used': used, 'total': total}
+            else:
+                orchestrator.space_quota = {}
             print(f"  ✅ 恢复空间配额: {len(space_df)} 条")
+        else:
+            orchestrator.space_quota = {}
         
-        # 5. 恢复历史日志（近期的部分）
-        # 扫描最近几天的日志文件
+        # 5. 恢复历史日志（近期的部分） - 可配置回溯天数
         restore_date_obj = pd.to_datetime(restore_date)
-        log_start_date = restore_date_obj - pd.Timedelta(days=7)  # 恢复最近7天的日志
+        log_start_date = restore_date_obj - pd.Timedelta(days=log_lookback_days)
         
         orchestrator.shipment_log = []
         orchestrator.production_gr = []
         orchestrator.delivery_gr = []
+        orchestrator.delivery_shipment_log = []
+        orchestrator.inventory_change_log = []
+        orchestrator.daily_logs = []
         
         current_scan_date = log_start_date
         while current_scan_date <= restore_date_obj:
@@ -167,26 +256,78 @@ def restore_orchestrator_state(orchestrator, restore_date: str, output_base_dir:
             # 恢复发货日志
             shipment_file = orchestrator_dir / f"shipment_log_{scan_date_str}.csv"
             if shipment_file.exists():
-                shipment_df = pd.read_csv(shipment_file)
-                orchestrator.shipment_log.extend(shipment_df.to_dict('records'))
+                try:
+                    shipment_df = pd.read_csv(shipment_file, dtype=object)
+                except EmptyDataError:
+                    shipment_df = pd.DataFrame()
+                if not shipment_df.empty:
+                    shipment_df = _normalize_identifiers(shipment_df)
+                    orchestrator.shipment_log.extend(shipment_df.to_dict('records'))
             
             # 恢复生产入库日志
             production_file = orchestrator_dir / f"production_gr_{scan_date_str}.csv"
             if production_file.exists():
-                production_df = pd.read_csv(production_file)
-                orchestrator.production_gr.extend(production_df.to_dict('records'))
+                try:
+                    production_df = pd.read_csv(production_file, dtype=object)
+                except EmptyDataError:
+                    production_df = pd.DataFrame()
+                if not production_df.empty:
+                    production_df = _normalize_identifiers(production_df)
+                    orchestrator.production_gr.extend(production_df.to_dict('records'))
             
             # 恢复收货日志
             delivery_file = orchestrator_dir / f"delivery_gr_{scan_date_str}.csv"
             if delivery_file.exists():
-                delivery_df = pd.read_csv(delivery_file)
-                orchestrator.delivery_gr.extend(delivery_df.to_dict('records'))
+                try:
+                    delivery_df = pd.read_csv(delivery_file, dtype=object)
+                except EmptyDataError:
+                    delivery_df = pd.DataFrame()
+                if not delivery_df.empty:
+                    delivery_df = _normalize_identifiers(delivery_df)
+                    orchestrator.delivery_gr.extend(delivery_df.to_dict('records'))
+            
+            # 恢复站点间发运日志 (delivery_shipment_log)
+            dship_file = orchestrator_dir / f"delivery_shipment_log_{scan_date_str}.csv"
+            if dship_file.exists():
+                try:
+                    dship_df = pd.read_csv(dship_file, dtype=object)
+                except EmptyDataError:
+                    dship_df = pd.DataFrame()
+                if not dship_df.empty:
+                    dship_df = _normalize_identifiers(dship_df)
+                    orchestrator.delivery_shipment_log.extend(dship_df.to_dict('records'))
+            
+            # 恢复库存变动日志 (inventory_change_log)
+            invchg_file = orchestrator_dir / f"inventory_change_log_{scan_date_str}.csv"
+            if invchg_file.exists():
+                try:
+                    invchg_df = pd.read_csv(invchg_file, dtype=object)
+                except EmptyDataError:
+                    invchg_df = pd.DataFrame()
+                if not invchg_df.empty:
+                    invchg_df = _normalize_identifiers(invchg_df)
+                    orchestrator.inventory_change_log.extend(invchg_df.to_dict('records'))
+            
+            # 恢复 daily_logs（汇总日志）
+            daily_file = orchestrator_dir / f"daily_logs_{scan_date_str}.csv"
+            if daily_file.exists():
+                try:
+                    daily_df = pd.read_csv(daily_file, dtype=object)
+                except EmptyDataError:
+                    daily_df = pd.DataFrame()
+                if not daily_df.empty:
+                    # daily_logs 可能不含标准标识符列，但调用normalize不会有害
+                    daily_df = _normalize_identifiers(daily_df)
+                    orchestrator.daily_logs.extend(daily_df.to_dict('records'))
             
             current_scan_date += pd.Timedelta(days=1)
         
         print(f"  ✅ 恢复发货日志: {len(orchestrator.shipment_log)} 条")
         print(f"  ✅ 恢复生产日志: {len(orchestrator.production_gr)} 条")
         print(f"  ✅ 恢复收货日志: {len(orchestrator.delivery_gr)} 条")
+        print(f"  ✅ 恢复站点间发运日志: {len(orchestrator.delivery_shipment_log)} 条")
+        print(f"  ✅ 恢复库存变动日志: {len(orchestrator.inventory_change_log)} 条")
+        print(f"  ✅ 恢复daily_logs: {len(orchestrator.daily_logs)} 条")
         
         # 6. 设置当前日期
         orchestrator.current_date = restore_date_obj
@@ -957,7 +1098,8 @@ def run_integrated_simulation(
         start_date=start_date,
         output_dir=str(orchestrator_output_dir)
     )
-    
+    # 设置 open deployment 的清理天数，3代表保留3天
+    orchestrator.set_past_due_cleanup_grace_days(100)
     if is_resuming:
         # 续跑模式：恢复状态
         print(f"\n🔄 续跑模式：恢复Orchestrator状态")
@@ -1018,9 +1160,11 @@ def run_integrated_simulation(
         # ==================== 每日开始：GR入库处理 ====================
         try:
             print(f"\n🌅 每日开始状态更新")
+            
             # 🔄 第0步：保存期初库存快照（在任何变动之前）
             print(f"  💾 保存期初库存快照...")
             orchestrator.save_beginning_inventory(current_date.strftime('%Y-%m-%d'))
+            orchestrator.cleanup_past_due_open_deployments(current_date.strftime('%Y-%m-%d'),grace_days=getattr(orchestrator, "cleanup_grace_days", 0),write_audit=True)
 
             # 🔄 第1步：处理当日到达的delivery GR (in-transit → inventory)
             print(f"  📦 处理当日delivery GR到达...")
@@ -1201,7 +1345,7 @@ def run_integrated_simulation(
                     orchestrator=orchestrator,
                     current_date=current_date,
                     output_dir=str(module_outputs['module6']),
-                    max_wait_days=7,
+                    max_wait_days=30,
                     random_seed=config_dict.get('M6_RandomSeed', 42)  # 使用统一种子
                 )
                 

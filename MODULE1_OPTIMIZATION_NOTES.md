@@ -9,46 +9,49 @@
 
 ## 优化方案
 
-基于配置表中 **最大AO advance_days = 10天** 的特点，实施了三项关键优化：
+基于配置表中 **max_advance_days从配置动态读取** 的原则，实施了两项关键优化：
 
-### 1. 优化预测数据查询窗口
+### 1. 优化预测数据查询方式（保持30天窗口）
 
-**位置**: `generate_daily_orders()` 函数 (第194-219行)
+**位置**: `generate_daily_orders()` 函数 (第199-209行)
 
 **改动前**:
 ```python
-# 使用30天窗口 + .isin()查找
+# 使用30天窗口 + .isin()查找（慢）
 future_dates = pd.date_range(sim_date, periods=min(30, len(original_forecast)), freq='D')
 ml_original_forecast = original_forecast[
     (original_forecast['material'] == material) & 
     (original_forecast['location'] == location) &
-    (original_forecast['date'].isin(future_dates))  # 慢！
+    (original_forecast['date'].isin(future_dates))  # O(n²)复杂度
 ]
 ```
 
 **改动后**:
 ```python
-# 动态计算窗口（max_advance_days + 5天buffer）+ 直接比较
-max_advance_days = int(ao_config['advance_days'].max(skipna=True)) if not ao_config.empty else 10
-forecast_window_days = max_advance_days + 5  # 例如：10 + 5 = 15天
+# 保持30天窗口（业务需求）+ 直接日期比较（快）
+forecast_window_days = 30
 end_date = sim_date + pd.Timedelta(days=forecast_window_days)
 
 ml_original_forecast = original_forecast[
     (original_forecast['material'] == material) & 
     (original_forecast['location'] == location) &
     (original_forecast['date'] >= sim_date) &
-    (original_forecast['date'] < end_date)  # 快！
+    (original_forecast['date'] < end_date)  # O(n)复杂度，直接比较
 ]
 ```
 
 **性能提升**:
-- 数据量减少50% (30天 → 15天)
+- 窗口保持30天不变（符合业务逻辑：基于未来30天预测生成订单）
 - 避免 `.isin()` 的O(n²)复杂度，改用O(n)的直接比较
 - 实测：单次查询快约2-3倍
 
-### 2. 限制历史订单文件读取范围
+### 2. 限制历史订单文件读取范围（核心优化）
 
-**位置**: `_load_previous_orders()` 函数 (第578-625行)
+**位置**: `_load_previous_orders()` 函数 (第578-631行)
+
+**关键点**：
+- max_advance_days **必须从配置表动态获取**，不能写死
+- 只需读取最近 **(max_advance_days + 1)** 天的文件
 
 **改动前**:
 ```python
@@ -56,30 +59,35 @@ def _load_previous_orders(m1_output_dir: str, current_date: pd.Timestamp):
     # 读取所有历史文件！随着仿真推进，文件数量线性增长
     for fname in os.listdir(m1_output_dir):
         if fdate < current_date:  # 只排除未来文件
-            # 读取所有过去的文件...
+            # 读取所有过去的文件...（问题：越来越慢）
 ```
 
 **改动后**:
 ```python
-def _load_previous_orders(m1_output_dir: str, current_date: pd.Timestamp, max_advance_days: int = 10):
-    # 只读取最近max_advance_days天的文件
-    earliest_relevant_date = current_date - pd.Timedelta(days=max_advance_days)
+def _load_previous_orders(m1_output_dir: str, current_date: pd.Timestamp, max_advance_days: int):
+    # max_advance_days从ao_config动态获取（第633-638行）
+    # 只读取最近(max_advance_days+1)天的文件
+    earliest_relevant_date = current_date - pd.Timedelta(days=max_advance_days + 1)
     
     for fname in os.listdir(m1_output_dir):
         if fdate < earliest_relevant_date:  # 跳过过早的文件
             continue
-        # 只读取最近10天的文件...
+        # 只读取最近(max_advance_days+1)天的文件
 ```
 
-**性能提升**:
+**为什么是 max_advance_days + 1？**
+- AO订单最多提前 max_advance_days 天生成
+- 加1天是为了确保覆盖边界情况
+
+**性能提升**（以max_advance_days=10为例）:
 - 时间复杂度: O(n) → O(1) （n = 仿真天数）
-- 30天仿真：读取10个文件 vs 30个文件 (3倍)
-- 90天仿真：读取10个文件 vs 90个文件 (9倍)
-- 365天仿真：读取10个文件 vs 365个文件 (36.5倍)
+- 30天仿真：读取11个文件 vs 30个文件 (2.7倍)
+- 90天仿真：读取11个文件 vs 90个文件 (8.2倍)
+- 365天仿真：读取11个文件 vs 365个文件 (33.2倍)
 
 ### 3. 提前过滤数据减少处理开销
 
-**位置**: `run_daily_order_generation()` 函数 (第627-635行)
+**位置**: `run_daily_order_generation()` 函数 (第642-645行)
 
 **改动前**:
 ```python
@@ -136,33 +144,38 @@ previous_orders_all = previous_orders_all.drop_duplicates(subset=dedup_keys)
 
 ## 配置依赖
 
-优化方案基于以下配置假设：
-- **最大 AO advance_days**: 10天（来自 M1_AOConfig）
-- 如果将来增加更大的 advance_days，需要相应调整：
-  - `forecast_window_days` 参数（建议：max_advance_days + 5）
-  - `max_advance_days` 参数传递给 `_load_previous_orders()`
+优化方案的关键原则：
+- **max_advance_days 必须从配置表动态获取**，不能写死为10天
+- 代码会自动从 M1_AOConfig 的 'advance_days' 列读取最大值
+- 如果配置表变化（例如max_advance_days变为15天或20天），代码会自动适应
+- 默认后备值：`DEFAULT_MAX_ADVANCE_DAYS = 10`（仅在配置缺失时使用）
 
 ## 代码维护建议
 
-1. **自动适应配置变化**：代码已改为动态计算查询窗口（max_advance_days + 5），无需手动调整
-2. **使用命名常量**：`DEFAULT_MAX_ADVANCE_DAYS = 10` 定义在文件开头，便于维护
-3. **保持优化一致性**：其他类似的数据查询也可以采用相同的优化思路
+1. **不要改变预测窗口**：30天预测窗口是业务逻辑要求，保持不变
+2. **max_advance_days自动适应**：从配置表动态获取，无需手动调整
+3. **使用命名常量**：`DEFAULT_MAX_ADVANCE_DAYS = 10` 仅作为后备值
+4. **历史文件读取范围**：始终为 `max_advance_days + 1` 天
 
-## 代码审查改进
+## 优化修正历史
 
-基于代码审查反馈，进行了以下改进：
+### 第一版优化（已修正）
+- ❌ 错误：将预测窗口从30天改为15天
+- ❌ 错误：假设max_advance_days固定为10天
+- ✅ 正确：优化了历史订单文件读取
 
-1. **提取命名常量**：
-   - 定义 `DEFAULT_MAX_ADVANCE_DAYS = 10` 在模块顶部
-   - 所有硬编码的默认值都使用这个常量
+### 最终版优化（当前版本）
+1. **保持30天预测窗口**：
+   - 符合业务逻辑：需要基于未来30天的forecast生成订单
+   - 仅优化查询方式（.isin() → 直接比较）
 
-2. **动态计算查询窗口**：
-   - 改为 `forecast_window_days = max_advance_days + 5`
-   - 根据实际配置自动调整，无需手动修改
+2. **动态获取max_advance_days**：
+   - 从配置表 M1_AOConfig 动态读取
+   - 不能写死为10天，必须支持配置变化
 
-3. **统一默认值**：
-   - 所有使用默认值的地方都引用 `DEFAULT_MAX_ADVANCE_DAYS`
-   - 保持代码一致性
+3. **历史文件读取优化**：
+   - 只读取最近 (max_advance_days + 1) 天的文件
+   - 这是核心性能优化点
 
 ## 后续优化建议
 

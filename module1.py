@@ -189,14 +189,6 @@ def generate_daily_orders(sim_date, original_forecast, current_forecast, ao_conf
     orders = []
     consumed_forecast = current_forecast.copy()
     
-    # 性能优化：从ao_config动态计算最大advance_days，用于优化查询窗口
-    if not ao_config.empty and 'advance_days' in ao_config.columns:
-        max_val = ao_config['advance_days'].max(skipna=True)
-        max_advance_days = int(max_val) if pd.notna(max_val) else DEFAULT_MAX_ADVANCE_DAYS
-    else:
-        max_advance_days = DEFAULT_MAX_ADVANCE_DAYS
-    forecast_window_days = max_advance_days + 5  # 比最大advance_days多留5天buffer
-    
     # Get unique material-location combinations
     ml_combinations = original_forecast[['material', 'location']].drop_duplicates()
     
@@ -204,11 +196,11 @@ def generate_daily_orders(sim_date, original_forecast, current_forecast, ao_conf
         material = ml_row['material']
         location = ml_row['location']
         
-        # 性能优化：基于最大advance_days使用更短的查找窗口（动态计算）
-        # 这样可以显著减少数据过滤开销，根据实际配置自适应调整
+        # 性能优化：基于30天未来预测计算订单（保持原业务逻辑）
+        # 使用直接日期比较代替.isin()以提升性能
+        forecast_window_days = 30
         end_date = sim_date + pd.Timedelta(days=forecast_window_days)
         
-        # 使用直接日期比较代替.isin()以提升性能
         ml_original_forecast = original_forecast[
             (original_forecast['material'] == material) & 
             (original_forecast['location'] == location) &
@@ -217,7 +209,7 @@ def generate_daily_orders(sim_date, original_forecast, current_forecast, ao_conf
         ]
         
         if ml_original_forecast.empty:
-            # 如果forecast_window_days范围内没有数据，尝试查找更短的范围（7天）
+            # 如果30天范围内没有数据，尝试查找更短的范围（7天）
             short_end_date = sim_date + pd.Timedelta(days=7)
             ml_original_forecast = original_forecast[
                 (original_forecast['material'] == material) & 
@@ -589,8 +581,9 @@ def run_daily_order_generation(
         # 7) 合并历史未到期订单 → 当日版本订单视图
         def _load_previous_orders(m1_output_dir: str, current_date: pd.Timestamp, max_advance_days: int = DEFAULT_MAX_ADVANCE_DAYS) -> pd.DataFrame:
             """
-            性能优化：仅加载最近max_advance_days天的历史订单文件
-            因为AO订单最多提前10天生成，所以只需要读取最近10天的文件
+            性能优化：仅加载最近(max_advance_days+1)天的历史订单文件
+            因为AO订单最多提前max_advance_days天生成，所以只需要读取最近max_advance_days+1天的文件
+            max_advance_days从配置表动态获取，不能写死
             """
             try:
                 if not os.path.isdir(m1_output_dir):
@@ -598,9 +591,10 @@ def run_daily_order_generation(
                 
                 pattern = re.compile(r"module1_output_(\d{8})\.xlsx$")
                 
-                # 性能优化：计算需要读取的最早日期（当前日期-max_advance_days）
+                # 性能优化：计算需要读取的最早日期（当前日期 - max_advance_days - 1）
                 # 只读取这个时间窗口内的文件，避免随着仿真推进而读取越来越多的历史文件
-                earliest_relevant_date = current_date - pd.Timedelta(days=max_advance_days)
+                # 加1是为了确保覆盖所有可能还未到期的订单
+                earliest_relevant_date = current_date - pd.Timedelta(days=max_advance_days + 1)
                 
                 rows = []
                 for fname in os.listdir(m1_output_dir):

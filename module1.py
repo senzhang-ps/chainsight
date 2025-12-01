@@ -190,7 +190,11 @@ def generate_daily_orders(sim_date, original_forecast, current_forecast, ao_conf
     consumed_forecast = current_forecast.copy()
     
     # 性能优化：从ao_config动态计算最大advance_days，用于优化查询窗口
-    max_advance_days = int(ao_config['advance_days'].max()) if not ao_config.empty and 'advance_days' in ao_config.columns else DEFAULT_MAX_ADVANCE_DAYS
+    if not ao_config.empty and 'advance_days' in ao_config.columns:
+        max_val = ao_config['advance_days'].max(skipna=True)
+        max_advance_days = int(max_val) if pd.notna(max_val) else DEFAULT_MAX_ADVANCE_DAYS
+    else:
+        max_advance_days = DEFAULT_MAX_ADVANCE_DAYS
     forecast_window_days = max_advance_days + 5  # 比最大advance_days多留5天buffer
     
     # Get unique material-location combinations
@@ -633,7 +637,11 @@ def run_daily_order_generation(
                 return pd.DataFrame()
 
         # 性能优化：从ao_config中获取最大advance_days，用于优化历史订单加载范围
-        max_advance_days = int(ao_config['advance_days'].max()) if not ao_config.empty and 'advance_days' in ao_config.columns else DEFAULT_MAX_ADVANCE_DAYS
+        if not ao_config.empty and 'advance_days' in ao_config.columns:
+            max_val = ao_config['advance_days'].max(skipna=True)
+            max_advance_days = int(max_val) if pd.notna(max_val) else DEFAULT_MAX_ADVANCE_DAYS
+        else:
+            max_advance_days = DEFAULT_MAX_ADVANCE_DAYS
         
         previous_orders_all = _load_previous_orders(output_dir, simulation_date, max_advance_days)
         

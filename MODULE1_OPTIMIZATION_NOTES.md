@@ -28,8 +28,9 @@ ml_original_forecast = original_forecast[
 
 **改动后**:
 ```python
-# 使用15天窗口（max_advance_days=10 + 5天buffer）+ 直接比较
-forecast_window_days = 15
+# 动态计算窗口（max_advance_days + 5天buffer）+ 直接比较
+max_advance_days = int(ao_config['advance_days'].max(skipna=True)) if not ao_config.empty else 10
+forecast_window_days = max_advance_days + 5  # 例如：10 + 5 = 15天
 end_date = sim_date + pd.Timedelta(days=forecast_window_days)
 
 ml_original_forecast = original_forecast[

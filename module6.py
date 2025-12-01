@@ -73,6 +73,40 @@ class SafeExpressionEvaluator:
         else:
             raise ValueError(f"Unsupported syntax: {ast.dump(node)}")
 
+def _check_and_deduplicate(df: pd.DataFrame, key_column: str, sheet_name: str, validation_log: list) -> pd.DataFrame:
+    """
+    Helper function to check for and remove duplicates in a DataFrame based on a key column.
+    
+    Args:
+        df: DataFrame to check
+        key_column: Column name to check for duplicates
+        sheet_name: Name of the sheet/config for logging
+        validation_log: List to append validation issues to
+        
+    Returns:
+        DataFrame with duplicates removed (if any)
+    """
+    if df.empty:
+        return df
+    
+    dup_rows = df[df.duplicated(subset=[key_column], keep=False)]
+    if not dup_rows.empty:
+        dup_count = len(dup_rows)
+        dup_unique = dup_rows[key_column].nunique()
+        print(f"  ⚠️  发现{sheet_name}中有 {dup_unique} 个重复的{key_column}（共 {dup_count} 条记录），将去重保留第一条")
+        validation_log.append({
+            'sheet': sheet_name,
+            'row': '',
+            'issue': f'Found {dup_unique} duplicate {key_column} values in {sheet_name} ({dup_count} total duplicates). '
+                    f'Keeping first occurrence of each {key_column}.',
+            'severity': 'WARNING',
+            'impact': f'Data Deduplication - {dup_count - dup_unique} duplicate records removed',
+            f'duplicate_{key_column}': dup_unique
+        })
+        df = df.drop_duplicates(subset=[key_column], keep='first')
+    
+    return df
+
 def load_standalone_config(input_excel: str) -> dict:
     """
     加载独立模式的配置数据（从 Excel 文件）
@@ -647,22 +681,7 @@ def run_physical_flow_module(
     bypass_rules = config['MDQBypassRules']
 
     # 🔧 修复：确保demand_prio没有重复的demand_element
-    if not demand_prio.empty:
-        dup_demand_elements = demand_prio[demand_prio.duplicated(subset=['demand_element'], keep=False)]
-        if not dup_demand_elements.empty:
-            dup_count = len(dup_demand_elements)
-            dup_unique = dup_demand_elements['demand_element'].nunique()
-            print(f"  ⚠️  发现Global_DemandPriority中有 {dup_unique} 个重复的demand_element（共 {dup_count} 条记录），将去重保留第一条")
-            validation_log.append({
-                'sheet': 'Global_DemandPriority',
-                'row': '',
-                'issue': f'Found {dup_unique} duplicate demand_elements in Global_DemandPriority ({dup_count} total duplicates). '
-                        f'Keeping first occurrence of each demand_element.',
-                'severity': 'WARNING',
-                'impact': f'Data Deduplication - {dup_count - dup_unique} duplicate records removed',
-                'duplicate_demand_elements': dup_unique
-            })
-            demand_prio = demand_prio.drop_duplicates(subset=['demand_element'], keep='first')
+    demand_prio = _check_and_deduplicate(demand_prio, 'demand_element', 'Global_DemandPriority', validation_log)
     
     prio_map = demand_prio.set_index('demand_element')['priority'].to_dict() if not demand_prio.empty else {}
     missing_prio = dp[~dp['demand_element'].isin(prio_map.keys())]
@@ -700,24 +719,7 @@ def run_physical_flow_module(
         # print(f"  📊 过滤后保留: {len(dp)} 条记录")
 
     # 🔧 修复：确保material_md没有重复的material，避免merge产生重复行
-    # 检查material_md是否有重复的material
-    if not material_md.empty:
-        dup_materials = material_md[material_md.duplicated(subset=['material'], keep=False)]
-        if not dup_materials.empty:
-            dup_count = len(dup_materials)
-            dup_unique = dup_materials['material'].nunique()
-            print(f"  ⚠️  发现M6_MaterialMD中有 {dup_unique} 个重复的material（共 {dup_count} 条记录），将去重保留第一条")
-            validation_log.append({
-                'sheet': 'M6_MaterialMD',
-                'row': '',
-                'issue': f'Found {dup_unique} duplicate materials in M6_MaterialMD ({dup_count} total duplicates). '
-                        f'Keeping first occurrence of each material.',
-                'severity': 'WARNING',
-                'impact': f'Data Deduplication - {dup_count - dup_unique} duplicate records removed',
-                'duplicate_materials': dup_unique
-            })
-            # 去重：保留第一条记录
-            material_md = material_md.drop_duplicates(subset=['material'], keep='first')
+    material_md = _check_and_deduplicate(material_md, 'material', 'M6_MaterialMD', validation_log)
     
     mat_map = material_md.set_index('material')[['demand_unit_to_weight','demand_unit_to_volume']].to_dict('index') if not material_md.empty else {}
     missing_mat = dp[~dp['material'].isin(mat_map.keys())]
@@ -747,22 +749,7 @@ def run_physical_flow_module(
         dp['demand_unit_to_volume'] = dp['demand_unit_to_volume'].fillna(1.0)
 
     # 🔧 修复：确保truck_specs没有重复的truck_type
-    if not truck_specs.empty:
-        dup_truck_types = truck_specs[truck_specs.duplicated(subset=['truck_type'], keep=False)]
-        if not dup_truck_types.empty:
-            dup_count = len(dup_truck_types)
-            dup_unique = dup_truck_types['truck_type'].nunique()
-            print(f"  ⚠️  发现M6_TruckTypeSpecs中有 {dup_unique} 个重复的truck_type（共 {dup_count} 条记录），将去重保留第一条")
-            validation_log.append({
-                'sheet': 'M6_TruckTypeSpecs',
-                'row': '',
-                'issue': f'Found {dup_unique} duplicate truck_types in M6_TruckTypeSpecs ({dup_count} total duplicates). '
-                        f'Keeping first occurrence of each truck_type.',
-                'severity': 'WARNING',
-                'impact': f'Data Deduplication - {dup_count - dup_unique} duplicate records removed',
-                'duplicate_truck_types': dup_unique
-            })
-            truck_specs = truck_specs.drop_duplicates(subset=['truck_type'], keep='first')
+    truck_specs = _check_and_deduplicate(truck_specs, 'truck_type', 'M6_TruckTypeSpecs', validation_log)
     
     spec_map = truck_specs.set_index('truck_type').to_dict('index') if not truck_specs.empty else {}
 

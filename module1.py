@@ -492,6 +492,58 @@ def simulate_shipment_for_single_day(simulation_date, order_log, current_invento
 
 # ----------- 14. 集成模式支持 -----------
 
+def _load_previous_orders(m1_output_dir: str, current_date: pd.Timestamp, max_advance_days: int = DEFAULT_MAX_ADVANCE_DAYS) -> pd.DataFrame:
+    """
+    性能优化：仅加载最近(max_advance_days+1)天的历史订单文件
+    因为AO订单最多提前max_advance_days天生成，所以只需要读取最近max_advance_days+1天的文件
+    max_advance_days从配置表动态获取，不能写死
+    """
+    try:
+        if not os.path.isdir(m1_output_dir):
+            return pd.DataFrame()
+        
+        pattern = re.compile(r"module1_output_(\d{8})\. xlsx$")
+        
+        # 性能优化：计算需要读取的最早日期（当前日期 - max_advance_days - 1）
+        # 只读取这个时间窗口内的文件，避免随着仿真推进而读取越来越多的历史文件
+        # 加1是为了确保覆盖所有可能还未到期的订单
+        earliest_relevant_date = current_date - pd.Timedelta(days=max_advance_days + 1)
+        
+        rows = []
+        for fname in os.listdir(m1_output_dir):
+            m = pattern.match(fname)
+            if not m:
+                continue
+            fdate = pd.to_datetime(m.group(1))
+            
+            # 跳过当前日期及之后的文件
+            if fdate. normalize() >= current_date.normalize():
+                continue
+            
+            # 性能优化：跳过过早的文件（超出max_advance_days窗口）
+            if fdate. normalize() < earliest_relevant_date.normalize():
+                continue
+            
+            fpath = os.path.join(m1_output_dir, fname)
+            try:
+                xl = pd.ExcelFile(fpath)
+                if 'OrderLog' not in xl.sheet_names:
+                    continue
+                df = xl.parse('OrderLog')
+                if df is None or df.empty:
+                    continue
+                if 'date' in df.columns:
+                    df['date'] = pd.to_datetime(df['date'])
+                if 'simulation_date' in df.columns:
+                    df['simulation_date'] = pd.to_datetime(df['simulation_date'])
+                rows.append(df)
+            except Exception:
+                continue
+        return pd.concat(rows, ignore_index=True) if rows else pd.DataFrame()
+    except Exception:
+        return pd.DataFrame()
+
+
 def run_daily_order_generation(
     config_dict: dict,
     simulation_date: pd.Timestamp,
@@ -580,57 +632,6 @@ def run_daily_order_generation(
         )
 
         # 7) 合并历史未到期订单 → 当日版本订单视图
-        def _load_previous_orders(m1_output_dir: str, current_date: pd.Timestamp, max_advance_days: int = DEFAULT_MAX_ADVANCE_DAYS) -> pd.DataFrame:
-            """
-            性能优化：仅加载最近(max_advance_days+1)天的历史订单文件
-            因为AO订单最多提前max_advance_days天生成，所以只需要读取最近max_advance_days+1天的文件
-            max_advance_days从配置表动态获取，不能写死
-            """
-            try:
-                if not os.path.isdir(m1_output_dir):
-                    return pd.DataFrame()
-                
-                pattern = re.compile(r"module1_output_(\d{8})\. xlsx$")
-                
-                # 性能优化：计算需要读取的最早日期（当前日期 - max_advance_days - 1）
-                # 只读取这个时间窗口内的文件，避免随着仿真推进而读取越来越多的历史文件
-                # 加1是为了确保覆盖所有可能还未到期的订单
-                earliest_relevant_date = current_date - pd.Timedelta(days=max_advance_days + 1)
-                
-                rows = []
-                for fname in os.listdir(m1_output_dir):
-                    m = pattern.match(fname)
-                    if not m:
-                        continue
-                    fdate = pd.to_datetime(m.group(1))
-                    
-                    # 跳过当前日期及之后的文件
-                    if fdate. normalize() >= current_date.normalize():
-                        continue
-                    
-                    # 性能优化：跳过过早的文件（超出max_advance_days窗口）
-                    if fdate. normalize() < earliest_relevant_date.normalize():
-                        continue
-                    
-                    fpath = os.path.join(m1_output_dir, fname)
-                    try:
-                        xl = pd.ExcelFile(fpath)
-                        if 'OrderLog' not in xl.sheet_names:
-                            continue
-                        df = xl.parse('OrderLog')
-                        if df is None or df.empty:
-                            continue
-                        if 'date' in df.columns:
-                            df['date'] = pd.to_datetime(df['date'])
-                        if 'simulation_date' in df.columns:
-                            df['simulation_date'] = pd.to_datetime(df['simulation_date'])
-                        rows.append(df)
-                    except Exception:
-                        continue
-                return pd.concat(rows, ignore_index=True) if rows else pd.DataFrame()
-            except Exception:
-                return pd.DataFrame()
-
         # 性能优化：从ao_config中获取最大advance_days，用于优化历史订单加载范围
         if not ao_config.empty and 'advance_days' in ao_config. columns:
             max_val = ao_config['advance_days'].max(skipna=True)

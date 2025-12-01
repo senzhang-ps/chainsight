@@ -31,9 +31,9 @@ def _normalize_identifiers(df: pd.DataFrame) -> pd.DataFrame:
         if col in df.columns:
             # Convert to string and handle NaN values
             df[col] = df[col].astype('string')
-            # Performance optimization: Use vectorized operations where possible
+            # Apply normalization functions
             if col in ['location', 'sending', 'receiving', 'sourcing']:
-                # Vectorized normalization for location-type fields
+                # Normalization for location-type fields
                 df[col] = df[col].apply(_normalize_location)
             # Apply specific normalization for material
             elif col == 'material':
@@ -1582,14 +1582,13 @@ def main(
             # Performance optimization: Use itertuples for faster iteration
             for row in today_prod.itertuples():
                 k = (row.material, row.location)
-                if hasattr(row, 'produced_qty') and pd.notna(row.produced_qty):
-                    qty_today = int(row.produced_qty)
-                elif hasattr(row, 'planned_qty') and pd.notna(row.planned_qty):
-                    qty_today = int(row.planned_qty)
-                elif hasattr(row, 'quantity') and pd.notna(row.quantity):
-                    qty_today = int(row.quantity)
-                else:
-                    qty_today = 0
+                # Use getattr for safe column access with itertuples
+                qty_today = getattr(row, 'produced_qty', None)
+                if qty_today is None or pd.isna(qty_today):
+                    qty_today = getattr(row, 'planned_qty', None)
+                if qty_today is None or pd.isna(qty_today):
+                    qty_today = getattr(row, 'quantity', 0)
+                qty_today = int(qty_today) if qty_today is not None and not pd.isna(qty_today) else 0
                 today_production_gr[k] = today_production_gr.get(k, 0) + qty_today
 
             # 未来生产 (available_date > sim_date) —— 用 uncon_planned_qty
@@ -1597,17 +1596,15 @@ def main(
             # Performance optimization: Use itertuples for faster iteration
             for row in future_prod.itertuples():
                 k = (row.material, row.location)
-                if hasattr(row, 'uncon_planned_qty') and pd.notna(row.uncon_planned_qty):
-                    qty_future = int(row.uncon_planned_qty)
-                elif hasattr(row, 'produced_qty') and pd.notna(row.produced_qty):
-                    # 回退：若没有 uncon，则用 produced（尽量不丢数据）
-                    qty_future = int(row.produced_qty)
-                elif hasattr(row, 'planned_qty') and pd.notna(row.planned_qty):
-                    qty_future = int(row.planned_qty)
-                elif hasattr(row, 'quantity') and pd.notna(row.quantity):
-                    qty_future = int(row.quantity)
-                else:
-                    qty_future = 0
+                # Use getattr for safe column access with itertuples
+                qty_future = getattr(row, 'uncon_planned_qty', None)
+                if qty_future is None or pd.isna(qty_future):
+                    qty_future = getattr(row, 'produced_qty', None)
+                if qty_future is None or pd.isna(qty_future):
+                    qty_future = getattr(row, 'planned_qty', None)
+                if qty_future is None or pd.isna(qty_future):
+                    qty_future = getattr(row, 'quantity', 0)
+                qty_future = int(qty_future) if qty_future is not None and not pd.isna(qty_future) else 0
                 future_production[k] = future_production.get(k, 0) + qty_future
         
         # 从 Orchestrator 获取在途库存

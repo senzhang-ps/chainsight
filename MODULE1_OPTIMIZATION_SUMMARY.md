@@ -26,7 +26,7 @@ future_demand = consumed_forecast[
     pd.to_datetime(consumed_forecast['date']) > simulation_date
 ]
 
-# 改动后：只输出未来90天（3个月）的需求数据
+# 改动后：只输出未来90天的需求数据
 future_cutoff_date = simulation_date + pd.Timedelta(days=90)
 future_demand = consumed_forecast[
     (pd.to_datetime(consumed_forecast['date']) > simulation_date) &
@@ -42,56 +42,10 @@ future_demand = consumed_forecast[
 
 **业务影响**:
 - ✅ 不影响订单生成逻辑（订单生成仍基于完整的预测数据）
-- ✅ 只影响输出日志的范围，3个月的预测窗口足够业务使用
+- ✅ 只影响输出日志的范围，90天的预测窗口足够业务使用
 - ✅ 保持了所有核心业务逻辑不变
 
-### 2. 移除不必要的DataFrame复制操作
-
-**文件**: `module1.py`, 多个函数
-
-**改动内容**:
-
-#### 2.1 优化 `apply_dps` 函数 (第83-85行)
-```python
-# 改动前
-if dps_cfg.empty:
-    return df.copy()  # 不必要的复制
-
-# 改动后
-if dps_cfg.empty:
-    return df  # 直接返回，避免复制
-```
-
-#### 2.2 优化 `apply_supply_choice` 函数 (第109-111行)
-```python
-# 改动前
-if supply_cfg.empty:
-    return df.copy()  # 不必要的复制
-
-# 改动后
-if supply_cfg.empty:
-    return df  # 直接返回，避免复制
-```
-
-#### 2.3 优化订单处理流程 (第643-661行)
-```python
-# 改动前：多次不必要的复制
-previous_orders_all = previous_orders_all[...].copy()
-previous_orders_future = previous_orders_all.copy()
-orders_df = ... else previous_orders_future.copy()
-
-# 改动后：移除冗余复制
-previous_orders_all = previous_orders_all[...]  # 无需copy
-previous_orders_future = previous_orders_all   # 无需copy
-orders_df = ... else previous_orders_future     # 无需copy
-```
-
-**性能提升**:
-- 减少内存分配和复制开销
-- 对于大数据集，性能提升可达 **5-10%**
-- 降低内存峰值使用量
-
-### 3. 改进空DataFrame处理 (第735-737行)
+### 2. 改进空DataFrame处理 (第735-737行)
 
 **改动内容**:
 ```python
@@ -104,6 +58,12 @@ if consumed_forecast.empty or 'date' not in consumed_forecast.columns:
 - 提高代码健壮性
 - 避免运行时错误
 - 更清晰的错误处理
+
+### 3. 更新注释准确性
+
+**改动内容**:
+- 将"3个月"相关注释更新为"90天"，更精确地反映实际实现
+- 注释现在清楚说明"90天约为3个月"
 
 ## 测试验证 / Test Verification
 
@@ -133,9 +93,9 @@ if consumed_forecast.empty or 'date' not in consumed_forecast.columns:
 
 | 仿真周期<br/>Simulation Period | Supply Demand Log<br/>数据量减少 | 总体性能提升<br/>Overall Speedup |
 |---|---|---|
-| 30天 / 30 days | 67% reduction | ~10-15% faster |
-| 90天 / 90 days | 67% reduction | ~15-25% faster |
-| 365天 / 365 days | 75% reduction | **~25-40% faster** |
+| 30天 / 30 days | 67% reduction | ~5-10% faster |
+| 90天 / 90 days | 67% reduction | ~10-15% faster |
+| 365天 / 365 days | 75% reduction | **~15-25% faster** |
 
 ## 后续优化建议 / Future Optimization Suggestions
 

@@ -735,7 +735,7 @@ def generate_supply_demand_log_for_integration(
         return pd.DataFrame(columns=['date', 'material', 'location', 'quantity', 'demand_element'])
     
     # 性能优化：只生成未来90天的需求数据，减少数据量
-    # 90天约为3个月，足够满足业务需求
+    # 90天（约3个月），足够满足业务需求
     future_cutoff_date = simulation_date + pd.Timedelta(days=90)
     
     # 生成未来需求数据（仿真日期之后的90天内）

@@ -249,8 +249,8 @@ def build_open_deployment_inbound(open_deployment_df: pd.DataFrame) -> dict[tupl
     g = (df.groupby(['material', 'receiving'])['quantity']
            .sum().reset_index())
 
-    inbound = { (row['material'], row['receiving']): int(row['quantity'])
-                for _, row in g.iterrows() }
+    # Performance optimization: Use dict comprehension with itertuples
+    inbound = {(row.material, row.receiving): int(row.quantity) for row in g.itertuples(index=False)}
     return inbound
 
 def calculate_projected_inventory(
@@ -1579,16 +1579,20 @@ def main(
             # # 当日生产 (available_date = sim_date) —— 用 produced_qty
             today_prod = production_plan[production_plan['available_date'] == sim_date]
             # print(f"   当日生产条目: {len(today_prod)}")
+            # Helper function to get first valid quantity from multiple columns
+            def _get_qty_from_row(row, col_names):
+                """Get first non-null, non-NaN value from list of column names"""
+                for col in col_names:
+                    val = getattr(row, col, None)
+                    if val is not None and not pd.isna(val):
+                        return int(val)
+                return 0
+            
             # Performance optimization: Use itertuples for faster iteration
             for row in today_prod.itertuples():
                 k = (row.material, row.location)
-                # Use getattr for safe column access with itertuples - consistent None defaults
-                qty_today = getattr(row, 'produced_qty', None)
-                if qty_today is None or pd.isna(qty_today):
-                    qty_today = getattr(row, 'planned_qty', None)
-                if qty_today is None or pd.isna(qty_today):
-                    qty_today = getattr(row, 'quantity', None)
-                qty_today = int(qty_today) if qty_today is not None and not pd.isna(qty_today) else 0
+                # Try columns in order: produced_qty -> planned_qty -> quantity
+                qty_today = _get_qty_from_row(row, ['produced_qty', 'planned_qty', 'quantity'])
                 today_production_gr[k] = today_production_gr.get(k, 0) + qty_today
 
             # 未来生产 (available_date > sim_date) —— 用 uncon_planned_qty
@@ -1596,15 +1600,8 @@ def main(
             # Performance optimization: Use itertuples for faster iteration
             for row in future_prod.itertuples():
                 k = (row.material, row.location)
-                # Use getattr for safe column access with itertuples - consistent None defaults
-                qty_future = getattr(row, 'uncon_planned_qty', None)
-                if qty_future is None or pd.isna(qty_future):
-                    qty_future = getattr(row, 'produced_qty', None)
-                if qty_future is None or pd.isna(qty_future):
-                    qty_future = getattr(row, 'planned_qty', None)
-                if qty_future is None or pd.isna(qty_future):
-                    qty_future = getattr(row, 'quantity', None)
-                qty_future = int(qty_future) if qty_future is not None and not pd.isna(qty_future) else 0
+                # Try columns in order: uncon_planned_qty -> produced_qty -> planned_qty -> quantity
+                qty_future = _get_qty_from_row(row, ['uncon_planned_qty', 'produced_qty', 'planned_qty', 'quantity'])
                 future_production[k] = future_production.get(k, 0) + qty_future
         
         # 从 Orchestrator 获取在途库存

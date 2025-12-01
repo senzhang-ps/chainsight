@@ -94,7 +94,7 @@ def _check_and_deduplicate(df: pd.DataFrame, key_column: str, sheet_name: str, v
         # Only compute full duplicate rows if there are duplicates
         dup_mask = df.duplicated(subset=[key_column], keep=False)
         dup_count = dup_mask.sum()
-        # More efficient: use value_counts instead of nunique on filtered data
+        # Get unique count of duplicate keys
         dup_unique = df.loc[dup_mask, key_column].nunique()
         
         print(f"  ⚠️  发现{sheet_name}中有 {dup_unique} 个重复的{key_column}（共 {dup_count} 条记录），将去重保留第一条")
@@ -1062,7 +1062,7 @@ def run_physical_flow_module(
                         if addable <= 0:
                             continue
 
-                        # Get demand_row for storing in load_records
+                        # Note: .loc[idx] lookup needed to maintain Series format for downstream code
                         demand_row = remaining_demands.loc[idx]
                         load_records.append({'idx': idx, 'load_qty': addable, 'demand_row': demand_row})
                         q_units += addable
@@ -1145,6 +1145,7 @@ def run_physical_flow_module(
                             if addable <= 0:
                                 continue
 
+                            # Note: .loc[idx] lookup needed to maintain Series format for downstream code
                             demand_row = remaining_demands.loc[idx]
                             load_records.append({'idx': idx, 'load_qty': addable, 'demand_row': demand_row})
                             q_units += addable

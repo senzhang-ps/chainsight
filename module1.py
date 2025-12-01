@@ -81,9 +81,8 @@ def load_config(filename, sheet_mapping=None):
 
 # ----------- 2. DPS SPLIT -----------
 def apply_dps(df, dps_cfg):
-    # 性能优化：如果配置为空，直接返回原DataFrame，避免不必要的copy
     if dps_cfg.empty:
-        return df
+        return df.copy()
     df_new = df.copy()
     splits = []
     for _, row in dps_cfg.iterrows():
@@ -107,9 +106,8 @@ def apply_dps(df, dps_cfg):
 
 # ----------- 3. SUPPLY CHOICE -----------
 def apply_supply_choice(df, supply_cfg):
-    # 性能优化：如果配置为空，直接返回原DataFrame，避免不必要的copy
     if supply_cfg.empty:
-        return df
+        return df.copy()
     df_new = df.copy()
     for _, row in supply_cfg.iterrows():
         filt = (
@@ -644,7 +642,7 @@ def run_daily_order_generation(
         # 性能优化：在去重之前先过滤未来订单，减少处理的数据量
         if not previous_orders_all.empty and 'date' in previous_orders_all.columns:
             previous_orders_all['date'] = pd.to_datetime(previous_orders_all['date'])
-            previous_orders_all = previous_orders_all[previous_orders_all['date'] >= simulation_date]
+            previous_orders_all = previous_orders_all[previous_orders_all['date'] >= simulation_date].copy()
         
         if not previous_orders_all.empty:
             dedup_keys = [
@@ -654,12 +652,12 @@ def run_daily_order_generation(
             if dedup_keys:
                 previous_orders_all = previous_orders_all.drop_duplicates(subset=dedup_keys)
 
-        previous_orders_future = previous_orders_all if not previous_orders_all.empty else pd.DataFrame()
+        previous_orders_future = previous_orders_all.copy() if not previous_orders_all.empty else pd.DataFrame()
 
         orders_df = (
             pd.concat([previous_orders_future, today_orders_df], ignore_index=True)
             if (today_orders_df is not None and not today_orders_df.empty)
-            else previous_orders_future
+            else previous_orders_future.copy()
         )
 
         if not orders_df.empty:
@@ -736,11 +734,11 @@ def generate_supply_demand_log_for_integration(
     if consumed_forecast.empty or 'date' not in consumed_forecast.columns:
         return pd.DataFrame(columns=['date', 'material', 'location', 'quantity', 'demand_element'])
     
-    # 性能优化：只生成未来3个月（90天）的需求数据，减少数据量
-    # 计算3个月后的截止日期
+    # 性能优化：只生成未来90天的需求数据，减少数据量
+    # 90天约为3个月，足够满足业务需求
     future_cutoff_date = simulation_date + pd.Timedelta(days=90)
     
-    # 生成未来需求数据（仿真日期之后，3个月之内）
+    # 生成未来需求数据（仿真日期之后的90天内）
     future_demand = consumed_forecast[
         (pd.to_datetime(consumed_forecast['date']) > simulation_date) &
         (pd.to_datetime(consumed_forecast['date']) <= future_cutoff_date)

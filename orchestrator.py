@@ -114,9 +114,9 @@ def _normalize_identifiers(df: pd.DataFrame) -> pd.DataFrame:
             # Apply specific normalization for receiving
             elif col == 'receiving':
                 df[col] = df[col].apply(_normalize_receiving)
-            # For other identifier columns, ensure they are properly formatted strings
+            # For other identifier columns, vectorized string conversion
             else:
-                df[col] = df[col].apply(lambda x: str(x) if pd.notna(x) else "")
+                df[col] = df[col].fillna('').astype(str)
     
     return df
 
@@ -212,9 +212,10 @@ class Orchestrator:
         # 确保标识符字段为字符串格式
         normalized_df = _normalize_identifiers(initial_inventory_df)
         
-        for _, row in normalized_df.iterrows():
-            key = (row['material'], row['location'])
-            quantity = int(row['quantity'])
+        # Performance optimization: Use itertuples instead of iterrows
+        for row in normalized_df.itertuples():
+            key = (row.material, row.location)
+            quantity = int(row.quantity)
             self.unrestricted_inventory[key] = quantity
             self.initial_inventory[key] = quantity  # 保存初始库存副本
         
@@ -386,9 +387,10 @@ class Orchestrator:
         ]
         
         records = []
-        for _, capacity_row in effective_capacity.iterrows():
-            location = capacity_row['location']
-            capacity = capacity_row['capacity']
+        # Performance optimization: Use itertuples instead of iterrows
+        for capacity_row in effective_capacity.itertuples():
+            location = capacity_row.location
+            capacity = capacity_row.capacity
             
             # Calculate total unrestricted inventory at this location
             location_inventory = sum([
@@ -523,18 +525,19 @@ class Orchestrator:
         ]
         
         # Update unrestricted inventory
-        for _, row in daily_shipments.iterrows():
+        # Performance optimization: Use itertuples instead of iterrows
+        for row in daily_shipments.itertuples():
             # 🔧 使用标准化函数确保数据一致性
-            key = (_normalize_material(row['material']), _normalize_location(row['location']))
+            key = (_normalize_material(row.material), _normalize_location(row.location))
             if key in self.unrestricted_inventory:
-                self.unrestricted_inventory[key] = max(0, self.unrestricted_inventory[key] - int(row['quantity']))
+                self.unrestricted_inventory[key] = max(0, self.unrestricted_inventory[key] - int(row.quantity))
             
             # Log shipment
             self.shipment_log.append({
                 'date': date_obj,
-                'material': _normalize_material(row['material']), # 添加格式化
-                'location': _normalize_location(row['location']), # 添加格式化
-                'quantity': int(row['quantity']),
+                'material': _normalize_material(row.material), # 添加格式化
+                'location': _normalize_location(row.location), # 添加格式化
+                'quantity': int(row.quantity),
                 'type': 'customer_shipment'
             })
         
@@ -583,18 +586,19 @@ class Orchestrator:
         ]
         
         # Update unrestricted inventory and log production GR
-        for _, row in daily_production.iterrows():
+        # Performance optimization: Use itertuples instead of iterrows
+        for row in daily_production.itertuples():
             # 🔧 修复：使用标准化的location格式，确保与其他地方一致
-            key = (_normalize_material(row['material']), _normalize_location(row['location']))
-            quantity = int(row['produced_qty'])
+            key = (_normalize_material(row.material), _normalize_location(row.location))
+            quantity = int(row.produced_qty)
             
             self.unrestricted_inventory[key] = self.unrestricted_inventory.get(key, 0) + quantity
             
             # Log production GR
             self.production_gr.append({
                 'date': date_obj,
-                'material': _normalize_material(row['material']), # 添加格式化
-                'location': _normalize_location(row['location']), # 添加格式化
+                'material': _normalize_material(row.material), # 添加格式化
+                'location': _normalize_location(row.location), # 添加格式化
                 'quantity': quantity
             })
         
@@ -618,21 +622,22 @@ class Orchestrator:
         #     print(f"    📈 部署计划deployed_qty统计: {deployment_df['deployed_qty'].describe()}")
         
         # Add new deployment plans to open deployment
-        for i, row in deployment_df.iterrows():
+        # Performance optimization: Use itertuples instead of iterrows
+        for row in deployment_df.itertuples():
             # Generate unique UID
             self.uid_sequence += 1
             uid_obj = DeploymentUID(
-                material=str(row['material']),
-                sending=str(row['sending']),
-                receiving=str(row['receiving']),
-                planned_deploy_date=pd.to_datetime(row['planned_deployment_date']).strftime('%Y-%m-%d'),
-                demand_element=str(row['demand_element']),
+                material=str(row.material),
+                sending=str(row.sending),
+                receiving=str(row.receiving),
+                planned_deploy_date=pd.to_datetime(row.planned_deployment_date).strftime('%Y-%m-%d'),
+                demand_element=str(row.demand_element),
                 sequence=self.uid_sequence
             )
             uid = uid_obj.to_string()
             
-            original_qty = row['deployed_qty']
-            converted_qty = self._safe_convert_to_int(row['deployed_qty'])
+            original_qty = row.deployed_qty
+            converted_qty = self._safe_convert_to_int(row.deployed_qty)
             
             # if i < 3:  # 只显示前3条记录的详细信息
                 # print(f"      记录{i+1}: original_qty={original_qty} (类型: {type(original_qty)}), converted_qty={converted_qty}")
@@ -674,21 +679,22 @@ class Orchestrator:
         #         # print(f"    Row {idx}: {row['material']}@{row['sending']}->{row['receiving']}, ship:{row['actual_ship_date']}, delivery:{row['actual_delivery_date']}, qty:{row['delivery_qty']}")
         
         # Process each delivery record
-        for idx, row in delivery_df.iterrows():
-            uid = str(row['ori_deployment_uid'])
-            vehicle_uid = str(row['vehicle_uid'])
-            material = str(row['material'])
-            sending = str(row['sending'])
-            receiving = str(row['receiving'])
+        # Performance optimization: Use itertuples instead of iterrows
+        for row in delivery_df.itertuples():
+            uid = str(row.ori_deployment_uid)
+            vehicle_uid = str(row.vehicle_uid)
+            material = str(row.material)
+            sending = str(row.sending)
+            receiving = str(row.receiving)
             
             # 添加调试信息：显示原始和标准化后的标识符
             normalized_material = _normalize_material(material)
             normalized_receiving = _normalize_receiving(receiving)
             # if material == '80813644' and receiving in ['C816', 'C810']:
                 # print(f"      🔍 标识符标准化: 原始material='{material}' -> '{normalized_material}', 原始receiving='{receiving}' -> '{normalized_receiving}'")
-            ship_date = pd.to_datetime(row['actual_ship_date'])
-            delivery_date = pd.to_datetime(row['actual_delivery_date'])
-            quantity = self._safe_convert_to_int(row['delivery_qty'])
+            ship_date = pd.to_datetime(row.actual_ship_date)
+            delivery_date = pd.to_datetime(row.actual_delivery_date)
+            quantity = self._safe_convert_to_int(row.delivery_qty)
             
             # 只处理当天发运的货物（actual_ship_date == 当前仿真日期）
             if ship_date.normalize() != date_obj:

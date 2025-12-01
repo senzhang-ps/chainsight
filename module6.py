@@ -1047,8 +1047,8 @@ def run_physical_flow_module(
                         cap_v_rem = max(0.0, cap_v - v_sum)
 
                         limits = [qty_pending]            # 订单剩余量硬上限
-                        if uw > 0 and cap_w_rem > 0: limits.append(floor(cap_w_rem / uw))
-                        if uv > 0 and cap_v_rem > 0: limits.append(floor(cap_v_rem / uv))
+                        if uw > 0: limits.append(floor(cap_w_rem / uw))
+                        if uv > 0: limits.append(floor(cap_v_rem / uv))
                         
                         # 库存检查：限制发货量不超过可用库存
                         if inventory_check_enabled:
@@ -1131,8 +1131,8 @@ def run_physical_flow_module(
                             cap_v_rem = max(0.0, cap_v - v_sum)
 
                             limits = [qty_pending]
-                            if uw > 0 and cap_w_rem > 0: limits.append(floor(cap_w_rem / uw))
-                            if uv > 0 and cap_v_rem > 0: limits.append(floor(cap_v_rem / uv))
+                            if uw > 0: limits.append(floor(cap_w_rem / uw))
+                            if uv > 0: limits.append(floor(cap_v_rem / uv))
                             
                             # 库存检查：限制发货量不超过可用库存
                             if inventory_check_enabled:

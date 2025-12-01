@@ -217,7 +217,7 @@ def generate_daily_orders(sim_date, original_forecast, current_forecast, ao_conf
         ]
         
         if ml_original_forecast.empty:
-            # 如果15天范围内没有数据，尝试查找更短的范围
+            # 如果forecast_window_days范围内没有数据，尝试查找更短的范围（7天）
             short_end_date = sim_date + pd.Timedelta(days=7)
             ml_original_forecast = original_forecast[
                 (original_forecast['material'] == material) & 

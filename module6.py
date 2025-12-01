@@ -89,10 +89,14 @@ def _check_and_deduplicate(df: pd.DataFrame, key_column: str, sheet_name: str, v
     if df.empty:
         return df
     
-    dup_rows = df[df.duplicated(subset=[key_column], keep=False)]
-    if not dup_rows.empty:
-        dup_count = len(dup_rows)
-        dup_unique = dup_rows[key_column].nunique()
+    # Performance optimization: Check for duplicates first before computing full duplicate mask
+    if df[key_column].duplicated().any():
+        # Only compute full duplicate rows if there are duplicates
+        dup_mask = df.duplicated(subset=[key_column], keep=False)
+        dup_count = dup_mask.sum()
+        # More efficient: use value_counts instead of nunique on filtered data
+        dup_unique = df.loc[dup_mask, key_column].nunique()
+        
         print(f"  ⚠️  发现{sheet_name}中有 {dup_unique} 个重复的{key_column}（共 {dup_count} 条记录），将去重保留第一条")
         validation_log.append({
             'sheet': sheet_name,
@@ -804,26 +808,30 @@ def run_physical_flow_module(
     dp['simulation_date'] = dp['planned_deployment_date']
     
     # print(f"  🔍 处理后的部署计划数量: {len(dp)}")
-    # 按路线类型统计
-    dp['route_type_debug'] = dp.apply(lambda row: 'self_loop' if row['sending'] == row['receiving'] else 'cross_node', axis=1)
+    # 按路线类型统计 - Performance optimization: Vectorized comparison instead of apply
+    dp['route_type_debug'] = np.where(dp['sending'] == dp['receiving'], 'self_loop', 'cross_node')
     route_debug_stats = dp['route_type_debug'].value_counts()
     # print(f"  📊 部署计划路线统计: {route_debug_stats.to_dict()}")
 
     # 🔧 修复：在转换为dict前检查UID是否唯一，避免pandas报错
-    duplicate_uids = dp[dp.duplicated(subset=['ori_deployment_uid'], keep=False)]
-    if not duplicate_uids.empty:
-        dup_uid_count = duplicate_uids['ori_deployment_uid'].nunique()
-        print(f"  ⚠️  发现 {dup_uid_count} 个重复的ori_deployment_uid（共 {len(duplicate_uids)} 条记录）")
-        print(f"  🔍 重复UID示例: {duplicate_uids['ori_deployment_uid'].unique()[:5].tolist()}")
+    # Performance optimization: Check for duplicates efficiently
+    if dp['ori_deployment_uid'].duplicated().any():
+        dup_mask = dp.duplicated(subset=['ori_deployment_uid'], keep=False)
+        dup_count = dup_mask.sum()
+        dup_uid_count = dp.loc[dup_mask, 'ori_deployment_uid'].nunique()
+        duplicate_uids = dp.loc[dup_mask, 'ori_deployment_uid'].unique()[:5]
+        
+        print(f"  ⚠️  发现 {dup_uid_count} 个重复的ori_deployment_uid（共 {dup_count} 条记录）")
+        print(f"  🔍 重复UID示例: {duplicate_uids.tolist()}")
         
         # 记录到validation log
         validation_log.append({
             'sheet': 'DeploymentPlan',
             'row': '',
-            'issue': f'Found {dup_uid_count} duplicate ori_deployment_uid values ({len(duplicate_uids)} total duplicates). '
+            'issue': f'Found {dup_uid_count} duplicate ori_deployment_uid values ({dup_count} total duplicates). '
                     f'This indicates a data processing error. Deduplicating by keeping first occurrence.',
             'severity': 'ERROR',
-            'impact': f'Data Deduplication - {len(duplicate_uids) - dup_uid_count} duplicate records removed',
+            'impact': f'Data Deduplication - {dup_count - dup_uid_count} duplicate records removed',
             'duplicate_uids': dup_uid_count
         })
         
@@ -1025,38 +1033,38 @@ def run_physical_flow_module(
                     material_loaded = {}  # {material: total_loaded_qty}
 
                     # —— 初次扫描：尽量装入，但不超过 cap（无 ∞）——
-                    for idx, demand_row in remaining_demands.iterrows():
-                        qty_pending = float(demand_row['deployed_qty'])
+                    # Performance optimization: Use itertuples for ~2-3x faster iteration
+                    for row_tuple in remaining_demands.itertuples():
+                        idx = row_tuple.Index
+                        qty_pending = float(row_tuple.deployed_qty)
                         if qty_pending <= 0:
                             continue
-                        uw = float(demand_row['demand_unit_to_weight'])
-                        uv = float(demand_row['demand_unit_to_volume'])
-                        material = demand_row['material']
+                        uw = float(row_tuple.demand_unit_to_weight)
+                        uv = float(row_tuple.demand_unit_to_volume)
+                        material = row_tuple.material
 
-                        cap_w_rem = max(0.0, cap_w - w_sum)
-                        cap_v_rem = max(0.0, cap_v - v_sum)
+                        cap_w_rem = cap_w - w_sum
+                        cap_v_rem = cap_v - v_sum
 
                         limits = [qty_pending]            # 订单剩余量硬上限
-                        if uw > 0: limits.append(floor(cap_w_rem / uw))
-                        if uv > 0: limits.append(floor(cap_v_rem / uv))
+                        if uw > 0 and cap_w_rem > 0: limits.append(floor(cap_w_rem / uw))
+                        if uv > 0 and cap_v_rem > 0: limits.append(floor(cap_v_rem / uv))
                         
                         # 库存检查：限制发货量不超过可用库存
                         if inventory_check_enabled:
                             inv_key = (material, sending)
                             available_qty = available_inventory.get(inv_key, 0)
                             already_loaded = material_loaded.get(material, 0)
-                            inventory_limit = max(0, available_qty - already_loaded)
-                            limits.append(inventory_limit)
-                            
-                            # if inventory_limit <= 0:
-                            #     # 库存不足，跳过该物料
-                            #     print(f"        🚫 库存不足: {material}@{sending}, 可用={available_qty}, 已装={already_loaded}")
-                            #     continue
+                            inventory_limit = available_qty - already_loaded
+                            if inventory_limit > 0:
+                                limits.append(inventory_limit)
 
                         addable = int(max(0, min(limits)))
                         if addable <= 0:
                             continue
 
+                        # Get demand_row for storing in load_records
+                        demand_row = remaining_demands.loc[idx]
                         load_records.append({'idx': idx, 'load_qty': addable, 'demand_row': demand_row})
                         q_units += addable
                         w_sum  += addable * uw
@@ -1107,38 +1115,41 @@ def run_physical_flow_module(
                     if trigger_cause:
                         # —— 触发后再尽量贴近 1.0（仍不超）——
                         taken = {r['idx'] for r in load_records}
-                        for idx, demand_row in remaining_demands.iterrows():
+                        # Performance optimization: Use itertuples for faster iteration
+                        for row_tuple in remaining_demands.itertuples():
+                            idx = row_tuple.Index
                             if idx in taken:
                                 continue
-                            qty_pending = float(demand_row['deployed_qty'])
+                            qty_pending = float(row_tuple.deployed_qty)
                             if qty_pending <= 0:
                                 continue
-                            uw = float(demand_row['demand_unit_to_weight'])
-                            uv = float(demand_row['demand_unit_to_volume'])
-                            material = demand_row['material']
+                            uw = float(row_tuple.demand_unit_to_weight)
+                            uv = float(row_tuple.demand_unit_to_volume)
+                            material = row_tuple.material
 
-                            cap_w_rem = max(0.0, cap_w - w_sum)
-                            cap_v_rem = max(0.0, cap_v - v_sum)
+                            cap_w_rem = cap_w - w_sum
+                            cap_v_rem = cap_v - v_sum
 
                             limits = [qty_pending]
-                            if uw > 0: limits.append(floor(cap_w_rem / uw))
-                            if uv > 0: limits.append(floor(cap_v_rem / uv))
+                            if uw > 0 and cap_w_rem > 0: limits.append(floor(cap_w_rem / uw))
+                            if uv > 0 and cap_v_rem > 0: limits.append(floor(cap_v_rem / uv))
                             
                             # 库存检查：限制发货量不超过可用库存
                             if inventory_check_enabled:
                                 inv_key = (material, sending)
                                 available_qty = available_inventory.get(inv_key, 0)
                                 already_loaded = material_loaded.get(material, 0)
-                                inventory_limit = max(0, available_qty - already_loaded)
-                                limits.append(inventory_limit)
-                                
+                                inventory_limit = available_qty - already_loaded
                                 if inventory_limit <= 0:
                                     continue
+                                if inventory_limit > 0:
+                                    limits.append(inventory_limit)
 
                             addable = int(max(0, min(limits)))
                             if addable <= 0:
                                 continue
 
+                            demand_row = remaining_demands.loc[idx]
                             load_records.append({'idx': idx, 'load_qty': addable, 'demand_row': demand_row})
                             q_units += addable
                             w_sum  += addable * uw

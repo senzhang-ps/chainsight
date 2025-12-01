@@ -1582,12 +1582,12 @@ def main(
             # Performance optimization: Use itertuples for faster iteration
             for row in today_prod.itertuples():
                 k = (row.material, row.location)
-                # Use getattr for safe column access with itertuples
+                # Use getattr for safe column access with itertuples - consistent None defaults
                 qty_today = getattr(row, 'produced_qty', None)
                 if qty_today is None or pd.isna(qty_today):
                     qty_today = getattr(row, 'planned_qty', None)
                 if qty_today is None or pd.isna(qty_today):
-                    qty_today = getattr(row, 'quantity', 0)
+                    qty_today = getattr(row, 'quantity', None)
                 qty_today = int(qty_today) if qty_today is not None and not pd.isna(qty_today) else 0
                 today_production_gr[k] = today_production_gr.get(k, 0) + qty_today
 
@@ -1596,31 +1596,29 @@ def main(
             # Performance optimization: Use itertuples for faster iteration
             for row in future_prod.itertuples():
                 k = (row.material, row.location)
-                # Use getattr for safe column access with itertuples
+                # Use getattr for safe column access with itertuples - consistent None defaults
                 qty_future = getattr(row, 'uncon_planned_qty', None)
                 if qty_future is None or pd.isna(qty_future):
                     qty_future = getattr(row, 'produced_qty', None)
                 if qty_future is None or pd.isna(qty_future):
                     qty_future = getattr(row, 'planned_qty', None)
                 if qty_future is None or pd.isna(qty_future):
-                    qty_future = getattr(row, 'quantity', 0)
+                    qty_future = getattr(row, 'quantity', None)
                 qty_future = int(qty_future) if qty_future is not None and not pd.isna(qty_future) else 0
                 future_production[k] = future_production.get(k, 0) + qty_future
         
         # 从 Orchestrator 获取在途库存
         today_intransit = {}
         if not in_transit.empty:
-            # Performance optimization: Use itertuples for faster iteration
-            today_transit_df = in_transit[in_transit['available_date'] == sim_date]
-            for row in today_transit_df.itertuples():
+            # Performance optimization: Combine filter and iteration
+            for row in in_transit[in_transit['available_date'] == sim_date].itertuples():
                 k = (row.material, row.receiving)
                 today_intransit[k] = today_intransit.get(k, 0) + int(row.quantity)
         # 未来在途：available_date > sim_date，用于自补货的 pipeline 覆盖
         future_intransit = {}
         if not in_transit.empty:
-            future_rows = in_transit[in_transit['available_date'] > sim_date]
-            # Performance optimization: Use itertuples for faster iteration
-            for row in future_rows.itertuples():
+            # Performance optimization: Combine filter and iteration
+            for row in in_transit[in_transit['available_date'] > sim_date].itertuples():
                 k = (row.material, row.receiving)
                 future_intransit[k] = future_intransit.get(k, 0) + int(row.quantity)
         

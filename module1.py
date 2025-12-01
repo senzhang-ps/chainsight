@@ -4,6 +4,11 @@ from scipy.stats import truncnorm
 import os
 import re
 
+# ----------- 0. CONSTANTS AND CONFIGURATION -----------
+
+# 性能优化：最大AO提前天数的默认值（从配置中动态获取，此为后备值）
+DEFAULT_MAX_ADVANCE_DAYS = 10
+
 # ----------- 0. STRING NORMALIZATION FUNCTIONS -----------
 
 def _normalize_location(location_str) -> str:
@@ -184,6 +189,10 @@ def generate_daily_orders(sim_date, original_forecast, current_forecast, ao_conf
     orders = []
     consumed_forecast = current_forecast.copy()
     
+    # 性能优化：从ao_config动态计算最大advance_days，用于优化查询窗口
+    max_advance_days = int(ao_config['advance_days'].max()) if not ao_config.empty and 'advance_days' in ao_config.columns else DEFAULT_MAX_ADVANCE_DAYS
+    forecast_window_days = max_advance_days + 5  # 比最大advance_days多留5天buffer
+    
     # Get unique material-location combinations
     ml_combinations = original_forecast[['material', 'location']].drop_duplicates()
     
@@ -191,9 +200,8 @@ def generate_daily_orders(sim_date, original_forecast, current_forecast, ao_conf
         material = ml_row['material']
         location = ml_row['location']
         
-        # 性能优化：基于最大advance_days使用更短的查找窗口（原30天改为15天）
-        # 这样可以显著减少数据过滤开销，因为配置中最大advance_days仅为10天
-        forecast_window_days = 15  # 比最大advance_days(10)多留5天buffer
+        # 性能优化：基于最大advance_days使用更短的查找窗口（动态计算）
+        # 这样可以显著减少数据过滤开销，根据实际配置自适应调整
         end_date = sim_date + pd.Timedelta(days=forecast_window_days)
         
         # 使用直接日期比较代替.isin()以提升性能
@@ -575,7 +583,7 @@ def run_daily_order_generation(
         )
 
         # 7) 合并历史未到期订单 → 当日版本订单视图
-        def _load_previous_orders(m1_output_dir: str, current_date: pd.Timestamp, max_advance_days: int = 10) -> pd.DataFrame:
+        def _load_previous_orders(m1_output_dir: str, current_date: pd.Timestamp, max_advance_days: int = DEFAULT_MAX_ADVANCE_DAYS) -> pd.DataFrame:
             """
             性能优化：仅加载最近max_advance_days天的历史订单文件
             因为AO订单最多提前10天生成，所以只需要读取最近10天的文件
@@ -625,7 +633,7 @@ def run_daily_order_generation(
                 return pd.DataFrame()
 
         # 性能优化：从ao_config中获取最大advance_days，用于优化历史订单加载范围
-        max_advance_days = int(ao_config['advance_days'].max()) if not ao_config.empty and 'advance_days' in ao_config.columns else 10
+        max_advance_days = int(ao_config['advance_days'].max()) if not ao_config.empty and 'advance_days' in ao_config.columns else DEFAULT_MAX_ADVANCE_DAYS
         
         previous_orders_all = _load_previous_orders(output_dir, simulation_date, max_advance_days)
         

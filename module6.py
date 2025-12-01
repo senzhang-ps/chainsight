@@ -1043,8 +1043,8 @@ def run_physical_flow_module(
                         uv = float(row_tuple.demand_unit_to_volume)
                         material = row_tuple.material
 
-                        cap_w_rem = cap_w - w_sum
-                        cap_v_rem = cap_v - v_sum
+                        cap_w_rem = max(0.0, cap_w - w_sum)
+                        cap_v_rem = max(0.0, cap_v - v_sum)
 
                         limits = [qty_pending]            # 订单剩余量硬上限
                         if uw > 0 and cap_w_rem > 0: limits.append(floor(cap_w_rem / uw))
@@ -1127,8 +1127,8 @@ def run_physical_flow_module(
                             uv = float(row_tuple.demand_unit_to_volume)
                             material = row_tuple.material
 
-                            cap_w_rem = cap_w - w_sum
-                            cap_v_rem = cap_v - v_sum
+                            cap_w_rem = max(0.0, cap_w - w_sum)
+                            cap_v_rem = max(0.0, cap_v - v_sum)
 
                             limits = [qty_pending]
                             if uw > 0 and cap_w_rem > 0: limits.append(floor(cap_w_rem / uw))
@@ -1142,8 +1142,7 @@ def run_physical_flow_module(
                                 inventory_limit = available_qty - already_loaded
                                 if inventory_limit <= 0:
                                     continue
-                                if inventory_limit > 0:
-                                    limits.append(inventory_limit)
+                                limits.append(inventory_limit)
 
                             addable = int(max(0, min(limits)))
                             if addable <= 0:

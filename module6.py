@@ -1055,7 +1055,7 @@ def run_physical_flow_module(
                             inv_key = (material, sending)
                             available_qty = available_inventory.get(inv_key, 0)
                             already_loaded = material_loaded.get(material, 0)
-                            inventory_limit = available_qty - already_loaded
+                            inventory_limit = max(0, available_qty - already_loaded)
                             if inventory_limit > 0:
                                 limits.append(inventory_limit)
 
@@ -1139,7 +1139,7 @@ def run_physical_flow_module(
                                 inv_key = (material, sending)
                                 available_qty = available_inventory.get(inv_key, 0)
                                 already_loaded = material_loaded.get(material, 0)
-                                inventory_limit = available_qty - already_loaded
+                                inventory_limit = max(0, available_qty - already_loaded)
                                 if inventory_limit <= 0:
                                     continue
                                 limits.append(inventory_limit)

@@ -732,6 +732,10 @@ def generate_supply_demand_log_for_integration(
     Returns:
         pd.DataFrame: SupplyDemandLog数据
     """
+    # 处理空DataFrame
+    if consumed_forecast.empty or 'date' not in consumed_forecast.columns:
+        return pd.DataFrame(columns=['date', 'material', 'location', 'quantity', 'demand_element'])
+    
     # 性能优化：只生成未来3个月（90天）的需求数据，减少数据量
     # 计算3个月后的截止日期
     future_cutoff_date = simulation_date + pd.Timedelta(days=90)

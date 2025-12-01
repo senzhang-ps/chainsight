@@ -836,8 +836,9 @@ def run_mrp_layered_simulation_daily(
         
         # 获取当前层级的节点
         material_locations_df = pd.DataFrame(material_locations)
-        # Performance optimization: Vectorized comparison instead of apply
-        layer_mask = material_locations_df['location'].map(lambda loc: location_layer.get(loc, -1) == layer)
+        # Performance optimization: Use vectorized isin for better performance
+        layer_locations = [loc for loc, lyr in location_layer.items() if lyr == layer]
+        layer_mask = material_locations_df['location'].isin(layer_locations)
         layer_nodes = material_locations_df[layer_mask]
         
         # print(f"   处理Layer {layer}: {len(layer_nodes)} 个节点")

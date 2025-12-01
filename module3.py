@@ -53,15 +53,15 @@ def _normalize_identifiers(df: pd.DataFrame) -> pd.DataFrame:
         if col in df.columns:
             # Convert to string and handle NaN values
             df[col] = df[col].astype('string')
-            # Apply specific normalization for location-type fields
+            # Apply normalization for location-type fields
             if col in ['location', 'sending', 'receiving']:
                 df[col] = df[col].apply(_normalize_location)
-            # Apply specific normalization for material
+            # Apply normalization for material
             elif col in ['material']:
                 df[col] = df[col].apply(_normalize_material)
-            # For other identifier columns, ensure they are properly formatted strings
+            # For other identifier columns, vectorized string conversion
             else:
-                df[col] = df[col].apply(lambda x: str(x) if pd.notna(x) else "")
+                df[col] = df[col].fillna('').astype(str)
     
     return df
 
@@ -183,9 +183,10 @@ def assign_location_layers(network_df: pd.DataFrame) -> pd.DataFrame:
     parents = defaultdict(list)
     
     # 第一步：构建父子关系图
-    for _, row in network_df.iterrows():
-        sourcing_val = row['sourcing']
-        location_val = row['location']
+    # Performance optimization: Use itertuples instead of iterrows
+    for row in network_df.itertuples():
+        sourcing_val = row.sourcing
+        location_val = row.location
         
         # Handle null/nan values properly for both scalar and Series cases
         sourcing_valid = sourcing_val is not None and pd.notna(sourcing_val) and str(sourcing_val).strip() != ''
@@ -629,9 +630,10 @@ def calculate_daily_net_demand(
                     # 添加调试信息以追踪问题
                     if AO_local > 0:
                         # print(f"    Debug: AO_local={AO_local} for {material}@{location}, horizon_end={horizon_end.date()}")
-                        for _, ao_row in od.iterrows():
-                            ao_date = pd.to_datetime(ao_row['date'])
-                            # print(f"      AO订单: 日期={ao_date.date()}, 数量={ao_row['quantity']}")
+                        # Performance optimization: Use itertuples instead of iterrows
+                        for ao_row in od.itertuples():
+                            ao_date = pd.to_datetime(ao_row.date)
+                            # print(f"      AO订单: 日期={ao_date.date()}, 数量={ao_row.quantity}")
             else:
                 # 如果没有date列，AO_local保持为0
                 pass
@@ -786,10 +788,11 @@ def run_mrp_layered_simulation_daily(
     extended_material_locations = []
     
     # 1. 添加network中明确配置的组合
-    for _, row in active_network.iterrows():
+    # Performance optimization: Use itertuples instead of iterrows
+    for row in active_network.itertuples():
         extended_material_locations.append({
-            'material': str(row['material']),
-            'location': str(row['location'])
+            'material': str(row.material),
+            'location': str(row.location)
         })
     
     # 2. 为自动识别的根节点添加缺失的material组合
@@ -833,14 +836,16 @@ def run_mrp_layered_simulation_daily(
         
         # 获取当前层级的节点
         material_locations_df = pd.DataFrame(material_locations)
-        layer_mask = material_locations_df['location'].apply(lambda loc: location_layer.get(loc, -1) == layer)
+        # Performance optimization: Vectorized comparison instead of apply
+        layer_mask = material_locations_df['location'].map(lambda loc: location_layer.get(loc, -1) == layer)
         layer_nodes = material_locations_df[layer_mask]
         
         # print(f"   处理Layer {layer}: {len(layer_nodes)} 个节点")
         
-        for _, ml in layer_nodes.iterrows():
-            material = str(ml['material'])
-            location = str(ml['location'])
+        # Performance optimization: Use itertuples instead of iterrows
+        for ml in layer_nodes.itertuples():
+            material = str(ml.material)
+            location = str(ml.location)
 
             # 查找有效的网络配置
             network_candidates = active_network[

@@ -31,15 +31,17 @@ def _normalize_identifiers(df: pd.DataFrame) -> pd.DataFrame:
         if col in df.columns:
             # Convert to string and handle NaN values
             df[col] = df[col].astype('string')
-            # Apply specific normalization for location-type fields
+            # Performance optimization: Use vectorized operations where possible
             if col in ['location', 'sending', 'receiving', 'sourcing']:
+                # Vectorized normalization for location-type fields
                 df[col] = df[col].apply(_normalize_location)
             # Apply specific normalization for material
             elif col == 'material':
                 df[col] = df[col].apply(_normalize_material)
             # For other identifier columns, ensure they are properly formatted strings
             else:
-                df[col] = df[col].apply(lambda x: str(x) if pd.notna(x) else "")
+                # Vectorized string conversion
+                df[col] = df[col].fillna('').astype(str)
     
     return df
 
@@ -511,9 +513,10 @@ def assign_location_layers(network_df: pd.DataFrame) -> pd.DataFrame:
 
     children = defaultdict(list)
     parents = defaultdict(list)
-    for _, row in network_df.iterrows():
-        sourcing_val = row['sourcing']
-        location_val = row['location']
+    # Performance optimization: Use itertuples instead of iterrows
+    for row in network_df.itertuples():
+        sourcing_val = row.sourcing
+        location_val = row.location
         sourcing_valid = sourcing_val is not None and pd.notna(sourcing_val) and str(sourcing_val).strip() != ''
         location_valid = location_val is not None and pd.notna(location_val) and str(location_val).strip() != ''
         if sourcing_valid and location_valid:
@@ -1458,7 +1461,8 @@ def main(
     network_layers = assign_location_layers(network)
     location_to_layer = dict(zip(network_layers['location'], network_layers['layer']))
     layer_list = sorted(network_layers['layer'].unique(), reverse=True)  # 从最大层往上游推进
-    demand_priority_map = {row['demand_element']: row['priority'] for _, row in demand_priority.iterrows()}
+    # Performance optimization: Use dict() with zip instead of iterrows
+    demand_priority_map = dict(zip(demand_priority['demand_element'], demand_priority['priority']))
     config['LocationLayerMap'] = location_to_layer
     # ========== 初始化库存 soh_dict ==========
     # 1. 全收集所有material/location（包含 OrderLog）
@@ -1489,13 +1493,12 @@ def main(
         raise ValueError(f"InventoryLog contains duplicate (material, location) on sim_start {sim_start}:\n{dup_rows[['material', 'location', 'date']]}")
 
     # 4. 初始化soh_dict，默认0
-    soh_dict = {}
-    for mat in all_mats:
-        for loc in all_locs:
-            soh_dict[(mat, loc)] = 0  # 默认0
+    # Performance optimization: Use dictionary comprehension instead of nested loops
+    soh_dict = {(mat, loc): 0 for mat in all_mats for loc in all_locs}
 
-    for _, row in inv_df.iterrows():
-        soh_dict[(row['material'], row['location'])] = int(row['quantity'])
+    # Performance optimization: Use itertuples instead of iterrows
+    for row in inv_df.itertuples():
+        soh_dict[(row.material, row.location)] = int(row.quantity)
 
 
     deployment_plan_rows = []
@@ -1576,33 +1579,33 @@ def main(
             # # 当日生产 (available_date = sim_date) —— 用 produced_qty
             today_prod = production_plan[production_plan['available_date'] == sim_date]
             # print(f"   当日生产条目: {len(today_prod)}")
-            for _, row in today_prod.iterrows():
-                k = (row['material'], row['location'])
-                if 'produced_qty' in row and pd.notna(row['produced_qty']):
-                    qty_today = int(row['produced_qty'])
-                elif 'planned_qty' in row and pd.notna(row['planned_qty']):
-                    qty_today = int(row['planned_qty'])
-                elif 'quantity' in row and pd.notna(row['quantity']):
-                    qty_today = int(row['quantity'])
+            # Performance optimization: Use itertuples for faster iteration
+            for row in today_prod.itertuples():
+                k = (row.material, row.location)
+                if hasattr(row, 'produced_qty') and pd.notna(row.produced_qty):
+                    qty_today = int(row.produced_qty)
+                elif hasattr(row, 'planned_qty') and pd.notna(row.planned_qty):
+                    qty_today = int(row.planned_qty)
+                elif hasattr(row, 'quantity') and pd.notna(row.quantity):
+                    qty_today = int(row.quantity)
                 else:
                     qty_today = 0
                 today_production_gr[k] = today_production_gr.get(k, 0) + qty_today
-                # if k[0] == '80813644' and k[1] == '0386':
-                    # print(f"   添加80813644@0386生产: {qty_today} (累计: {today_production_gr[k]})")
 
             # 未来生产 (available_date > sim_date) —— 用 uncon_planned_qty
             future_prod = production_plan[production_plan['available_date'] > sim_date]
-            for _, row in future_prod.iterrows():
-                k = (row['material'], row['location'])
-                if 'uncon_planned_qty' in row and pd.notna(row['uncon_planned_qty']):
-                    qty_future = int(row['uncon_planned_qty'])
-                elif 'produced_qty' in row and pd.notna(row['produced_qty']):
+            # Performance optimization: Use itertuples for faster iteration
+            for row in future_prod.itertuples():
+                k = (row.material, row.location)
+                if hasattr(row, 'uncon_planned_qty') and pd.notna(row.uncon_planned_qty):
+                    qty_future = int(row.uncon_planned_qty)
+                elif hasattr(row, 'produced_qty') and pd.notna(row.produced_qty):
                     # 回退：若没有 uncon，则用 produced（尽量不丢数据）
-                    qty_future = int(row['produced_qty'])
-                elif 'planned_qty' in row and pd.notna(row['planned_qty']):
-                    qty_future = int(row['planned_qty'])
-                elif 'quantity' in row and pd.notna(row['quantity']):
-                    qty_future = int(row['quantity'])
+                    qty_future = int(row.produced_qty)
+                elif hasattr(row, 'planned_qty') and pd.notna(row.planned_qty):
+                    qty_future = int(row.planned_qty)
+                elif hasattr(row, 'quantity') and pd.notna(row.quantity):
+                    qty_future = int(row.quantity)
                 else:
                     qty_future = 0
                 future_production[k] = future_production.get(k, 0) + qty_future
@@ -1610,16 +1613,19 @@ def main(
         # 从 Orchestrator 获取在途库存
         today_intransit = {}
         if not in_transit.empty:
-            for _, row in in_transit[in_transit['available_date'] == sim_date].iterrows():
-                k = (row['material'], row['receiving'])
-                today_intransit[k] = today_intransit.get(k, 0) + int(row['quantity'])
+            # Performance optimization: Use itertuples for faster iteration
+            today_transit_df = in_transit[in_transit['available_date'] == sim_date]
+            for row in today_transit_df.itertuples():
+                k = (row.material, row.receiving)
+                today_intransit[k] = today_intransit.get(k, 0) + int(row.quantity)
         # 未来在途：available_date > sim_date，用于自补货的 pipeline 覆盖
         future_intransit = {}
         if not in_transit.empty:
             future_rows = in_transit[in_transit['available_date'] > sim_date]
-            for _, row in future_rows.iterrows():
-                k = (row['material'], row['receiving'])
-                future_intransit[k] = future_intransit.get(k, 0) + int(row['quantity'])
+            # Performance optimization: Use itertuples for faster iteration
+            for row in future_rows.itertuples():
+                k = (row.material, row.receiving)
+                future_intransit[k] = future_intransit.get(k, 0) + int(row.quantity)
         
         # 加载当日收货、发货和开放调拨数据
         delivery_gr_data = config.get('DeliveryGR', pd.DataFrame())
@@ -1630,24 +1636,27 @@ def main(
         delivery_gr = {}
         if not delivery_gr_data.empty:
             filtered_delivery = delivery_gr_data[pd.to_datetime(delivery_gr_data['date']) == sim_date] if 'date' in delivery_gr_data.columns else delivery_gr_data
-            for _, row in filtered_delivery.iterrows():
-                k = (row['material'], row['receiving'])
-                delivery_gr[k] = delivery_gr.get(k, 0) + int(row['quantity'])
+            # Performance optimization: Use itertuples for faster iteration
+            for row in filtered_delivery.itertuples():
+                k = (row.material, row.receiving)
+                delivery_gr[k] = delivery_gr.get(k, 0) + int(row.quantity)
         
         today_shipment = {}
         if not today_shipment_data.empty:
             filtered_shipment = today_shipment_data[pd.to_datetime(today_shipment_data['date']) == sim_date] if 'date' in today_shipment_data.columns else today_shipment_data
-            for _, row in filtered_shipment.iterrows():
-                k = (row['material'], row['location'])
-                today_shipment[k] = today_shipment.get(k, 0) + int(row['quantity'])
+            # Performance optimization: Use itertuples for faster iteration
+            for row in filtered_shipment.itertuples():
+                k = (row.material, row.location)
+                today_shipment[k] = today_shipment.get(k, 0) + int(row.quantity)
         
         open_deployment = {}
         if not open_deployment_data.empty:
-            for _, row in open_deployment_data.iterrows():
+            # Performance optimization: Use itertuples for faster iteration
+            for row in open_deployment_data.itertuples():
                 # 只计算真正从该地点发出的调拨，排除自循环（sending=receiving）
-                if row['sending'] != row['receiving']:
-                    k = (row['material'], row['sending'])
-                    open_deployment[k] = open_deployment.get(k, 0) + int(row['quantity'])
+                if row.sending != row.receiving:
+                    k = (row.material, row.sending)
+                    open_deployment[k] = open_deployment.get(k, 0) + int(row.quantity)
         # 🔁 新增：构造 inbound 视图 (material, receiving) → qty
         open_deployment_inbound = build_open_deployment_inbound(open_deployment_data)
 

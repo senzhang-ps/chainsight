@@ -646,7 +646,25 @@ def run_physical_flow_module(
     delay_dist = config['DeliveryDelayDistribution']
     bypass_rules = config['MDQBypassRules']
 
-    prio_map = demand_prio.set_index('demand_element')['priority'].to_dict()
+    # 🔧 修复：确保demand_prio没有重复的demand_element
+    if not demand_prio.empty:
+        dup_demand_elements = demand_prio[demand_prio.duplicated(subset=['demand_element'], keep=False)]
+        if not dup_demand_elements.empty:
+            dup_count = len(dup_demand_elements)
+            dup_unique = dup_demand_elements['demand_element'].nunique()
+            print(f"  ⚠️  发现Global_DemandPriority中有 {dup_unique} 个重复的demand_element（共 {dup_count} 条记录），将去重保留第一条")
+            validation_log.append({
+                'sheet': 'Global_DemandPriority',
+                'row': '',
+                'issue': f'Found {dup_unique} duplicate demand_elements in Global_DemandPriority ({dup_count} total duplicates). '
+                        f'Keeping first occurrence of each demand_element.',
+                'severity': 'WARNING',
+                'impact': f'Data Deduplication - {dup_count - dup_unique} duplicate records removed',
+                'duplicate_demand_elements': dup_unique
+            })
+            demand_prio = demand_prio.drop_duplicates(subset=['demand_element'], keep='first')
+    
+    prio_map = demand_prio.set_index('demand_element')['priority'].to_dict() if not demand_prio.empty else {}
     missing_prio = dp[~dp['demand_element'].isin(prio_map.keys())]
     if not missing_prio.empty:
         # 记录缺失的demand_element详细信息
@@ -681,7 +699,27 @@ def run_physical_flow_module(
         dp = dp[dp['demand_element'].isin(prio_map.keys())]
         # print(f"  📊 过滤后保留: {len(dp)} 条记录")
 
-    mat_map = material_md.set_index('material')[['demand_unit_to_weight','demand_unit_to_volume']].to_dict('index')
+    # 🔧 修复：确保material_md没有重复的material，避免merge产生重复行
+    # 检查material_md是否有重复的material
+    if not material_md.empty:
+        dup_materials = material_md[material_md.duplicated(subset=['material'], keep=False)]
+        if not dup_materials.empty:
+            dup_count = len(dup_materials)
+            dup_unique = dup_materials['material'].nunique()
+            print(f"  ⚠️  发现M6_MaterialMD中有 {dup_unique} 个重复的material（共 {dup_count} 条记录），将去重保留第一条")
+            validation_log.append({
+                'sheet': 'M6_MaterialMD',
+                'row': '',
+                'issue': f'Found {dup_unique} duplicate materials in M6_MaterialMD ({dup_count} total duplicates). '
+                        f'Keeping first occurrence of each material.',
+                'severity': 'WARNING',
+                'impact': f'Data Deduplication - {dup_count - dup_unique} duplicate records removed',
+                'duplicate_materials': dup_unique
+            })
+            # 去重：保留第一条记录
+            material_md = material_md.drop_duplicates(subset=['material'], keep='first')
+    
+    mat_map = material_md.set_index('material')[['demand_unit_to_weight','demand_unit_to_volume']].to_dict('index') if not material_md.empty else {}
     missing_mat = dp[~dp['material'].isin(mat_map.keys())]
     if not missing_mat.empty:
         missing_materials = missing_mat['material'].unique()
@@ -708,7 +746,25 @@ def run_physical_flow_module(
         dp['demand_unit_to_weight'] = dp['demand_unit_to_weight'].fillna(1.0)
         dp['demand_unit_to_volume'] = dp['demand_unit_to_volume'].fillna(1.0)
 
-    spec_map = truck_specs.set_index('truck_type').to_dict('index')
+    # 🔧 修复：确保truck_specs没有重复的truck_type
+    if not truck_specs.empty:
+        dup_truck_types = truck_specs[truck_specs.duplicated(subset=['truck_type'], keep=False)]
+        if not dup_truck_types.empty:
+            dup_count = len(dup_truck_types)
+            dup_unique = dup_truck_types['truck_type'].nunique()
+            print(f"  ⚠️  发现M6_TruckTypeSpecs中有 {dup_unique} 个重复的truck_type（共 {dup_count} 条记录），将去重保留第一条")
+            validation_log.append({
+                'sheet': 'M6_TruckTypeSpecs',
+                'row': '',
+                'issue': f'Found {dup_unique} duplicate truck_types in M6_TruckTypeSpecs ({dup_count} total duplicates). '
+                        f'Keeping first occurrence of each truck_type.',
+                'severity': 'WARNING',
+                'impact': f'Data Deduplication - {dup_count - dup_unique} duplicate records removed',
+                'duplicate_truck_types': dup_unique
+            })
+            truck_specs = truck_specs.drop_duplicates(subset=['truck_type'], keep='first')
+    
+    spec_map = truck_specs.set_index('truck_type').to_dict('index') if not truck_specs.empty else {}
 
     # --- 阈值>1.0 的配置告警（仍允许，但不会靠阈值触发） ---
     bad_th = truck_con[(truck_con['WFR'] > 1.0) | (truck_con['VFR'] > 1.0)]
@@ -765,6 +821,29 @@ def run_physical_flow_module(
     dp['route_type_debug'] = dp.apply(lambda row: 'self_loop' if row['sending'] == row['receiving'] else 'cross_node', axis=1)
     route_debug_stats = dp['route_type_debug'].value_counts()
     # print(f"  📊 部署计划路线统计: {route_debug_stats.to_dict()}")
+
+    # 🔧 修复：在转换为dict前检查UID是否唯一，避免pandas报错
+    duplicate_uids = dp[dp.duplicated(subset=['ori_deployment_uid'], keep=False)]
+    if not duplicate_uids.empty:
+        dup_uid_count = duplicate_uids['ori_deployment_uid'].nunique()
+        print(f"  ⚠️  发现 {dup_uid_count} 个重复的ori_deployment_uid（共 {len(duplicate_uids)} 条记录）")
+        print(f"  🔍 重复UID示例: {duplicate_uids['ori_deployment_uid'].unique()[:5].tolist()}")
+        
+        # 记录到validation log
+        validation_log.append({
+            'sheet': 'DeploymentPlan',
+            'row': '',
+            'issue': f'Found {dup_uid_count} duplicate ori_deployment_uid values ({len(duplicate_uids)} total duplicates). '
+                    f'This indicates a data processing error. Deduplicating by keeping first occurrence.',
+            'severity': 'ERROR',
+            'impact': f'Data Deduplication - {len(duplicate_uids) - dup_uid_count} duplicate records removed',
+            'duplicate_uids': dup_uid_count
+        })
+        
+        # 去重：保留第一条记录
+        print(f"  🔧 去重处理：保留每个UID的第一条记录")
+        dp = dp.drop_duplicates(subset=['ori_deployment_uid'], keep='first')
+        print(f"  ✅ 去重后保留: {len(dp)} 条记录")
 
     # Dict index
     dp_dict = dp.set_index('ori_deployment_uid').to_dict('index')

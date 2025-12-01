@@ -4,6 +4,11 @@ from scipy.stats import truncnorm
 import os
 import re
 
+# ----------- 0. CONSTANTS AND CONFIGURATION -----------
+
+# 性能优化：最大AO提前天数的默认值（从配置中动态获取，此为后备值）
+DEFAULT_MAX_ADVANCE_DAYS = 10
+
 # ----------- 0. STRING NORMALIZATION FUNCTIONS -----------
 
 def _normalize_location(location_str) -> str:
@@ -191,22 +196,26 @@ def generate_daily_orders(sim_date, original_forecast, current_forecast, ao_conf
         material = ml_row['material']
         location = ml_row['location']
         
-        # Calculate 30-day average forecast from ORIGINAL forecast
-        # 修复：使用更合理的预测查找范围，确保能找到数据
-        future_dates = pd.date_range(sim_date, periods=min(30, len(original_forecast)), freq='D')
+        # 性能优化：基于30天未来预测计算订单（保持原业务逻辑）
+        # 使用直接日期比较代替.isin()以提升性能
+        forecast_window_days = 30
+        end_date = sim_date + pd.Timedelta(days=forecast_window_days)
+        
         ml_original_forecast = original_forecast[
             (original_forecast['material'] == material) & 
             (original_forecast['location'] == location) &
-            (original_forecast['date'].isin(future_dates))
+            (original_forecast['date'] >= sim_date) &
+            (original_forecast['date'] < end_date)
         ]
         
         if ml_original_forecast.empty:
-            # 修复：如果30天范围内没有数据，尝试查找更短的范围
-            future_dates_short = pd.date_range(sim_date, periods=7, freq='D')
+            # 如果30天范围内没有数据，尝试查找更短的范围（7天）
+            short_end_date = sim_date + pd.Timedelta(days=7)
             ml_original_forecast = original_forecast[
                 (original_forecast['material'] == material) & 
                 (original_forecast['location'] == location) &
-                (original_forecast['date'].isin(future_dates_short))
+                (original_forecast['date'] >= sim_date) &
+                (original_forecast['date'] < short_end_date)
             ]
             
             if ml_original_forecast.empty:
@@ -494,6 +503,8 @@ def run_daily_order_generation(
     注意：为了确保shipment基于实际库存限制，orchestrator参数实际上是必需的。
     没有orchestrator时只能生成订单，无法生成合理的shipment。
     
+    性能优化：基于最大AO advance_days优化数据查询范围和历史订单加载
+    
     Args:
         config_dict: 配置数据字典
         simulation_date: 仿真日期
@@ -568,19 +579,38 @@ def run_daily_order_generation(
         )
 
         # 7) 合并历史未到期订单 → 当日版本订单视图
-        def _load_previous_orders(m1_output_dir: str, current_date: pd.Timestamp) -> pd.DataFrame:
+        def _load_previous_orders(m1_output_dir: str, current_date: pd.Timestamp, max_advance_days: int = DEFAULT_MAX_ADVANCE_DAYS) -> pd.DataFrame:
+            """
+            性能优化：仅加载最近(max_advance_days+1)天的历史订单文件
+            因为AO订单最多提前max_advance_days天生成，所以只需要读取最近max_advance_days+1天的文件
+            max_advance_days从配置表动态获取，不能写死
+            """
             try:
                 if not os.path.isdir(m1_output_dir):
                     return pd.DataFrame()
+                
                 pattern = re.compile(r"module1_output_(\d{8})\.xlsx$")
+                
+                # 性能优化：计算需要读取的最早日期（当前日期 - max_advance_days - 1）
+                # 只读取这个时间窗口内的文件，避免随着仿真推进而读取越来越多的历史文件
+                # 加1是为了确保覆盖所有可能还未到期的订单
+                earliest_relevant_date = current_date - pd.Timedelta(days=max_advance_days + 1)
+                
                 rows = []
                 for fname in os.listdir(m1_output_dir):
                     m = pattern.match(fname)
                     if not m:
                         continue
                     fdate = pd.to_datetime(m.group(1))
+                    
+                    # 跳过当前日期及之后的文件
                     if fdate.normalize() >= current_date.normalize():
                         continue
+                    
+                    # 性能优化：跳过过早的文件（超出max_advance_days窗口）
+                    if fdate.normalize() < earliest_relevant_date.normalize():
+                        continue
+                    
                     fpath = os.path.join(m1_output_dir, fname)
                     try:
                         xl = pd.ExcelFile(fpath)
@@ -600,7 +630,20 @@ def run_daily_order_generation(
             except Exception:
                 return pd.DataFrame()
 
-        previous_orders_all = _load_previous_orders(output_dir, simulation_date)
+        # 性能优化：从ao_config中获取最大advance_days，用于优化历史订单加载范围
+        if not ao_config.empty and 'advance_days' in ao_config.columns:
+            max_val = ao_config['advance_days'].max(skipna=True)
+            max_advance_days = int(max_val) if pd.notna(max_val) else DEFAULT_MAX_ADVANCE_DAYS
+        else:
+            max_advance_days = DEFAULT_MAX_ADVANCE_DAYS
+        
+        previous_orders_all = _load_previous_orders(output_dir, simulation_date, max_advance_days)
+        
+        # 性能优化：在去重之前先过滤未来订单，减少处理的数据量
+        if not previous_orders_all.empty and 'date' in previous_orders_all.columns:
+            previous_orders_all['date'] = pd.to_datetime(previous_orders_all['date'])
+            previous_orders_all = previous_orders_all[previous_orders_all['date'] >= simulation_date].copy()
+        
         if not previous_orders_all.empty:
             dedup_keys = [
                 c for c in ['date','material','location','demand_type','simulation_date','advance_days','quantity']
@@ -609,11 +652,7 @@ def run_daily_order_generation(
             if dedup_keys:
                 previous_orders_all = previous_orders_all.drop_duplicates(subset=dedup_keys)
 
-        previous_orders_future = (
-            previous_orders_all[previous_orders_all['date'] >= simulation_date].copy()
-            if (not previous_orders_all.empty and 'date' in previous_orders_all.columns)
-            else pd.DataFrame()
-        )
+        previous_orders_future = previous_orders_all.copy() if not previous_orders_all.empty else pd.DataFrame()
 
         orders_df = (
             pd.concat([previous_orders_future, today_orders_df], ignore_index=True)

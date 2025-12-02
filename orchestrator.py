@@ -24,7 +24,8 @@ from datetime import datetime
 # 在文件开头添加字符串格式化函数
 def _normalize_material(material_str) -> str:
     """Normalize material string to ensure consistent format - removes .0 suffix from numeric materials"""
-    if material_str is None:
+    # Handle None and pandas NA
+    if material_str is None or pd.isna(material_str):
         return ""
     
     try:

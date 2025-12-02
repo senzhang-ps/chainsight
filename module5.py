@@ -1011,7 +1011,8 @@ def validate_config_before_run(config, validation_log):
 
     return validation_log
 
-def collect_node_demands(material, location, sim_date, config, up_gap_buffer):
+def collect_node_demands(material, location, sim_date, config, up_gap_buffer,
+                         ptf_lsk_cache=None, lead_time_cache=None, active_network_cache=None):
     """
     对齐规则：
     - horizon 统一来自 determine_lead_time 口径：
@@ -1082,7 +1083,8 @@ def collect_node_demands(material, location, sim_date, config, up_gap_buffer):
         ptf, lsk_val = _get_ptf_lsk(
             material=str(material),
             site=str(location),
-            m4_mlcfg_df=config.get('M4_MaterialLocationLineCfg', pd.DataFrame())
+            m4_mlcfg_df=config.get('M4_MaterialLocationLineCfg', pd.DataFrame()),
+            cache=ptf_lsk_cache
         )
         # MCT/PDT/GR 来自 Global_LeadTime（以 sending==location 的行取最大值；缺失按 0）
         df_loc = leadtime_df[leadtime_df['sending'] == str(location)]
@@ -1885,7 +1887,10 @@ def main(
                 current_stock = dynamic_soh.get(node_key, 0)
                 # print(f"📍 节点: {mat}@{loc} [可用库存: {current_stock}]")
                 
-                demand_rows = collect_node_demands(mat, loc, sim_date, config, up_gap_buffer)
+                demand_rows = collect_node_demands(mat, loc, sim_date, config, up_gap_buffer,
+                                                   ptf_lsk_cache=ptf_lsk_cache,
+                                                   lead_time_cache=lead_time_cache,
+                                                   active_network_cache=active_network_cache)
                 if not demand_rows:
                     # print(f"   ⚠️  无需求需要处理")
                     continue

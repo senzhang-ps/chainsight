@@ -694,11 +694,14 @@ def run_physical_flow_module(
         missing_elements = missing_prio['demand_element'].unique()
         for val in missing_elements:
             missing_records = missing_prio[missing_prio['demand_element'] == val]
-            # 统计路线类型
-            route_stats = missing_records.apply(
-                lambda row: 'self_loop' if row['sending'] == row['receiving'] else 'cross_node', axis=1
-            ).value_counts()
-            route_info = ', '.join([f"{k}: {v}" for k, v in route_stats.items()])
+            # 统计路线类型 (only if 'sending' and 'receiving' columns exist)
+            if 'sending' in missing_records.columns and 'receiving' in missing_records.columns:
+                route_stats = missing_records.apply(
+                    lambda row: 'self_loop' if row['sending'] == row['receiving'] else 'cross_node', axis=1
+                ).value_counts()
+                route_info = ', '.join([f"{k}: {v}" for k, v in route_stats.items()])
+            else:
+                route_info = 'N/A (columns missing)'
             
             validation_log.append({
                 'sheet': 'Global_DemandPriority',

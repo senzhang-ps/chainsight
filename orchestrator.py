@@ -644,12 +644,12 @@ class Orchestrator:
                 # print(f"      记录{i+1}: original_qty={original_qty} (类型: {type(original_qty)}), converted_qty={converted_qty}")
             
             self.open_deployment[uid] = {
-                'material': _normalize_material(row['material']), # 添加格式化
-                'sending': _normalize_sending(row['sending']), # 添加格式化
-                'receiving': _normalize_receiving(row['receiving']), # 添加格式化
-                'planned_deployment_date': pd.to_datetime(row['planned_deployment_date']).strftime('%Y-%m-%d'),
+                'material': _normalize_material(row.material), # 添加格式化
+                'sending': _normalize_sending(row.sending), # 添加格式化
+                'receiving': _normalize_receiving(row.receiving), # 添加格式化
+                'planned_deployment_date': pd.to_datetime(row.planned_deployment_date).strftime('%Y-%m-%d'),
                 'deployed_qty': converted_qty,
-                'demand_element': str(row['demand_element']),
+                'demand_element': str(row.demand_element),
                 'creation_date': date_obj.strftime('%Y-%m-%d')
             }
         

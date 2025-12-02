@@ -31,6 +31,9 @@ def apply_moq_rv(qty, moq, rv, is_cross_node=True):
 # 标识符字段标准化函数（与main_integration.py保持一致）
 def _normalize_location(location_str) -> str:
     """Normalize location string by padding with leading zeros to 4 digits"""
+    # Handle None and pandas NA
+    if location_str is None or pd.isna(location_str):
+        return ""
     try:
         return str(int(location_str)).zfill(4)
     except (ValueError, TypeError):
@@ -38,7 +41,10 @@ def _normalize_location(location_str) -> str:
 
 def _normalize_material(material_str) -> str:
     """Normalize material string"""
-    return str(material_str) if material_str is not None else ""
+    # Handle None and pandas NA
+    if material_str is None or pd.isna(material_str):
+        return ""
+    return str(material_str)
 
 def _normalize_identifiers(df: pd.DataFrame) -> pd.DataFrame:
     """Normalize identifier columns to string format with proper formatting"""

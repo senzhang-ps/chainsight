@@ -24,6 +24,7 @@ from time_manager import SimulationTimeManager, initialize_time_manager
 from config_validator import run_pre_simulation_validation
 from inventory_balance_checker import InventoryBalanceChecker
 from summary_report_generator import SummaryReportGenerator
+from performance_profiler import PerformanceProfiler
 import module1
 import module3
 import module4
@@ -1260,16 +1261,18 @@ def run_integrated_simulation(
             # ========== M5: 部署计划 ==========
             print(f"\n3️⃣ 运行 Module5 - 部署计划")
             try:
-                m5_result = module5.main(
-                    # 集成模式参数
-                    config_dict=config_dict,
-                    module1_output_dir=str(module_outputs['module1']),
-                    module4_output_path=str(module_outputs['module4'] / f"Module4Output_{current_date.strftime('%Y%m%d')}.xlsx"),
-                    orchestrator=orchestrator,
-                    current_date=current_date.strftime('%Y-%m-%d'),
-                    # 输出路径
-                    output_path=str(module_outputs['module5'] / f"Module5Output_{current_date.strftime('%Y%m%d')}.xlsx")
-                )
+                # 启用性能分析
+                with PerformanceProfiler("Module5", output_dir=output_base_dir / "performance", enabled=True):
+                    m5_result = module5.main(
+                        # 集成模式参数
+                        config_dict=config_dict,
+                        module1_output_dir=str(module_outputs['module1']),
+                        module4_output_path=str(module_outputs['module4'] / f"Module4Output_{current_date.strftime('%Y%m%d')}.xlsx"),
+                        orchestrator=orchestrator,
+                        current_date=current_date.strftime('%Y-%m-%d'),
+                        # 输出路径
+                        output_path=str(module_outputs['module5'] / f"Module5Output_{current_date.strftime('%Y%m%d')}.xlsx")
+                    )
                 
                 # 获取部署计划数据
                 if m5_result and 'deployment_plan' in m5_result:
@@ -1375,14 +1378,16 @@ def run_integrated_simulation(
             # ========== M3: 净需求计算 ==========
             print(f"\n5️⃣ 运行 Module3 - 净需求计算")
             try:
-                m3_result = module3.run_integrated_mode(
-                    module1_output_dir=str(module_outputs['module1']),
-                    orchestrator=orchestrator,
-                    config_dict=config_dict,
-                    start_date=current_date.strftime('%Y-%m-%d'),
-                    end_date=current_date.strftime('%Y-%m-%d'),
-                    output_dir=str(module_outputs['module3'])
-                )
+                # 启用性能分析
+                with PerformanceProfiler("Module3", output_dir=output_base_dir / "performance", enabled=True):
+                    m3_result = module3.run_integrated_mode(
+                        module1_output_dir=str(module_outputs['module1']),
+                        orchestrator=orchestrator,
+                        config_dict=config_dict,
+                        start_date=current_date.strftime('%Y-%m-%d'),
+                        end_date=current_date.strftime('%Y-%m-%d'),
+                        output_dir=str(module_outputs['module3'])
+                    )
                 print(f"  ✅ Module3 完成")
                 all_results['module3'].append(m3_result)
             except Exception as e:

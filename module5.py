@@ -1219,7 +1219,8 @@ def collect_node_demands(material, location, sim_date, config, up_gap_buffer,
     return demand_rows
 
 def push_softpush_allocation(
-    deployment_plan_rows, config, dynamic_soh, sim_date
+    deployment_plan_rows, config, dynamic_soh, sim_date,
+    ptf_lsk_cache=None, lead_time_cache=None
 ):
     """
     对 push / soft-push 节点，把真正的剩余库存按下游 safety 权重分配为补货计划行。
@@ -2152,7 +2153,8 @@ def main(
         
         # push/soft-push再分配：直接用 dynamic_soh
         dynamic_soh_for_push = dynamic_soh.copy()
-        plan_push = push_softpush_allocation(deployment_plan_rows, config, dynamic_soh_for_push, sim_date)
+        plan_push = push_softpush_allocation(deployment_plan_rows, config, dynamic_soh_for_push, sim_date,
+                                              ptf_lsk_cache=ptf_lsk_cache, lead_time_cache=lead_time_cache)
 
         if plan_push:
             deployment_plan_rows.extend(plan_push)

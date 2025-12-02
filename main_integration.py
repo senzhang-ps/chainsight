@@ -1262,7 +1262,7 @@ def run_integrated_simulation(
             print(f"\n3️⃣ 运行 Module5 - 部署计划")
             try:
                 # 启用性能分析
-                with PerformanceProfiler("Module5", output_dir=output_base_dir / "performance", enabled=True):
+                with PerformanceProfiler("Module5", output_dir=Path(output_base_dir) / "performance", enabled=True):
                     m5_result = module5.main(
                         # 集成模式参数
                         config_dict=config_dict,
@@ -1379,7 +1379,7 @@ def run_integrated_simulation(
             print(f"\n5️⃣ 运行 Module3 - 净需求计算")
             try:
                 # 启用性能分析
-                with PerformanceProfiler("Module3", output_dir=output_base_dir / "performance", enabled=True):
+                with PerformanceProfiler("Module3", output_dir=Path(output_base_dir) / "performance", enabled=True):
                     m3_result = module3.run_integrated_mode(
                         module1_output_dir=str(module_outputs['module1']),
                         orchestrator=orchestrator,

@@ -542,43 +542,64 @@ def calculate_daily_net_demand(
         raise ValueError(f"Invalid date calculation: {e}")
     
     try:
+        # 🚀 OPTIMIZATION: Pre-filter DataFrames by material & location ONCE to avoid repeated comparisons
+        # Filter beginning_inventory_df
+        bi_filtered = pd.DataFrame()
+        if beginning_inventory_df is not None and (not beginning_inventory_df.empty) and 'material' in beginning_inventory_df.columns:
+            bi_mask = (beginning_inventory_df['material'] == material) & (beginning_inventory_df['location'] == location)
+            bi_filtered = beginning_inventory_df[bi_mask]
+        
+        # Filter in_transit_df
+        it_filtered = pd.DataFrame()
+        if not in_transit_df.empty and 'material' in in_transit_df.columns:
+            it_mask = (in_transit_df['material'] == material) & (in_transit_df['receiving'] == location)
+            it_filtered = in_transit_df[it_mask]
+        
+        # Filter delivery_gr_df
+        dgr_filtered = pd.DataFrame()
+        if not delivery_gr_df.empty and 'material' in delivery_gr_df.columns:
+            dgr_mask = (delivery_gr_df['material'] == material) & (delivery_gr_df['receiving'] == location)
+            dgr_filtered = delivery_gr_df[dgr_mask]
+        
+        # Filter future_production_df
+        fp_filtered = pd.DataFrame()
+        if not future_production_df.empty and 'material' in future_production_df.columns:
+            fp_mask = (future_production_df['material'] == material) & (future_production_df['location'] == location)
+            fp_filtered = future_production_df[fp_mask]
+        
+        # Filter today_shipment_df
+        ts_filtered = pd.DataFrame()
+        if not today_shipment_df.empty and 'material' in today_shipment_df.columns:
+            ts_mask = (today_shipment_df['material'] == material) & (today_shipment_df['location'] == location)
+            ts_filtered = today_shipment_df[ts_mask]
+        
+        # Filter open_deployment_df
+        od_filtered = pd.DataFrame()
+        if not open_deployment_df.empty and 'material' in open_deployment_df.columns:
+            od_mask = (open_deployment_df['material'] == material) & (open_deployment_df['sending'] == location) & (open_deployment_df['receiving'] != location)
+            od_filtered = open_deployment_df[od_mask]
+        
         # 1. 当日期初库存（Beginning Inventory，未包含当日出库/发运扣减）
         begin_qty = 0.0
-        if beginning_inventory_df is not None and (not beginning_inventory_df.empty) and 'material' in beginning_inventory_df.columns:
-            bi_rows = beginning_inventory_df[
-                (beginning_inventory_df['material'] == material) &
-                (beginning_inventory_df['location'] == location) &
-                (pd.to_datetime(beginning_inventory_df['date']) == pd.to_datetime(date))
-            ]
+        if not bi_filtered.empty:
+            bi_rows = bi_filtered[pd.to_datetime(bi_filtered['date']) == pd.to_datetime(date)]
             begin_qty = float(bi_rows['quantity'].sum()) if not bi_rows.empty else 0.0
         
         # 2. 在途库存
         in_transit_qty = 0.0
-        if not in_transit_df.empty and 'material' in in_transit_df.columns:
-            in_transit_rows = in_transit_df[
-                (in_transit_df['material'] == material) &
-                (in_transit_df['receiving'] == location)
-            ]
-            in_transit_qty = float(in_transit_rows['quantity'].sum()) if not in_transit_rows.empty else 0.0
+        if not it_filtered.empty:
+            in_transit_qty = float(it_filtered['quantity'].sum())
         
         # 3. 今日收货
         delivery_gr_qty = 0.0
-        if not delivery_gr_df.empty and 'material' in delivery_gr_df.columns:
-            delivery_gr_rows = delivery_gr_df[
-                (delivery_gr_df['material'] == material) &
-                (delivery_gr_df['receiving'] == location) &
-                (delivery_gr_df['date'] == date)
-            ]
-            delivery_gr_qty = float(delivery_gr_rows['quantity'].sum()) if not delivery_gr_rows.empty else 0.0
+        if not dgr_filtered.empty:
+            dgr_rows = dgr_filtered[dgr_filtered['date'] == date]
+            delivery_gr_qty = float(dgr_rows['quantity'].sum()) if not dgr_rows.empty else 0.0
         
         # 4a. 当日生产收货 (available_date = today) —— 用 produced_qty
         today_production_gr_qty = 0.0
-        if not future_production_df.empty and 'material' in future_production_df.columns:
-            today_rows = future_production_df[
-                (future_production_df['material'] == material) &
-                (future_production_df['location'] == location) &
-                (future_production_df['available_date'] == date)
-            ]
+        if not fp_filtered.empty:
+            today_rows = fp_filtered[fp_filtered['available_date'] == date]
             if not today_rows.empty:
                 if 'produced_qty' in today_rows.columns:
                     today_production_gr_qty = float(today_rows['produced_qty'].sum())
@@ -590,12 +611,10 @@ def calculate_daily_net_demand(
 
         # 4b. 未来确认生产 (date < available_date ≤ horizon_end) —— 用 uncon_planned_qty
         future_production_qty = 0.0
-        if not future_production_df.empty and 'material' in future_production_df.columns:
-            future_rows = future_production_df[
-                (future_production_df['material'] == material) &
-                (future_production_df['location'] == location) &
-                (future_production_df['available_date'] > date) &
-                (future_production_df['available_date'] <= horizon_end)
+        if not fp_filtered.empty:
+            future_rows = fp_filtered[
+                (fp_filtered['available_date'] > date) &
+                (fp_filtered['available_date'] <= horizon_end)
             ]
             if not future_rows.empty:
                 if 'uncon_planned_qty' in future_rows.columns:
@@ -612,13 +631,9 @@ def calculate_daily_net_demand(
         
         # 5. 今日客户发货 (从可用量中扣除) - 使用Module1的ShipmentLog
         today_shipment_qty = 0.0
-        if not today_shipment_df.empty and 'material' in today_shipment_df.columns:
-            today_shipment_rows = today_shipment_df[
-                (today_shipment_df['material'] == material) &
-                (today_shipment_df['location'] == location) &
-                (today_shipment_df['date'] == date)
-            ]
-            today_shipment_qty = float(today_shipment_rows['quantity'].sum()) if not today_shipment_rows.empty else 0.0
+        if not ts_filtered.empty:
+            ts_rows = ts_filtered[ts_filtered['date'] == date]
+            today_shipment_qty = float(ts_rows['quantity'].sum()) if not ts_rows.empty else 0.0
 
         # 5b. 今日调拨/跨点发运（从可用量侧扣）- ★新增：来自 Orchestrator Delivery_Shipment
         delivery_shipment_qty = 0.0
@@ -640,17 +655,12 @@ def calculate_daily_net_demand(
         # 6. 开放调拨 (从可用量中扣除) - 从 orchestrator 读取的已经是当日版本的视图
         # 注意：只计算真正从该地点发出的调拨，排除自循环（sending=receiving）
         open_deployment_qty = 0.0
-        if not open_deployment_df.empty and 'material' in open_deployment_df.columns:
-            open_deployment_rows = open_deployment_df[
-                (open_deployment_df['material'] == material) &
-                (open_deployment_df['sending'] == location) &
-                (open_deployment_df['receiving'] != location)  # 排除自循环
-            ]
+        if not od_filtered.empty:
             # open_deployment使用deployed_qty字段而不quantity
-            if not open_deployment_rows.empty and 'deployed_qty' in open_deployment_rows.columns:
-                open_deployment_qty = float(open_deployment_rows['deployed_qty'].sum())
-            elif not open_deployment_rows.empty and 'quantity' in open_deployment_rows.columns:
-                open_deployment_qty = float(open_deployment_rows['quantity'].sum())
+            if 'deployed_qty' in od_filtered.columns:
+                open_deployment_qty = float(od_filtered['deployed_qty'].sum())
+            elif 'quantity' in od_filtered.columns:
+                open_deployment_qty = float(od_filtered['quantity'].sum())
         
         # 总可用量计算
         total_available = (begin_qty + in_transit_qty + delivery_gr_qty + 

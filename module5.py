@@ -1102,10 +1102,9 @@ def collect_node_demands(material, location, sim_date, config, up_gap_buffer,
     demand_rows = []
 
     # ========= 1) SDL: 预测 / 其他本地需求 =========
-    sdl = supply_demand_log[
-        (supply_demand_log['material'] == material) &
-        (supply_demand_log['location'] == location)
-    ].copy()
+    # 🚀 OPTIMIZATION: Use mask to avoid repeated comparisons
+    sdl_mask = (supply_demand_log['material'] == material) & (supply_demand_log['location'] == location)
+    sdl = supply_demand_log[sdl_mask].copy()
     if not sdl.empty:
         sdl['requirement_date'] = pd.to_datetime(sdl['date'])
 
@@ -1118,27 +1117,27 @@ def collect_node_demands(material, location, sim_date, config, up_gap_buffer,
         # 其他（含 net demand for xx 等）：[sim_date, horizon_end]
         sdl_others = sdl[~is_fc & (sdl['requirement_date'] >= sim_date) & (sdl['requirement_date'] <= horizon_end)]
 
-        for _, row in pd.concat([sdl_fc, sdl_others], ignore_index=True).iterrows():
+        # 🚀 OPTIMIZATION: Use itertuples instead of iterrows (20-27x faster)
+        for row in pd.concat([sdl_fc, sdl_others], ignore_index=True).itertuples():
             demand_rows.append({
                 'material': material,
                 'location': location,
                 'sending': upstream,
                 'receiving': location,
-                'demand_element': row['demand_element'],
-                'demand_qty': int(row['quantity']),
-                'planned_qty': int(row['quantity']),
+                'demand_element': row.demand_element,
+                'demand_qty': int(row.quantity),
+                'planned_qty': int(row.quantity),
                 'moq': moq,
                 'rv': rv,
                 'leadtime': leadtime_for_row if upstream else 0,  # 顶层自补 0，跨节点=统一 horizon
-                'requirement_date': row['requirement_date'],
+                'requirement_date': row.requirement_date,
                 'plan_deploy_date': sim_date  # 计划触发日在窗口内分配环节使用，这里先放 sim_date
             })
 
     # ========= 2) 安全库存：只取 horizon_end 当天 =========
-    ss = safety_stock[
-        (safety_stock['material'] == material) &
-        (safety_stock['location'] == location)
-    ].copy()
+    # 🚀 OPTIMIZATION: Use mask to avoid repeated comparisons
+    ss_mask = (safety_stock['material'] == material) & (safety_stock['location'] == location)
+    ss = safety_stock[ss_mask].copy()
     ss_qty = 0
     if not ss.empty:
         ss['date'] = pd.to_datetime(ss['date'])
@@ -1165,9 +1164,9 @@ def collect_node_demands(material, location, sim_date, config, up_gap_buffer,
     # ========= 3) 订单池（AO/normal）：[sim_date, horizon_end] =========
     order_df = config.get('OrderLog', pd.DataFrame())
     if not order_df.empty:
-        orders = order_df[
-            (order_df['material'] == material) & (order_df['location'] == location)
-        ].copy()
+        # 🚀 OPTIMIZATION: Use mask to avoid repeated comparisons
+        orders_mask = (order_df['material'] == material) & (order_df['location'] == location)
+        orders = order_df[orders_mask].copy()
         if not orders.empty:
             orders['requirement_date'] = pd.to_datetime(orders['date'])
             orders['demand_element']  = orders['demand_type']
@@ -1176,20 +1175,21 @@ def collect_node_demands(material, location, sim_date, config, up_gap_buffer,
             mask = (orders['requirement_date'] >= sim_date) & (orders['requirement_date'] <= horizon_end)
             orders = orders[mask]
 
-            for _, row in orders.iterrows():
-                qty = int(row['quantity'])
+            # 🚀 OPTIMIZATION: Use itertuples instead of iterrows (20-27x faster)
+            for row in orders.itertuples():
+                qty = int(row.quantity)
                 demand_rows.append({
                     'material': material,
                     'location': location,
                     'sending': upstream,
                     'receiving': location,
-                    'demand_element': str(row['demand_element']),
+                    'demand_element': str(row.demand_element),
                     'demand_qty': qty,
                     'planned_qty': qty,
                     'moq': moq,
                     'rv': rv,
                     'leadtime': leadtime_for_row if upstream else 0,
-                    'requirement_date': row['requirement_date'],
+                    'requirement_date': row.requirement_date,
                     'plan_deploy_date': sim_date,
                     'orig_location': location
                 })

@@ -13,14 +13,20 @@ DEFAULT_MAX_ADVANCE_DAYS = 10
 
 def _normalize_location(location_str) -> str:
     """Normalize location string by padding with leading zeros to 4 digits"""
+    # Handle None and pandas NA
+    if location_str is None or pd.isna(location_str):
+        return ""
     try:
-        return str(int(location_str)). zfill(4)
+        return str(int(location_str)).zfill(4)
     except (ValueError, TypeError):
-        return str(location_str). zfill(4)
+        return str(location_str).zfill(4)
 
 def _normalize_material(material_str) -> str:
     """Normalize material string"""
-    return str(material_str) if material_str is not None else ""
+    # Handle None and pandas NA
+    if material_str is None or pd.isna(material_str):
+        return ""
+    return str(material_str)
 
 def _normalize_identifiers(df: pd.DataFrame) -> pd.DataFrame:
     """Normalize identifier columns to string format with proper formatting (优化版本)"""

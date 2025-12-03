@@ -858,9 +858,14 @@ def generate_shipment_with_inventory_check(
     # ✅ 可用库存 = 期初 + 当日 Production GR + 当日 Delivery GR
     current_inventory = _build_available_inventory_from_orchestrator(orchestrator, simulation_date)
     
-    materials = today_orders['material'].unique(). tolist()
-    locations = today_orders['location'].unique().tolist()
-    order_log = today_orders. copy()
+    # Normalize material and location lists to match inventory keys
+    materials = [_normalize_material(m) for m in today_orders['material'].unique().tolist()]
+    locations = [_normalize_location(l) for l in today_orders['location'].unique().tolist()]
+    
+    # Normalize order_log material and location to match inventory keys
+    order_log = today_orders.copy()
+    order_log['material'] = order_log['material'].apply(_normalize_material)
+    order_log['location'] = order_log['location'].apply(_normalize_location)
     
     # 注意：此处不再叠加 production_plan / delivery_plan，避免双计
     shipment_df, cut_df, _ = simulate_shipment_for_single_day(

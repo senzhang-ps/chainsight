@@ -508,7 +508,7 @@ def _load_previous_orders(m1_output_dir: str, current_date: pd.Timestamp, max_ad
         if not os.path.isdir(m1_output_dir):
             return pd.DataFrame()
         
-        pattern = re.compile(r"module1_output_(\d{8})\. xlsx$")
+        pattern = re.compile(r"module1_output_(\d{8})\.xlsx$")
         
         # 性能优化：计算需要读取的最早日期（当前日期 - max_advance_days - 1）
         # 只读取这个时间窗口内的文件，避免随着仿真推进而读取越来越多的历史文件
@@ -523,11 +523,11 @@ def _load_previous_orders(m1_output_dir: str, current_date: pd.Timestamp, max_ad
             fdate = pd.to_datetime(m.group(1))
             
             # 跳过当前日期及之后的文件
-            if fdate. normalize() >= current_date.normalize():
+            if fdate.normalize() >= current_date.normalize():
                 continue
             
             # 性能优化：跳过过早的文件（超出max_advance_days窗口）
-            if fdate. normalize() < earliest_relevant_date.normalize():
+            if fdate.normalize() < earliest_relevant_date.normalize():
                 continue
             
             fpath = os.path.join(m1_output_dir, fname)
@@ -782,7 +782,7 @@ def save_module1_output_with_supply_demand(
             shipment_df = _ensure_cols(shipment_df, ['date','material','location','quantity','demand_type','order_id'])
             cut_df = _ensure_cols(cut_df, ['date','material','location','quantity'])
             supply_demand_df = _ensure_cols(supply_demand_df, ['date','material','location','quantity','demand_element'])
-            _normalize_identifiers(orders_df). to_excel(writer, sheet_name='OrderLog', index=False)
+            _normalize_identifiers(orders_df).to_excel(writer, sheet_name='OrderLog', index=False)
             _normalize_identifiers(shipment_df).to_excel(writer, sheet_name='ShipmentLog', index=False)
             _normalize_identifiers(cut_df).to_excel(writer, sheet_name='CutLog', index=False)  # 始终写
             _normalize_identifiers(supply_demand_df).to_excel(writer, sheet_name='SupplyDemandLog', index=False)
@@ -817,19 +817,19 @@ def _build_available_inventory_from_orchestrator(orchestrator, simulation_date: 
     # 期初库存
     if not beg_df.empty:
         for _, r in beg_df.iterrows():
-            key = (str(r['material']), str(r['location']))
+            key = (_normalize_material(r['material']), _normalize_location(r['location']))
             inv[key] = inv.get(key, 0) + int(r['quantity'])
 
     # 生产 GR（location 为入库地点）
     if not prod_df.empty:
-        for _, r in prod_df. iterrows():
-            key = (str(r['material']), str(r['location']))
+        for _, r in prod_df.iterrows():
+            key = (_normalize_material(r['material']), _normalize_location(r['location']))
             inv[key] = inv.get(key, 0) + int(r['quantity'])
 
     # 交付 GR（receiving 为入库地点）
     if not delv_df.empty:
         for _, r in delv_df.iterrows():
-            key = (str(r['material']), str(r['receiving']))
+            key = (_normalize_material(r['material']), _normalize_location(r['receiving']))
             inv[key] = inv.get(key, 0) + int(r['quantity'])
 
     return inv

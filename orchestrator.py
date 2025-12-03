@@ -177,6 +177,12 @@ class Orchestrator:
         # Space capacity configuration
         self.space_capacity: pd.DataFrame = pd.DataFrame()
         
+        # 🚀 Phase 6: Date-indexed lookups for O(1) performance (instead of O(n) list scans)
+        self.production_gr_by_date: Dict[str, List[Dict]] = {}  # date_str -> records
+        self.delivery_gr_by_date: Dict[str, List[Dict]] = {}  # date_str -> records
+        self.shipment_log_by_date: Dict[str, List[Dict]] = {}  # date_str -> records
+        self.delivery_shipment_log_by_date: Dict[str, List[Dict]] = {}  # date_str -> records
+        
         # UID sequence counter
         self.uid_sequence = 0
         # 过期清理的全局宽限天数（可运行时修改）
@@ -449,10 +455,9 @@ class Orchestrator:
         Returns:
             DataFrame with columns [date, material, location, quantity]
         """
-        date_obj = pd.to_datetime(date).normalize()
-        
-        records = [record for record in self.production_gr 
-                  if pd.to_datetime(record['date']).normalize() == date_obj]
+        # 🚀 Phase 6: O(1) indexed lookup instead of O(n) list scan
+        date_str = pd.to_datetime(date).strftime('%Y-%m-%d')
+        records = self.production_gr_by_date.get(date_str, [])
         
         df = pd.DataFrame(records)
         if df.empty:
@@ -470,10 +475,9 @@ class Orchestrator:
         Returns:
             DataFrame with columns [date, material, receiving, quantity, ori_deployment_uid, vehicle_uid]
         """
-        date_obj = pd.to_datetime(date).normalize()
-        
-        records = [record for record in self.delivery_gr 
-                  if pd.to_datetime(record['date']).normalize() == date_obj]
+        # 🚀 Phase 6: O(1) indexed lookup instead of O(n) list scan
+        date_str = pd.to_datetime(date).strftime('%Y-%m-%d')
+        records = self.delivery_gr_by_date.get(date_str, [])
         
         df = pd.DataFrame(records)
         if df.empty:
@@ -491,10 +495,9 @@ class Orchestrator:
         Returns:
             DataFrame with columns [date, material, location, quantity]
         """
-        date_obj = pd.to_datetime(date).normalize()
-        
-        records = [record for record in self.shipment_log 
-                  if pd.to_datetime(record['date']).normalize() == date_obj]
+        # 🚀 Phase 6: O(1) indexed lookup instead of O(n) list scan
+        date_str = pd.to_datetime(date).strftime('%Y-%m-%d')
+        records = self.shipment_log_by_date.get(date_str, [])
         
         df = pd.DataFrame(records)
         if df.empty:
@@ -503,8 +506,9 @@ class Orchestrator:
         return df
     
     def get_delivery_shipment_log_view(self, date: str) -> pd.DataFrame:
-        date_obj = pd.to_datetime(date).normalize()
-        rows = [r for r in self.delivery_shipment_log if pd.to_datetime(r['date']).normalize() == date_obj]
+        # 🚀 Phase 6: O(1) indexed lookup instead of O(n) list scan
+        date_str = pd.to_datetime(date).strftime('%Y-%m-%d')
+        rows = self.delivery_shipment_log_by_date.get(date_str, [])
         df = pd.DataFrame(rows)
         if df.empty:
             df = pd.DataFrame(columns=['date','material','sending','receiving','quantity','ori_deployment_uid','actual_ship_date','actual_delivery_date','type'])
@@ -534,13 +538,19 @@ class Orchestrator:
                 self.unrestricted_inventory[key] = max(0, self.unrestricted_inventory[key] - int(row.quantity))
             
             # Log shipment
-            self.shipment_log.append({
+            record = {
                 'date': date_obj,
                 'material': _normalize_material(row.material), # 添加格式化
                 'location': _normalize_location(row.location), # 添加格式化
                 'quantity': int(row.quantity),
                 'type': 'customer_shipment'
-            })
+            }
+            self.shipment_log.append(record)
+            # 🚀 Phase 6: Add to indexed lookup
+            date_str = date_obj.strftime('%Y-%m-%d')
+            if date_str not in self.shipment_log_by_date:
+                self.shipment_log_by_date[date_str] = []
+            self.shipment_log_by_date[date_str].append(record)
         
         if len(daily_shipments) > 0:
             print(f"✅ Processed {len(daily_shipments)} M1 shipments for {date}")
@@ -596,12 +606,18 @@ class Orchestrator:
             self.unrestricted_inventory[key] = self.unrestricted_inventory.get(key, 0) + quantity
             
             # Log production GR
-            self.production_gr.append({
+            record = {
                 'date': date_obj,
                 'material': _normalize_material(row.material), # 添加格式化
                 'location': _normalize_location(row.location), # 添加格式化
                 'quantity': quantity
-            })
+            }
+            self.production_gr.append(record)
+            # 🚀 Phase 6: Add to indexed lookup
+            date_str = date_obj.strftime('%Y-%m-%d')
+            if date_str not in self.production_gr_by_date:
+                self.production_gr_by_date[date_str] = []
+            self.production_gr_by_date[date_str].append(record)
         
         if len(daily_production) > 0:
             print(f"✅ Processed {len(daily_production)} M4 production receipts for {date}")
@@ -718,7 +734,7 @@ class Orchestrator:
                     self.unrestricted_inventory[sending_key] - quantity)
             
             # 🆕 记录发运出库日志
-            self.delivery_shipment_log.append({
+            shipment_record = {
                 'date': date_obj,
                 'material': _normalize_material(material), # 添加格式化
                 'sending': _normalize_sending(sending), # 添加格式化
@@ -728,7 +744,13 @@ class Orchestrator:
                 'actual_ship_date': ship_date.strftime('%Y-%m-%d'),
                 'actual_delivery_date': delivery_date.strftime('%Y-%m-%d'),
                 'type': 'delivery_shipment'
-            })
+            }
+            self.delivery_shipment_log.append(shipment_record)
+            # 🚀 Phase 6: Add to indexed lookup
+            date_str = date_obj.strftime('%Y-%m-%d')
+            if date_str not in self.delivery_shipment_log_by_date:
+                self.delivery_shipment_log_by_date[date_str] = []
+            self.delivery_shipment_log_by_date[date_str].append(shipment_record)
             
             # 判断处理逻辑：基于delivery_date是否为未来日期
             if delivery_date.normalize() > date_obj:
@@ -773,6 +795,11 @@ class Orchestrator:
                 
                 if not is_duplicate:
                     self.delivery_gr.append(gr_record)
+                    # 🚀 Phase 6: Add to indexed lookup
+                    date_str = date_obj.strftime('%Y-%m-%d')
+                    if date_str not in self.delivery_gr_by_date:
+                        self.delivery_gr_by_date[date_str] = []
+                    self.delivery_gr_by_date[date_str].append(gr_record)
                     # print(f"        ✅ 已添加delivery GR记录: {material}@{receiving}={quantity}")
                     # 特别追踪80813644@C816
             #         if material == '80813644' and receiving == 'C816':
@@ -871,6 +898,11 @@ class Orchestrator:
                     for record in self.delivery_gr
                 ):
                     self.delivery_gr.append(gr_record)
+                    # 🚀 Phase 6: Add to indexed lookup
+                    date_str = date_obj.strftime('%Y-%m-%d')
+                    if date_str not in self.delivery_gr_by_date:
+                        self.delivery_gr_by_date[date_str] = []
+                    self.delivery_gr_by_date[date_str].append(gr_record)
                 
                 completed_transits.append(transit_uid)
         
@@ -1023,17 +1055,17 @@ class Orchestrator:
         _normalize_identifiers(production_gr_df).to_csv(self.output_dir / f"production_gr_{date_str}.csv", index=False)
         
         # Save daily shipment log
-        date_obj = pd.to_datetime(date).normalize()
-        daily_shipments = [record for record in self.shipment_log 
-                          if pd.to_datetime(record['date']).normalize() == date_obj]
+        # 🚀 Phase 6: O(1) indexed lookup instead of O(n) list scan
+        date_str = pd.to_datetime(date).strftime('%Y-%m-%d')
+        daily_shipments = self.shipment_log_by_date.get(date_str, [])
         shipment_df = pd.DataFrame(daily_shipments)
         if shipment_df.empty:
             shipment_df = pd.DataFrame(columns=['date', 'material', 'location', 'quantity'])
         _normalize_identifiers(shipment_df).to_csv(self.output_dir / f"shipment_log_{date_str}.csv", index=False)
         
         # 🆕 保存发运出库日志
-        daily_delivery_shipments = [record for record in self.delivery_shipment_log 
-                                   if pd.to_datetime(record['date']).normalize() == date_obj]
+        # 🚀 Phase 6: O(1) indexed lookup instead of O(n) list scan
+        daily_delivery_shipments = self.delivery_shipment_log_by_date.get(date_str, [])
         delivery_shipment_df = pd.DataFrame(daily_delivery_shipments)
         if delivery_shipment_df.empty:
             delivery_shipment_df = pd.DataFrame(columns=['date', 'material', 'sending', 'receiving', 'quantity', 
@@ -1079,18 +1111,17 @@ class Orchestrator:
         Returns:
             Dictionary with summary statistics
         """
+        # 🚀 Phase 6: O(1) indexed lookup instead of O(n) list scan
+        date_str = pd.to_datetime(date).strftime('%Y-%m-%d')
         return {
             'date': date,
             'total_inventory_items': len(self.unrestricted_inventory),
             'total_inventory_quantity': sum(self.unrestricted_inventory.values()),
             'open_deployment_count': len(self.open_deployment),
             'in_transit_count': len(self.in_transit),
-            'production_gr_count': len([r for r in self.production_gr 
-                                      if r['date'] == pd.to_datetime(date).normalize()]),
-            'delivery_gr_count': len([r for r in self.delivery_gr 
-                                    if r['date'] == pd.to_datetime(date).normalize()]),
-            'shipment_count': len([r for r in self.shipment_log 
-                                 if r['date'] == pd.to_datetime(date).normalize()])
+            'production_gr_count': len(self.production_gr_by_date.get(date_str, [])),
+            'delivery_gr_count': len(self.delivery_gr_by_date.get(date_str, [])),
+            'shipment_count': len(self.shipment_log_by_date.get(date_str, []))
         }
     
     def save_beginning_inventory(self, date: str):
@@ -1169,29 +1200,28 @@ class Orchestrator:
             all_keys.update(self.daily_ending_inventory[date].keys())
         
         # 从各种变动记录获取
-        for record in self.production_gr:
-            if pd.to_datetime(record['date']).normalize() == date_obj:
-                all_keys.add((record['material'], record['location']))
+        # 🚀 Phase 6: O(1) indexed lookup instead of O(n) list scan
+        date_str = date_obj.strftime('%Y-%m-%d')
         
-        for record in self.delivery_gr:
-            if pd.to_datetime(record['date']).normalize() == date_obj:
-                all_keys.add((record['material'], record['receiving']))
+        for record in self.production_gr_by_date.get(date_str, []):
+            all_keys.add((record['material'], record['location']))
         
-        for record in self.shipment_log:
-            if pd.to_datetime(record['date']).normalize() == date_obj:
-                all_keys.add((record['material'], record['location']))
+        for record in self.delivery_gr_by_date.get(date_str, []):
+            all_keys.add((record['material'], record['receiving']))
+        
+        for record in self.shipment_log_by_date.get(date_str, []):
+            all_keys.add((record['material'], record['location']))
         
         # 🔧 修复：直接从内存的delivery_shipment_log获取发运出库数据
         delivery_ship_data = {}
-        for record in self.delivery_shipment_log:
-            if pd.to_datetime(record['date']).normalize() == date_obj:
-                material = record['material']
-                sending = record['sending']
-                quantity = float(record['quantity'])
-                
-                key = (material, sending)
-                delivery_ship_data[key] = delivery_ship_data.get(key, 0) + quantity
-                all_keys.add(key)
+        for record in self.delivery_shipment_log_by_date.get(date_str, []):
+            material = record['material']
+            sending = record['sending']
+            quantity = float(record['quantity'])
+            
+            key = (material, sending)
+            delivery_ship_data[key] = delivery_ship_data.get(key, 0) + quantity
+            all_keys.add(key)
         
         print(f"  📊 从内存获取发运出库 [{date}]: {len(delivery_ship_data)} 项")
         
@@ -1216,17 +1246,16 @@ class Orchestrator:
                 beginning_qty = self.daily_beginning_inventory[date].get((material, location), 0)
             
             # 生产入库
+            # 🚀 Phase 6: O(1) indexed lookup instead of O(n) list scan
             production_qty = sum(
-                record['quantity'] for record in self.production_gr
-                if (pd.to_datetime(record['date']).normalize() == date_obj and 
-                    record['material'] == material and record['location'] == location)
+                record['quantity'] for record in self.production_gr_by_date.get(date_str, [])
+                if record['material'] == material and record['location'] == location
             )
             
             # 交付入库
             delivery_qty = sum(
-                record['quantity'] for record in self.delivery_gr
-                if (pd.to_datetime(record['date']).normalize() == date_obj and 
-                    record['material'] == material and record['receiving'] == location)
+                record['quantity'] for record in self.delivery_gr_by_date.get(date_str, [])
+                if record['material'] == material and record['receiving'] == location
             )
             
             # 调试信息：显示delivery_gr匹配情况
@@ -1241,10 +1270,10 @@ class Orchestrator:
             #         print(f"    记录{i+1}: uid={rec.get('ori_deployment_uid', 'N/A')}, qty={rec['quantity']}, date={rec['date']}")
             
             # 发货出库
+            # 🚀 Phase 6: O(1) indexed lookup instead of O(n) list scan
             shipment_qty = sum(
-                record['quantity'] for record in self.shipment_log
-                if (pd.to_datetime(record['date']).normalize() == date_obj and 
-                    record['material'] == material and record['location'] == location)
+                record['quantity'] for record in self.shipment_log_by_date.get(date_str, [])
+                if record['material'] == material and record['location'] == location
             )
             
             # 发运出库（从内存获取）
@@ -1301,12 +1330,13 @@ class Orchestrator:
         beginning_inv = self.daily_beginning_inventory.get(date, {})
         ending_inv = self.daily_ending_inventory.get(date, {})
         
-        date_obj = pd.to_datetime(date).normalize()
+        # 🚀 Phase 6: O(1) indexed lookup instead of O(n) list scan
+        date_str = pd.to_datetime(date).strftime('%Y-%m-%d')
         
         # 获取当日各项变动
-        production_gr = [gr for gr in self.production_gr if pd.to_datetime(gr['date']).normalize() == date_obj]
-        delivery_gr = [gr for gr in self.delivery_gr if pd.to_datetime(gr['date']).normalize() == date_obj]
-        shipments = [ship for ship in self.shipment_log if pd.to_datetime(ship['date']).normalize() == date_obj]
+        production_gr = self.production_gr_by_date.get(date_str, [])
+        delivery_gr = self.delivery_gr_by_date.get(date_str, [])
+        shipments = self.shipment_log_by_date.get(date_str, [])
         
         # M6 发运（当日实际发运）
         m6_ship_df = self.get_delivery_shipment_log_view(date)

@@ -330,7 +330,47 @@ def restore_orchestrator_state(orchestrator, restore_date: str, output_base_dir:
         print(f"  ✅ 恢复库存变动日志: {len(orchestrator.inventory_change_log)} 条")
         print(f"  ✅ 恢复daily_logs: {len(orchestrator.daily_logs)} 条")
         
-        # 6. 设置当前日期
+        # 6. 重建date-indexed dictionaries for Phase 6 optimization
+        print(f"  🔧 重建日期索引字典...")
+        orchestrator.production_gr_by_date = {}
+        orchestrator.delivery_gr_by_date = {}
+        orchestrator.shipment_log_by_date = {}
+        orchestrator.delivery_shipment_log_by_date = {}
+        
+        # Index production_gr
+        for record in orchestrator.production_gr:
+            date_key = record.get('date', '')
+            if date_key not in orchestrator.production_gr_by_date:
+                orchestrator.production_gr_by_date[date_key] = []
+            orchestrator.production_gr_by_date[date_key].append(record)
+        
+        # Index delivery_gr
+        for record in orchestrator.delivery_gr:
+            date_key = record.get('date', '')
+            if date_key not in orchestrator.delivery_gr_by_date:
+                orchestrator.delivery_gr_by_date[date_key] = []
+            orchestrator.delivery_gr_by_date[date_key].append(record)
+        
+        # Index shipment_log
+        for record in orchestrator.shipment_log:
+            date_key = record.get('date', '')
+            if date_key not in orchestrator.shipment_log_by_date:
+                orchestrator.shipment_log_by_date[date_key] = []
+            orchestrator.shipment_log_by_date[date_key].append(record)
+        
+        # Index delivery_shipment_log
+        for record in orchestrator.delivery_shipment_log:
+            date_key = record.get('date', '')
+            if date_key not in orchestrator.delivery_shipment_log_by_date:
+                orchestrator.delivery_shipment_log_by_date[date_key] = []
+            orchestrator.delivery_shipment_log_by_date[date_key].append(record)
+        
+        print(f"  ✅ 日期索引重建完成: production_gr={len(orchestrator.production_gr_by_date)} 天, "
+              f"delivery_gr={len(orchestrator.delivery_gr_by_date)} 天, "
+              f"shipment_log={len(orchestrator.shipment_log_by_date)} 天, "
+              f"delivery_shipment_log={len(orchestrator.delivery_shipment_log_by_date)} 天")
+        
+        # 7. 设置当前日期
         orchestrator.current_date = restore_date_obj
         
         print(f"  🎯 Orchestrator状态恢复完成")

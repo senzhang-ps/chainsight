@@ -196,7 +196,7 @@ def restore_orchestrator_state(orchestrator, restore_date: str, output_base_dir:
         else:
             orchestrator.planning_intransit = []
         
-        # 3. 恢复开放调拨
+        # 3. 恢复开放调拨 (MUST be a dict with UID keys, not a list)
         deployment_file = orchestrator_dir / f"open_deployment_{date_str}.csv"
         if deployment_file.exists():
             try:
@@ -205,12 +205,31 @@ def restore_orchestrator_state(orchestrator, restore_date: str, output_base_dir:
                 deployment_df = pd.DataFrame()
             if not deployment_df.empty:
                 deployment_df = _normalize_identifiers(deployment_df)
-                orchestrator.open_deployment = deployment_df.to_dict('records')
+                # Rebuild as dictionary: uid -> deployment_record
+                orchestrator.open_deployment = {}
+                for _, row in deployment_df.iterrows():
+                    uid = row.get('ori_deployment_uid')
+                    if uid is not None and str(uid).strip() and str(uid) != 'None':
+                        uid_str = str(uid)
+                        # Safely convert deployed_qty to int
+                        try:
+                            deployed_qty = int(float(row.get('deployed_qty', 0) or 0))
+                        except (ValueError, TypeError):
+                            deployed_qty = 0
+                        
+                        orchestrator.open_deployment[uid_str] = {
+                            'material': str(row.get('material', '')),
+                            'sending': str(row.get('sending', '')),
+                            'receiving': str(row.get('receiving', '')),
+                            'planned_deployment_date': str(row.get('planned_deployment_date', '')),
+                            'deployed_qty': deployed_qty,
+                            'demand_element': str(row.get('demand_element', ''))
+                        }
             else:
-                orchestrator.open_deployment = []
+                orchestrator.open_deployment = {}
             print(f"  ✅ 恢复调拨记录: {len(orchestrator.open_deployment)} 条")
         else:
-            orchestrator.open_deployment = []
+            orchestrator.open_deployment = {}
         
         # 4. 恢复空间配额
         space_file = orchestrator_dir / f"space_quota_{date_str}.csv"

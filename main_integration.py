@@ -180,7 +180,7 @@ def restore_orchestrator_state(orchestrator, restore_date: str, output_base_dir:
         else:
             orchestrator.unrestricted_inventory = {}
         
-        # 2. 恢复在途库存
+        # 2. 恢复在途库存 (MUST rebuild as in_transit dictionary with UID keys)
         intransit_file = orchestrator_dir / f"planning_intransit_{date_str}.csv"
         if intransit_file.exists():
             try:
@@ -189,12 +189,33 @@ def restore_orchestrator_state(orchestrator, restore_date: str, output_base_dir:
                 intransit_df = pd.DataFrame()
             if not intransit_df.empty:
                 intransit_df = _normalize_identifiers(intransit_df)
-                orchestrator.planning_intransit = intransit_df.to_dict('records')
+                # Rebuild in_transit dictionary: transit_uid -> transit_record
+                orchestrator.in_transit = {}
+                for _, row in intransit_df.iterrows():
+                    transit_uid = row.get('transit_uid')
+                    if transit_uid is not None and str(transit_uid).strip() and str(transit_uid) != 'None':
+                        uid_str = str(transit_uid)
+                        # Safely convert quantity to int
+                        try:
+                            quantity = int(float(row.get('quantity', 0) or 0))
+                        except (ValueError, TypeError):
+                            quantity = 0
+                        
+                        orchestrator.in_transit[uid_str] = {
+                            'material': str(row.get('material', '')),
+                            'sending': str(row.get('sending', '')),
+                            'receiving': str(row.get('receiving', '')),
+                            'actual_ship_date': str(row.get('actual_ship_date', '')),
+                            'actual_delivery_date': str(row.get('actual_delivery_date', '')),
+                            'quantity': quantity,
+                            'ori_deployment_uid': str(row.get('ori_deployment_uid', '')),
+                            'vehicle_uid': str(row.get('vehicle_uid', ''))
+                        }
             else:
-                orchestrator.planning_intransit = []
-            print(f"  ✅ 恢复在途记录: {len(orchestrator.planning_intransit)} 条")
+                orchestrator.in_transit = {}
+            print(f"  ✅ 恢复在途记录: {len(orchestrator.in_transit)} 条")
         else:
-            orchestrator.planning_intransit = []
+            orchestrator.in_transit = {}
         
         # 3. 恢复开放调拨 (MUST be a dict with UID keys, not a list)
         deployment_file = orchestrator_dir / f"open_deployment_{date_str}.csv"

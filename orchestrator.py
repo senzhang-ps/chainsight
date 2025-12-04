@@ -300,23 +300,34 @@ class Orchestrator:
             date: Date in YYYY-MM-DD format
             
         Returns:
-            DataFrame with columns [date, available_date, material, receiving, quantity]
+            DataFrame with all fields needed for restoration:
+            [transit_uid, date, material, sending, receiving, actual_ship_date, 
+             actual_delivery_date, quantity, ori_deployment_uid, vehicle_uid]
         """
         date_obj = pd.to_datetime(date).normalize()
         
         records = []
         for uid, transit_record in self.in_transit.items():
             records.append({
+                'transit_uid': uid,  # Add UID for restoration
                 'date': date_obj,
-                'available_date': pd.to_datetime(transit_record['actual_delivery_date']),
                 'material': _normalize_material(transit_record['material']), # 添加格式化
+                'sending': transit_record.get('sending', ''),  # Add sending
                 'receiving': transit_record['receiving'],
-                'quantity': transit_record['quantity']
+                'actual_ship_date': transit_record.get('actual_ship_date', ''),  # Add ship date
+                'actual_delivery_date': transit_record['actual_delivery_date'],
+                'quantity': transit_record['quantity'],
+                'ori_deployment_uid': transit_record.get('ori_deployment_uid', ''),  # Add original UID
+                'vehicle_uid': transit_record.get('vehicle_uid', '')  # Add vehicle UID
             })
         
         df = pd.DataFrame(records)
         if df.empty:
-            df = pd.DataFrame(columns=['date', 'available_date', 'material', 'receiving', 'quantity'])
+            df = pd.DataFrame(columns=[
+                'transit_uid', 'date', 'material', 'sending', 'receiving', 
+                'actual_ship_date', 'actual_delivery_date', 'quantity', 
+                'ori_deployment_uid', 'vehicle_uid'
+            ])
         
         return df
     

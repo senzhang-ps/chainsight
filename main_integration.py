@@ -279,7 +279,26 @@ def restore_orchestrator_state(orchestrator, restore_date: str, output_base_dir:
         else:
             orchestrator.space_quota = {}
         
-        # 5. 恢复历史日志（近期的部分） - 可配置回溯天数
+        # 5. 恢复生产计划backlog (future production)
+        production_backlog_file = orchestrator_dir / f"production_plan_backlog_{date_str}.csv"
+        if production_backlog_file.exists():
+            try:
+                backlog_df = pd.read_csv(production_backlog_file, dtype=object)
+            except EmptyDataError:
+                backlog_df = pd.DataFrame()
+            if not backlog_df.empty:
+                backlog_df = _normalize_identifiers(backlog_df)
+                # Convert quantity to int
+                if 'quantity' in backlog_df.columns:
+                    backlog_df['quantity'] = pd.to_numeric(backlog_df['quantity'], errors='coerce').fillna(0).astype(int)
+                orchestrator.production_plan_backlog = backlog_df.to_dict('records')
+            else:
+                orchestrator.production_plan_backlog = []
+            print(f"  ✅ 恢复生产计划backlog: {len(orchestrator.production_plan_backlog)} 条")
+        else:
+            orchestrator.production_plan_backlog = []
+        
+        # 6. 恢复历史日志（近期的部分） - 可配置回溯天数
         restore_date_obj = pd.to_datetime(restore_date)
         log_start_date = restore_date_obj - pd.Timedelta(days=log_lookback_days)
         

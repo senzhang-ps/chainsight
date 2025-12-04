@@ -431,6 +431,30 @@ class Orchestrator:
         
         return df
     
+    def get_production_plan_backlog_view(self, date: str) -> pd.DataFrame:
+        """
+        Get production plan backlog (future production) for persistence
+        
+        Args:
+            date: Reference date in YYYY-MM-DD format
+            
+        Returns:
+            DataFrame with columns [material, location, available_date, quantity]
+        """
+        if not self.production_plan_backlog:
+            return pd.DataFrame(columns=['material', 'location', 'available_date', 'quantity'])
+        
+        backlog_df = pd.DataFrame(self.production_plan_backlog)
+        if backlog_df.empty:
+            return pd.DataFrame(columns=['material', 'location', 'available_date', 'quantity'])
+        
+        # Ensure all required columns exist
+        for col in ['material', 'location', 'available_date', 'quantity']:
+            if col not in backlog_df.columns:
+                backlog_df[col] = ''
+        
+        return backlog_df[['material', 'location', 'available_date', 'quantity']]
+    
     def get_all_production_view(self, date: str) -> pd.DataFrame:
         date_obj = pd.to_datetime(date).normalize()
 
@@ -1056,6 +1080,10 @@ class Orchestrator:
         # Save space quota view
         space_quota_df = self.get_space_quota_view(date)
         _normalize_identifiers(space_quota_df).to_csv(self.output_dir / f"space_quota_{date_str}.csv", index=False)
+        
+        # Save production plan backlog (future production)
+        production_backlog_df = self.get_production_plan_backlog_view(date)
+        _normalize_identifiers(production_backlog_df).to_csv(self.output_dir / f"production_plan_backlog_{date_str}.csv", index=False)
         
         # Save daily delivery GR
         delivery_gr_df = self.get_delivery_gr_view(date)

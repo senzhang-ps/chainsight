@@ -1056,8 +1056,8 @@ class Orchestrator:
         
         # Save daily shipment log
         # 🚀 Phase 6: O(1) indexed lookup instead of O(n) list scan
-        date_str = pd.to_datetime(date).strftime('%Y-%m-%d')
-        daily_shipments = self.shipment_log_by_date.get(date_str, [])
+        date_key = pd.to_datetime(date).strftime('%Y-%m-%d')
+        daily_shipments = self.shipment_log_by_date.get(date_key, [])
         shipment_df = pd.DataFrame(daily_shipments)
         if shipment_df.empty:
             shipment_df = pd.DataFrame(columns=['date', 'material', 'location', 'quantity'])
@@ -1065,7 +1065,7 @@ class Orchestrator:
         
         # 🆕 保存发运出库日志
         # 🚀 Phase 6: O(1) indexed lookup instead of O(n) list scan
-        daily_delivery_shipments = self.delivery_shipment_log_by_date.get(date_str, [])
+        daily_delivery_shipments = self.delivery_shipment_log_by_date.get(date_key, [])
         delivery_shipment_df = pd.DataFrame(daily_delivery_shipments)
         if delivery_shipment_df.empty:
             delivery_shipment_df = pd.DataFrame(columns=['date', 'material', 'sending', 'receiving', 'quantity', 

@@ -201,12 +201,22 @@ def restore_orchestrator_state(orchestrator, restore_date: str, output_base_dir:
                         except (ValueError, TypeError):
                             quantity = 0
                         
+                        # Convert date fields to datetime objects (Module6 expects datetime for comparisons)
+                        try:
+                            actual_ship_date = pd.to_datetime(row.get('actual_ship_date')).normalize() if pd.notna(row.get('actual_ship_date')) else None
+                        except:
+                            actual_ship_date = None
+                        try:
+                            actual_delivery_date = pd.to_datetime(row.get('actual_delivery_date')).normalize() if pd.notna(row.get('actual_delivery_date')) else None
+                        except:
+                            actual_delivery_date = None
+                        
                         orchestrator.in_transit[uid_str] = {
                             'material': str(row.get('material', '')),
                             'sending': str(row.get('sending', '')),
                             'receiving': str(row.get('receiving', '')),
-                            'actual_ship_date': str(row.get('actual_ship_date', '')),
-                            'actual_delivery_date': str(row.get('actual_delivery_date', '')),
+                            'actual_ship_date': actual_ship_date,
+                            'actual_delivery_date': actual_delivery_date,
                             'quantity': quantity,
                             'ori_deployment_uid': str(row.get('ori_deployment_uid', '')),
                             'vehicle_uid': str(row.get('vehicle_uid', ''))

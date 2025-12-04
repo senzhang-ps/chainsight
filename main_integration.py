@@ -291,6 +291,9 @@ def restore_orchestrator_state(orchestrator, restore_date: str, output_base_dir:
                 # Convert quantity to int
                 if 'quantity' in backlog_df.columns:
                     backlog_df['quantity'] = pd.to_numeric(backlog_df['quantity'], errors='coerce').fillna(0).astype(int)
+                # Convert available_date to datetime to match original structure
+                if 'available_date' in backlog_df.columns:
+                    backlog_df['available_date'] = pd.to_datetime(backlog_df['available_date']).dt.normalize()
                 orchestrator.production_plan_backlog = backlog_df.to_dict('records')
             else:
                 orchestrator.production_plan_backlog = []

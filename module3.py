@@ -609,22 +609,21 @@ def calculate_daily_net_demand(
                 else:
                     today_production_gr_qty = 0.0
 
-        # 4b. 未来确认生产 (date < available_date ≤ horizon_end) —— 用 uncon_planned_qty
+        # 4b. 未来确认生产（不限制时间窗口）—— 用 con_planned_qty
         future_production_qty = 0.0
         if not fp_filtered.empty:
             future_rows = fp_filtered[
-                (fp_filtered['available_date'] > date) &
-                (fp_filtered['available_date'] <= horizon_end)
+                (fp_filtered['available_date'] > date)
             ]
             if not future_rows.empty:
-                if 'uncon_planned_qty' in future_rows.columns:
-                    future_production_qty = float(future_rows['uncon_planned_qty'].sum())
+                if 'con_planned_qty' in future_rows.columns:
+                    future_production_qty = float(pd.to_numeric(future_rows['con_planned_qty'], errors='coerce').fillna(0).sum())
                 elif 'produced_qty' in future_rows.columns:
-                    # 回退：如果没有 uncon_planned_qty，就用 produced_qty
-                    future_production_qty = float(future_rows['produced_qty'].sum())
+                    # 回退：如果没有 con_planned_qty，就用 produced_qty
+                    future_production_qty = float(pd.to_numeric(future_rows['produced_qty'], errors='coerce').fillna(0).sum())
                 elif 'quantity' in future_rows.columns:
                     # 兼容老口径
-                    future_production_qty = float(future_rows['quantity'].sum())
+                    future_production_qty = float(pd.to_numeric(future_rows['quantity'], errors='coerce').fillna(0).sum())
                 else:
                     future_production_qty = 0.0
 
@@ -652,7 +651,7 @@ def calculate_daily_net_demand(
                 ]
                 delivery_shipment_qty = float(ds_rows[qty_col].sum()) if not ds_rows.empty else 0.0
 
-        # 6. 开放调拨 (从可用量中扣除) - 从 orchestrator 读取的已经是当日版本的视图
+        # 6a. 开放调拨出库 (从可用量中扣除) - 从 orchestrator 读取的当日版本视图
         # 注意：只计算真正从该地点发出的调拨，排除自循环（sending=receiving）
         open_deployment_qty = 0.0
         if not od_filtered.empty:
@@ -662,10 +661,27 @@ def calculate_daily_net_demand(
             elif 'quantity' in od_filtered.columns:
                 open_deployment_qty = float(od_filtered['quantity'].sum())
         
+        # 6b. 开放调拨入库（作为未来到货的 pipeline supply）
+        # 计入 receiving 端的未来可用量：date > sim_date 的入库（不设上限窗口）
+        open_deployment_inbound_future_qty = 0.0
+        if not open_deployment_df.empty:
+            # 兼容字段：quantity / deployed_qty；地点字段：receiving；日期字段：date
+            qty_col = 'deployed_qty' if 'deployed_qty' in open_deployment_df.columns else ('quantity' if 'quantity' in open_deployment_df.columns else None)
+            if qty_col and 'receiving' in open_deployment_df.columns and 'date' in open_deployment_df.columns and 'material' in open_deployment_df.columns:
+                odf = open_deployment_df[
+                    (open_deployment_df['material'] == material) &
+                    (open_deployment_df['receiving'] == location)
+                ].copy()
+                if not odf.empty:
+                    odf['date'] = pd.to_datetime(odf['date'], errors='coerce')
+                    future_mask = odf['date'] > date
+                    future_inbound = pd.to_numeric(odf.loc[future_mask, qty_col], errors='coerce').fillna(0)
+                    open_deployment_inbound_future_qty = float(future_inbound.sum())
+        
         # 总可用量计算
         total_available = (begin_qty + in_transit_qty + delivery_gr_qty + 
-                          today_production_gr_qty + future_production_qty - 
-                          today_shipment_qty - delivery_shipment_qty - open_deployment_qty)
+                  today_production_gr_qty + future_production_qty + open_deployment_inbound_future_qty - 
+                  today_shipment_qty - delivery_shipment_qty - open_deployment_qty)
         
 
         # ======== 需求侧：三类本地需求 ========

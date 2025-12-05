@@ -821,8 +821,14 @@ def load_integrated_config(
             if 'ProductionPlan' in xl.sheet_names:
                 m4_production = xl.parse('ProductionPlan')
                 if not m4_production.empty:
+                    # Ensure 'available_date' column exists for ProductionPlan
+                    if 'available_date' not in m4_production.columns:
+                        if 'date' in m4_production.columns:
+                            m4_production = m4_production.rename(columns={'date': 'available_date'})
+                        # Do NOT map 'production_plan_date' to 'available_date' — distinct semantics
+                    # Cast types
                     if 'available_date' in m4_production.columns:
-                        m4_production['available_date'] = pd.to_datetime(m4_production['available_date'])
+                        m4_production['available_date'] = pd.to_datetime(m4_production['available_date'], errors='coerce')
                     for col in ['produced_qty', 'uncon_planned_qty', 'planned_qty', 'quantity']:
                         if col in m4_production.columns:
                             m4_production[col] = pd.to_numeric(m4_production[col], errors='coerce').fillna(0)
@@ -857,12 +863,18 @@ def load_integrated_config(
             # print(f"  ✅ 从 Orchestrator 加载了动态数据（使用期初库存基础）")
         except Exception as e:
             print(f"  ⚠️  从 Orchestrator 加载动态数据失败: {e}")
-            # 使用空数据作为备选
-            config['InventoryLog'] = pd.DataFrame()
-            config['InTransit'] = pd.DataFrame() 
-            config['DeliveryGR'] = pd.DataFrame()
-            config['OpenDeployment'] = pd.DataFrame()
-            config['ReceivingSpace'] = pd.DataFrame()
+
+    # 5. 统一最终的 ProductionPlan 列规范（兜底）：确保存在 'available_date'
+    if 'ProductionPlan' in config and isinstance(config['ProductionPlan'], pd.DataFrame):
+        pp = config['ProductionPlan']
+        if not pp.empty and 'available_date' not in pp.columns:
+            # common legacy names
+            if 'date' in pp.columns:
+                pp = pp.rename(columns={'date': 'available_date'})
+            # Do NOT map 'production_plan_date' → 'available_date' — distinct semantics
+        if 'available_date' in pp.columns:
+            pp['available_date'] = pd.to_datetime(pp['available_date'], errors='coerce')
+        config['ProductionPlan'] = pp
     else:
         # 使用空数据
         config['InventoryLog'] = pd.DataFrame()
@@ -1741,17 +1753,22 @@ def main(
         # 从 Orchestrator 获取在途库存
         today_intransit = {}
         if not in_transit.empty:
-            # Performance optimization: Combine filter and iteration
-            for row in in_transit[in_transit['available_date'] == sim_date].itertuples():
-                k = (row.material, row.receiving)
-                today_intransit[k] = today_intransit.get(k, 0) + int(row.quantity)
-        # 未来在途：available_date > sim_date，用于自补货的 pipeline 覆盖
+            # Use actual_delivery_date as the availability date for in-transit arrivals
+            date_col = 'actual_delivery_date' if 'actual_delivery_date' in in_transit.columns else ('available_date' if 'available_date' in in_transit.columns else None)
+            if date_col is not None:
+                mask_today = pd.to_datetime(in_transit[date_col]).dt.normalize() == sim_date.normalize()
+                for row in in_transit[mask_today].itertuples():
+                    k = (row.material, row.receiving)
+                    today_intransit[k] = today_intransit.get(k, 0) + int(row.quantity)
+        # 未来在途：actual_delivery_date > sim_date，用于自补货的 pipeline 覆盖
         future_intransit = {}
         if not in_transit.empty:
-            # Performance optimization: Combine filter and iteration
-            for row in in_transit[in_transit['available_date'] > sim_date].itertuples():
-                k = (row.material, row.receiving)
-                future_intransit[k] = future_intransit.get(k, 0) + int(row.quantity)
+            date_col = 'actual_delivery_date' if 'actual_delivery_date' in in_transit.columns else ('available_date' if 'available_date' in in_transit.columns else None)
+            if date_col is not None:
+                mask_future = pd.to_datetime(in_transit[date_col]).dt.normalize() > sim_date.normalize()
+                for row in in_transit[mask_future].itertuples():
+                    k = (row.material, row.receiving)
+                    future_intransit[k] = future_intransit.get(k, 0) + int(row.quantity)
         
         # 加载当日收货、发货和开放调拨数据
         delivery_gr_data = config.get('DeliveryGR', pd.DataFrame())
@@ -1761,7 +1778,7 @@ def main(
         # 转换为字典格式
         delivery_gr = {}
         if not delivery_gr_data.empty:
-            filtered_delivery = delivery_gr_data[pd.to_datetime(delivery_gr_data['date']) == sim_date] if 'date' in delivery_gr_data.columns else delivery_gr_data
+            filtered_delivery = delivery_gr_data[pd.to_datetime(delivery_gr_data['date']).dt.normalize() == sim_date.normalize()] if 'date' in delivery_gr_data.columns else delivery_gr_data
             # Performance optimization: Use itertuples for faster iteration
             for row in filtered_delivery.itertuples():
                 k = (row.material, row.receiving)

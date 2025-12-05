@@ -24,6 +24,7 @@ from time_manager import SimulationTimeManager, initialize_time_manager
 from config_validator import run_pre_simulation_validation
 from inventory_balance_checker import InventoryBalanceChecker
 from summary_report_generator import SummaryReportGenerator
+from performance_profiler import PerformanceProfiler
 import module1
 import module3
 import module4
@@ -179,7 +180,7 @@ def restore_orchestrator_state(orchestrator, restore_date: str, output_base_dir:
         else:
             orchestrator.unrestricted_inventory = {}
         
-        # 2. 恢复在途库存
+        # 2. 恢复在途库存 (MUST rebuild as in_transit dictionary with UID keys)
         intransit_file = orchestrator_dir / f"planning_intransit_{date_str}.csv"
         if intransit_file.exists():
             try:
@@ -188,14 +189,45 @@ def restore_orchestrator_state(orchestrator, restore_date: str, output_base_dir:
                 intransit_df = pd.DataFrame()
             if not intransit_df.empty:
                 intransit_df = _normalize_identifiers(intransit_df)
-                orchestrator.planning_intransit = intransit_df.to_dict('records')
+                # Rebuild in_transit dictionary: transit_uid -> transit_record
+                orchestrator.in_transit = {}
+                for _, row in intransit_df.iterrows():
+                    transit_uid = row.get('transit_uid')
+                    if transit_uid is not None and str(transit_uid).strip() and str(transit_uid) != 'None':
+                        uid_str = str(transit_uid)
+                        # Safely convert quantity to int
+                        try:
+                            quantity = int(float(row.get('quantity', 0) or 0))
+                        except (ValueError, TypeError):
+                            quantity = 0
+                        
+                        # Convert date fields to datetime objects (Module6 expects datetime for comparisons)
+                        try:
+                            actual_ship_date = pd.to_datetime(row.get('actual_ship_date')).normalize() if pd.notna(row.get('actual_ship_date')) else None
+                        except:
+                            actual_ship_date = None
+                        try:
+                            actual_delivery_date = pd.to_datetime(row.get('actual_delivery_date')).normalize() if pd.notna(row.get('actual_delivery_date')) else None
+                        except:
+                            actual_delivery_date = None
+                        
+                        orchestrator.in_transit[uid_str] = {
+                            'material': str(row.get('material', '')),
+                            'sending': str(row.get('sending', '')),
+                            'receiving': str(row.get('receiving', '')),
+                            'actual_ship_date': actual_ship_date,
+                            'actual_delivery_date': actual_delivery_date,
+                            'quantity': quantity,
+                            'ori_deployment_uid': str(row.get('ori_deployment_uid', '')),
+                            'vehicle_uid': str(row.get('vehicle_uid', ''))
+                        }
             else:
-                orchestrator.planning_intransit = []
-            print(f"  ✅ 恢复在途记录: {len(orchestrator.planning_intransit)} 条")
+                orchestrator.in_transit = {}
+            print(f"  ✅ 恢复在途记录: {len(orchestrator.in_transit)} 条")
         else:
-            orchestrator.planning_intransit = []
+            orchestrator.in_transit = {}
         
-        # 3. 恢复开放调拨
+        # 3. 恢复开放调拨 (MUST be a dict with UID keys, not a list)
         deployment_file = orchestrator_dir / f"open_deployment_{date_str}.csv"
         if deployment_file.exists():
             try:
@@ -204,12 +236,31 @@ def restore_orchestrator_state(orchestrator, restore_date: str, output_base_dir:
                 deployment_df = pd.DataFrame()
             if not deployment_df.empty:
                 deployment_df = _normalize_identifiers(deployment_df)
-                orchestrator.open_deployment = deployment_df.to_dict('records')
+                # Rebuild as dictionary: uid -> deployment_record
+                orchestrator.open_deployment = {}
+                for _, row in deployment_df.iterrows():
+                    uid = row.get('ori_deployment_uid')
+                    if uid is not None and str(uid).strip() and str(uid) != 'None':
+                        uid_str = str(uid)
+                        # Safely convert deployed_qty to int
+                        try:
+                            deployed_qty = int(float(row.get('deployed_qty', 0) or 0))
+                        except (ValueError, TypeError):
+                            deployed_qty = 0
+                        
+                        orchestrator.open_deployment[uid_str] = {
+                            'material': str(row.get('material', '')),
+                            'sending': str(row.get('sending', '')),
+                            'receiving': str(row.get('receiving', '')),
+                            'planned_deployment_date': str(row.get('planned_deployment_date', '')),
+                            'deployed_qty': deployed_qty,
+                            'demand_element': str(row.get('demand_element', ''))
+                        }
             else:
-                orchestrator.open_deployment = []
+                orchestrator.open_deployment = {}
             print(f"  ✅ 恢复调拨记录: {len(orchestrator.open_deployment)} 条")
         else:
-            orchestrator.open_deployment = []
+            orchestrator.open_deployment = {}
         
         # 4. 恢复空间配额
         space_file = orchestrator_dir / f"space_quota_{date_str}.csv"
@@ -238,7 +289,31 @@ def restore_orchestrator_state(orchestrator, restore_date: str, output_base_dir:
         else:
             orchestrator.space_quota = {}
         
-        # 5. 恢复历史日志（近期的部分） - 可配置回溯天数
+        # 5. 恢复生产计划backlog (future production)
+        production_backlog_file = orchestrator_dir / f"production_plan_backlog_{date_str}.csv"
+        if production_backlog_file.exists():
+            try:
+                backlog_df = pd.read_csv(production_backlog_file, dtype=object)
+            except EmptyDataError:
+                backlog_df = pd.DataFrame()
+            if not backlog_df.empty:
+                backlog_df = _normalize_identifiers(backlog_df)
+                # Convert quantity to int
+                if 'quantity' in backlog_df.columns:
+                    backlog_df['quantity'] = pd.to_numeric(backlog_df['quantity'], errors='coerce').fillna(0).astype(int)
+                # Convert available_date to datetime to match original structure
+                if 'available_date' in backlog_df.columns:
+                    backlog_df['available_date'] = pd.to_datetime(backlog_df['available_date']).dt.normalize()
+                
+                # Convert to list of dictionaries with proper types (efficient, no iterrows)
+                orchestrator.production_plan_backlog = backlog_df.to_dict('records')
+            else:
+                orchestrator.production_plan_backlog = []
+            print(f"  ✅ 恢复生产计划backlog: {len(orchestrator.production_plan_backlog)} 条")
+        else:
+            orchestrator.production_plan_backlog = []
+        
+        # 6. 恢复历史日志（近期的部分） - 可配置回溯天数
         restore_date_obj = pd.to_datetime(restore_date)
         log_start_date = restore_date_obj - pd.Timedelta(days=log_lookback_days)
         
@@ -329,7 +404,47 @@ def restore_orchestrator_state(orchestrator, restore_date: str, output_base_dir:
         print(f"  ✅ 恢复库存变动日志: {len(orchestrator.inventory_change_log)} 条")
         print(f"  ✅ 恢复daily_logs: {len(orchestrator.daily_logs)} 条")
         
-        # 6. 设置当前日期
+        # 6. 重建date-indexed dictionaries for Phase 6 optimization
+        print(f"  🔧 重建日期索引字典...")
+        orchestrator.production_gr_by_date = {}
+        orchestrator.delivery_gr_by_date = {}
+        orchestrator.shipment_log_by_date = {}
+        orchestrator.delivery_shipment_log_by_date = {}
+        
+        # Index production_gr
+        for record in orchestrator.production_gr:
+            date_key = record.get('date', '')
+            if date_key not in orchestrator.production_gr_by_date:
+                orchestrator.production_gr_by_date[date_key] = []
+            orchestrator.production_gr_by_date[date_key].append(record)
+        
+        # Index delivery_gr
+        for record in orchestrator.delivery_gr:
+            date_key = record.get('date', '')
+            if date_key not in orchestrator.delivery_gr_by_date:
+                orchestrator.delivery_gr_by_date[date_key] = []
+            orchestrator.delivery_gr_by_date[date_key].append(record)
+        
+        # Index shipment_log
+        for record in orchestrator.shipment_log:
+            date_key = record.get('date', '')
+            if date_key not in orchestrator.shipment_log_by_date:
+                orchestrator.shipment_log_by_date[date_key] = []
+            orchestrator.shipment_log_by_date[date_key].append(record)
+        
+        # Index delivery_shipment_log
+        for record in orchestrator.delivery_shipment_log:
+            date_key = record.get('date', '')
+            if date_key not in orchestrator.delivery_shipment_log_by_date:
+                orchestrator.delivery_shipment_log_by_date[date_key] = []
+            orchestrator.delivery_shipment_log_by_date[date_key].append(record)
+        
+        print(f"  ✅ 日期索引重建完成: production_gr={len(orchestrator.production_gr_by_date)} 天, "
+              f"delivery_gr={len(orchestrator.delivery_gr_by_date)} 天, "
+              f"shipment_log={len(orchestrator.shipment_log_by_date)} 天, "
+              f"delivery_shipment_log={len(orchestrator.delivery_shipment_log_by_date)} 天")
+        
+        # 7. 设置当前日期
         orchestrator.current_date = restore_date_obj
         
         print(f"  🎯 Orchestrator状态恢复完成")
@@ -1260,16 +1375,18 @@ def run_integrated_simulation(
             # ========== M5: 部署计划 ==========
             print(f"\n3️⃣ 运行 Module5 - 部署计划")
             try:
-                m5_result = module5.main(
-                    # 集成模式参数
-                    config_dict=config_dict,
-                    module1_output_dir=str(module_outputs['module1']),
-                    module4_output_path=str(module_outputs['module4'] / f"Module4Output_{current_date.strftime('%Y%m%d')}.xlsx"),
-                    orchestrator=orchestrator,
-                    current_date=current_date.strftime('%Y-%m-%d'),
-                    # 输出路径
-                    output_path=str(module_outputs['module5'] / f"Module5Output_{current_date.strftime('%Y%m%d')}.xlsx")
-                )
+                # 启用性能分析
+                with PerformanceProfiler("Module5", output_dir=Path(output_base_dir) / "performance", enabled=True):
+                    m5_result = module5.main(
+                        # 集成模式参数
+                        config_dict=config_dict,
+                        module1_output_dir=str(module_outputs['module1']),
+                        module4_output_path=str(module_outputs['module4'] / f"Module4Output_{current_date.strftime('%Y%m%d')}.xlsx"),
+                        orchestrator=orchestrator,
+                        current_date=current_date.strftime('%Y-%m-%d'),
+                        # 输出路径
+                        output_path=str(module_outputs['module5'] / f"Module5Output_{current_date.strftime('%Y%m%d')}.xlsx")
+                    )
                 
                 # 获取部署计划数据
                 if m5_result and 'deployment_plan' in m5_result:
@@ -1375,14 +1492,16 @@ def run_integrated_simulation(
             # ========== M3: 净需求计算 ==========
             print(f"\n5️⃣ 运行 Module3 - 净需求计算")
             try:
-                m3_result = module3.run_integrated_mode(
-                    module1_output_dir=str(module_outputs['module1']),
-                    orchestrator=orchestrator,
-                    config_dict=config_dict,
-                    start_date=current_date.strftime('%Y-%m-%d'),
-                    end_date=current_date.strftime('%Y-%m-%d'),
-                    output_dir=str(module_outputs['module3'])
-                )
+                # 启用性能分析
+                with PerformanceProfiler("Module3", output_dir=Path(output_base_dir) / "performance", enabled=True):
+                    m3_result = module3.run_integrated_mode(
+                        module1_output_dir=str(module_outputs['module1']),
+                        orchestrator=orchestrator,
+                        config_dict=config_dict,
+                        start_date=current_date.strftime('%Y-%m-%d'),
+                        end_date=current_date.strftime('%Y-%m-%d'),
+                        output_dir=str(module_outputs['module3'])
+                    )
                 print(f"  ✅ Module3 完成")
                 all_results['module3'].append(m3_result)
             except Exception as e:

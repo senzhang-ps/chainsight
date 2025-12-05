@@ -13,14 +13,20 @@ DEFAULT_MAX_ADVANCE_DAYS = 10
 
 def _normalize_location(location_str) -> str:
     """Normalize location string by padding with leading zeros to 4 digits"""
+    # Handle None and pandas NA
+    if location_str is None or pd.isna(location_str):
+        return ""
     try:
-        return str(int(location_str)). zfill(4)
+        return str(int(location_str)).zfill(4)
     except (ValueError, TypeError):
-        return str(location_str). zfill(4)
+        return str(location_str).zfill(4)
 
 def _normalize_material(material_str) -> str:
     """Normalize material string"""
-    return str(material_str) if material_str is not None else ""
+    # Handle None and pandas NA
+    if material_str is None or pd.isna(material_str):
+        return ""
+    return str(material_str)
 
 def _normalize_identifiers(df: pd.DataFrame) -> pd.DataFrame:
     """Normalize identifier columns to string format with proper formatting (优化版本)"""
@@ -86,18 +92,19 @@ def apply_dps(df, dps_cfg):
         return df. copy()
     df_new = df.copy()
     splits = []
-    for _, row in dps_cfg.iterrows():
-        filt = (df['material'] == row['material']) & (df['location'] == row['location'])
-        for i, orig_row in df[filt].iterrows():
-            split_qty = int(round(orig_row['quantity'] * row['dps_percent']))
-            remain_qty = int(round(orig_row['quantity'] - split_qty))
+    # Use itertuples for better performance
+    for row in dps_cfg.itertuples():
+        filt = (df['material'] == row.material) & (df['location'] == row.location)
+        for orig_row in df[filt].itertuples():
+            split_qty = int(round(orig_row.quantity * row.dps_percent))
+            remain_qty = int(round(orig_row.quantity - split_qty))
             splits. append({
-                'material': orig_row['material'],
-                'location': row['dps_location'],
-                'week': orig_row['week'],
+                'material': orig_row.material,
+                'location': row.dps_location,
+                'week': orig_row.week,
                 'quantity': split_qty
             })
-            df_new. at[i, 'quantity'] = remain_qty
+            df_new. at[orig_row.Index, 'quantity'] = remain_qty
     if splits:
         df_new = pd.concat([df_new, pd.DataFrame(splits)], ignore_index=True)
     df_new = df_new.groupby(['material','location','week'], as_index=False)['quantity'].sum()
@@ -223,11 +230,11 @@ def generate_daily_orders(sim_date, original_forecast, current_forecast, ao_conf
     if ml_avg_demand.empty:
         return pd.DataFrame(), consumed_forecast
     
-    # ✅ 遍历有需求的物料-地点组合（不再重复过滤）
-    for _, row in ml_avg_demand. iterrows():
-        material = row['material']
-        location = row['location']
-        daily_avg_forecast = row['avg_daily_demand']
+    # ✅ 遍历有需求的物料-地点组合（不再重复过滤）- use itertuples for better performance
+    for row in ml_avg_demand. itertuples():
+        material = row.material
+        location = row.location
+        daily_avg_forecast = row.avg_daily_demand
         
         if daily_avg_forecast <= 0:
             continue
@@ -427,6 +434,15 @@ def simulate_shipment_for_single_day(simulation_date, order_log, current_invento
         production_plan: 生产计划
         delivery_plan: 调运计划
     """
+    # Pre-filter by date once before loops for better performance
+    prod_today = None
+    if production_plan is not None and not production_plan.empty:
+        prod_today = production_plan[production_plan['available_date'] == simulation_date]
+    
+    deliv_today = None
+    if delivery_plan is not None and not delivery_plan.empty:
+        deliv_today = delivery_plan[delivery_plan['actual_delivery_date'] == simulation_date]
+    
     # 可用库存 = 当天初始库存 + 当日生产 + 当日调运
     unres_inventory = {}
     for mat in material_list:
@@ -436,22 +452,20 @@ def simulate_shipment_for_single_day(simulation_date, order_log, current_invento
             initial_qty = current_inventory.get(inv_key, 0)
             # 生产收货
             prod_qty = 0
-            if production_plan is not None and not production_plan.empty:
+            if prod_today is not None and not prod_today.empty:
                 prod_filt = (
-                    (production_plan['material'] == mat) &
-                    (production_plan['location'] == loc) &
-                    (production_plan['available_date'] == simulation_date)
+                    (prod_today['material'] == mat) &
+                    (prod_today['location'] == loc)
                 )
-                prod_qty = int(production_plan[prod_filt]['quantity']. sum())
+                prod_qty = int(prod_today[prod_filt]['quantity']. sum())
             # 调运收货
             deliv_qty = 0
-            if delivery_plan is not None and not delivery_plan.empty:
+            if deliv_today is not None and not deliv_today.empty:
                 deliv_filt = (
-                    (delivery_plan['material'] == mat) &
-                    (delivery_plan['location'] == loc) &
-                    (delivery_plan['actual_delivery_date'] == simulation_date)
+                    (deliv_today['material'] == mat) &
+                    (deliv_today['location'] == loc)
                 )
-                deliv_qty = int(delivery_plan[deliv_filt]['quantity']. sum())
+                deliv_qty = int(deliv_today[deliv_filt]['quantity']. sum())
             # 总可用库存 (unrestricted inventory)
             unres_inventory[inv_key] = initial_qty + prod_qty + deliv_qty
 
@@ -502,7 +516,7 @@ def _load_previous_orders(m1_output_dir: str, current_date: pd.Timestamp, max_ad
         if not os.path.isdir(m1_output_dir):
             return pd.DataFrame()
         
-        pattern = re.compile(r"module1_output_(\d{8})\. xlsx$")
+        pattern = re.compile(r"module1_output_(\d{8})\.xlsx$")
         
         # 性能优化：计算需要读取的最早日期（当前日期 - max_advance_days - 1）
         # 只读取这个时间窗口内的文件，避免随着仿真推进而读取越来越多的历史文件
@@ -517,11 +531,11 @@ def _load_previous_orders(m1_output_dir: str, current_date: pd.Timestamp, max_ad
             fdate = pd.to_datetime(m.group(1))
             
             # 跳过当前日期及之后的文件
-            if fdate. normalize() >= current_date.normalize():
+            if fdate.normalize() >= current_date.normalize():
                 continue
             
             # 性能优化：跳过过早的文件（超出max_advance_days窗口）
-            if fdate. normalize() < earliest_relevant_date.normalize():
+            if fdate.normalize() < earliest_relevant_date.normalize():
                 continue
             
             fpath = os.path.join(m1_output_dir, fname)
@@ -776,7 +790,7 @@ def save_module1_output_with_supply_demand(
             shipment_df = _ensure_cols(shipment_df, ['date','material','location','quantity','demand_type','order_id'])
             cut_df = _ensure_cols(cut_df, ['date','material','location','quantity'])
             supply_demand_df = _ensure_cols(supply_demand_df, ['date','material','location','quantity','demand_element'])
-            _normalize_identifiers(orders_df). to_excel(writer, sheet_name='OrderLog', index=False)
+            _normalize_identifiers(orders_df).to_excel(writer, sheet_name='OrderLog', index=False)
             _normalize_identifiers(shipment_df).to_excel(writer, sheet_name='ShipmentLog', index=False)
             _normalize_identifiers(cut_df).to_excel(writer, sheet_name='CutLog', index=False)  # 始终写
             _normalize_identifiers(supply_demand_df).to_excel(writer, sheet_name='SupplyDemandLog', index=False)
@@ -808,23 +822,23 @@ def _build_available_inventory_from_orchestrator(orchestrator, simulation_date: 
 
     inv = {}
 
-    # 期初库存
+    # 期初库存 - use itertuples for better performance
     if not beg_df.empty:
-        for _, r in beg_df.iterrows():
-            key = (str(r['material']), str(r['location']))
-            inv[key] = inv.get(key, 0) + int(r['quantity'])
+        for r in beg_df.itertuples():
+            key = (_normalize_material(r.material), _normalize_location(r.location))
+            inv[key] = inv.get(key, 0) + int(r.quantity)
 
-    # 生产 GR（location 为入库地点）
+    # 生产 GR（location 为入库地点）- use itertuples for better performance
     if not prod_df.empty:
-        for _, r in prod_df. iterrows():
-            key = (str(r['material']), str(r['location']))
-            inv[key] = inv.get(key, 0) + int(r['quantity'])
+        for r in prod_df.itertuples():
+            key = (_normalize_material(r.material), _normalize_location(r.location))
+            inv[key] = inv.get(key, 0) + int(r.quantity)
 
-    # 交付 GR（receiving 为入库地点）
+    # 交付 GR（receiving 为入库地点）- use itertuples for better performance
     if not delv_df.empty:
-        for _, r in delv_df.iterrows():
-            key = (str(r['material']), str(r['receiving']))
-            inv[key] = inv.get(key, 0) + int(r['quantity'])
+        for r in delv_df.itertuples():
+            key = (_normalize_material(r.material), _normalize_location(r.receiving))
+            inv[key] = inv.get(key, 0) + int(r.quantity)
 
     return inv
 
@@ -852,9 +866,14 @@ def generate_shipment_with_inventory_check(
     # ✅ 可用库存 = 期初 + 当日 Production GR + 当日 Delivery GR
     current_inventory = _build_available_inventory_from_orchestrator(orchestrator, simulation_date)
     
-    materials = today_orders['material'].unique(). tolist()
-    locations = today_orders['location'].unique().tolist()
-    order_log = today_orders. copy()
+    # Normalize material and location lists to match inventory keys
+    materials = [_normalize_material(m) for m in today_orders['material'].unique().tolist()]
+    locations = [_normalize_location(l) for l in today_orders['location'].unique().tolist()]
+    
+    # Normalize order_log material and location to match inventory keys
+    order_log = today_orders.copy()
+    order_log['material'] = order_log['material'].apply(_normalize_material)
+    order_log['location'] = order_log['location'].apply(_normalize_location)
     
     # 注意：此处不再叠加 production_plan / delivery_plan，避免双计
     shipment_df, cut_df, _ = simulate_shipment_for_single_day(
@@ -869,9 +888,9 @@ def generate_shipment_with_inventory_check(
     
     if not shipment_df.empty:
         shipment_df['demand_type'] = 'customer'
-        shipment_df['order_id'] = shipment_df. apply(
-            lambda row: f"ORD_{simulation_date.strftime('%Y%m%d')}_{row. name}", axis=1
-        )
+        # Vectorized order_id generation instead of apply
+        date_str = simulation_date.strftime('%Y%m%d')
+        shipment_df['order_id'] = 'ORD_' + date_str + '_' + shipment_df.index.astype(str)
     
     # print(f"  📦 基于[期初+当日GR]生成: {len(shipment_df)} 个shipment, {len(cut_df)} 个cut")
     return shipment_df, cut_df

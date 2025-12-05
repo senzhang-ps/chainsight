@@ -73,6 +73,44 @@ class SafeExpressionEvaluator:
         else:
             raise ValueError(f"Unsupported syntax: {ast.dump(node)}")
 
+def _check_and_deduplicate(df: pd.DataFrame, key_column: str, sheet_name: str, validation_log: list) -> pd.DataFrame:
+    """
+    Helper function to check for and remove duplicates in a DataFrame based on a key column.
+    
+    Args:
+        df: DataFrame to check
+        key_column: Column name to check for duplicates
+        sheet_name: Name of the sheet/config for logging
+        validation_log: List to append validation issues to
+        
+    Returns:
+        DataFrame with duplicates removed (if any)
+    """
+    if df.empty:
+        return df
+    
+    # Performance optimization: Check for duplicates first before computing full duplicate mask
+    if df[key_column].duplicated().any():
+        # Only compute full duplicate rows if there are duplicates
+        dup_mask = df.duplicated(subset=[key_column], keep=False)
+        dup_count = dup_mask.sum()
+        # Get unique count of duplicate keys
+        dup_unique = df.loc[dup_mask, key_column].nunique()
+        
+        print(f"  ⚠️  发现{sheet_name}中有 {dup_unique} 个重复的{key_column}（共 {dup_count} 条记录），将去重保留第一条")
+        validation_log.append({
+            'sheet': sheet_name,
+            'row': '',
+            'issue': f'Found {dup_unique} duplicate {key_column} values in {sheet_name} ({dup_count} total duplicates). '
+                    f'Keeping first occurrence of each {key_column}.',
+            'severity': 'WARNING',
+            'impact': f'Data Deduplication - {dup_count - dup_unique} duplicate records removed',
+            f'duplicate_{key_column}': dup_unique
+        })
+        df = df.drop_duplicates(subset=[key_column], keep='first')
+    
+    return df
+
 def load_standalone_config(input_excel: str) -> dict:
     """
     加载独立模式的配置数据（从 Excel 文件）
@@ -646,18 +684,24 @@ def run_physical_flow_module(
     delay_dist = config['DeliveryDelayDistribution']
     bypass_rules = config['MDQBypassRules']
 
-    prio_map = demand_prio.set_index('demand_element')['priority'].to_dict()
+    # 🔧 修复：确保demand_prio没有重复的demand_element
+    demand_prio = _check_and_deduplicate(demand_prio, 'demand_element', 'Global_DemandPriority', validation_log)
+    
+    prio_map = demand_prio.set_index('demand_element')['priority'].to_dict() if not demand_prio.empty else {}
     missing_prio = dp[~dp['demand_element'].isin(prio_map.keys())]
     if not missing_prio.empty:
         # 记录缺失的demand_element详细信息
         missing_elements = missing_prio['demand_element'].unique()
         for val in missing_elements:
             missing_records = missing_prio[missing_prio['demand_element'] == val]
-            # 统计路线类型
-            route_stats = missing_records.apply(
-                lambda row: 'self_loop' if row['sending'] == row['receiving'] else 'cross_node', axis=1
-            ).value_counts()
-            route_info = ', '.join([f"{k}: {v}" for k, v in route_stats.items()])
+            # 统计路线类型 (only if 'sending' and 'receiving' columns exist)
+            if 'sending' in missing_records.columns and 'receiving' in missing_records.columns:
+                route_stats = missing_records.apply(
+                    lambda row: 'self_loop' if row['sending'] == row['receiving'] else 'cross_node', axis=1
+                ).value_counts()
+                route_info = ', '.join([f"{k}: {v}" for k, v in route_stats.items()])
+            else:
+                route_info = 'N/A (columns missing)'
             
             validation_log.append({
                 'sheet': 'Global_DemandPriority',
@@ -681,7 +725,10 @@ def run_physical_flow_module(
         dp = dp[dp['demand_element'].isin(prio_map.keys())]
         # print(f"  📊 过滤后保留: {len(dp)} 条记录")
 
-    mat_map = material_md.set_index('material')[['demand_unit_to_weight','demand_unit_to_volume']].to_dict('index')
+    # 🔧 修复：确保material_md没有重复的material，避免merge产生重复行
+    material_md = _check_and_deduplicate(material_md, 'material', 'M6_MaterialMD', validation_log)
+    
+    mat_map = material_md.set_index('material')[['demand_unit_to_weight','demand_unit_to_volume']].to_dict('index') if not material_md.empty else {}
     missing_mat = dp[~dp['material'].isin(mat_map.keys())]
     if not missing_mat.empty:
         missing_materials = missing_mat['material'].unique()
@@ -708,7 +755,10 @@ def run_physical_flow_module(
         dp['demand_unit_to_weight'] = dp['demand_unit_to_weight'].fillna(1.0)
         dp['demand_unit_to_volume'] = dp['demand_unit_to_volume'].fillna(1.0)
 
-    spec_map = truck_specs.set_index('truck_type').to_dict('index')
+    # 🔧 修复：确保truck_specs没有重复的truck_type
+    truck_specs = _check_and_deduplicate(truck_specs, 'truck_type', 'M6_TruckTypeSpecs', validation_log)
+    
+    spec_map = truck_specs.set_index('truck_type').to_dict('index') if not truck_specs.empty else {}
 
     # --- 阈值>1.0 的配置告警（仍允许，但不会靠阈值触发） ---
     bad_th = truck_con[(truck_con['WFR'] > 1.0) | (truck_con['VFR'] > 1.0)]
@@ -761,10 +811,37 @@ def run_physical_flow_module(
     dp['simulation_date'] = dp['planned_deployment_date']
     
     # print(f"  🔍 处理后的部署计划数量: {len(dp)}")
-    # 按路线类型统计
-    dp['route_type_debug'] = dp.apply(lambda row: 'self_loop' if row['sending'] == row['receiving'] else 'cross_node', axis=1)
+    # 按路线类型统计 - Performance optimization: Vectorized comparison instead of apply
+    dp['route_type_debug'] = np.where(dp['sending'] == dp['receiving'], 'self_loop', 'cross_node')
     route_debug_stats = dp['route_type_debug'].value_counts()
     # print(f"  📊 部署计划路线统计: {route_debug_stats.to_dict()}")
+
+    # 🔧 修复：在转换为dict前检查UID是否唯一，避免pandas报错
+    # Performance optimization: Check for duplicates efficiently
+    if dp['ori_deployment_uid'].duplicated().any():
+        dup_mask = dp.duplicated(subset=['ori_deployment_uid'], keep=False)
+        dup_count = dup_mask.sum()
+        dup_uid_count = dp.loc[dup_mask, 'ori_deployment_uid'].nunique()
+        duplicate_uids = dp.loc[dup_mask, 'ori_deployment_uid'].unique()[:5]
+        
+        print(f"  ⚠️  发现 {dup_uid_count} 个重复的ori_deployment_uid（共 {dup_count} 条记录）")
+        print(f"  🔍 重复UID示例: {duplicate_uids.tolist()}")
+        
+        # 记录到validation log
+        validation_log.append({
+            'sheet': 'DeploymentPlan',
+            'row': '',
+            'issue': f'Found {dup_uid_count} duplicate ori_deployment_uid values ({dup_count} total duplicates). '
+                    f'This indicates a data processing error. Deduplicating by keeping first occurrence.',
+            'severity': 'ERROR',
+            'impact': f'Data Deduplication - {dup_count - dup_uid_count} duplicate records removed',
+            'duplicate_uids': dup_uid_count
+        })
+        
+        # 去重：保留第一条记录
+        print(f"  🔧 去重处理：保留每个UID的第一条记录")
+        dp = dp.drop_duplicates(subset=['ori_deployment_uid'], keep='first')
+        print(f"  ✅ 去重后保留: {len(dp)} 条记录")
 
     # Dict index
     dp_dict = dp.set_index('ori_deployment_uid').to_dict('index')
@@ -959,13 +1036,15 @@ def run_physical_flow_module(
                     material_loaded = {}  # {material: total_loaded_qty}
 
                     # —— 初次扫描：尽量装入，但不超过 cap（无 ∞）——
-                    for idx, demand_row in remaining_demands.iterrows():
-                        qty_pending = float(demand_row['deployed_qty'])
+                    # Performance optimization: Use itertuples for ~2-3x faster iteration
+                    for row_tuple in remaining_demands.itertuples():
+                        idx = row_tuple.Index
+                        qty_pending = float(row_tuple.deployed_qty)
                         if qty_pending <= 0:
                             continue
-                        uw = float(demand_row['demand_unit_to_weight'])
-                        uv = float(demand_row['demand_unit_to_volume'])
-                        material = demand_row['material']
+                        uw = float(row_tuple.demand_unit_to_weight)
+                        uv = float(row_tuple.demand_unit_to_volume)
+                        material = row_tuple.material
 
                         cap_w_rem = max(0.0, cap_w - w_sum)
                         cap_v_rem = max(0.0, cap_v - v_sum)
@@ -981,16 +1060,13 @@ def run_physical_flow_module(
                             already_loaded = material_loaded.get(material, 0)
                             inventory_limit = max(0, available_qty - already_loaded)
                             limits.append(inventory_limit)
-                            
-                            # if inventory_limit <= 0:
-                            #     # 库存不足，跳过该物料
-                            #     print(f"        🚫 库存不足: {material}@{sending}, 可用={available_qty}, 已装={already_loaded}")
-                            #     continue
 
                         addable = int(max(0, min(limits)))
                         if addable <= 0:
                             continue
 
+                        # Note: .loc[idx] lookup needed to maintain Series format for downstream code
+                        demand_row = remaining_demands.loc[idx]
                         load_records.append({'idx': idx, 'load_qty': addable, 'demand_row': demand_row})
                         q_units += addable
                         w_sum  += addable * uw
@@ -1041,15 +1117,17 @@ def run_physical_flow_module(
                     if trigger_cause:
                         # —— 触发后再尽量贴近 1.0（仍不超）——
                         taken = {r['idx'] for r in load_records}
-                        for idx, demand_row in remaining_demands.iterrows():
+                        # Performance optimization: Use itertuples for faster iteration
+                        for row_tuple in remaining_demands.itertuples():
+                            idx = row_tuple.Index
                             if idx in taken:
                                 continue
-                            qty_pending = float(demand_row['deployed_qty'])
+                            qty_pending = float(row_tuple.deployed_qty)
                             if qty_pending <= 0:
                                 continue
-                            uw = float(demand_row['demand_unit_to_weight'])
-                            uv = float(demand_row['demand_unit_to_volume'])
-                            material = demand_row['material']
+                            uw = float(row_tuple.demand_unit_to_weight)
+                            uv = float(row_tuple.demand_unit_to_volume)
+                            material = row_tuple.material
 
                             cap_w_rem = max(0.0, cap_w - w_sum)
                             cap_v_rem = max(0.0, cap_v - v_sum)
@@ -1065,14 +1143,13 @@ def run_physical_flow_module(
                                 already_loaded = material_loaded.get(material, 0)
                                 inventory_limit = max(0, available_qty - already_loaded)
                                 limits.append(inventory_limit)
-                                
-                                if inventory_limit <= 0:
-                                    continue
 
                             addable = int(max(0, min(limits)))
                             if addable <= 0:
                                 continue
 
+                            # Note: .loc[idx] lookup needed to maintain Series format for downstream code
+                            demand_row = remaining_demands.loc[idx]
                             load_records.append({'idx': idx, 'load_qty': addable, 'demand_row': demand_row})
                             q_units += addable
                             w_sum  += addable * uw

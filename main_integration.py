@@ -305,16 +305,8 @@ def restore_orchestrator_state(orchestrator, restore_date: str, output_base_dir:
                 if 'available_date' in backlog_df.columns:
                     backlog_df['available_date'] = pd.to_datetime(backlog_df['available_date']).dt.normalize()
                 
-                # Convert to records with proper datetime objects
-                orchestrator.production_plan_backlog = []
-                for _, row in backlog_df.iterrows():
-                    record = {
-                        'material': row.get('material'),
-                        'location': row.get('location'),
-                        'available_date': row.get('available_date'),  # Already datetime from normalization
-                        'quantity': int(row.get('quantity', 0))
-                    }
-                    orchestrator.production_plan_backlog.append(record)
+                # Convert to list of dictionaries with proper types (efficient, no iterrows)
+                orchestrator.production_plan_backlog = backlog_df.to_dict('records')
             else:
                 orchestrator.production_plan_backlog = []
             print(f"  ✅ 恢复生产计划backlog: {len(orchestrator.production_plan_backlog)} 条")

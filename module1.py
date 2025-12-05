@@ -16,10 +16,11 @@ DEFAULT_MAX_ADVANCE_DAYS = 10
 # - use_parallel_ao_consume：是否启用 AO 消耗的并行分组计算（按物料-地点拆分，进程池）
 # - use_parallel_file_load：是否启用历史订单文件的并行读取（线程池，适合I/O）
 # - parallel_max_workers：并发工作进程/线程数（None表示自动：CPU核心数）
-DEFAULT_USE_PARALLEL_AO_CONSUME = False
+DEFAULT_USE_PARALLEL_AO_CONSUME = True
 DEFAULT_USE_PARALLEL_FILE_LOAD = True
 DEFAULT_PARALLEL_MAX_WORKERS: Optional[int] = None
 DEFAULT_ERROR_LOG_PATH: Optional[str] = None  # 异常日志输出路径（txt），为空则不写盘
+DEFAULT_USE_PARALLEL_NORMAL_CONSUME: Optional[bool] = None  # Normal并行开关（None表示继承AO并行开关）
 
 # 简易异常日志记录工具（中文信息）
 def _append_error_log(message: str):
@@ -434,6 +435,8 @@ def generate_daily_orders(sim_date, original_forecast, current_forecast, ao_conf
                     cf['quantity'].astype(int)
                 )
                 consumed_forecast = cf[['material','location','date','quantity']]
+            # 并行路径计时打印（与串行一致的可读性）
+            print(f"[M1] AO消耗完成，耗时: {time.perf_counter()-t3:.3f}s")
             # 若无补丁或并行失败，保持原consumed_forecast不变
         else:
             # 串行路径（保持旧逻辑，确保输出完全一致）
@@ -464,15 +467,101 @@ def generate_daily_orders(sim_date, original_forecast, current_forecast, ao_conf
     normal_consume = orders_df[orders_df['demand_type'] == 'normal'].copy() if not orders_df.empty else pd.DataFrame(columns=orders_df.columns)
     t4 = time.perf_counter()
     if not normal_consume.empty:
-        n_g = normal_consume.groupby(['material','location','date'], as_index=False)['quantity'].sum()
-        for r in n_g.itertuples():
-            mask = (consumed_forecast['material'] == r.material) & (consumed_forecast['location'] == r.location) & (consumed_forecast['date'] == r.date)
-            if not consumed_forecast[mask].empty:
-                idx = consumed_forecast[mask].index[0]
-                avail = int(consumed_forecast.at[idx, 'quantity'])
-                take = min(avail, int(r.quantity))
-                consumed_forecast.at[idx, 'quantity'] = avail - take
-        print(f"[M1] Normal消耗完成，耗时: {time.perf_counter()-t4:.3f}s")
+        # 与 AO 相同的贪婪窗口顺序，确保确定性：[0, -1, -2, 1, 2, 3]
+        offsets_n = np.array([0, -1, -2, 1, 2, 3], dtype=int)
+
+        # 使用独立的 Normal 并行配置开关；为空时继承 AO 开关
+        inherit_flag = globals().get('DEFAULT_USE_PARALLEL_NORMAL_CONSUME', None)
+        use_parallel_normal = (inherit_flag if inherit_flag is not None else globals().get('DEFAULT_USE_PARALLEL_AO_CONSUME', False))
+        max_workers_cfg = globals().get('DEFAULT_PARALLEL_MAX_WORKERS', None)
+
+        if use_parallel_normal:
+            # 子进程函数：在单一(物料,地点)下消费Normal订单，返回(date, material, location, new_quantity)补丁
+            def _consume_normal_for_ml(args: Tuple[pd.DataFrame, pd.DataFrame, np.ndarray, str, str]) -> pd.DataFrame:
+                ml_orders, ml_forecast, offsets_local, mat, loc = args
+                if ml_orders.empty or ml_forecast.empty:
+                    return pd.DataFrame(columns=['material','location','date','new_quantity'])
+                ml_forecast = ml_forecast.copy()
+                # Normal订单在该窗口内贪婪扣减（与AO一致）
+                for r in ml_orders.itertuples():
+                    if r.quantity <= 0:
+                        continue
+                    remaining = int(r.quantity)
+                    for od in offsets_local:
+                        if remaining <= 0:
+                            break
+                        d = pd.to_datetime(r.date) + pd.to_timedelta(int(od), unit='D')
+                        idxs = ml_forecast.index[ml_forecast['date'] == d]
+                        if len(idxs) == 0:
+                            continue
+                        idx = idxs[0]
+                        avail = int(ml_forecast.at[idx, 'quantity'])
+                        take = min(avail, remaining)
+                        ml_forecast.at[idx, 'quantity'] = avail - take
+                        remaining -= take
+                out = ml_forecast[['date','quantity']].copy()
+                out['material'] = mat
+                out['location'] = loc
+                out = out.rename(columns={'quantity':'new_quantity'})
+                return out[['material','location','date','new_quantity']]
+
+            # 组装任务：每个(物料,地点)为一个任务
+            tasks_n: List[Tuple[pd.DataFrame, pd.DataFrame, np.ndarray, str, str]] = []
+            for (mat, loc), grp in normal_consume.groupby(['material','location']):
+                ml_mask = (consumed_forecast['material'] == mat) & (consumed_forecast['location'] == loc)
+                ml_forecast = consumed_forecast.loc[ml_mask, ['date','quantity']].copy()
+                if ml_forecast.empty:
+                    continue
+                tasks_n.append((grp[['date','quantity','simulation_date']], ml_forecast, offsets_n, mat, loc))
+
+            patches_n: List[pd.DataFrame] = []
+            with ProcessPoolExecutor(max_workers=max_workers_cfg) as ex:
+                futures = [ex.submit(_consume_normal_for_ml, t) for t in tasks_n]
+                for f in as_completed(futures):
+                    try:
+                        res = f.result()
+                        if res is not None and not res.empty:
+                            patches_n.append(res)
+                    except Exception:
+                        _append_error_log('[Normal并行] 子任务异常：某个物料-地点的Normal消耗未应用，建议检查数据或关闭并行')
+
+            if patches_n:
+                patch_df_n = pd.concat(patches_n, ignore_index=True)
+                key_cols = ['material','location','date']
+                cf_n = consumed_forecast.merge(patch_df_n, on=key_cols, how='left')
+                cf_n['quantity'] = np.where(
+                    cf_n['new_quantity'].notna(),
+                    np.maximum(0, cf_n['new_quantity'].astype(int)),
+                    cf_n['quantity'].astype(int)
+                )
+                consumed_forecast = cf_n[['material','location','date','quantity']]
+            print(f"[M1] Normal消耗完成（并行），耗时: {time.perf_counter()-t4:.3f}s")
+        else:
+            # 串行路径：与 AO 一致的贪婪窗口顺序
+            normal_consume = normal_consume.sort_values(by=['date','quantity','simulation_date'])
+            for r in normal_consume.itertuples():
+                if r.quantity <= 0:
+                    continue
+                target_dates = pd.to_datetime(r.date) + pd.to_timedelta(offsets_n, unit='D')
+                ml_mask = (consumed_forecast['material'] == r.material) & (consumed_forecast['location'] == r.location)
+                window_mask = ml_mask & consumed_forecast['date'].isin(target_dates)
+                window = consumed_forecast.loc[window_mask, ['date','quantity']].copy()
+                remaining = int(r.quantity)
+                for od in offsets_n:
+                    if remaining <= 0:
+                        break
+                    d = pd.to_datetime(r.date) + pd.to_timedelta(int(od), unit='D')
+                    idxs = window.index[window['date'] == d]
+                    if len(idxs) == 0:
+                        continue
+                    idx = idxs[0]
+                    avail = int(window.at[idx, 'quantity'])
+                    take = min(avail, remaining)
+                    window.at[idx, 'quantity'] = avail - take
+                    remaining -= take
+                for _, w in window.iterrows():
+                    consumed_forecast.loc[ml_mask & (consumed_forecast['date'] == w['date']), 'quantity'] = int(w['quantity'])
+            print(f"[M1] Normal消耗完成（串行），耗时: {time.perf_counter()-t4:.3f}s")
     
     return orders_df, consumed_forecast
 

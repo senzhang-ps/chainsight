@@ -89,44 +89,30 @@ def load_config(filename, sheet_mapping=None):
 # ----------- 2.  DPS SPLIT -----------
 def apply_dps(df, dps_cfg):
     if dps_cfg.empty:
-        return df. copy()
-    df_new = df.copy()
-    splits = []
-    # Use itertuples for better performance
-    for row in dps_cfg.itertuples():
-        filt = (df['material'] == row.material) & (df['location'] == row.location)
-        for orig_row in df[filt].itertuples():
-            split_qty = int(round(orig_row.quantity * row.dps_percent))
-            remain_qty = int(round(orig_row.quantity - split_qty))
-            splits. append({
-                'material': orig_row.material,
-                'location': row.dps_location,
-                'week': orig_row.week,
-                'quantity': split_qty
-            })
-            df_new. at[orig_row.Index, 'quantity'] = remain_qty
-    if splits:
-        df_new = pd.concat([df_new, pd.DataFrame(splits)], ignore_index=True)
-    df_new = df_new.groupby(['material','location','week'], as_index=False)['quantity'].sum()
-    df_new['quantity'] = df_new['quantity']. astype(int)
-    # 确保标识符字段为字符串格式
-    return _normalize_identifiers(df_new)
+        return df.copy()
+    df_g = df.groupby(['material','location','week'], as_index=False)['quantity'].sum()
+    cols = ['material','location','dps_location','dps_percent']
+    m = df_g.merge(dps_cfg[cols], on=['material','location'], how='left')
+    m['dps_percent'] = m['dps_percent'].fillna(0.0)
+    m['split_qty'] = np.round(m['quantity'] * m['dps_percent']).astype(int)
+    m['remain_qty'] = (m['quantity'] - m['split_qty']).astype(int)
+    remain = m[['material','location','week','remain_qty']].rename(columns={'remain_qty':'quantity'})
+    split = m[['material','dps_location','week','split_qty']].rename(columns={'dps_location':'location','split_qty':'quantity'})
+    out = pd.concat([remain, split], ignore_index=True)
+    out = out.groupby(['material','location','week'], as_index=False)['quantity'].sum()
+    out['quantity'] = out['quantity'].astype(int)
+    return _normalize_identifiers(out)
 
 # ----------- 3. SUPPLY CHOICE -----------
 def apply_supply_choice(df, supply_cfg):
-    if supply_cfg. empty:
+    if supply_cfg.empty:
         return df.copy()
-    df_new = df.copy()
-    for _, row in supply_cfg.iterrows():
-        filt = (
-            (df_new['material'] == row['material']) &
-            (df_new['location'] == row['location']) &
-            (df_new['week'] == row['week'])
-        )
-        df_new.loc[filt, 'quantity'] += int(round(row['adjust_quantity']))
-    df_new['quantity'] = df_new['quantity'].astype(int)
-    # 确保标识符字段为字符串格式
-    return _normalize_identifiers(df_new)
+    df_g = df.groupby(['material','location','week'], as_index=False)['quantity'].sum()
+    sup_g = supply_cfg.groupby(['material','location','week'], as_index=False)['adjust_quantity'].sum()
+    m = df_g.merge(sup_g, on=['material','location','week'], how='left')
+    m['quantity'] = (m['quantity'] + m['adjust_quantity'].fillna(0)).astype(int)
+    out = m[['material','location','week','quantity']]
+    return _normalize_identifiers(out)
 
 # ----------- 4. SPLIT WEEKLY FORECAST TO DAILY (INTEGER, NO ERROR) -----------
 def expand_forecast_to_days_integer_split(demand_weekly, start_date, num_weeks, simulation_end_date=None):
@@ -198,6 +184,8 @@ def generate_daily_orders(sim_date, original_forecast, current_forecast, ao_conf
         return pd.DataFrame(), current_forecast
     
     orders = []
+    # 预测视图按键聚合，保障唯一性
+    current_forecast = current_forecast.groupby(['material','location','date'], as_index=False)['quantity'].sum()
     consumed_forecast = current_forecast.copy()
     
     # ✅ 性能优化：预过滤30天窗口的数据（只过滤一次）
@@ -211,7 +199,7 @@ def generate_daily_orders(sim_date, original_forecast, current_forecast, ao_conf
     
     # ✅ 性能优化：预分组计算平均需求（只计算一次）
     if not windowed_forecast.empty:
-        ml_avg_demand = windowed_forecast. groupby(['material', 'location'], as_index=False)['quantity'].mean()
+        ml_avg_demand = windowed_forecast.groupby(['material','location'], as_index=False)['quantity'].mean()
         ml_avg_demand.columns = ['material', 'location', 'avg_daily_demand']
     else:
         # 如果30天窗口内没有数据，尝试7天窗口
@@ -230,81 +218,99 @@ def generate_daily_orders(sim_date, original_forecast, current_forecast, ao_conf
     if ml_avg_demand.empty:
         return pd.DataFrame(), consumed_forecast
     
-    # ✅ 遍历有需求的物料-地点组合（不再重复过滤）- use itertuples for better performance
-    for row in ml_avg_demand. itertuples():
-        material = row.material
-        location = row.location
-        daily_avg_forecast = row.avg_daily_demand
-        
-        if daily_avg_forecast <= 0:
-            continue
-        
-        # Get AO configuration for this material-location
-        ml_ao_config = ao_config[
-            (ao_config['material'] == material) & 
-            (ao_config['location'] == location)
-        ]
-        
-        # Calculate order averages based on ORIGINAL forecast
-        total_ao_percent = ml_ao_config['ao_percent'].sum() if not ml_ao_config.empty else 0
-        total_ao_daily_avg = daily_avg_forecast * total_ao_percent
-        normal_daily_avg = daily_avg_forecast - total_ao_daily_avg
-        
-        # Generate AO orders (based on ORIGINAL forecast)
-        for _, ao_row in ml_ao_config.iterrows():
-            advance_days = int(ao_row['advance_days'])
-            ao_percent = float(ao_row['ao_percent'])
-            ao_daily_avg = daily_avg_forecast * ao_percent
-            
-            # Generate AO quantity with percentage-based error
-            ao_qty = generate_quantity_with_percent_error(
-                ao_daily_avg, material, location, 'AO', forecast_error
-            )
-            
-            if ao_qty > 0:
-                ao_order_date = sim_date + pd. Timedelta(days=advance_days)
-                orders.append({
-                    'date': ao_order_date,
-                    'material': material,
-                    'location': location,
-                    'demand_type': 'AO',
-                    'quantity': ao_qty,
-                    'simulation_date': sim_date,
-                    'advance_days': advance_days
-                })
-                
-                # Consume forecast using AO logic (2 before, 3 after order date)
-                consumed_forecast = consume_forecast_ao_logic(
-                    consumed_forecast, material, location, ao_order_date, ao_qty
-                )
-        
-        # Generate normal order (based on ORIGINAL forecast)
-        if normal_daily_avg > 0:
-            normal_qty = generate_quantity_with_percent_error(
-                normal_daily_avg, material, location, 'normal', forecast_error
-            )
-            
-            if normal_qty > 0:
-                orders.append({
-                    'date': sim_date,
-                    'material': material,
-                    'location': location,
-                    'demand_type': 'normal',
-                    'quantity': normal_qty,
-                    'simulation_date': sim_date,
-                    'advance_days': 0
-                })
-                
-                # Consume forecast for normal order (just simulation date)
-                consumed_forecast = consume_forecast_normal_logic(
-                    consumed_forecast, material, location, sim_date, normal_qty
-                )
-    
-    orders_df = pd.DataFrame(orders)
+    # ✅ 向量化：在物料-地点粒度生成 AO 与 Normal 订单
+    # AO 配置去重：仅移除完全重复的行（不按 ML 折叠）
+    ao_cols = ['material','location','advance_days','ao_percent']
+    ao_cfg_selected = ao_config[ao_cols].drop_duplicates() if not ao_config.empty else ao_config[ao_cols]
+    ao_lines = ml_avg_demand.merge(ao_cfg_selected, on=['material','location'], how='left')
+    ao_lines = ao_lines.dropna(subset=['ao_percent'])
+    fe = forecast_error.groupby(['material','location','order_type'], as_index=False)['error_std_percent'].max()
+    if not ao_lines.empty:
+        ao_lines['ao_daily_avg'] = ao_lines['avg_daily_demand'] * ao_lines['ao_percent']
+        fe_ao = fe[fe['order_type'] == 'AO'][['material','location','error_std_percent']]
+        ao_e = ao_lines.merge(fe_ao, on=['material','location'], how='left')
+        ao_abs_std = ao_e['ao_daily_avg'] * ao_e['error_std_percent'].fillna(0)
+        ao_qty = np.maximum(0, np.round(np.random.normal(ao_e['ao_daily_avg'], ao_abs_std))).astype(int)
+        ao_dates = sim_date + pd.to_timedelta(ao_e['advance_days'].astype(int), unit='D')
+        ao_orders_df = pd.DataFrame({
+            'date': ao_dates,
+            'material': ao_e['material'].astype(str),
+            'location': ao_e['location'].astype(str),
+            'demand_type': 'AO',
+            'quantity': ao_qty,
+            'simulation_date': sim_date,
+            'advance_days': ao_e['advance_days'].astype(int)
+        })
+    else:
+        ao_orders_df = pd.DataFrame(columns=['date','material','location','demand_type','quantity','simulation_date','advance_days'])
+
+    # Normal 订单计算使用去重后的 AO 百分比之和（同一 ML 不同 advance_days 会累加）
+    total_ao = ao_cfg_selected.groupby(['material','location'], as_index=False)['ao_percent'].sum()
+    normal = ml_avg_demand.merge(total_ao, on=['material','location'], how='left')
+    normal['ao_percent'] = normal['ao_percent'].fillna(0).clip(0,1)
+    normal['normal_daily_avg'] = normal['avg_daily_demand'] * (1 - normal['ao_percent'])
+    normal = normal[normal['normal_daily_avg'] > 0]
+    if not normal.empty:
+        fe_n = fe[fe['order_type'] == 'normal'][['material','location','error_std_percent']]
+        n_e = normal.merge(fe_n, on=['material','location'], how='left')
+        n_abs_std = n_e['normal_daily_avg'] * n_e['error_std_percent'].fillna(0)
+        normal_qty = np.maximum(0, np.round(np.random.normal(n_e['normal_daily_avg'], n_abs_std))).astype(int)
+        normal_orders_df = pd.DataFrame({
+            'date': pd.Series([sim_date] * len(n_e)),
+            'material': n_e['material'].astype(str),
+            'location': n_e['location'].astype(str),
+            'demand_type': 'normal',
+            'quantity': normal_qty,
+            'simulation_date': pd.Series([sim_date] * len(n_e)),
+            'advance_days': 0
+        })
+    else:
+        normal_orders_df = pd.DataFrame(columns=['date','material','location','demand_type','quantity','simulation_date','advance_days'])
+
+    orders_df = pd.concat([ao_orders_df, normal_orders_df], ignore_index=True)
     if not orders_df.empty:
-        orders_df['quantity'] = orders_df['quantity']. astype(int)
-        # 确保标识符字段为字符串格式
+        orders_df = orders_df.groupby(['date','material','location','demand_type','simulation_date','advance_days'], as_index=False)['quantity'].sum()
+        orders_df['quantity'] = orders_df['quantity'].astype(int)
         orders_df = _normalize_identifiers(orders_df)
+
+    # 消耗：先 AO 后 normal，贪婪优先顺序
+    ao_consume = orders_df[orders_df['demand_type'] == 'AO'].copy() if not orders_df.empty else pd.DataFrame(columns=orders_df.columns)
+    if not ao_consume.empty:
+        ao_consume = ao_consume.sort_values(by=['date','advance_days','quantity','simulation_date'])
+        offsets = np.array([0, -1, -2, 1, 2, 3], dtype=int)
+        for r in ao_consume.itertuples():
+            if r.quantity <= 0:
+                continue
+            target_dates = pd.to_datetime(r.date) + pd.to_timedelta(offsets, unit='D')
+            ml_mask = (consumed_forecast['material'] == r.material) & (consumed_forecast['location'] == r.location)
+            window_mask = ml_mask & consumed_forecast['date'].isin(target_dates)
+            window = consumed_forecast.loc[window_mask, ['date','quantity']].copy()
+            remaining = int(r.quantity)
+            for od in offsets:
+                if remaining <= 0:
+                    break
+                d = pd.to_datetime(r.date) + pd.to_timedelta(int(od), unit='D')
+                idxs = window.index[window['date'] == d]
+                if len(idxs) == 0:
+                    continue
+                idx = idxs[0]
+                avail = int(window.at[idx, 'quantity'])
+                take = min(avail, remaining)
+                window.at[idx, 'quantity'] = avail - take
+                remaining -= take
+            for _, w in window.iterrows():
+                consumed_forecast.loc[ml_mask & (consumed_forecast['date'] == w['date']), 'quantity'] = int(w['quantity'])
+
+    normal_consume = orders_df[orders_df['demand_type'] == 'normal'].copy() if not orders_df.empty else pd.DataFrame(columns=orders_df.columns)
+    if not normal_consume.empty:
+        n_g = normal_consume.groupby(['material','location','date'], as_index=False)['quantity'].sum()
+        for r in n_g.itertuples():
+            mask = (consumed_forecast['material'] == r.material) & (consumed_forecast['location'] == r.location) & (consumed_forecast['date'] == r.date)
+            if not consumed_forecast[mask].empty:
+                idx = consumed_forecast[mask].index[0]
+                avail = int(consumed_forecast.at[idx, 'quantity'])
+                take = min(avail, int(r.quantity))
+                consumed_forecast.at[idx, 'quantity'] = avail - take
     
     return orders_df, consumed_forecast
 
@@ -443,64 +449,40 @@ def simulate_shipment_for_single_day(simulation_date, order_log, current_invento
     if delivery_plan is not None and not delivery_plan.empty:
         deliv_today = delivery_plan[delivery_plan['actual_delivery_date'] == simulation_date]
     
-    # 可用库存 = 当天初始库存 + 当日生产 + 当日调运
-    unres_inventory = {}
-    for mat in material_list:
-        for loc in location_list:
-            inv_key = (mat, loc)
-            # 当天初始库存
-            initial_qty = current_inventory.get(inv_key, 0)
-            # 生产收货
-            prod_qty = 0
-            if prod_today is not None and not prod_today.empty:
-                prod_filt = (
-                    (prod_today['material'] == mat) &
-                    (prod_today['location'] == loc)
-                )
-                prod_qty = int(prod_today[prod_filt]['quantity']. sum())
-            # 调运收货
-            deliv_qty = 0
-            if deliv_today is not None and not deliv_today.empty:
-                deliv_filt = (
-                    (deliv_today['material'] == mat) &
-                    (deliv_today['location'] == loc)
-                )
-                deliv_qty = int(deliv_today[deliv_filt]['quantity']. sum())
-            # 总可用库存 (unrestricted inventory)
-            unres_inventory[inv_key] = initial_qty + prod_qty + deliv_qty
+    # 当前库存已由 orchestrator 计算（期初+当日GR）
+    inv_df = pd.DataFrame([
+        {'material': k[0], 'location': k[1], 'qty_avail': v}
+        for k, v in current_inventory.items()
+    ])
+    if inv_df.empty:
+        inv_df = pd.DataFrame(columns=['material','location','qty_avail'])
 
-    shipment_log = []
-    cut_log = []
-
-    # 处理订单
-    todays_orders = order_log[order_log['date'] == simulation_date] if not order_log.empty else pd. DataFrame(columns=order_log.columns)
-    for mat in material_list:
-        for loc in location_list:
-            inv_key = (mat, loc)
-            qty_avail = unres_inventory.get(inv_key, 0)
-            todays = todays_orders[
-                (todays_orders['material'] == mat) &
-                (todays_orders['location'] == loc)
-            ] if not todays_orders.empty else pd.DataFrame(columns=todays_orders.columns)
-            qty_ordered = int(todays['quantity'].sum()) if not todays.empty else 0
-            shipped = int(min(qty_ordered, qty_avail))
-            stockout = int(max(0, qty_ordered - shipped))
-            shipment_log.append({
-                'date': simulation_date, 'material': mat, 'location': loc, 'quantity': shipped
-            })
-            if stockout > 0:
-                cut_log.append({
-                    'date': simulation_date, 'material': mat, 'location': loc, 'quantity': stockout
-                })
-
-    # 确保标识符字段为字符串格式
-    shipment_df = _normalize_identifiers(pd.DataFrame(shipment_log))
-    cut_df = _normalize_identifiers(pd.DataFrame(cut_log))
+    todays_orders = order_log[order_log['date'] == simulation_date] if not order_log.empty else pd.DataFrame(columns=order_log.columns)
+    ord_g = todays_orders.groupby(['material','location'], as_index=False)['quantity'].sum().rename(columns={'quantity':'qty_ordered'}) if not todays_orders.empty else pd.DataFrame(columns=['material','location','qty_ordered'])
+    merged = ord_g.merge(inv_df, on=['material','location'], how='left')
+    merged['qty_avail'] = merged['qty_avail'].fillna(0).astype(int)
+    merged['qty_ordered'] = merged['qty_ordered'].fillna(0).astype(int)
+    merged['shipped'] = np.minimum(merged['qty_ordered'], merged['qty_avail']).astype(int)
+    merged['cut'] = (merged['qty_ordered'] - merged['shipped']).astype(int)
+    shipment_df = pd.DataFrame({
+        'date': simulation_date,
+        'material': merged['material'].astype(str),
+        'location': merged['location'].astype(str),
+        'quantity': merged['shipped'].astype(int)
+    })
+    cut_df = pd.DataFrame({
+        'date': simulation_date,
+        'material': merged['material'].astype(str),
+        'location': merged['location'].astype(str),
+        'quantity': merged['cut'].astype(int)
+    })
+    shipment_df = _normalize_identifiers(shipment_df)
+    cut_df = _normalize_identifiers(cut_df)
     
     return (
         shipment_df,
         cut_df,
-        unres_inventory  # 返回计算后的可用库存，供下次调用使用
+        current_inventory  # 返回可用库存
     )
 
 
@@ -820,27 +802,30 @@ def _build_available_inventory_from_orchestrator(orchestrator, simulation_date: 
     prod_df = orchestrator.get_production_gr_view(date_str)
     delv_df = orchestrator.get_delivery_gr_view(date_str)
 
-    inv = {}
+    # 统一并聚合为 ML 粒度
+    def _to_ml(df, loc_col):
+        if df is None or df.empty:
+            return pd.DataFrame(columns=['material','location','quantity'])
+        o = df[['material', loc_col, 'quantity']].copy()
+        o['material'] = o['material'].astype(str)
+        o['location'] = o[loc_col].astype(str).str.zfill(4)
+        return o.groupby(['material','location'], as_index=False)['quantity'].sum()
 
-    # 期初库存 - use itertuples for better performance
-    if not beg_df.empty:
-        for r in beg_df.itertuples():
-            key = (_normalize_material(r.material), _normalize_location(r.location))
-            inv[key] = inv.get(key, 0) + int(r.quantity)
-
-    # 生产 GR（location 为入库地点）- use itertuples for better performance
-    if not prod_df.empty:
-        for r in prod_df.itertuples():
-            key = (_normalize_material(r.material), _normalize_location(r.location))
-            inv[key] = inv.get(key, 0) + int(r.quantity)
-
-    # 交付 GR（receiving 为入库地点）- use itertuples for better performance
-    if not delv_df.empty:
-        for r in delv_df.itertuples():
-            key = (_normalize_material(r.material), _normalize_location(r.receiving))
-            inv[key] = inv.get(key, 0) + int(r.quantity)
-
-    return inv
+    beg = _to_ml(beg_df, 'location')
+    prod = _to_ml(prod_df, 'location')
+    delv = _to_ml(delv_df, 'receiving')
+    inv_df = beg.merge(prod, on=['material','location'], how='outer', suffixes=('_beg','_prod'))
+    inv_df = inv_df.merge(delv, on=['material','location'], how='outer')
+    # 显式数值转换以避免 fillna 的未来 downcasting 变更
+    for col in ['quantity_beg','quantity_prod','quantity']:
+        if col in inv_df.columns:
+            inv_df[col] = pd.to_numeric(inv_df[col], errors='coerce')
+    inv_df[['quantity_beg','quantity_prod','quantity']] = inv_df[['quantity_beg','quantity_prod','quantity']].fillna(0)
+    # 计算总可用库存
+    qty = inv_df.get('quantity_beg', 0) + inv_df.get('quantity_prod', 0) + inv_df.get('quantity', 0)
+    inv_df['qty'] = pd.to_numeric(qty, errors='coerce').fillna(0).astype(int)
+    inv_df = inv_df[['material','location','qty']]
+    return {(r.material, r.location): int(r.qty) for r in inv_df.itertuples(index=False)}
 
 def generate_shipment_with_inventory_check(
     orders_df: pd. DataFrame, 

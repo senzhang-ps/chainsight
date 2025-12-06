@@ -440,6 +440,56 @@ def apply_grouped_moq_rv(demand_rows, location):
             
     return adjusted_qtys
 
+def apply_priority_allocation_vectorized(demand_rows, adjusted_qtys, current_stock, demand_priority_map):
+    """
+    Vectorized allocation within a node across priority groups.
+    - Inputs: demand_rows list of dicts; adjusted_qtys dict index->adjusted demand; current_stock int.
+    - Output: sets 'deployed_qty_invCon' on demand_rows according to weights per priority.
+    Behavior matches existing logic: fully satisfy higher priorities first; last served priority is proportional.
+    """
+    if not demand_rows:
+        return current_stock
+    n = len(demand_rows)
+    # Build DataFrame with indices
+    df = pd.DataFrame(demand_rows).copy()
+    df['idx'] = np.arange(n)
+    df['priority'] = df['demand_element'].map(lambda x: demand_priority_map.get(x, 99))
+    df['adjusted_qty'] = df['idx'].map(lambda i: int(adjusted_qtys.get(i, int(df.loc[df['idx']==i, 'demand_qty'].iloc[0]))))
+    df['deployed_qty_invCon'] = 0
+
+    # Early exit
+    if current_stock <= 0:
+        # leave zeros
+        for i, row in df[['idx','deployed_qty_invCon']].itertuples(index=False):
+            demand_rows[i]['deployed_qty_invCon'] = int(row)
+        return 0
+
+    # Process priorities in ascending order; stop when stock depleted
+    for p, block in df.sort_values('priority').groupby('priority', sort=True):
+        group_total = int(block['adjusted_qty'].sum())
+        if group_total <= 0:
+            continue
+        idxs = block['idx'].to_numpy()
+        adj = block['adjusted_qty'].to_numpy()
+        if current_stock >= group_total:
+            # fully satisfy
+            df.loc[df.index[df['idx'].isin(idxs)], 'deployed_qty_invCon'] = adj
+            current_stock -= group_total
+            continue
+        # partial: proportional by adjusted_qty, integer floors
+        weights = adj.astype(float)
+        shares = (current_stock * (weights / float(group_total))) if group_total > 0 else np.zeros_like(weights)
+        alloc = np.minimum(np.floor(shares).astype(np.int64), adj)
+        df.loc[df.index[df['idx'].isin(idxs)], 'deployed_qty_invCon'] = alloc
+        current_stock = 0
+        # zero all remaining priorities implicitly
+        break
+
+    # Write back
+    for i, val in df[['idx','deployed_qty_invCon']].itertuples(index=False):
+        demand_rows[int(i)]['deployed_qty_invCon'] = int(val)
+    return current_stock
+
 def _build_ptf_lsk_cache(m4_mlcfg_df: pd.DataFrame | None) -> Dict[tuple[str, str], tuple[int, int]]:
     """
     PTF/LSK 缓存构建（性能优化）
@@ -1582,8 +1632,10 @@ def push_softpush_allocation(
 
 def apply_receiving_space_quota(deployment_plan_rows, receiving_space, sim_date, demand_priority_map):
     """
-    在所有调运计划明细生成后，按receiving space quota再分配，更新deployed_qty，unfulfilled log
-    修复：仅对跨节点调运（sending != receiving）应用receiving space quota限制
+    Vectorized receiving space quota application.
+    - Applies quota only to cross-node shipments (sending != receiving).
+    - Allocates by priority groups then proportionally by weights within a group.
+    Expect 2-5x speedup vs row-wise loop.
     """
     import time
     t0 = time.perf_counter()
@@ -1592,99 +1644,109 @@ def apply_receiving_space_quota(deployment_plan_rows, receiving_space, sim_date,
         df['deployed_qty'] = []
         df['quota'] = []
         return df, []
-    
-    # 如果receiving_space配置为空，直接返回原分配结果
+
+    # Fast path: no receiving space
     if receiving_space.empty:
         df['deployed_qty'] = df['deployed_qty_invCon']
         df['quota'] = np.inf
         return df, []
-    
-    # 按receiving+date分组
+
+    # Ensure date types
+    if 'date' in df.columns:
+        df['date'] = pd.to_datetime(df['date'])
+    if 'date' in receiving_space.columns:
+        receiving_space['date'] = pd.to_datetime(receiving_space['date'])
+
+    # Precompute priority for rows (missing → 99)
+    df['priority'] = df['demand_element'].map(lambda x: demand_priority_map.get(x, 99))
+
+    # Split self-fulfillment vs cross-node
+    is_cross = df['sending'] != df['receiving']
+    df_self = df[~is_cross].copy()
+    df_cross = df[is_cross].copy()
+
+    # Self rows pass-through
+    if not df_self.empty:
+        df.loc[df_self.index, 'deployed_qty'] = df_self['deployed_qty_invCon']
+        df.loc[df_self.index, 'quota'] = np.inf
+
+    # If no cross-node rows, return
+    if df_cross.empty:
+        print(f"[M5] Receiving Space Quota 用时: {time.perf_counter()-t0:.3f}s，受限条目: 0")
+        return df, []
+
+    # Join quota to cross-node by (receiving,date)
+    space = receiving_space[['receiving','date','max_qty']].copy()
+    space = space.rename(columns={'max_qty':'quota'})
+    df_cross = df_cross.merge(space, on=['receiving','date'], how='left')
+    df_cross['quota'] = df_cross['quota'].fillna(np.inf)
+
+    # Group by (receiving,date) for allocation
     unfulfilled = []
-    for (recv, date), grp in df.groupby(['receiving', 'date']):
-        quota_row = receiving_space[
-            (receiving_space['receiving'] == recv) & (pd.to_datetime(receiving_space['date']) == date)
-        ]
-        quota = quota_row['max_qty'].iloc[0] if not quota_row.empty else np.inf
-        
-        # 🔧 修复：仅计算跨节点调运的quantity占用quota
-        cross_node_grp = grp[grp['sending'] != grp['receiving']]
-        self_fulfillment_grp = grp[grp['sending'] == grp['receiving']]
-        
-        # 自我需求满足不占用quota，直接通过
-        df.loc[self_fulfillment_grp.index, 'deployed_qty'] = self_fulfillment_grp['deployed_qty_invCon']
-        df.loc[self_fulfillment_grp.index, 'quota'] = np.inf  # 自我满足不受quota限制
-        
-        if cross_node_grp.empty:
-            # 如果没有跨节点调运，跳过quota检查
-            continue
-            
-        # 仅检查跨节点调运是否超过quota
-        cross_node_total = cross_node_grp['deployed_qty_invCon'].sum()
-        if cross_node_total <= quota:
-            df.loc[cross_node_grp.index, 'deployed_qty'] = cross_node_grp['deployed_qty_invCon']
-            df.loc[cross_node_grp.index, 'quota'] = quota
-            continue
-        # 跨节点调运空间不足，按优先级+权重分配（仅处理跨节点调运）
-        cross_node_rows = cross_node_grp.to_dict(orient='records')
-        
-        # 按优先级对跨节点调运进行排序和分组
-        rows_sorted = sorted(cross_node_rows, key=lambda r: demand_priority_map.get(r['demand_element'], 99))
-        grouped = {}
-        for r in rows_sorted:
-            p = demand_priority_map.get(r['demand_element'], 99)
-            grouped.setdefault(p, []).append(r)
-        
-        left = quota
-        deploy_qtys = {i: 0 for i in range(len(cross_node_rows))}
-        
-        for priority in sorted(grouped):
-            group = grouped[priority]
-            group_total = sum(r['deployed_qty_invCon'] for r in group)
-            if left >= group_total:
-                for r in group:
-                    idx = cross_node_rows.index(r)
-                    deploy_qtys[idx] = r['deployed_qty_invCon']
-                left -= group_total
+    results = []
+
+    def _alloc_group(g: pd.DataFrame) -> pd.DataFrame:
+        quota = g['quota'].iloc[0]
+        total = g['deployed_qty_invCon'].sum()
+        if total <= quota:
+            g['deployed_qty'] = g['deployed_qty_invCon']
+            g['quota'] = quota
+            return g
+        # Sort by priority then proportional weights within each priority
+        g = g.sort_values(['priority'])
+        left = float(quota)
+        deployed = np.zeros(len(g), dtype=np.int64)
+
+        # Process each priority block vectorized
+        for p, block in g.groupby('priority', sort=True):
+            block_total = block['deployed_qty_invCon'].sum()
+            idx = block.index.to_numpy()
+            if left >= block_total:
+                deployed_idx_vals = block['deployed_qty_invCon'].to_numpy()
             else:
-                allocated = 0
-                for r in group:
-                    idx = cross_node_rows.index(r)
-                    weight = r['deployed_qty_invCon'] / group_total if group_total > 0 else 0
-                    q = int(left * weight)
-                    deploy_qtys[idx] = min(q, r['deployed_qty_invCon'])
-                    allocated += deploy_qtys[idx]
-                left -= allocated
-                # 不再分配
+                # proportional weights; integer floor
+                weights = block['deployed_qty_invCon'].to_numpy().astype(float)
+                if block_total > 0:
+                    shares = (left * (weights / float(block_total)))
+                else:
+                    shares = np.zeros_like(weights)
+                deployed_idx_vals = np.minimum(np.floor(shares).astype(np.int64), block['deployed_qty_invCon'].to_numpy())
+            deployed[g.index.get_indexer(idx)] = deployed_idx_vals
+            left -= deployed_idx_vals.sum()
+            if left <= 0:
                 break
-        
-        # 更新跨节点调运的实际分配
-        for idx, qty in deploy_qtys.items():
-            original_row = cross_node_rows[idx]
-            # 找到原始DataFrame中对应的索引
-            original_idx = cross_node_grp[
-                (cross_node_grp['sending'] == original_row['sending']) &
-                (cross_node_grp['receiving'] == original_row['receiving']) &
-                (cross_node_grp['material'] == original_row['material']) &
-                (cross_node_grp['demand_element'] == original_row['demand_element'])
-            ].index[0]
-            
-            df.at[original_idx, 'deployed_qty'] = qty
-            df.at[original_idx, 'quota'] = quota
-            
-            gap = original_row['deployed_qty_invCon'] - qty
-            if gap > 0:
-                unfulfilled.append({
-                    'date': date,
-                    'sending': original_row['sending'],
-                    'receiving': original_row['receiving'],
-                    'material': original_row['material'],  # 新增
-                    'demand_qty': original_row['demand_qty'],
-                    'demand_element': original_row['demand_element'],
-                    'unfulfilled_qty': gap,
-                    'reason': "space constraint"
-                })
-    # 空间充足行
+
+        g['deployed_qty'] = deployed
+        g['quota'] = quota
+        return g
+
+    allocated = (
+        df_cross.groupby(['receiving','date'], sort=False, group_keys=False)
+        .apply(_alloc_group)
+    )
+
+    # Write back allocated values
+    df.loc[allocated.index, 'deployed_qty'] = allocated['deployed_qty']
+    df.loc[allocated.index, 'quota'] = allocated['quota']
+
+    # Build unfulfilled log vectorized where gap > 0
+    gaps = allocated[allocated['deployed_qty_invCon'] > allocated['deployed_qty']]
+    if not gaps.empty:
+        unfulfilled = [
+            {
+                'date': row.date,
+                'sending': row.sending,
+                'receiving': row.receiving,
+                'material': row.material,
+                'demand_qty': row.demand_qty,
+                'demand_element': row.demand_element,
+                'unfulfilled_qty': int(row.deployed_qty_invCon - row.deployed_qty),
+                'reason': 'space constraint'
+            }
+            for row in gaps.itertuples(index=False)
+        ]
+
+    # Fill pass-through for any untouched rows
     df['deployed_qty'] = df['deployed_qty'].fillna(df['deployed_qty_invCon'])
     df['quota'] = df['quota'].fillna(np.nan)
     print(f"[M5] Receiving Space Quota 用时: {time.perf_counter()-t0:.3f}s，受限条目: {len(unfulfilled)}")
@@ -2129,64 +2191,14 @@ def main(
                 total_actual_demand = sum(adjusted_qtys.values())
                 # print(f"   📊 总需求: {total_actual_demand}, 可用库存: {current_stock}")
                 
-                for priority in sorted(grouped):
-                    group = grouped[priority]
-                    # 🔧 修复：优先级组需求量基于分组MOQ/RV调整结果
-                    group_actual_demand = 0
-                    for i, d in enumerate(demand_rows):
-                        if d in group:
-                            group_actual_demand += adjusted_qtys.get(i, d['demand_qty'])
-                    # print(f"   🔢 优先级 {priority}: 需求 {group_actual_demand}")
-                    
-                    # 如果没有剩余库存，所有后续优先级都分配0
-                    if current_stock <= 0:
-                        for d in group:
-                            d['deployed_qty_invCon'] = 0
-                        # print(f"      ❌ 无剩余库存，跳过")
-                        continue
-                    
-                    if group_actual_demand == 0:
-                        for d in group:
-                            d['deployed_qty_invCon'] = 0
-                        continue
-                    
-                    if current_stock >= group_actual_demand:
-                        # 库存充足，完全满足当前优先级
-                        for i, d in enumerate(demand_rows):
-                            if d in group:
-                                adjusted_qty = adjusted_qtys.get(i, d['demand_qty'])
-                                d['deployed_qty_invCon'] = adjusted_qty
-                        current_stock -= group_actual_demand
-                        # print(f"      ✅ 库存充足，完全满足")
-                    else:
-                        # 库存不足，按权重分配所有剩余库存给当前优先级
-                        # 关键修复：用完库存后，后续优先级不再分配
-                        for i, d in enumerate(demand_rows):
-                            if d in group:
-                                adjusted_qty = adjusted_qtys.get(i, d['demand_qty'])
-                                weight = adjusted_qty / group_actual_demand if group_actual_demand > 0 else 0
-                                d['deployed_qty_invCon'] = min(int(current_stock * weight), adjusted_qty)
-                        
-                        # 重新计算实际分配量
-                        actual_allocated = sum(d['deployed_qty_invCon'] for d in group)
-                        current_stock = 0  # 关键修复：库存不足时，用完所有库存，后续优先级不再分配
-                        # print(f"      ⚠️  库存不足，部分满足 {actual_allocated}/{group_actual_demand}，后续优先级不再分配")
-                        
-                        # 为后续优先级预设0分配
-                        remaining_priorities = [p for p in sorted(grouped) if p > priority]
-                        for remaining_priority in remaining_priorities:
-                            for d in grouped[remaining_priority]:
-                                d['deployed_qty_invCon'] = 0
-                        break  # 跳出优先级循环
-                    
-                    # 显示分配详情
-                    for i, d in enumerate(demand_rows):
-                        if d in group:
-                            receiving = d.get('from_location', d.get('receiving', loc))
-                            is_cross_node = (loc != receiving)
-                            adjusted_qty = adjusted_qtys.get(i, d['demand_qty'])
-                            # status = "✅" if d['deployed_qty_invCon'] == adjusted_qty else "⚠️"
-                            # print(f"      {status} [{d['demand_element']}] 原始需求={d['demand_qty']} 计划={adjusted_qty} 分配={d['deployed_qty_invCon']} 跨节点={is_cross_node}")
+                # 👉 Vectorized priority allocation
+                current_stock = apply_priority_allocation_vectorized(
+                    demand_rows=demand_rows,
+                    adjusted_qtys=adjusted_qtys,
+                    current_stock=current_stock,
+                    demand_priority_map=demand_priority_map
+                )
+                
                 # —— 在处理 GAP 之前，给所有需求行初始化 pipeline 相关字段 —— 
                 for d in demand_rows:
                     d.setdefault('deploy_qty_with_plan_order', 0)
@@ -2195,108 +2207,111 @@ def main(
                     d.setdefault('deploy_from_future_production', 0)
 
                 # —— 自补货第二轮：用 pipeline supply 覆盖剩余 gap（所有节点都适用）——
+                # Vectorized pipeline allocation for self-rows
+                if demand_rows:
+                    ndr_df = pd.DataFrame(demand_rows).copy()
+                    ndr_df['idx'] = np.arange(len(ndr_df))
+                    # receiving resolution
+                    rec_arr = [r.get('from_location', r.get('receiving', loc)) for r in demand_rows]
+                    ndr_df['receiving'] = rec_arr
+                    ndr_df['is_self'] = ndr_df['receiving'] == loc
+                    ndr_df['priority'] = ndr_df['demand_element'].map(lambda x: demand_priority_map.get(x, 99))
+                    # adjusted qty from map
+                    ndr_df['adjusted_qty'] = ndr_df['idx'].map(lambda i: int(adjusted_qtys.get(i, int(ndr_df.loc[ndr_df['idx']==i, 'demand_qty'].iloc[0]))))
+                    # already allocated from inventory
+                    ndr_df['allocated_invcon'] = [int(r.get('deployed_qty_invCon', 0) or 0) for r in demand_rows]
+                    # existing plan cover
+                    ndr_df['plan_order_cover'] = [int(r.get('deploy_qty_with_plan_order', 0) or 0) for r in demand_rows]
+                    # raw gap for self rows
+                    self_df = ndr_df[ndr_df['is_self']].copy()
+                    if not self_df.empty:
+                        self_df['raw_gap'] = self_df['adjusted_qty'] - self_df['allocated_invcon'] - self_df['plan_order_cover']
+                        self_df['alloc_intrans'] = 0
+                        self_df['alloc_odi'] = 0
+                        self_df['alloc_future'] = 0
+                        # Pools
+                        node_key = (mat, loc)
+                        pool_in_transit = int(future_intransit.get(node_key, 0) or 0)
+                        pool_odi = int(open_deployment_inbound.get(node_key, 0) or 0)
+                        pool_future_production = int(future_production.get(node_key, 0) or 0)
+                        # Allocate sequentially by source, proportionally by raw_gap over ascending priority
+                        def _alloc_source(df_src, pool, col_name):
+                            if pool <= 0 or df_src.empty:
+                                return df_src, 0
+                            df_rem = df_src[df_src['raw_gap'] > 0].sort_values('priority')
+                            if df_rem.empty:
+                                return df_src, 0
+                            total_gap = float(df_rem['raw_gap'].sum())
+                            if total_gap <= 0:
+                                return df_src, 0
+                            weights = df_rem['raw_gap'].to_numpy(dtype=float) / total_gap
+                            shares = np.floor(pool * weights).astype(np.int64)
+                            # clip to raw_gap
+                            shares = np.minimum(shares, df_rem['raw_gap'].to_numpy(dtype=np.int64))
+                            # write back
+                            df_src.loc[df_rem.index, col_name] = shares
+                            df_src.loc[df_rem.index, 'raw_gap'] = (df_rem['raw_gap'].to_numpy(dtype=np.int64) - shares)
+                            return df_src, int(shares.sum())
+                        # in-transit
+                        self_df, used_intrans = _alloc_source(self_df, pool_in_transit, 'alloc_intrans')
+                        pool_in_transit -= used_intrans
+                        # ODI
+                        self_df, used_odi = _alloc_source(self_df, pool_odi, 'alloc_odi')
+                        pool_odi -= used_odi
+                        # future production
+                        self_df, used_future = _alloc_source(self_df, pool_future_production, 'alloc_future')
+                        pool_future_production -= used_future
+                        # update cover
+                        self_df['plan_order_cover'] = self_df['plan_order_cover'] + self_df['alloc_intrans'] + self_df['alloc_odi'] + self_df['alloc_future']
+                        # write back to demand_rows
+                        for row in self_df.itertuples(index=False):
+                            i = int(row.idx)
+                            demand_rows[i]['deploy_qty_with_plan_order'] = int(row.plan_order_cover)
+                            demand_rows[i]['deploy_from_in_transit'] = int(row.alloc_intrans)
+                            demand_rows[i]['deploy_from_open_deployment_inbound'] = int(row.alloc_odi)
+                            demand_rows[i]['deploy_from_future_production'] = int(row.alloc_future)
 
-                # 只考虑本节点自补货行：receiving == 本节点 loc
-                self_idx_list = []
-
-                for idx, d in enumerate(demand_rows):
-                    receiving = d.get('from_location', d.get('receiving', loc))
-                    if receiving == loc:
-                        self_idx_list.append(idx)
-
-                # 如果没有自补货需求，直接跳过 pipeline 逻辑
-                if self_idx_list:
-                    # 构造本节点自补可用的 pipeline 池
-                    node_key = (mat, loc)
-                    # ✅ 按你的要求：pipeline 用 future intransit，不动
-                    pool_in_transit = future_intransit.get(node_key, 0)
-                    pool_future_production = future_production.get(node_key, 0)
-                    pool_odi = open_deployment_inbound.get(node_key, 0)
-
-                    pipeline_pool_total = pool_in_transit + pool_odi + pool_future_production
-
-                    if pipeline_pool_total > 0:
-                        # 按优先级顺序，用 pipeline 覆盖自补货 gap
-                        self_idx_sorted = sorted(
-                            self_idx_list,
-                            key=lambda i: demand_priority_map.get(demand_rows[i]['demand_element'], 99)
-                        )
-
-                        for idx in self_idx_sorted:
-                            d = demand_rows[idx]
-                            adjusted_qty = adjusted_qtys.get(idx, d['demand_qty'])
-                            allocated_invcon = d.get('deployed_qty_invCon', 0)
-                            raw_gap = adjusted_qty - allocated_invcon
-
-                            if raw_gap <= 0:
-                                continue
-                            if pipeline_pool_total <= 0:
-                                break
-
-                            alloc = min(raw_gap, pipeline_pool_total)
-
-                            # 按 in_transit -> open_deployment_inbound -> future_production 顺序消耗
-                            alloc_intrans = min(alloc, pool_in_transit)
-                            pool_in_transit -= alloc_intrans
-
-                            remain1 = alloc - alloc_intrans
-                            alloc_odi = min(remain1, pool_odi)
-                            pool_odi -= alloc_odi
-
-                            remain2 = remain1 - alloc_odi
-                            alloc_future = min(remain2, pool_future_production)
-                            pool_future_production -= alloc_future
-
-                            pipeline_pool_total = pool_in_transit + pool_odi + pool_future_production
-
-                            d['deploy_qty_with_plan_order'] += alloc
-                            d['deploy_from_in_transit'] += alloc_intrans
-                            d['deploy_from_open_deployment_inbound'] += alloc_odi
-                            d['deploy_from_future_production'] += alloc_future
-
-
-                # 处理GAP和生成调拨计划
-                gap_count = 0
-                for i, d in enumerate(demand_rows):
-                    receiving = d.get('from_location', d.get('receiving', loc))
-                    is_cross_node = (loc != receiving)
-                    adjusted_qty = adjusted_qtys.get(i, d['demand_qty'])
-
-                    # 本地自补需求使用 pipeline cover（deploy_qty_with_plan_order）
-                    is_self_node = (receiving == loc)
-                    if is_self_node:
-                        plan_order_cover = d.get('deploy_qty_with_plan_order', 0)
-                    else:
-                        plan_order_cover = 0
-
-                    gap_qty = adjusted_qty - d.get('deployed_qty_invCon', 0) - plan_order_cover
-                    if gap_qty <= 0:
-                        continue
-
+                # 处理GAP和生成调拨计划（向量化）
+                # Compute gaps for all rows
+                if demand_rows:
+                    df_gap = pd.DataFrame(demand_rows).copy()
+                    df_gap['idx'] = np.arange(len(df_gap))
+                    df_gap['receiving'] = [r.get('from_location', r.get('receiving', loc)) for r in demand_rows]
+                    df_gap['is_self'] = df_gap['receiving'] == loc
+                    df_gap['priority'] = df_gap['demand_element'].map(lambda x: demand_priority_map.get(x, 99))
+                    df_gap['adjusted_qty'] = df_gap['idx'].map(lambda i: int(adjusted_qtys.get(i, int(df_gap.loc[df_gap['idx']==i, 'demand_qty'].iloc[0]))))
+                    df_gap['allocated_invcon'] = [int(r.get('deployed_qty_invCon', 0) or 0) for r in demand_rows]
+                    df_gap['plan_order_cover'] = [int(r.get('deploy_qty_with_plan_order', 0) or 0) for r in demand_rows]
+                    df_gap['gap_qty'] = df_gap['adjusted_qty'] - df_gap['allocated_invcon'] - df_gap['plan_order_cover']
+                    df_gap_pos = df_gap[df_gap['gap_qty'] > 0]
+                    # upstream once per node
                     up_loc = get_upstream(loc, mat, network, sim_date, active_network_cache=active_network_cache)
-                    gap_count += 1
-
-                    if up_loc:
-                        new_demand_element = f"net demand for {d['demand_element']}"
-                        up_gap_next.setdefault((mat, up_loc), []).append({
-                            'demand_element': new_demand_element,
-                            'planned_qty': gap_qty,
-                            'leadtime': d['leadtime'],
-                            'requirement_date': d.get('requirement_date', d['plan_deploy_date']),
-                            'location': up_loc,
-                            'from_location': loc,
-                            'orig_location': d.get('orig_location', d['location'])
-                        })
-                    
-                    unfulfilled_rows.append({
-                        'date': d['plan_deploy_date'],
-                        'sending': loc,
-                        'receiving': receiving,
-                        'demand_qty': d['demand_qty'],
-                        'demand_element': d['demand_element'],
-                        'unfulfilled_qty': gap_qty,
-                        'reason': "supply shortage"
-                    })
+                    if not df_gap_pos.empty:
+                        # unfulfilled log entries
+                        for row in df_gap_pos.itertuples(index=False):
+                            unfulfilled_rows.append({
+                                'date': row.plan_deploy_date,
+                                'sending': loc,
+                                'receiving': row.receiving,
+                                'demand_qty': row.demand_qty,
+                                'demand_element': row.demand_element,
+                                'unfulfilled_qty': int(row.gap_qty),
+                                'reason': "supply shortage"
+                            })
+                        # upstream gap routing
+                        if up_loc:
+                            for row in df_gap_pos.itertuples(index=False):
+                                new_demand_element = f"net demand for {row.demand_element}"
+                                req_dt = row.requirement_date if hasattr(row, 'requirement_date') and pd.notna(row.requirement_date) else row.plan_deploy_date
+                                up_gap_next.setdefault((mat, up_loc), []).append({
+                                    'demand_element': new_demand_element,
+                                    'planned_qty': int(row.gap_qty),
+                                    'leadtime': int(row.leadtime),
+                                    'requirement_date': req_dt,
+                                    'location': up_loc,
+                                    'from_location': loc,
+                                    'orig_location': row.orig_location if hasattr(row, 'orig_location') else row.location
+                                })
 
                         
                         # print(f"      🔼 需求缺口: {gap_qty} [{d['demand_element']}] → 上游 {up_loc} (is_cross_node: {is_cross_node}, adjusted_qty: {adjusted_qty})")
@@ -2305,6 +2320,50 @@ def main(
                     # print(f"      🟢 无需求缺口")
                 
                 # 生成调拨计划行
+                # 👉 Batch precompute lead time for this node (mat, loc)
+                # Compute sending location type once
+                sending_location_type = get_sending_location_type(
+                    material=str(mat),
+                    sending=str(loc),
+                    sim_date=sim_date,
+                    network_df=network,
+                    location_layer_map=config.get('LocationLayerMap', {})
+                )
+                # PTF/LSK for plant, constant per (material, sending)
+                ptf_val, lsk_val = _get_ptf_lsk(
+                    material=str(mat),
+                    site=str(loc),
+                    m4_mlcfg_df=config.get('M4_MaterialLocationLineCfg', pd.DataFrame()),
+                    cache=ptf_lsk_cache
+                )
+                # Build lead time map for unique receivings (cross-node only)
+                unique_receivings = set()
+                for d in demand_rows:
+                    rcv = d.get('from_location', d.get('receiving', loc))
+                    if rcv != loc:
+                        unique_receivings.add(str(rcv))
+                lt_map: Dict[tuple[str, str, str], int] = {}
+                if unique_receivings:
+                    for rcv in unique_receivings:
+                        # Base values from cache or df
+                        if lead_time_cache is not None:
+                            base_vals = lead_time_cache.get((str(loc), str(rcv)))
+                            if base_vals is None:
+                                PDT, GR, MCT = 0, 0, 0
+                            else:
+                                PDT, GR, MCT = base_vals
+                        else:
+                            row_lt = config['LeadTime'][(config['LeadTime']['sending'] == str(loc)) & (config['LeadTime']['receiving'] == str(rcv))]
+                            PDT = int(pd.to_numeric(row_lt['PDT'], errors='coerce').fillna(0).iloc[0]) if not row_lt.empty else 0
+                            GR  = int(pd.to_numeric(row_lt['GR'],  errors='coerce').fillna(0).iloc[0]) if not row_lt.empty else 0
+                            MCT = int(pd.to_numeric(row_lt['MCT'], errors='coerce').fillna(0).iloc[0]) if not row_lt.empty else 0
+                        if str(sending_location_type).lower() == 'plant':
+                            base_lt = max(int(MCT), int(PDT) + int(GR))
+                            leadtime_val = max(1, int(base_lt + int(ptf_val) + int(lsk_val) - 1))
+                        else:
+                            leadtime_val = max(1, int(int(PDT) + int(GR)))
+                        lt_map[(str(mat), str(loc), str(rcv))] = int(leadtime_val)
+
                 for i, d in enumerate(demand_rows):
                     receiving = d.get('from_location', d.get('receiving', loc))
                     
@@ -2318,25 +2377,8 @@ def main(
                         leadtime_for_row = 0
                     else:
                         planned_delivery_date = d.get('requirement_date', d['plan_deploy_date'])
-                        # 即时计算该行的 lead time：sending=loc, receiving=receiving
-                        sending_location_type = get_sending_location_type(
-                            material=str(mat),
-                            sending=str(loc),
-                            sim_date=sim_date,
-                            network_df=network,
-                            location_layer_map=config.get('LocationLayerMap', {})
-                        )
-                        lt_row, _ = determine_lead_time(
-                            sending=str(loc),
-                            receiving=str(receiving),
-                            location_type=str(sending_location_type),
-                            lead_time_df=config['LeadTime'],
-                            m4_mlcfg_df=config.get('M4_MaterialLocationLineCfg', pd.DataFrame()),
-                            material=str(mat),
-                            lead_time_cache=lead_time_cache,
-                            ptf_lsk_cache=ptf_lsk_cache
-                        )
-                        leadtime_for_row = int(lt_row)
+                        # Use precomputed lead time map
+                        leadtime_for_row = int(lt_map.get((str(mat), str(loc), str(receiving)), 1))
                     
                     plan_row = {
                         'date': d['plan_deploy_date'],

@@ -1,3 +1,36 @@
+# =============================================================
+# Module 5 多层级部署规划（说明与配置指引）
+#
+# 用途：在给定网络、需求、库存与产运数据下，按优先级与约束生成跨节点调拨计划。
+# 运行模式：
+# - 独立模式：通过 `--input/--output/--sim_start/--sim_end` 读写Excel。
+# - 集成模式：通过 `config_dict + orchestrator + current_date` 直接读取各模块输出。
+#
+# 关键配置表（列名以实际表为准）：
+# - `DeployConfig`：按 (material, sending) 维护 `moq`(最小订货量) 与 `rv`(重订量)、`lsk`/`day`（回顾节奏元数据）。
+#     影响：跨节点调运的需求量会按路径分组应用 MOQ/RV；自循环（sending=receiving）不应用MOQ/RV。
+# - `PushPullModel`：按 (material, sending) 维护 `model` ∈ {push, soft push, pull}。
+#     影响：当日非push需求完全满足且存在剩余库存时，push/soft-push会将剩余库存按下游安全库存权重下推；soft-push会先保留本节点当日安全库存。
+# - `LeadTime`：按 (sending, receiving) 维护 `PDT/GR/MCT`。
+#     影响：决定窗口与到货日；Plant口径为 `max(MCT, PDT+GR)+PTF+LSK-1`，DC为 `PDT+GR`。
+# - `M4_MaterialLocationLineCfg`：按 (material, location) 维护 `PTF/LSK`。
+#     影响：仅Plant计算口径需要；与Module3保持一致（以 sending 为 site）。
+# - `SafetyStock`：按 (material, location, date) 维护安全库存目标量。
+#     影响：在窗口末日(horizon_end)作为需求；push/soft-push按目标日的安全库存做权重分配。
+# - `DemandPriority`：维护 `demand_element -> priority`。
+#     影响：分配顺序（数值越小优先级越高）；若缺失会自动补齐 AO=1、normal=2、其他=9。
+# - `ReceivingSpace`：按 (receiving, date) 维护 `max_qty`（收货空间上限）。
+#     影响：对跨节点调运的当日到货按优先级+权重做二次限额；自我满足不受限额约束。
+# - `Network`：按 (material, location) 维护 `sourcing`（上游）。
+#     影响：用于窗口、路径与向上游传递缺口；不允许同一 (material, location) 存在多个 `sourcing`。
+# - `OrderLog`（集成模式自动从Module1日输出提取）：
+#     影响：AO/normal订单在 (sim_date, horizon_end] 作为需求参与分配。
+#
+# 使用建议：
+# - 保证 `Network/LeadTime/DeployConfig/PushPullModel/SafetyStock/ReceivingSpace` 一致且完备，避免缺口传递异常。
+# - 若开启 `push/soft-push`，请确保下游安全库存与lead time配置正确，否则可能导致分配偏差。
+# - 收货空间限额仅影响跨节点到货；如空间不足，将在 `UnfulfilledLog` 记录原因为 `space constraint`。
+# =============================================================
 #module 5
 import pandas as pd
 import numpy as np
@@ -9,7 +42,10 @@ from functools import lru_cache
 # ========= 集成数据加载函数 (新增) =========
 
 def _normalize_location(location_str) -> str:
-    """Normalize location string by padding with leading zeros to 4 digits"""
+    """
+    规范化地点编码：补齐为4位数字字符串。
+    作用：统一 `location/sending/receiving/sourcing` 字段格式，避免匹配失败。
+    """
     # Handle None and pandas NA
     if location_str is None or pd.isna(location_str):
         return ""
@@ -19,14 +55,20 @@ def _normalize_location(location_str) -> str:
         return str(location_str).zfill(4)
 
 def _normalize_material(material_str) -> str:
-    """Normalize material string"""
+    """
+    规范化物料编码为字符串。
+    作用：统一 `material` 字段格式，避免数值/字符串混用导致的合并分组问题。
+    """
     # Handle None and pandas NA
     if material_str is None or pd.isna(material_str):
         return ""
     return str(material_str)
 
 def _normalize_identifiers(df: pd.DataFrame) -> pd.DataFrame:
-    """Normalize identifier columns to string format with proper formatting"""
+    """
+    标识字段统一为字符串（并格式化地点字段）。
+    作用：确保配置与日志中的 `material/location/sending/receiving/sourcing` 可一致匹配。
+    """
     if df.empty:
         return df
     
@@ -54,14 +96,10 @@ def _normalize_identifiers(df: pd.DataFrame) -> pd.DataFrame:
 
 def load_module1_daily_shipment(module1_output_dir: str, current_date: pd.Timestamp) -> pd.DataFrame:
     """
-    从Module1输出加载当日发货数据
-    
-    Args:
-        module1_output_dir: Module1输出目录
-        current_date: 当前日期
-        
-    Returns:
-        pd.DataFrame: 当日发货数据 [date, material, location, quantity]
+    加载 Module1 当日发货数据（ShipmentLog）。
+    - 输入：目录与 `current_date`，自动读取 `module1_output_YYYYMMDD.xlsx`。
+    - 输出：`[date, material, location, quantity]`。
+    影响：用于当日可用库存与预测库存的扣减（对客发货）。
     """
     try:
         date_str = current_date.strftime('%Y%m%d')
@@ -91,9 +129,10 @@ def load_module1_daily_shipment(module1_output_dir: str, current_date: pd.Timest
 
 def load_module1_daily_orders(module1_output_dir: str, current_date: pd.Timestamp) -> pd.DataFrame:
     """
-    从Module1输出加载"当日版本"的订单日志（包含历史天生成但尚未来到期的订单 + 当天新生成）
-    仅按 requirement_date>=current_date 过滤，不按 simulation_date 过滤
-    返回列: [date, material, location, demand_type, quantity, simulation_date]
+    加载 Module1 当日订单池（OrderLog）。
+    - 选择：`requirement_date >= current_date`，不按 `simulation_date` 过滤。
+    - 输出列：`date, material, location, demand_type(AO/normal), quantity, simulation_date`。
+    影响：AO/normal订单参与当天窗口的需求分配与缺口传递。
     """
     cols = ['date', 'material', 'location', 'demand_type', 'quantity', 'simulation_date']
     try:
@@ -130,14 +169,10 @@ def load_module1_daily_orders(module1_output_dir: str, current_date: pd.Timestam
 
 def load_orchestrator_delivery_gr(orchestrator: object, current_date: pd.Timestamp) -> pd.DataFrame:
     """
-    从Orchestrator加载当日收货数据
-    
-    Args:
-        orchestrator: Orchestrator实例
-        current_date: 当前日期
-        
-    Returns:
-        pd.DataFrame: 当日收货数据 [date, material, receiving, quantity]
+    从 Orchestrator 加载当日收货（GR）视图。
+    - 列名映射：`location→receiving`, `gr_qty/received_qty→quantity`。
+    - 输出列：`date, material, receiving, quantity`。
+    影响：用于当日可用库存与预测库存的增加（收货入库）。
     """
     try:
         date_str = current_date.strftime('%Y-%m-%d')
@@ -179,14 +214,10 @@ def load_orchestrator_delivery_gr(orchestrator: object, current_date: pd.Timesta
 
 def load_orchestrator_open_deployment(orchestrator: object, current_date: pd.Timestamp) -> pd.DataFrame:
     """
-    从Orchestrator加载开放调拨数据
-    
-    Args:
-        orchestrator: Orchestrator实例
-        current_date: 当前日期
-        
-    Returns:
-        pd.DataFrame: 开放调拨数据 [material, sending, receiving, quantity]
+    从 Orchestrator 加载开放调拨（Open Deployment）视图。
+    - 列名映射：`location→sending`, `deployed_qty/planned_qty→quantity`。
+    - 输出列：`material, sending, receiving, quantity`。
+    影响：作为当日可用库存扣减（发送端）与 inbound 管道供给（接收端）。
     """
     try:
         date_str = current_date.strftime('%Y-%m-%d')
@@ -228,11 +259,10 @@ def load_orchestrator_open_deployment(orchestrator: object, current_date: pd.Tim
 
 def build_open_deployment_inbound(open_deployment_df: pd.DataFrame) -> dict[tuple[str, str], int]:
     """
-    从 open_deployment 明细构造 inbound 视图：
-    - 维度： (material, receiving)
-    - 过滤：sending != receiving（排除自循环）；deployed_qty/quantity > 0
-    - 汇总：sum(quantity)
-    返回：{(material, receiving): qty}
+    构造开放调拨的接收端视图（pipeline inbound）。
+    - 过滤：`sending != receiving` 且数量>0。
+    - 维度与汇总：`(material, receiving) -> sum(quantity)`。
+    影响：自补货的管道供给覆盖缺口时使用（不计入当日现货）。
     """
     if open_deployment_df is None or open_deployment_df.empty:
         return {}
@@ -270,16 +300,9 @@ def calculate_projected_inventory(
     open_deployment: dict
 ) -> dict:
     """
-    计算预测库存，用于gap计算和供应链规划
-    
-    Formula: projected_inventory = beginning_inventory + in_transit + delivery_gr + 
-             today_production + future_production - today_shipment - open_deployment
-    
-    Args:
-        各个库存维度的字典，键为(material, location)，值为数量
-        
-    Returns:
-        dict: 预测库存字典 {(material, location): quantity}
+    计算预测库存（用于缺口判断与规划）：
+    `beginning + in_transit + delivery_gr + today_production + future_production - today_shipment - open_deployment`。
+    影响：决定是否存在可用于满足需求的总供给能力（含未来/在途）。
     """
     all_keys = set()
     for d in [beginning_inventory, in_transit, delivery_gr, today_production_gr, 
@@ -309,12 +332,9 @@ def calculate_available_inventory(
     open_deployment_inbound: dict
 ) -> dict:
     """
-    计算当日真实可用库存（dynamic_soh），用于实际分配
-
-    现在约定：
-    dynamic_soh = beginning + delivery_gr + today_production_gr - open_deployment
-
-    open_deployment_inbound 不再计入当日现货，只作为 pipeline supply 使用
+    计算当日真实可用库存 `dynamic_soh`（用于实际分配）：
+    `beginning + delivery_gr + today_production_gr - open_deployment`。
+    说明：`open_deployment_inbound` 不计入当日现货，仅在自补的管道覆盖中使用。
     """
     all_keys = set()
     for d in [beginning_inventory, delivery_gr, today_production_gr,
@@ -337,6 +357,10 @@ def calculate_available_inventory(
 
 def get_upstream(location, material, network_df, sim_date, 
                  active_network_cache=None):
+    """
+    查找 (material, location) 在 `Network` 中的上游 `sourcing`（按有效期筛选）。
+    影响：用于确定窗口口径与向上游传递缺口。
+    """
     row = get_active_network(network_df, material, location, sim_date, cache=active_network_cache)
     if not row.empty:
         return row.iloc[0]['sourcing']
@@ -344,13 +368,10 @@ def get_upstream(location, material, network_df, sim_date,
 
 def apply_moq_rv(qty, moq, rv, is_cross_node=True):
     """
-    补货量小于moq补moq，否则向上取整到rv的倍数
-    
-    Args:
-        qty: 需求数量
-        moq: 最小订货量
-        rv: 重订量(Round Volume)
-        is_cross_node: 是否为跨节点调运。True=跨节点需要应用MOQ/RV，False=自循环不应用MOQ/RV
+    应用最小订货量/重订量（来自 `DeployConfig`）：
+    - 若自循环（非跨节点），直接返回原需求量。
+    - 若跨节点：`qty < moq → moq`，否则向上取整到 `rv` 的倍数。
+    影响：影响有效需求量与分配结果。
     """
     if qty <= 0:
         return 0
@@ -366,14 +387,10 @@ def apply_moq_rv(qty, moq, rv, is_cross_node=True):
 
 def apply_grouped_moq_rv(demand_rows, location):
     """
-    按调运路径分组应用MOQ/RV
-    
-    Args:
-        demand_rows: 需求行列表
-        location: 当前位置（sending）
-        
-    Returns:
-        dict: 调整后的 demand_row_index -> adjusted_qty 映射
+    按调运路径分组应用 MOQ/RV（来自 `DeployConfig`）：
+    - 分组维度：(material, sending, receiving, demand_element)
+    - 仅跨节点（sending != receiving）应用 MOQ/RV，自循环不应用。
+    影响：决定各优先级组的实际需求量，从而影响库存分配与缺口传递。
     """
     # 按 (material, sending, receiving, demand_element) 分组
     route_groups = {}
@@ -423,7 +440,11 @@ def apply_grouped_moq_rv(demand_rows, location):
     return adjusted_qtys
 
 def _build_ptf_lsk_cache(m4_mlcfg_df: pd.DataFrame | None) -> Dict[tuple[str, str], tuple[int, int]]:
-    """Build cache for PTF/LSK lookups - 15-20x faster than DataFrame filtering"""
+    """
+    PTF/LSK 缓存构建（性能优化）
+    用途：为 Plant 口径的 lead time 计算提供 `PTF/LSK`，来源表 `M4_MaterialLocationLineCfg`。
+    影响：若未维护对应 (material, location) 的 PTF/LSK，则默认 PTF=0、LSK=1，窗口可能缩短。
+    """
     cache = {}
     if m4_mlcfg_df is None or m4_mlcfg_df.empty:
         return cache
@@ -452,7 +473,11 @@ def _build_ptf_lsk_cache(m4_mlcfg_df: pd.DataFrame | None) -> Dict[tuple[str, st
 
 def _get_ptf_lsk(material: str, site: str, m4_mlcfg_df: pd.DataFrame | None, 
                  cache: Dict[tuple[str, str], tuple[int, int]] | None = None) -> tuple[int, int]:
-    """Get PTF/LSK with optional caching support"""
+    """
+    获取指定 (material, site=location) 的 `PTF/LSK`（支持缓存）。
+    来源：`M4_MaterialLocationLineCfg`。
+    影响：用于 Plant 口径的 lead time 计算，影响窗口与目标日。
+    """
     # Use cache if provided (15-20x faster)
     if cache is not None:
         return cache.get((str(material), str(site)), (0, 1))
@@ -479,7 +504,10 @@ def _get_ptf_lsk(material: str, site: str, m4_mlcfg_df: pd.DataFrame | None,
     return ptf, lsk
 
 def _build_lead_time_cache(lead_time_df: pd.DataFrame) -> Dict[tuple[str, str], tuple[int, int, int]]:
-    """Build cache for lead time base values (PDT, GR, MCT) - 10-15x faster"""
+    """
+    构建 `LeadTime` 基础参数缓存（PDT/GR/MCT）。
+    影响：显著提升多次查询性能；内容缺失将导致窗口计算回退。
+    """
     cache = {}
     if lead_time_df.empty:
         return cache
@@ -509,11 +537,10 @@ def determine_lead_time(
     ptf_lsk_cache: Dict[tuple[str, str], tuple[int, int]] | None = None
 ) -> tuple[int, str]:
     """
-    Plant: lead_time = max(MCT, PDT+GR) + PTF + LSK - 1
-    DC:    lead_time = PDT + GR
-    PTF/LSK 来源: M4_MaterialLocationLineCfg（按 material+sending 匹配）
-    
-    With caching: 10-15x faster when cache hit rate is high
+    计算 (sending→receiving) 的到货提前期：
+    - Plant：`lead_time = max(MCT, PDT+GR) + PTF + LSK - 1`（PTF/LSK 来自 `M4_MaterialLocationLineCfg`，按 (material, sending)）
+    - DC：`lead_time = PDT + GR`
+    影响：窗口与到货日、push/soft-push安全库存目标日均依赖此计算；缺失时回退为 1 天。
     """
     # Use cache if provided (10-15x faster)
     if lead_time_cache is not None:
@@ -565,10 +592,11 @@ def get_sending_location_type(
     location_layer_map: dict
 ) -> str:
     """
-    与 Module3 一致的口径：
-    1) 先查 network 中 (material, location=sending) 活动行，若存在则用其 location_type
-    2) 若不存在且 sending 是自动识别的最上游（layer=0），则视为 Plant
+    识别发送端类型（与 Module3 一致）：
+    1) `Network` 有活动行则使用其 `location_type`
+    2) 若为根层（`layer=0`），视为 Plant
     3) 否则默认 DC
+    影响：决定 lead time 计算口径（Plant/DC）。
     """
     if not sending or pd.isna(sending) or str(sending).strip() == "":
         return 'DC'
@@ -585,6 +613,10 @@ def get_sending_location_type(
 
 # === 用 module3 的版本替换 ===
 def assign_location_layers(network_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    根据 `Network` 的 `sourcing→location` 关系，计算每个 `location` 的层级（layer）。
+    影响：主流程按层级从下游到上游推进分配与缺口传递。
+    """
     from collections import defaultdict, deque
     if network_df.empty:
         return pd.DataFrame({'location': [], 'layer': []})
@@ -639,7 +671,10 @@ def assign_location_layers(network_df: pd.DataFrame) -> pd.DataFrame:
     return layer_df
 
 def _build_active_network_cache(network_df: pd.DataFrame) -> Dict[tuple[str, str, pd.Timestamp, pd.Timestamp], pd.Series]:
-    """Build cache for active network lookups - 20-30x faster than DataFrame filtering"""
+    """
+    构建 `Network` 活动行缓存（按 `eff_from/eff_to` 有效期）。
+    影响：显著提升查找上游速度；缺失时回退至DataFrame过滤。
+    """
     cache = {}
     if network_df.empty:
         return cache
@@ -661,7 +696,10 @@ def _build_active_network_cache(network_df: pd.DataFrame) -> Dict[tuple[str, str
 
 def get_active_network(network_df, material, location, sim_date, 
                       cache: Dict[tuple[str, str, pd.Timestamp, pd.Timestamp], pd.Series] | None = None):
-    """Get active network with optional caching support - 20-30x faster with cache"""
+    """
+    获取 (material, location) 在 `sim_date` 的活动 `Network` 行（支持缓存）。
+    影响：用于确定上游与路径，驱动窗口与缺口传递。
+    """
     # Use cache if provided
     if cache is not None:
         # Find matching entries in cache
@@ -688,6 +726,10 @@ def get_active_network(network_df, material, location, sim_date,
     return rows
 
 def is_review_day(dt, lsk, day):
+    """
+    判断是否为回顾日（daily/weekly/monthly）。
+    配置：`lsk/day` 来源 `DeployConfig`；仅在需要时参考，不直接控制窗口。
+    """
     if lsk == 'daily':
         return True
     if lsk == 'weekly':
@@ -697,6 +739,10 @@ def is_review_day(dt, lsk, day):
     raise ValueError(f"Unknown LSK: {lsk}")
 
 def compute_horizon(dt, lsk, day):
+    """
+    计算从回顾日至下次回顾日之间的窗口结束日。
+    说明：本模块窗口统一由 `determine_lead_time` 控制，此函数仅保留兼容用途。
+    """
     if lsk == 'daily':
         return dt, dt
     if lsk == 'weekly':
@@ -732,17 +778,12 @@ def load_integrated_config(
     current_date: pd.Timestamp
 ) -> dict:
     """
-    加载集成配置数据，替代原来的load_config
-    
-    Args:
-        config_dict: 配置数据字典
-        module1_output_dir: Module1输出目录
-        module4_output_path: Module4输出文件路径
-        orchestrator: Orchestrator实例
-        current_date: 当前日期
-        
-    Returns:
-        dict: 集成配置数据
+    加载集成配置数据（替代 `load_config`）：
+    - 静态表：`SafetyStock/Network/LeadTime/DemandPriority/PushPullModel/DeployConfig`
+    - 当日数据：从 Module1 日输出读取 `SupplyDemandLog/OrderLog/TodayShipment`
+    - 动态数据：从 orchestrator 读取 `BeginningInventory/InTransit/DeliveryGR/OpenDeployment/ReceivingSpace`
+    - 生产：优先读取 orchestrator 当日历史生产GR（避免重复），若无则回退至 Module4 `ProductionPlan`
+    影响：决定 `Module5` 当日库存基线与需求池、在途与开放调拨，以及后续分配与缺口传递的依据。
     """
     config = {}
     validation_log = []
@@ -915,6 +956,12 @@ def load_integrated_config(
     return config
 
 def load_config(input_path: str):
+    """
+    独立模式读取Excel配置：
+    - 必需工作表：`SupplyDemandLog/ProductionPlan/InventoryLog/InTransit/SafetyStock/Network/PushPullModel/ReceivingSpace/LeadTime/DemandPriority/DeployConfig`
+    - 自动补充与日期类型转换，并统一标识字符串格式。
+    影响：作为独立模式的数据来源与校验基础。
+    """
     required_sheets = [
         'SupplyDemandLog', 'ProductionPlan', 'InventoryLog', 'InTransit', 'SafetyStock',
         'Network', 'PushPullModel', 'ReceivingSpace', 'LeadTime',
@@ -962,6 +1009,13 @@ def load_config(input_path: str):
     return config
 
 def validate_config_before_run(config, validation_log):
+    """
+    运行前配置校验与自动补充：
+    - `Network` 不允许同一 (material, location) 多个 `sourcing`
+    - 缺失 `LeadTime/PushPullModel` 的必要行会记录校验项
+    - `DemandPriority` 自动补齐 AO=1、normal=2、其他=9
+    影响：保证主流程分配顺序与路径、窗口可用。
+    """
     deploy_cfg = config['DeployConfig']
     leadtime_df = config['LeadTime']
     pushpull = config['PushPullModel']
@@ -1026,19 +1080,11 @@ def validate_config_before_run(config, validation_log):
 def collect_node_demands(material, location, sim_date, config, up_gap_buffer,
                          ptf_lsk_cache=None, lead_time_cache=None, active_network_cache=None):
     """
-    对齐规则：
-    - horizon 统一来自 determine_lead_time 口径：
-        * 有上游：horizon = determine_lead_time(upstream->location)
-        * 无上游（顶层自补）：horizon = max(MCT, PDT+GR) + PTF + LSK - 1
-    - horizon_end = sim_date + horizon
-    - 选择窗口：
-        * AO/normal（订单，来自 OrderLog）：date ∈ (sim_date, horizon_end]
-        * forecast（来自 SupplyDemandLog）：date ∈ [sim_date, horizon_end]
-        * safety：取 horizon_end 当天的目标量
-        * 其余/净需求传递（net demand for xx 等）：date ∈ [sim_date, horizon_end]
-    - 行级 leadtime：
-        * 有上游：= horizon（同一套口径）
-        * 无上游：= 0
+    收集节点在当天窗口内的需求：
+    - 窗口：统一由 `determine_lead_time` 决定；无上游按 Plant 公式。
+    - 需求来源：`SupplyDemandLog`（forecast/others）、`SafetyStock`（仅 horizon_end 当天）、`OrderLog`（AO/normal）、上游 `up_gap_buffer`（净需求）。
+    - 行级 `leadtime`：跨节点使用统一窗口值，自补货为 0。
+    影响：决定后续库存分配、缺口生成与向上游传递。
     """
     import pandas as pd
     from datetime import timedelta
@@ -1235,13 +1281,11 @@ def push_softpush_allocation(
     ptf_lsk_cache=None, lead_time_cache=None
 ):
     """
-    对 push / soft-push 节点，把真正的剩余库存按下游 safety 权重分配为补货计划行。
-    修复点：
-      1) 本节点当日若存在未满足的非 push 需求（含自满足 & 跨节点），则不触发 push
-      2) 已分配库存：当日、非 push 行（含自满足）都会扣减，避免误判“剩余”
-      3) receiving 端安全库存按 (sim_date + leadtime) 取值
-      4) 若下游 safety 总和为 0 或无下游，则不分配
-      5) 最大余数法分配，消灭向下取整尾差
+    push / soft-push 补货分配（`PushPullModel`）：
+    - 触发前提：当日所有非push需求均已满足且仍有剩余 `dynamic_soh`。
+    - soft-push：先保留本节点当日安全库存，再下推；push：全部可下推。
+    - 权重：下游安全库存以 (sim_date + leadtime) 目标日为权重，最大余数法分配尾差。
+    影响：可能将本节点剩余库存在当日直接转为跨节点到货，后续仍受 `ReceivingSpace` 二次限额控制。
     """
     import pandas as pd
     import numpy as np
@@ -1518,6 +1562,10 @@ def apply_receiving_space_quota(deployment_plan_rows, receiving_space, sim_date,
     return df, unfulfilled
 
 def log_outputs(output_path: str, outputs: Dict[str, pd.DataFrame]):
+    """
+    将结果表写入Excel：`DeploymentPlan/UnfulfilledLog/StockOnHandLog/Validation`。
+    说明：输出前统一标识字段格式，确保后续分析一致性。
+    """
     with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
         for sheet, df in outputs.items():
             if df.empty:
@@ -1543,25 +1591,10 @@ def main(
     current_date: str = None
 ):
     """
-    Module 5: 多层级部署规划模块
-    
-    支持两种运行模式:
-    1. 独立模式: 传入input_path, output_path, sim_start, sim_end
-    2. 集成模式: 传入config_dict, module1_output_dir, module4_output_path, orchestrator, current_date
-    
-    Args:
-        # 独立模式参数
-        input_path: 输入配置文件路径
-        output_path: 输出文件路径 
-        sim_start: 仿真开始日期
-        sim_end: 仿真结束日期
-        
-        # 集成模式参数
-        config_dict: 配置数据字典
-        module1_output_dir: Module1输出目录
-        module4_output_path: Module4输出文件路径
-        orchestrator: Orchestrator实例
-        current_date: 当前日期(单日运行时)
+    Module 5 主入口：多层级部署规划。
+    - 独立模式：使用Excel；集成模式：使用各模块/Orchestrator视图。
+    - 配置影响：见文件头部说明，各表直接影响窗口、分配、push行为与空间限额。
+    输出：写入Excel并返回数据帧，供集成与分析使用。
     """
     # 判断运行模式
     if config_dict is not None:

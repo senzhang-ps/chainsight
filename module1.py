@@ -2,10 +2,11 @@ import pandas as pd
 import numpy as np
 from scipy. stats import truncnorm
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
-from typing import Optional, Tuple, List, Dict
+from typing import Optional, Tuple, List, Dict, Any
 import time
 import os
 import re
+import pickle
 
 # ----------- 0.  CONSTANTS AND CONFIGURATION -----------
 
@@ -18,7 +19,7 @@ DEFAULT_MAX_ADVANCE_DAYS = 10
 # - parallel_max_workers：并发工作进程/线程数（None表示自动：CPU核心数）
 DEFAULT_USE_PARALLEL_AO_CONSUME = True
 DEFAULT_USE_PARALLEL_FILE_LOAD = True
-DEFAULT_PARALLEL_MAX_WORKERS: Optional[int] = None
+DEFAULT_PARALLEL_MAX_WORKERS: Optional[int] = 8  # 并发工作进程/线程数（None表示自动：CPU核心数）
 DEFAULT_ERROR_LOG_PATH: Optional[str] = None  # 异常日志输出路径（txt），为空则不写盘
 DEFAULT_USE_PARALLEL_NORMAL_CONSUME: Optional[bool] = None  # Normal并行开关（None表示继承AO并行开关）
 
@@ -231,6 +232,61 @@ def expand_forecast_to_days_integer_split(demand_weekly, start_date, num_weeks, 
     # 确保标识符字段为字符串格式
     return _normalize_identifiers(result_df)
 
+# ----------- Helper: Top-level parallel workers for Windows spawn -----------
+def _consume_ao_for_ml_worker(args: Tuple[pd.DataFrame, pd.DataFrame, np.ndarray, str, str]) -> pd.DataFrame:
+    ml_orders, ml_forecast, offsets_local, mat, loc = args
+    if ml_orders.empty or ml_forecast.empty:
+        return pd.DataFrame(columns=['material','location','date','new_quantity'])
+    ml_forecast = ml_forecast.copy()
+    for r in ml_orders.itertuples():
+        if r.quantity <= 0:
+            continue
+        remaining = int(r.quantity)
+        for od in offsets_local:
+            if remaining <= 0:
+                break
+            d = pd.to_datetime(r.date) + pd.to_timedelta(int(od), unit='D')
+            idxs = ml_forecast.index[ml_forecast['date'] == d]
+            if len(idxs) == 0:
+                continue
+            idx = idxs[0]
+            avail = int(ml_forecast.at[idx, 'quantity'])
+            take = min(avail, remaining)
+            ml_forecast.at[idx, 'quantity'] = avail - take
+            remaining -= take
+    out = ml_forecast[['date','quantity']].copy()
+    out['material'] = mat
+    out['location'] = loc
+    out = out.rename(columns={'quantity':'new_quantity'})
+    return out[['material','location','date','new_quantity']]
+
+def _consume_normal_for_ml_worker(args: Tuple[pd.DataFrame, pd.DataFrame, np.ndarray, str, str]) -> pd.DataFrame:
+    ml_orders, ml_forecast, offsets_local, mat, loc = args
+    if ml_orders.empty or ml_forecast.empty:
+        return pd.DataFrame(columns=['material','location','date','new_quantity'])
+    ml_forecast = ml_forecast.copy()
+    for r in ml_orders.itertuples():
+        if r.quantity <= 0:
+            continue
+        remaining = int(r.quantity)
+        for od in offsets_local:
+            if remaining <= 0:
+                break
+            d = pd.to_datetime(r.date) + pd.to_timedelta(int(od), unit='D')
+            idxs = ml_forecast.index[ml_forecast['date'] == d]
+            if len(idxs) == 0:
+                continue
+            idx = idxs[0]
+            avail = int(ml_forecast.at[idx, 'quantity'])
+            take = min(avail, remaining)
+            ml_forecast.at[idx, 'quantity'] = avail - take
+            remaining -= take
+    out = ml_forecast[['date','quantity']].copy()
+    out['material'] = mat
+    out['location'] = loc
+    out = out.rename(columns={'quantity':'new_quantity'})
+    return out[['material','location','date','new_quantity']]
+
 # ----------- 5. DAILY ORDER GENERATION -----------
 def generate_daily_orders(sim_date, original_forecast, current_forecast, ao_config, order_calendar, forecast_error):
     """
@@ -371,56 +427,59 @@ def generate_daily_orders(sim_date, original_forecast, current_forecast, ao_conf
             # 简化中文说明：
             # - 风险提示：如果不同分组之间存在共享日期行，合并补丁时需确保不产生负数；本实现对每个ML独立处理后再安全合并。
 
-            def _consume_ao_for_ml(args: Tuple[pd.DataFrame, pd.DataFrame, np.ndarray, str, str]) -> pd.DataFrame:
-                # 子进程纯函数：在单一(物料,地点)下消费AO，返回(date, material, location, new_quantity)补丁
-                ml_orders, ml_forecast, offsets_local, mat, loc = args
-                if ml_orders.empty or ml_forecast.empty:
-                    return pd.DataFrame(columns=['material','location','date','new_quantity'])
-                # 局部窗口视图
-                ml_forecast = ml_forecast.copy()
-                for r in ml_orders.itertuples():
-                    if r.quantity <= 0:
-                        continue
-                    remaining = int(r.quantity)
-                    for od in offsets_local:
-                        if remaining <= 0:
-                            break
-                        d = pd.to_datetime(r.date) + pd.to_timedelta(int(od), unit='D')
-                        idxs = ml_forecast.index[ml_forecast['date'] == d]
-                        if len(idxs) == 0:
-                            continue
-                        idx = idxs[0]
-                        avail = int(ml_forecast.at[idx, 'quantity'])
-                        take = min(avail, remaining)
-                        ml_forecast.at[idx, 'quantity'] = avail - take
-                        remaining -= take
-                # 输出补丁
-                out = ml_forecast[['date','quantity']].copy()
-                out['material'] = mat
-                out['location'] = loc
-                out = out.rename(columns={'quantity':'new_quantity'})
-                return out[['material','location','date','new_quantity']]
+            # 使用顶层worker，避免Windows下闭包函数的pickle问题
 
             # 组装任务（每个ML一个任务）
             tasks: List[Tuple[pd.DataFrame, pd.DataFrame, np.ndarray, str, str]] = []
+            bad_pickle_tasks_info: List[Dict[str, Any]] = []
             for (mat, loc), grp in ao_consume.groupby(['material','location']):
                 ml_mask = (consumed_forecast['material'] == mat) & (consumed_forecast['location'] == loc)
                 ml_forecast = consumed_forecast.loc[ml_mask, ['date','quantity']].copy()
                 if ml_forecast.empty:
                     continue
-                tasks.append((grp[['date','quantity','advance_days','simulation_date']], ml_forecast, offsets, mat, loc))
+                sample = (grp[['date','quantity','advance_days','simulation_date']], ml_forecast, offsets, mat, loc)
+                try:
+                    pickle.dumps(sample)
+                    tasks.append(sample)
+                except Exception as e:
+                    # Collect minimal diagnostics
+                    def df_info(df: pd.DataFrame):
+                        return {
+                            'shape': df.shape,
+                            'dtypes': {c: str(dt) for c, dt in df.dtypes.items()},
+                            'object_cols': [c for c, dt in df.dtypes.items() if str(dt) == 'object']
+                        }
+                    bad_pickle_tasks_info.append({
+                        'ml_key': (mat, loc),
+                        'orders_info': df_info(grp[['date','quantity','advance_days','simulation_date']]),
+                        'forecast_info': df_info(ml_forecast),
+                        'error': str(e)
+                    })
+            if bad_pickle_tasks_info:
+                print(f"[M1][AO] 发现不可pickle的任务样本: {len(bad_pickle_tasks_info)}（将跳过并记录）")
+                for i, info in enumerate(bad_pickle_tasks_info[:3], 1):
+                    print(f"[M1][AO] 不可pickle样本#{i} ML={info['ml_key']} orders_dtypes={info['orders_info']['dtypes']} forecast_dtypes={info['forecast_info']['dtypes']} err={info['error']}")
 
             patches: List[pd.DataFrame] = []
-            with ProcessPoolExecutor(max_workers=max_workers_cfg) as ex:
-                futures = [ex.submit(_consume_ao_for_ml, t) for t in tasks]
-                for f in as_completed(futures):
-                    try:
-                        res = f.result()
-                        if res is not None and not res.empty:
-                            patches.append(res)
-                    except Exception:
-                        # 并行子任务异常时记录日志并忽略，保持稳健（输出与串行可能不同；建议关闭并行）
-                        _append_error_log('[AO并行] 子任务异常：某个物料-地点的AO消耗未应用，建议检查数据或关闭并行')
+            parallel_failures = 0
+            try:
+                with ProcessPoolExecutor(max_workers=max_workers_cfg) as ex:
+                    futures = [ex.submit(_consume_ao_for_ml_worker, t) for t in tasks]
+                    for f in as_completed(futures):
+                        try:
+                            res = f.result()
+                            if res is not None and not res.empty:
+                                patches.append(res)
+                        except Exception:
+                            # 并行子任务异常时记录日志并忽略，保持稳健（输出与串行可能不同；建议关闭并行）
+                            parallel_failures += 1
+                            print('[M1] AO并行子任务失败：某些ML未应用消耗补丁（建议检查或关闭并行）')
+                            _append_error_log('[AO并行] 子任务异常：某个物料-地点的AO消耗未应用，建议检查数据或关闭并行')
+            except Exception:
+                # 执行器级失败
+                parallel_failures += 1
+                print('[M1] AO并行执行器失败：已跳过并行应用（建议检查或关闭并行）')
+                _append_error_log('[AO并行] 执行器失败：已跳过并行应用，建议检查或关闭并行')
 
             if patches:
                 patch_df = pd.concat(patches, ignore_index=True)
@@ -429,12 +488,16 @@ def generate_daily_orders(sim_date, original_forecast, current_forecast, ao_conf
                 cf = consumed_forecast.merge(
                     patch_df, on=key_cols, how='left'
                 )
+                # 安全数值转换：允许 new_quantity 中出现 NA/inf，先转为数值并用旧值兜底
+                cf['new_quantity'] = pd.to_numeric(cf['new_quantity'], errors='coerce')
                 cf['quantity'] = np.where(
                     cf['new_quantity'].notna(),
-                    np.maximum(0, cf['new_quantity'].astype(int)),
-                    cf['quantity'].astype(int)
+                    np.maximum(0, cf['new_quantity'].fillna(0)).astype(int),
+                    pd.to_numeric(cf['quantity'], errors='coerce').fillna(0).astype(int)
                 )
                 consumed_forecast = cf[['material','location','date','quantity']]
+            if parallel_failures > 0:
+                print(f"[M1] AO并行有{parallel_failures}个失败事件，部分补丁可能未应用（建议检查或关闭并行）")
             # 并行路径计时打印（与串行一致的可读性）
             print(f"[M1] AO消耗完成，耗时: {time.perf_counter()-t3:.3f}s")
             # 若无补丁或并行失败，保持原consumed_forecast不变
@@ -477,64 +540,71 @@ def generate_daily_orders(sim_date, original_forecast, current_forecast, ao_conf
 
         if use_parallel_normal:
             # 子进程函数：在单一(物料,地点)下消费Normal订单，返回(date, material, location, new_quantity)补丁
-            def _consume_normal_for_ml(args: Tuple[pd.DataFrame, pd.DataFrame, np.ndarray, str, str]) -> pd.DataFrame:
-                ml_orders, ml_forecast, offsets_local, mat, loc = args
-                if ml_orders.empty or ml_forecast.empty:
-                    return pd.DataFrame(columns=['material','location','date','new_quantity'])
-                ml_forecast = ml_forecast.copy()
-                # Normal订单在该窗口内贪婪扣减（与AO一致）
-                for r in ml_orders.itertuples():
-                    if r.quantity <= 0:
-                        continue
-                    remaining = int(r.quantity)
-                    for od in offsets_local:
-                        if remaining <= 0:
-                            break
-                        d = pd.to_datetime(r.date) + pd.to_timedelta(int(od), unit='D')
-                        idxs = ml_forecast.index[ml_forecast['date'] == d]
-                        if len(idxs) == 0:
-                            continue
-                        idx = idxs[0]
-                        avail = int(ml_forecast.at[idx, 'quantity'])
-                        take = min(avail, remaining)
-                        ml_forecast.at[idx, 'quantity'] = avail - take
-                        remaining -= take
-                out = ml_forecast[['date','quantity']].copy()
-                out['material'] = mat
-                out['location'] = loc
-                out = out.rename(columns={'quantity':'new_quantity'})
-                return out[['material','location','date','new_quantity']]
+            # 使用顶层worker，避免Windows下闭包函数的pickle问题
 
             # 组装任务：每个(物料,地点)为一个任务
             tasks_n: List[Tuple[pd.DataFrame, pd.DataFrame, np.ndarray, str, str]] = []
+            bad_pickle_tasks_n_info: List[Dict[str, Any]] = []
             for (mat, loc), grp in normal_consume.groupby(['material','location']):
                 ml_mask = (consumed_forecast['material'] == mat) & (consumed_forecast['location'] == loc)
                 ml_forecast = consumed_forecast.loc[ml_mask, ['date','quantity']].copy()
                 if ml_forecast.empty:
                     continue
-                tasks_n.append((grp[['date','quantity','simulation_date']], ml_forecast, offsets_n, mat, loc))
+                sample = (grp[['date','quantity','simulation_date']], ml_forecast, offsets_n, mat, loc)
+                try:
+                    pickle.dumps(sample)
+                    tasks_n.append(sample)
+                except Exception as e:
+                    def df_info(df: pd.DataFrame):
+                        return {
+                            'shape': df.shape,
+                            'dtypes': {c: str(dt) for c, dt in df.dtypes.items()},
+                            'object_cols': [c for c, dt in df.dtypes.items() if str(dt) == 'object']
+                        }
+                    bad_pickle_tasks_n_info.append({
+                        'ml_key': (mat, loc),
+                        'orders_info': df_info(grp[['date','quantity','simulation_date']]),
+                        'forecast_info': df_info(ml_forecast),
+                        'error': str(e)
+                    })
+            if bad_pickle_tasks_n_info:
+                print(f"[M1][Normal] 发现不可pickle的任务样本: {len(bad_pickle_tasks_n_info)}（将跳过并记录）")
+                for i, info in enumerate(bad_pickle_tasks_n_info[:3], 1):
+                    print(f"[M1][Normal] 不可pickle样本#{i} ML={info['ml_key']} orders_dtypes={info['orders_info']['dtypes']} forecast_dtypes={info['forecast_info']['dtypes']} err={info['error']}")
 
             patches_n: List[pd.DataFrame] = []
-            with ProcessPoolExecutor(max_workers=max_workers_cfg) as ex:
-                futures = [ex.submit(_consume_normal_for_ml, t) for t in tasks_n]
-                for f in as_completed(futures):
-                    try:
-                        res = f.result()
-                        if res is not None and not res.empty:
-                            patches_n.append(res)
-                    except Exception:
-                        _append_error_log('[Normal并行] 子任务异常：某个物料-地点的Normal消耗未应用，建议检查数据或关闭并行')
+            parallel_failures_n = 0
+            try:
+                with ProcessPoolExecutor(max_workers=max_workers_cfg) as ex:
+                    futures = [ex.submit(_consume_normal_for_ml_worker, t) for t in tasks_n]
+                    for f in as_completed(futures):
+                        try:
+                            res = f.result()
+                            if res is not None and not res.empty:
+                                patches_n.append(res)
+                        except Exception:
+                            parallel_failures_n += 1
+                            print('[M1] Normal并行子任务失败：某些ML未应用消耗补丁（建议检查或关闭并行）')
+                            _append_error_log('[Normal并行] 子任务异常：某个物料-地点的Normal消耗未应用，建议检查数据或关闭并行')
+            except Exception:
+                parallel_failures_n += 1
+                print('[M1] Normal并行执行器失败：已跳过并行应用（建议检查或关闭并行）')
+                _append_error_log('[Normal并行] 执行器失败：已跳过并行应用，建议检查或关闭并行')
 
             if patches_n:
                 patch_df_n = pd.concat(patches_n, ignore_index=True)
                 key_cols = ['material','location','date']
                 cf_n = consumed_forecast.merge(patch_df_n, on=key_cols, how='left')
+                # 安全数值转换：允许 new_quantity 中出现 NA/inf，先转为数值并用旧值兜底
+                cf_n['new_quantity'] = pd.to_numeric(cf_n['new_quantity'], errors='coerce')
                 cf_n['quantity'] = np.where(
                     cf_n['new_quantity'].notna(),
-                    np.maximum(0, cf_n['new_quantity'].astype(int)),
-                    cf_n['quantity'].astype(int)
+                    np.maximum(0, cf_n['new_quantity'].fillna(0)).astype(int),
+                    pd.to_numeric(cf_n['quantity'], errors='coerce').fillna(0).astype(int)
                 )
                 consumed_forecast = cf_n[['material','location','date','quantity']]
+            if parallel_failures_n > 0:
+                print(f"[M1] Normal并行有{parallel_failures_n}个失败事件，部分补丁可能未应用（建议检查或关闭并行）")
             print(f"[M1] Normal消耗完成（并行），耗时: {time.perf_counter()-t4:.3f}s")
         else:
             # 串行路径：与 AO 一致的贪婪窗口顺序

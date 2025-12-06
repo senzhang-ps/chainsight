@@ -2,6 +2,9 @@ import pandas as pd
 import numpy as np
 import os
 from typing import Dict, Tuple, List
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
+import time
 from collections import defaultdict, deque
 from datetime import datetime, timedelta
 from functools import lru_cache
@@ -123,6 +126,7 @@ def load_module1_daily_outputs(module1_output_dir: str, simulation_date: pd.Time
                   未来是否纳入需求由 M3 在计算前再筛选（只取 date > sim_date）。
     """
     try:
+        _t_func = time.perf_counter()
         date_str = simulation_date.strftime('%Y%m%d')
         f1 = os.path.join(module1_output_dir, f"module1_output_{date_str}.xlsx")
         f2 = os.path.join(module1_output_dir, f"output_simulation_{date_str}.xlsx")
@@ -167,6 +171,7 @@ def load_module1_daily_outputs(module1_output_dir: str, simulation_date: pd.Time
         module1_data['supply_demand_df'] = sdl
         module1_data['shipment_df'] = shp
         module1_data['order_df'] = odl
+        print(f"[M3] load_module1_daily_outputs total: {time.perf_counter()-_t_func:.3f}s for {simulation_date.date()}")
         return module1_data
 
     except Exception as e:
@@ -183,6 +188,7 @@ def assign_location_layers(network_df: pd.DataFrame) -> pd.DataFrame:
     Returns:
         DataFrame: 包含location和对应layer的映射关系
     """
+    _t_func = time.perf_counter()
     if network_df.empty:
         return pd.DataFrame({'location': [], 'layer': []})
         
@@ -275,6 +281,7 @@ def assign_location_layers(network_df: pd.DataFrame) -> pd.DataFrame:
     # print(f"  ✅ 层级分配完成，共 {len(layer_df)} 个地点")
     # print(f"  层级范围: {layer_df['layer'].min()} - {layer_df['layer'].max()}")
     
+    print(f"[M3] assign_location_layers total: {time.perf_counter()-_t_func:.3f}s, locations={len(layer_df)}")
     return layer_df
 
 # === 新增：放在 assign_location_layers 之后 ===
@@ -798,6 +805,7 @@ def run_mrp_layered_simulation_daily(
     Returns:
         pd.DataFrame: 当日净需求记录
     """
+    _t_func = time.perf_counter()
     if network_df.empty:
         print(f"Warning: Empty network configuration for date {sim_date}")
         return pd.DataFrame({'material': [], 'location': [], 'requirement_date': [], 'quantity': [], 'demand_element': [], 'layer': []})
@@ -850,6 +858,153 @@ def run_mrp_layered_simulation_daily(
     location_layer = dict(zip(location_layer_df['location'], location_layer_df['layer']))
     all_layers = sorted(set(location_layer.values()), reverse=True)
     all_net_demand_records = []
+
+    # === Caching to reduce repeated lookups ===
+    # Cache for PTF/LSK to avoid repeated df filtering
+    ptf_lsk_cache = _build_ptf_lsk_cache_m3(m4_mlcfg_df) if m4_mlcfg_df is not None and not m4_mlcfg_df.empty else {}
+
+    # Helper to compute one node's net demand; used by threads
+    def _compute_node_net_demand(ml_row: tuple) -> tuple:
+        material = str(ml_row.material)
+        location = str(ml_row.location)
+
+        # 查找有效的网络配置
+        network_candidates = active_network[
+            (active_network['material'] == material) &
+            (active_network['location'] == location)
+        ]
+
+        if not network_candidates.empty:
+            network_row = network_candidates.iloc[0]
+            upstream = network_row['sourcing']
+
+            # 命中 network 但 sourcing 为空/空串 → 视为顶层；根节点走 Plant 口径
+            if (pd.isna(upstream)) or (upstream is None) or (str(upstream).strip() == ''):
+                upstream = None
+                if location_layer.get(location, -1) == 0:
+                    location_type = 'Plant'
+                    horizon = _compute_root_horizon(
+                        material=str(material),
+                        location=str(location),
+                        lead_time_df=lead_time_df,
+                        m4_mlcfg_df=m4_mlcfg_df,
+                        ptf_lsk_cache=ptf_lsk_cache
+                    )
+                else:
+                    location_type = 'DC'
+                    horizon = 1
+            else:
+                # 有上游：保持原逻辑
+                sending_location_type = infer_sending_location_type(
+                    network_df=active_network,
+                    location_layer_df=location_layer_df,
+                    sending=str(upstream),
+                    material=str(material),
+                    sim_date=sim_date
+                )
+                horizon, error_msg = determine_lead_time(
+                    sending=str(upstream),
+                    receiving=str(location),
+                    location_type=str(sending_location_type),
+                    lead_time_df=lead_time_df,
+                    m4_mlcfg_df=m4_mlcfg_df,
+                    material=str(material),
+                    ptf_lsk_cache=ptf_lsk_cache
+                )
+                if error_msg:
+                    print(f"Warning: {error_msg} for {upstream}->{location}, using default horizon=1")
+                    horizon = 1
+        else:
+            # 根节点（如 plant）：与 Module 5 统一口径
+            upstream = None
+            if location_layer.get(location, -1) == 0:
+                location_type = 'Plant'
+                horizon = _compute_root_horizon(
+                    material=str(material),
+                    location=str(location),
+                    lead_time_df=lead_time_df,
+                    m4_mlcfg_df=m4_mlcfg_df,
+                    ptf_lsk_cache=ptf_lsk_cache
+                )
+            else:
+                location_type = 'DC'
+                horizon = 1
+
+        # 获取下游缺口（线程前置值由调用层传入后再合并）
+        lower_AO_gap = downstream_gap_dict[(material, location)]['AO']
+        lower_FC_gap = downstream_gap_dict[(material, location)]['FC']
+        lower_SS_gap = downstream_gap_dict[(material, location)]['SS']
+
+        # 计算当前节点的净需求
+        AO_gap, FC_gap, SS_gap = calculate_daily_net_demand(
+            str(material), str(location), sim_date,
+            daily_supply_demand_df, safety_stock_df,
+            beginning_inventory_df, in_transit_df,
+            delivery_gr_df, pd.DataFrame(future_production_df),
+            daily_shipment_df, open_deployment_df,
+            lower_FC_gap, lower_SS_gap, horizon,
+            delivery_shipment_df=delivery_shipment_df,
+            order_df=daily_order_df,
+            downstream_ao_gap=lower_AO_gap
+        )
+
+        # 记录当日净需求（仅有缺口时）
+        records = []
+        if AO_gap > 0:
+            records.append({
+                'material': str(material),
+                'location': str(location),
+                'requirement_date': sim_date + pd.Timedelta(days=1),
+                'quantity': -AO_gap,
+                'demand_element': 'net demand for AO',
+                'layer': current_layer,
+                'simulation_date': sim_date,
+                'horizon_days': horizon
+            })
+        if FC_gap > 0:
+            records.append({
+                'material': str(material),
+                'location': str(location),
+                'requirement_date': sim_date + pd.Timedelta(days=1),
+                'quantity': -FC_gap,
+                'demand_element': 'net demand for forecast',
+                'layer': current_layer,
+                'simulation_date': sim_date,
+                'horizon_days': horizon
+            })
+        if SS_gap > 0:
+            records.append({
+                'material': str(material),
+                'location': str(location),
+                'requirement_date': sim_date + pd.Timedelta(days=1),
+                'quantity': -SS_gap,
+                'demand_element': 'net demand for safety',
+                'layer': current_layer,
+                'simulation_date': sim_date,
+                'horizon_days': horizon
+            })
+
+        # 计算向父节点传递的经过 MOQ/RV 调整后的 gap
+        parent_key = None
+        parent_gaps = {'AO': 0.0, 'FC': 0.0, 'SS': 0.0}
+        if upstream and pd.notna(upstream):
+            parent_key = (material, str(upstream))
+            # 获取 MOQ/RV 配置
+            moq, rv = 1, 1
+            if deploy_config_df is not None and not deploy_config_df.empty:
+                config_row = deploy_config_df[
+                    (deploy_config_df['material'] == material) &
+                    (deploy_config_df['sending'] == str(upstream))
+                ]
+                if not config_row.empty:
+                    moq = int(config_row.iloc[0].get('moq', 1))
+                    rv = int(config_row.iloc[0].get('rv', 1))
+
+            gap_dict = {'AO': AO_gap, 'FC': FC_gap, 'SS': SS_gap}
+            for de, gv in gap_dict.items():
+                parent_gaps[de] = apply_moq_rv(gv, moq, rv, is_cross_node=True) if gv > 0 else 0.0
+
+        return records, parent_key, parent_gaps
 
     # 🔥 关键修改：扩展material_locations，包含所有层级中的地点
     # 原来的逻辑：只包含network中明确配置的location
@@ -908,168 +1063,64 @@ def run_mrp_layered_simulation_daily(
 
     for layer in all_layers:
         parent_gap_accum = defaultdict(lambda: {'AO': 0.0, 'FC': 0.0, 'SS': 0.0})
-        
+
         # 获取当前层级的节点
         material_locations_df = pd.DataFrame(material_locations)
-        # Performance optimization: Use vectorized isin for better performance
         layer_locations = [loc for loc, lyr in location_layer.items() if lyr == layer]
         layer_mask = material_locations_df['location'].isin(layer_locations)
         layer_nodes = material_locations_df[layer_mask]
-        
-        # print(f"   处理Layer {layer}: {len(layer_nodes)} 个节点")
-        
-        # Performance optimization: Use itertuples instead of iterrows
-        for ml in layer_nodes.itertuples():
-            material = str(ml.material)
-            location = str(ml.location)
 
-            # 查找有效的网络配置
-            network_candidates = active_network[
-                (active_network['material'] == material) &
-                (active_network['location'] == location)
-            ]
+        # 当前层号供子函数记录使用
+        current_layer = layer
 
-            if not network_candidates.empty:
-                network_row = network_candidates.iloc[0]
-                upstream = network_row['sourcing']
+        # 并行处理当前层的所有节点
+        records_lock = threading.Lock()
+        parent_lock = threading.Lock()
+        futures_map = {}
+        failed_rows: List[tuple] = []
+        try:
+            n_workers = min(32, max(1, len(layer_nodes)))
+            with ThreadPoolExecutor(max_workers=n_workers) as executor:
+                for ml in layer_nodes.itertuples():
+                    fut = executor.submit(_compute_node_net_demand, ml)
+                    futures_map[fut] = ml
 
-                # ✅ 命中 network 但 sourcing 为空/空串 → 视为顶层；根节点走 Plant 口径
-                if (pd.isna(upstream)) or (upstream is None) or (str(upstream).strip() == ''):
-                    upstream = None
-                    if location_layer.get(location, -1) == 0:
-                        location_type = 'Plant'
-                        horizon = _compute_root_horizon(
-                            material=str(material),
-                            location=str(location),
-                            lead_time_df=lead_time_df,
-                            m4_mlcfg_df=m4_mlcfg_df
-                        )
-                    else:
-                        location_type = 'DC'
-                        horizon = 1
-                else:
-                    # 有上游：保持原逻辑
-                    sending_location_type = infer_sending_location_type(
-                        network_df=active_network,
-                        location_layer_df=location_layer_df,
-                        sending=str(upstream),
-                        material=str(material),
-                        sim_date=sim_date
-                    )
-                    horizon, error_msg = determine_lead_time(
-                        sending=str(upstream),
-                        receiving=str(location),
-                        location_type=str(sending_location_type),
-                        lead_time_df=lead_time_df,
-                        m4_mlcfg_df=m4_mlcfg_df,
-                        material=str(material)
-                    )
-                    if error_msg:
-                        print(f"Warning: {error_msg} for {upstream}->{location}, using default horizon=1")
-                        horizon = 1
-            else:
-                # 根节点（如 plant）：与 Module 5 统一口径
-                upstream = None
-                if location_layer.get(location, -1) == 0:
-                    location_type = 'Plant'
-                    horizon = _compute_root_horizon(
-                        material=str(material),
-                        location=str(location),
-                        lead_time_df=lead_time_df,
-                        m4_mlcfg_df=m4_mlcfg_df
-                    )
-                else:
-                    location_type = 'DC'
-                    horizon = 1
+                for fut in as_completed(futures_map.keys()):
+                    try:
+                        records, parent_key, parent_gaps = fut.result()
+                        if records:
+                            with records_lock:
+                                all_net_demand_records.extend(records)
+                        if parent_key is not None:
+                            with parent_lock:
+                                parent_gap_accum[parent_key]['AO'] += parent_gaps['AO']
+                                parent_gap_accum[parent_key]['FC'] += parent_gaps['FC']
+                                parent_gap_accum[parent_key]['SS'] += parent_gaps['SS']
+                    except Exception as e:
+                        print(f"[M3] parallel task failed on layer {layer}: {e}")
+                        failed_rows.append(futures_map.get(fut))
+        except Exception as e:
+            # Executor-wide failure, fall back to sequential
+            print(f"[M3] parallel execution failed for layer {layer}: {e}. Falling back to sequential.")
+            failed_rows = list(layer_nodes.itertuples())
 
-            # 获取下游缺口
-            lower_AO_gap = downstream_gap_dict[(material, location)]['AO']
-            lower_FC_gap = downstream_gap_dict[(material, location)]['FC']
-            lower_SS_gap = downstream_gap_dict[(material, location)]['SS']
+        # If any tasks failed, retry them sequentially to ensure completeness
+        if failed_rows:
+            print(f"[M3] retrying {len(failed_rows)} failed nodes sequentially on layer {layer}.")
+            for ml in failed_rows:
+                try:
+                    records, parent_key, parent_gaps = _compute_node_net_demand(ml)
+                    if records:
+                        all_net_demand_records.extend(records)
+                    if parent_key is not None:
+                        parent_gap_accum[parent_key]['AO'] += parent_gaps['AO']
+                        parent_gap_accum[parent_key]['FC'] += parent_gaps['FC']
+                        parent_gap_accum[parent_key]['SS'] += parent_gaps['SS']
+                except Exception as e:
+                    print(f"[M3] sequential retry failed for node on layer {layer}: {e}")
 
-            # 计算当前节点的净需求
-            AO_gap, FC_gap, SS_gap = calculate_daily_net_demand(
-                str(material), str(location), sim_date,
-                daily_supply_demand_df, safety_stock_df,            # ← 传原始 SDL（不要合并池）
-                beginning_inventory_df, in_transit_df,
-                delivery_gr_df, pd.DataFrame(future_production_df),
-                daily_shipment_df, open_deployment_df,
-                lower_FC_gap, lower_SS_gap, horizon,
-                delivery_shipment_df=delivery_shipment_df,
-                order_df=daily_order_df,                            # ← 用于 AO_local
-                downstream_ao_gap=lower_AO_gap                      # ← 下游 AO 缺口
-            )
 
-            # 🔧 修复：向上传递gap时应用MOQ/RV逻辑（与Module5一致）
-            if upstream and pd.notna(upstream):
-                # 获取MOQ/RV配置
-                moq, rv = 1, 1  # 默认值
-                if deploy_config_df is not None and not deploy_config_df.empty:
-                    config_row = deploy_config_df[
-                        (deploy_config_df['material'] == material) & 
-                        (deploy_config_df['sending'] == upstream)
-                    ]
-                    if not config_row.empty:
-                        moq = int(config_row.iloc[0].get('moq', 1))
-                        rv = int(config_row.iloc[0].get('rv', 1))
-                
-                # 按demand element分组应用MOQ/RV（避免过量）
-                gap_dict = {'AO': AO_gap, 'FC': FC_gap, 'SS': SS_gap}
-                adjusted_gaps = {}
-                
-                for demand_element, gap_value in gap_dict.items():
-                    if gap_value > 0:
-                        # 向上传递是跨节点调运，需要应用MOQ/RV
-                        adjusted_gap = apply_moq_rv(gap_value, moq, rv, is_cross_node=True)
-                        adjusted_gaps[demand_element] = adjusted_gap
-                        # print(f"      📦 {demand_element} gap: 原始={gap_value:.2f} → MOQ/RV调整={adjusted_gap:.2f} (MOQ={moq}, RV={rv})")
-                    else:
-                        adjusted_gaps[demand_element] = 0
-                
-                # 向父节点传递调整后的gap
-                parent_gap_accum[(material, upstream)]['AO'] += adjusted_gaps.get('AO', 0)
-                parent_gap_accum[(material, upstream)]['FC'] += adjusted_gaps.get('FC', 0) 
-                parent_gap_accum[(material, upstream)]['SS'] += adjusted_gaps.get('SS', 0)
-
-            # 记录当日净需求
-            # 记录当日净需求（有缺口才写行），统一命名为 net demand for ...
-            if AO_gap > 0:
-                all_net_demand_records.append({
-                    'material': str(material),
-                    'location': str(location),
-                    'requirement_date': sim_date + pd.Timedelta(days=1),
-                    'quantity': -AO_gap,
-                    'demand_element': 'net demand for AO',
-                    'layer': layer,
-                    'simulation_date': sim_date,
-                    'horizon_days': horizon
-                })
-
-            if FC_gap > 0:
-                all_net_demand_records.append({
-                    'material': str(material),
-                    'location': str(location),
-                    'requirement_date': sim_date + pd.Timedelta(days=1),
-                    'quantity': -FC_gap,
-                    'demand_element': 'net demand for forecast',
-                    'layer': layer,
-                    'simulation_date': sim_date,
-                    'horizon_days': horizon
-                })
-
-            if SS_gap > 0:
-                all_net_demand_records.append({
-                    'material': str(material),
-                    'location': str(location),
-                    'requirement_date': sim_date + pd.Timedelta(days=1),
-                    'quantity': -SS_gap,
-                    'demand_element': 'net demand for safety',
-                    'layer': layer,
-                    'simulation_date': sim_date,
-                    'horizon_days': horizon
-                })
-
-        # ★关键：本层所有节点gap聚合后再传递给父层
+        # 本层所有节点gap聚合后再传递给父层
         downstream_gap_dict = parent_gap_accum
         
         # if parent_gap_accum:
@@ -1108,6 +1159,7 @@ def run_mrp_layered_simulation_daily(
     #     print(f"  涉及物料: {sorted(final_df['material'].unique())}")
     #     print(f"  层级分布: {dict(final_df['layer'].value_counts())}")
     
+    print(f"[M3] run_mrp_layered_simulation_daily total: {time.perf_counter()-_t_func:.3f}s, records={len(final_df)}")
     return final_df
 
 def load_excel_with_sheets(filepath: str) -> Dict[str, pd.DataFrame]:
@@ -1149,6 +1201,7 @@ def run_integrated_mode(
         dict: 包含输出结果的字典
     """
     print(f"🔄 Module3 运行于集成模式")
+    _t_total = time.perf_counter()
     # print(f"📊 模拟模式：所有模块只处理模拟周期内的数据")
     
     # 加载静态配置数据
@@ -1276,6 +1329,7 @@ def run_integrated_mode(
         all_net_demand.extend(net_demand_df.to_dict('records') if not net_demand_df.empty else [])
     
     print(f"\n✅ Module3 集成模式处理完成")
+    print(f"[M3] total duration: {time.perf_counter()-_t_total:.3f}s for {len(date_range)} days, net_demand_records={len(all_net_demand)}")
     # print(f"  处理了 {len(date_range)} 天")
     # print(f"  生成了 {len(all_net_demand)} 条Net Demand记录")
     # print(f"  所有模块只处理模拟周期内的数据")

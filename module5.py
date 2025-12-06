@@ -392,6 +392,7 @@ def apply_grouped_moq_rv(demand_rows, location):
     - 仅跨节点（sending != receiving）应用 MOQ/RV，自循环不应用。
     影响：决定各优先级组的实际需求量，从而影响库存分配与缺口传递。
     """
+    # Timing handled at caller to avoid excessive logs
     # 按 (material, sending, receiving, demand_element) 分组
     route_groups = {}
     for i, d in enumerate(demand_rows):
@@ -785,6 +786,8 @@ def load_integrated_config(
     - 生产：优先读取 orchestrator 当日历史生产GR（避免重复），若无则回退至 Module4 `ProductionPlan`
     影响：决定 `Module5` 当日库存基线与需求池、在途与开放调拨，以及后续分配与缺口传递的依据。
     """
+    import time
+    t0 = time.perf_counter()
     config = {}
     validation_log = []
     
@@ -804,32 +807,80 @@ def load_integrated_config(
     # 2. 从Module1加载当日数据
     config['SupplyDemandLog'] = config_dict.get('M5_SupplyDemandLog', pd.DataFrame())  # 从测试配置加载
     
-    # 从Module1加载当日"订单池"
-    if module1_output_dir and current_date:
-        config['OrderLog'] = load_module1_daily_orders(module1_output_dir, current_date)
-    else:
-        config['OrderLog'] = pd.DataFrame()
-
-    # 实际从 Module1 输出加载当日数据
+    # 并行从 Module1 加载当日数据（OrderLog, SupplyDemandLog, TodayShipment）
     if module1_output_dir and current_date:
         try:
-            # 从 Module1 日输出加载 SupplyDemandLog
+            from concurrent.futures import ThreadPoolExecutor
+
             date_str = current_date.strftime('%Y%m%d')
             module1_file = f"{module1_output_dir}/module1_output_{date_str}.xlsx"
-            if os.path.exists(module1_file):
-                xl = pd.ExcelFile(module1_file)
-                if 'SupplyDemandLog' in xl.sheet_names:
-                    m1_supply_demand = xl.parse('SupplyDemandLog')
-                    if not m1_supply_demand.empty:
-                        config['SupplyDemandLog'] = m1_supply_demand
-                        # print(f"  ✅ 从 Module1 加载了 {len(m1_supply_demand)} 条 SupplyDemandLog 数据")
+
+            def _load_orderlog():
+                try:
+                    return load_module1_daily_orders(module1_output_dir, current_date)
+                except Exception as e:
+                    print(f"  ⚠️  加载OrderLog失败: {e}")
+                    return pd.DataFrame()
+
+            def _load_supplydemand():
+                try:
+                    if os.path.exists(module1_file):
+                        xl = pd.ExcelFile(module1_file)
+                        if 'SupplyDemandLog' in xl.sheet_names:
+                            df = xl.parse('SupplyDemandLog')
+                            return df if isinstance(df, pd.DataFrame) else pd.DataFrame()
+                    return pd.DataFrame()
+                except Exception as e:
+                    print(f"  ⚠️  加载SupplyDemandLog失败: {e}")
+                    return pd.DataFrame()
+
+            def _load_todayshipment():
+                try:
+                    return load_module1_daily_shipment(module1_output_dir, current_date)
+                except Exception as e:
+                    print(f"  ⚠️  加载TodayShipment失败: {e}")
+                    return pd.DataFrame()
+
+            with ThreadPoolExecutor(max_workers=3) as ex:
+                f_order = ex.submit(_load_orderlog)
+                f_sdl   = ex.submit(_load_supplydemand)
+                f_ship  = ex.submit(_load_todayshipment)
+                order_df = f_order.result()
+                if not isinstance(order_df, pd.DataFrame):
+                    print("  ⚠️  并行加载 OrderLog 返回非DataFrame，回退为空表")
+                    config['OrderLog'] = pd.DataFrame()
+                else:
+                    config['OrderLog'] = order_df
+                sdl_df = f_sdl.result()
+                if isinstance(sdl_df, pd.DataFrame):
+                    if not sdl_df.empty:
+                        config['SupplyDemandLog'] = sdl_df
+                    else:
+                        print("  ⚠️  并行加载 SupplyDemandLog 结果为空，保持原配置字典中的值")
+                else:
+                    print("  ⚠️  并行加载 SupplyDemandLog 返回非DataFrame，保持原配置字典中的值")
+                ship_df = f_ship.result()
+                if not isinstance(ship_df, pd.DataFrame):
+                    print("  ⚠️  并行加载 TodayShipment 返回非DataFrame，回退为空表")
+                    config['TodayShipment'] = pd.DataFrame()
+                else:
+                    config['TodayShipment'] = ship_df
         except Exception as e:
-            print(f"  ⚠️  无法从 Module1 加载数据: {e}")
-    
-    # 从Module1加载当日发货数据
-    if module1_output_dir and current_date:
-        config['TodayShipment'] = load_module1_daily_shipment(module1_output_dir, current_date)
+            print(f"  ⚠️  并行加载 Module1 数据失败，回退串行: {e}")
+            # 回退串行
+            config['OrderLog'] = load_module1_daily_orders(module1_output_dir, current_date)
+            try:
+                if os.path.exists(module1_file):
+                    xl = pd.ExcelFile(module1_file)
+                    if 'SupplyDemandLog' in xl.sheet_names:
+                        m1_supply_demand = xl.parse('SupplyDemandLog')
+                        if not m1_supply_demand.empty:
+                            config['SupplyDemandLog'] = m1_supply_demand
+            except Exception as e2:
+                print(f"  ⚠️  无法从 Module1 加载数据: {e2}")
+            config['TodayShipment'] = load_module1_daily_shipment(module1_output_dir, current_date)
     else:
+        config['OrderLog'] = pd.DataFrame()
         config['TodayShipment'] = pd.DataFrame()
     
     # 3. 生产计划：修复重复计算问题，只使用实际的历史生产GR
@@ -891,19 +942,89 @@ def load_integrated_config(
         except Exception as e:
             print(f"  ⚠️  无法从 Module4 读取 M4_MaterialLocationLineCfg: {e}")
 
-    # 4. 从Orchestrator加载动态数据
+    # 4. 并行从 Orchestrator 加载动态数据
     if orchestrator and current_date:
         date_str = current_date.strftime('%Y-%m-%d')
         try:
-            # 🔄 修改：使用期初库存而不是当前库存状态，避免重复计算
-            config['InventoryLog'] = orchestrator.get_beginning_inventory_view(date_str)
-            config['InTransit'] = orchestrator.get_planning_intransit_view(date_str)
-            config['DeliveryGR'] = load_orchestrator_delivery_gr(orchestrator, current_date)
-            config['OpenDeployment'] = load_orchestrator_open_deployment(orchestrator, current_date)
-            config['ReceivingSpace'] = orchestrator.get_space_quota_view(date_str)
-            # print(f"  ✅ 从 Orchestrator 加载了动态数据（使用期初库存基础）")
+            from concurrent.futures import ThreadPoolExecutor
+
+            def _get_beginning():
+                try:
+                    return orchestrator.get_beginning_inventory_view(date_str)
+                except Exception as e:
+                    print(f"  ⚠️  加载BeginningInventory失败: {e}")
+                    return pd.DataFrame()
+
+            def _get_intransit():
+                try:
+                    return orchestrator.get_planning_intransit_view(date_str)
+                except Exception as e:
+                    print(f"  ⚠️  加载InTransit失败: {e}")
+                    return pd.DataFrame()
+
+            def _get_delivery_gr():
+                try:
+                    return load_orchestrator_delivery_gr(orchestrator, current_date)
+                except Exception as e:
+                    print(f"  ⚠️  加载DeliveryGR失败: {e}")
+                    return pd.DataFrame()
+
+            def _get_open_deployment():
+                try:
+                    return load_orchestrator_open_deployment(orchestrator, current_date)
+                except Exception as e:
+                    print(f"  ⚠️  加载OpenDeployment失败: {e}")
+                    return pd.DataFrame()
+
+            def _get_space_quota():
+                try:
+                    return orchestrator.get_space_quota_view(date_str)
+                except Exception as e:
+                    print(f"  ⚠️  加载ReceivingSpace失败: {e}")
+                    return pd.DataFrame()
+
+            with ThreadPoolExecutor(max_workers=5) as ex:
+                f_inv   = ex.submit(_get_beginning)
+                f_it    = ex.submit(_get_intransit)
+                f_gr    = ex.submit(_get_delivery_gr)
+                f_open  = ex.submit(_get_open_deployment)
+                f_space = ex.submit(_get_space_quota)
+                inv_df = f_inv.result(); it_df = f_it.result(); gr_df = f_gr.result(); open_df = f_open.result(); space_df = f_space.result()
+                if not isinstance(inv_df, pd.DataFrame):
+                    print("  ⚠️  并行加载 BeginningInventory 返回非DataFrame，回退为空表")
+                    config['InventoryLog'] = pd.DataFrame()
+                else:
+                    config['InventoryLog'] = inv_df
+                if not isinstance(it_df, pd.DataFrame):
+                    print("  ⚠️  并行加载 InTransit 返回非DataFrame，回退为空表")
+                    config['InTransit'] = pd.DataFrame()
+                else:
+                    config['InTransit'] = it_df
+                if not isinstance(gr_df, pd.DataFrame):
+                    print("  ⚠️  并行加载 DeliveryGR 返回非DataFrame，回退为空表")
+                    config['DeliveryGR'] = pd.DataFrame()
+                else:
+                    config['DeliveryGR'] = gr_df
+                if not isinstance(open_df, pd.DataFrame):
+                    print("  ⚠️  并行加载 OpenDeployment 返回非DataFrame，回退为空表")
+                    config['OpenDeployment'] = pd.DataFrame()
+                else:
+                    config['OpenDeployment'] = open_df
+                if not isinstance(space_df, pd.DataFrame):
+                    print("  ⚠️  并行加载 ReceivingSpace 返回非DataFrame，回退为空表")
+                    config['ReceivingSpace'] = pd.DataFrame()
+                else:
+                    config['ReceivingSpace'] = space_df
         except Exception as e:
-            print(f"  ⚠️  从 Orchestrator 加载动态数据失败: {e}")
+            print(f"  ⚠️  并行加载 Orchestrator 数据失败，回退串行: {e}")
+            try:
+                config['InventoryLog'] = orchestrator.get_beginning_inventory_view(date_str)
+                config['InTransit'] = orchestrator.get_planning_intransit_view(date_str)
+                config['DeliveryGR'] = load_orchestrator_delivery_gr(orchestrator, current_date)
+                config['OpenDeployment'] = load_orchestrator_open_deployment(orchestrator, current_date)
+                config['ReceivingSpace'] = orchestrator.get_space_quota_view(date_str)
+            except Exception as e2:
+                print(f"  ⚠️  从 Orchestrator 加载动态数据失败: {e2}")
 
     # 5. 统一最终的 ProductionPlan 列规范（兜底）：确保存在 'available_date'
     if 'ProductionPlan' in config and isinstance(config['ProductionPlan'], pd.DataFrame):
@@ -953,6 +1074,7 @@ def load_integrated_config(
             config[sheet_name] = _normalize_identifiers(df)
     
     config['ValidationLog'] = validation_log
+    print(f"[M5] load_integrated_config 用时: {time.perf_counter()-t0:.3f}s")
     return config
 
 def load_config(input_path: str):
@@ -1086,6 +1208,7 @@ def collect_node_demands(material, location, sim_date, config, up_gap_buffer,
     - 行级 `leadtime`：跨节点使用统一窗口值，自补货为 0。
     影响：决定后续库存分配、缺口生成与向上游传递。
     """
+    # Timing moved to caller-level aggregation to avoid per-ML spam
     import pandas as pd
     from datetime import timedelta
 
@@ -1297,6 +1420,8 @@ def push_softpush_allocation(
     deploy_cfg = config['DeployConfig']
     net        = config['Network']
 
+    import time
+    t0 = time.perf_counter()
     plan_rows_push = []
 
     # —— 统计【当日】已分配的库存（非 push 行，含自满足 + 跨节点）——
@@ -1451,6 +1576,7 @@ def push_softpush_allocation(
             }
             plan_rows_push.append(plan)
 
+    print(f"[M5] push_softpush_allocation 用时: {time.perf_counter()-t0:.3f}s，生成行数: {len(plan_rows_push)}")
     return plan_rows_push
 
 
@@ -1459,6 +1585,8 @@ def apply_receiving_space_quota(deployment_plan_rows, receiving_space, sim_date,
     在所有调运计划明细生成后，按receiving space quota再分配，更新deployed_qty，unfulfilled log
     修复：仅对跨节点调运（sending != receiving）应用receiving space quota限制
     """
+    import time
+    t0 = time.perf_counter()
     df = pd.DataFrame(deployment_plan_rows)
     if df.empty:
         df['deployed_qty'] = []
@@ -1559,6 +1687,7 @@ def apply_receiving_space_quota(deployment_plan_rows, receiving_space, sim_date,
     # 空间充足行
     df['deployed_qty'] = df['deployed_qty'].fillna(df['deployed_qty_invCon'])
     df['quota'] = df['quota'].fillna(np.nan)
+    print(f"[M5] Receiving Space Quota 用时: {time.perf_counter()-t0:.3f}s，受限条目: {len(unfulfilled)}")
     return df, unfulfilled
 
 def log_outputs(output_path: str, outputs: Dict[str, pd.DataFrame]):
@@ -1686,7 +1815,9 @@ def main(
 
     up_gap_buffer = {}
 
+    import time
     for sim_date in sim_dates:
+        day_start = time.perf_counter()
         # === 优化的日志输出 ===
         # print(f"\n{'='*60}")
         # print(f"📅 仿真日期: {sim_date.strftime('%Y-%m-%d')}")
@@ -1908,6 +2039,9 @@ def main(
                     #         print(f"   - {record}")
                     # else:
                     #     print(f"   Orchestrator没有production_gr属性")
+        import time
+        demand_collect_total_start = time.perf_counter()
+        demand_collect_only_elapsed = 0.0
         up_gap_next = {}
 
         for layer in layer_list:
@@ -1932,16 +2066,45 @@ def main(
                 if location_to_layer.get(loc, None) == layer
             )
             all_pairs = base_pairs | gap_pairs
+
+            # 并行收集每个节点的需求（同层之间互不依赖），随后仍按原顺序分配库存
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+            node_demands_map: dict[tuple[str,str], list] = {}
+            if all_pairs:
+                try:
+                    layer_collect_start = time.perf_counter()
+                    with ThreadPoolExecutor(max_workers=min(32, len(all_pairs))) as ex:
+                        futures = {
+                            ex.submit(
+                                collect_node_demands,
+                                mat, loc, sim_date, config, up_gap_buffer,
+                                ptf_lsk_cache, lead_time_cache, active_network_cache
+                            ): (mat, loc)
+                            for (mat, loc) in all_pairs
+                        }
+                        for fut in as_completed(futures):
+                            key = futures[fut]
+                            try:
+                                node_demands_map[key] = fut.result()
+                            except Exception as e:
+                                print(f"  ⚠️  并行收集需求失败: {key} -> {e}")
+                                node_demands_map[key] = []
+                    demand_collect_only_elapsed += (time.perf_counter() - layer_collect_start)
+                except Exception as e:
+                    print(f"  ⚠️  并行收集需求初始化失败，回退串行: {e}")
+                    node_demands_map = {}
             
             for mat, loc in all_pairs:
                 node_key = (mat, loc)
                 current_stock = dynamic_soh.get(node_key, 0)
                 # print(f"📍 节点: {mat}@{loc} [可用库存: {current_stock}]")
                 
-                demand_rows = collect_node_demands(mat, loc, sim_date, config, up_gap_buffer,
-                                                   ptf_lsk_cache=ptf_lsk_cache,
-                                                   lead_time_cache=lead_time_cache,
-                                                   active_network_cache=active_network_cache)
+                demand_rows = node_demands_map.get((mat, loc))
+                if demand_rows is None:
+                    demand_rows = collect_node_demands(mat, loc, sim_date, config, up_gap_buffer,
+                                                       ptf_lsk_cache=ptf_lsk_cache,
+                                                       lead_time_cache=lead_time_cache,
+                                                       active_network_cache=active_network_cache)
                 if not demand_rows:
                     # print(f"   ⚠️  无需求需要处理")
                     continue
@@ -2201,6 +2364,9 @@ def main(
             # 更新GAP缓冲区
             up_gap_buffer = up_gap_next.copy()
         
+        # 总计：需求收集+分配阶段用时（不含push/space quota）
+        print(f"[M5] Demand collection only 用时: {demand_collect_only_elapsed:.3f}s")
+        print(f"[M5] Demand collection+allocation 总用时: {time.perf_counter()-demand_collect_total_start:.3f}s")
         # push/soft-push再分配：直接用 dynamic_soh
         dynamic_soh_for_push = dynamic_soh.copy()
         plan_push = push_softpush_allocation(deployment_plan_rows, config, dynamic_soh_for_push, sim_date,
@@ -2270,6 +2436,7 @@ def main(
         'Validation': pd.DataFrame(validation_log),
     }
     log_outputs(output_path, outputs)
+    print(f"[M5] Full day total 用时: {time.perf_counter()-day_start:.3f}s")
     
     # 集成模式：将部署计划发送给Orchestrator（由主集成脚本统一处理）
     # 注意：这里暂时注释掉直接调用，交由主集成脚本统一处理以避免重复

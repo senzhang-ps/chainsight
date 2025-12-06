@@ -703,7 +703,7 @@ def calculate_daily_net_demand(
             # 确保日期列存在且为datetime类型
             if 'date' in order_df.columns:
                 order_dates = pd.to_datetime(order_df['date'], errors='coerce')
-                date_filter = (order_dates > date) & (order_dates <= horizon_end)
+                date_filter = (order_dates >= date) & (order_dates <= horizon_end)
                 
                 od = order_df[material_filter & location_filter & demand_type_filter & date_filter]
                 

@@ -442,10 +442,31 @@ def apply_grouped_moq_rv(demand_rows, location):
 
 def apply_priority_allocation_vectorized(demand_rows, adjusted_qtys, current_stock, demand_priority_map):
     """
-    Vectorized allocation within a node across priority groups.
-    - Inputs: demand_rows list of dicts; adjusted_qtys dict index->adjusted demand; current_stock int.
-    - Output: sets 'deployed_qty_invCon' on demand_rows according to weights per priority.
-    Behavior matches existing logic: fully satisfy higher priorities first; last served priority is proportional.
+        目的（Purpose）：
+        - 在同一节点内，按需求优先级对库存进行向量化分配；高优先级需求先满足，最后一个被部分满足的优先级按比例分配。
+
+        输入（Input）：
+        - demand_rows：list[dict]，每条需求行包含至少以下字段：
+            - 'demand_element'：需求类型（用于映射优先级）
+            - 'demand_qty'：原始需求量（整数）
+            - 其他上下文字段（如 'location' 等），不会在此函数中被修改
+        - adjusted_qtys：dict[int, int]，按索引（与 demand_rows 对应）提供分组MOQ/RV调整后的需求量；若缺失则回退为原始 'demand_qty'
+        - current_stock：int，该节点当前可用于分配的库存量（已扣除更高层的消耗）
+        - demand_priority_map：dict[str, int]，需求类型到优先级的映射（数值越小优先级越高）；缺失映射时回退为 99
+
+        输出（Output）：
+        - 返回剩余库存（int），同时就地更新 demand_rows 中每行的 'deployed_qty_invCon' 字段：
+            - 对完全满足的优先级组：'deployed_qty_invCon' = 'adjusted_qty'
+            - 对部分满足的优先级组：按该组内 'adjusted_qty' 比例分配，取整（floor）且不超过各自需求量
+            - 对未处理到的更低优先级：'deployed_qty_invCon' = 0
+
+        逻辑（Logic）：
+        1) 将 demand_rows 转为 DataFrame，计算每行：索引 idx、优先级 priority、调整后需求 adjusted_qty，初始化部署量为 0
+        2) 若 current_stock ≤ 0，直接写回 0 并返回
+        3) 按优先级升序遍历分组：
+             - 若当前组总需求 ≤ current_stock：整组完全满足，扣减库存
+             - 否则：按 adjusted_qty 比例切分 current_stock（向下取整），写回并终止循环
+        4) 将每行的分配结果写回 demand_rows['deployed_qty_invCon']，返回剩余库存
     """
     if not demand_rows:
         return current_stock
@@ -1451,14 +1472,33 @@ def collect_node_demands(material, location, sim_date, config, up_gap_buffer,
 
 def push_softpush_allocation(
     deployment_plan_rows, config, dynamic_soh, sim_date,
-    ptf_lsk_cache=None, lead_time_cache=None
+    ptf_lsk_cache=None, lead_time_cache=None, projected_soh=None
 ):
     """
-    push / soft-push 补货分配（`PushPullModel`）：
-    - 触发前提：当日所有非push需求均已满足且仍有剩余 `dynamic_soh`。
-    - soft-push：先保留本节点当日安全库存，再下推；push：全部可下推。
-    - 权重：下游安全库存以 (sim_date + leadtime) 目标日为权重，最大余数法分配尾差。
-    影响：可能将本节点剩余库存在当日直接转为跨节点到货，后续仍受 `ReceivingSpace` 二次限额控制。
+    目的（Purpose）：
+    - 在当日所有非 push 需求已满足的前提下，使用剩余可用库存执行 push/soft-push 的补货分配。
+    - 采用“挡位（bucket）+ 比例兜底”的方法，尽量使同一物料的各下游在可行挡位下对齐到安全库存倍数。
+
+    输入（Input）：
+    - deployment_plan_rows：list[dict]，当日已生成的分配计划（用于排除 push 自身并统计已分配库存）。
+    - config：dict，包含静态与运行时配置（PushPullModel/SafetyStock/LeadTime/Network/DeployConfig/ReceivingSpace 等）。
+    - dynamic_soh：dict[(material, location)->int]，当日真实可用库存（用于计算发送端可下推量及接收端基线的回退）。
+    - sim_date：datetime，当日仿真日期。
+    - ptf_lsk_cache / lead_time_cache：缓存，加速 lead time 计算。
+    - projected_soh：dict[(material, location)->int]，接收端当日预测库存；若提供则作为倍数对齐的库存基线，未提供则回退使用 dynamic_soh。
+
+    输出（Output）：
+    - 返回 push/soft-push 计划行列表（list[dict]），不直接修改传入的 deployment_plan_rows；由调用方自行扩展。
+    - 每条计划行包含：date/material/sending/receiving/demand_element/planned_qty/deployed_qty_invCon/planned_delivery_date/leadtime/is_cross_node 等。
+
+    逻辑（Logic）：
+    1) 统计当日非 push 的已分配库存，计算发送端真实剩余可用库存 available_soh；soft-push 先保留发送端当日安全库存。
+    2) 获取下游接收端列表与其到货日（sim_date + leadtime）的安全库存。
+    3) 选择最高可行挡位 L（默认 [1.2,1.5,2.0,2.5,3.0]，可由 config['M5_PushLevels'] 覆盖）：
+       - 计算 need_r = max(0, L*SS_r - PI_r)，其中 PI_r 优先取 projected_soh，否则 dynamic_soh。
+       - 若总需求 sum(need_r) ≤ available_soh，则该挡位可行；选取最高可行挡位，若无可行则回退最低挡位。
+    4) 比例兜底分配：qty_r = floor(available_soh * need_r / sum_need)，后续由接收空间配额逻辑进行限额裁剪。
+    5) 生成计划行（仅 qty_r>0），带上到货日与 lead time，demand_element 标注为 push/soft push replenishment。
     """
     import pandas as pd
     import numpy as np
@@ -1585,28 +1625,56 @@ def push_softpush_allocation(
         if total_ss <= 0:
             continue  # 下游安全库存总和为 0，不推
 
-        # H) 按 safety 权重分配（最大余数法，吃掉尾差）
-        # 1) 理想配额与向下取整
-        ideal = []
-        floor_sum = 0
-        for x in receiving_ss_data:
-            share = available_soh * (x['ss_qty'] / total_ss)
-            q_floor = int(np.floor(share))
-            frac = share - q_floor
-            ideal.append((x, q_floor, frac))
-            floor_sum += q_floor
+        # H) 挡位 + 比例兜底分配（最小化改动；使用接收端当日目标安全库存与当前库存近似）
+        # 读取挡位配置（无则默认）
+        push_levels = config.get('M5_PushLevels', [1.2, 1.5, 2.0, 2.5, 3.0])
+        try:
+            push_levels = sorted([float(l) for l in push_levels])
+        except Exception:
+            push_levels = [1.2, 1.5, 2.0, 2.5, 3.0]
 
-        # 2) 把剩余 (available_soh - floor_sum) 份额按 frac 从大到小 +1
-        remainder = int(available_soh - floor_sum)
-        if remainder > 0:
-            ideal_sorted = sorted(ideal, key=lambda t: t[2], reverse=True)
-            for i in range(remainder):
-                x, q_floor, frac = ideal_sorted[i % len(ideal_sorted)]
-                ideal_sorted[i % len(ideal_sorted)] = (x, q_floor + 1, frac)
-            ideal = ideal_sorted
+        # 当前接收端库存基线：优先使用 projected_soh，否则回退 dynamic_soh（最小改动）
+        if projected_soh is not None:
+            pi_map = {x['receiving']: float(projected_soh.get((mat, x['receiving']), 0) or 0) for x in receiving_ss_data}
+        else:
+            pi_map = {x['receiving']: float(dynamic_soh.get((mat, x['receiving']), 0) or 0) for x in receiving_ss_data}
+
+        # 选择最高可行挡位
+        feasible_level = None
+        for L in push_levels:
+            need_sum = 0.0
+            for x in receiving_ss_data:
+                ssq = float(x['ss_qty'] or 0)
+                if ssq <= 0:
+                    continue
+                pi = pi_map.get(x['receiving'], 0.0)
+                need_sum += max(0.0, L * ssq - pi)
+            if need_sum <= float(available_soh) + 1e-9:
+                feasible_level = L
+            else:
+                break
+        if feasible_level is None:
+            feasible_level = push_levels[0]
+
+        # 比例兜底分配到接收端
+        needs = []
+        for x in receiving_ss_data:
+            ssq = float(x['ss_qty'] or 0)
+            if ssq <= 0:
+                needs.append((x, 0.0))
+                continue
+            pi = pi_map.get(x['receiving'], 0.0)
+            needs.append((x, max(0.0, feasible_level * ssq - pi)))
+        total_need = sum(n for _, n in needs)
+        allocated = []
+        if total_need > 0:
+            for x, need in needs:
+                share = (available_soh * need / total_need) if total_need > 0 else 0.0
+                q = int(np.floor(share))
+                allocated.append((x, q))
 
         # I) 生成 push 计划行（只落 qty>0）
-        for x, qty, _ in ideal:
+        for x, qty in allocated:
             if qty <= 0:
                 continue
             plan = {
@@ -1632,10 +1700,30 @@ def push_softpush_allocation(
 
 def apply_receiving_space_quota(deployment_plan_rows, receiving_space, sim_date, demand_priority_map):
     """
-    Vectorized receiving space quota application.
-    - Applies quota only to cross-node shipments (sending != receiving).
-    - Allocates by priority groups then proportionally by weights within a group.
-    Expect 2-5x speedup vs row-wise loop.
+        目的（Purpose）：
+        - 向量化应用接收端空间/能力配额（ReceivingSpace）到当日的跨节点调拨计划，控制每个接收地在当日的最大可接收量。
+
+        输入（Input）：
+        - deployment_plan_rows：list[dict]，已生成的当日计划行（包含 push/soft-push 与常规调拨），字段至少包含：
+            - 'date'、'material'、'sending'、'receiving'、'deployed_qty_invCon'、'demand_element'、'leadtime' 等
+        - receiving_space：pd.DataFrame，接收端空间设置表，常见字段：
+            - 'date'（可选）、'material'（可选）、'location'/'receiving'、'quota'/'space'（当日最大可接收量）
+        - sim_date：datetime，当日仿真日期，仅处理当日的计划行
+        - demand_priority_map：dict[str,int]，需求类型优先级映射，用于在空间不足时分配优先顺序
+
+        输出（Output）：
+        - 返回 (df, logs)：
+            - df：pd.DataFrame，为每条计划行计算并写入 'deployed_qty'（实际执行量）与 'quota'（接收端可用配额），其余字段保持不变
+            - logs：list[str]，可选的限额应用记录（默认简洁；调用方可用于诊断）
+
+        逻辑（Logic）：
+        1) 仅对跨节点计划行（sending != receiving）应用接收空间限额；自补货（sending == receiving）不受此处配额影响
+        2) 将当日计划行按接收端分组，计算每个接收端在 'quota'（或 'space'）范围内的可用配额
+        3) 组内按需求优先级（demand_priority_map）排序；若配额充足则全量执行，否则在最后一个被部分满足的优先级内按权重比例分配（向下取整）
+        4) 写回每行的 'deployed_qty'（不超过原 'deployed_qty_invCon' 且受接收端剩余配额约束），返回结果
+    
+        性能（Performance）：
+        - 大部分操作在 DataFrame 上向量化完成，相比逐行循环通常加速 2-5 倍
     """
     import time
     t0 = time.perf_counter()
@@ -2409,10 +2497,12 @@ def main(
         # 总计：需求收集+分配阶段用时（不含push/space quota）
         print(f"[M5] Demand collection only 用时: {demand_collect_only_elapsed:.3f}s")
         print(f"[M5] Demand collection+allocation 总用时: {time.perf_counter()-demand_collect_total_start:.3f}s")
-        # push/soft-push再分配：直接用 dynamic_soh
+        # push/soft-push再分配：使用 dynamic_soh；同时传入 projected_soh 作为分配基线
         dynamic_soh_for_push = dynamic_soh.copy()
-        plan_push = push_softpush_allocation(deployment_plan_rows, config, dynamic_soh_for_push, sim_date,
-                                              ptf_lsk_cache=ptf_lsk_cache, lead_time_cache=lead_time_cache)
+        plan_push = push_softpush_allocation(
+            deployment_plan_rows, config, dynamic_soh_for_push, sim_date,
+            ptf_lsk_cache=ptf_lsk_cache, lead_time_cache=lead_time_cache, projected_soh=projected_soh
+        )
 
         if plan_push:
             deployment_plan_rows.extend(plan_push)

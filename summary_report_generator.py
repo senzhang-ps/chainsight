@@ -180,8 +180,8 @@ class SummaryReportGenerator:
         # AO 订单可能在多个 simulation_date 被重复记录，需要按唯一键去重
         if not combined_orders.empty:
             original_count = len(combined_orders)
-            # 按 date, material, location, demand_type, quantity 去重（保留第一条）
-            dedup_cols = ['date', 'material', 'location', 'quantity']
+            # 按 date, material, location, quantity,（若有）demand_type, simulation_date 去重（保留第一条）
+            dedup_cols = ['date', 'material', 'location', 'quantity', 'simulation_date']
             if 'demand_type' in combined_orders.columns:
                 dedup_cols.append('demand_type')
             combined_orders = combined_orders.drop_duplicates(subset=dedup_cols, keep='first')

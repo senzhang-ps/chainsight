@@ -1,8 +1,19 @@
-# main_integration.py
-# 主集成执行脚本 - 协调所有模块通过Orchestrator运行
-#
-# 执行顺序: M1 → M4 → M5 → M6 → M3
-# 每日处理模式，确保模块间数据流环环相扣
+"""
+main_integration.py
+
+整体目的：
+- 作为供应链仿真的主集成执行脚本，统一调度 Module1/3/4/5/6，通过 Orchestrator 在日度粒度上串联生产、部署与物流流程，实现端到端的数据流转与状态维护。
+
+功能点：
+- 断点续跑：自动检测最后完整日期、支持状态恢复并继续运行，避免重复计算与中断损失。
+- 预验证与加载：在仿真前运行配置校验，统一读取并标准化配置表的标识符字段，同时对 M4 的换产配置进行校验与去重。
+- 模块序列执行：按日循环依次执行 M1→M4→M5→M6→M3，各模块间立即更新库存与状态以确保数据一致性。
+- 状态管理与输出：在每日开始/结束阶段保存库存快照、输出每日汇总与详细日志，最终生成汇总报告与库存一致性验证。
+- 随机性控制：统一读取并设置全局随机种子，保证仿真可复现。
+
+使用方法：
+- 通过 `run_integrated_simulation(config_path, start_date, end_date, ...)` 执行完整仿真；或运行 `main()` 支持命令行参数调用。
+"""
 
 import pandas as pd
 import numpy as np
@@ -35,15 +46,27 @@ import module6
 # ========================= 断点续跑功能 =========================
 
 def detect_last_complete_date(output_base_dir: str, start_date: str, end_date: str) -> str:
-    """
-    检测最后一个完整处理的日期
+    """检测最后一个完整处理的日期
+
+    目的：
+    - 扫描 `orchestrator/` 目录下的每日关键文件集合，判定最近一次完整输出的仿真日期，用于断点续跑起点。
+
     Args:
-        output_base_dir: 输出基础目录
-        start_date: 原始开始日期
-        end_date: 原始结束日期
-        
+        output_base_dir: 输出基础目录。
+        start_date: 原始开始日期（YYYY-MM-DD）。
+        end_date: 原始结束日期（YYYY-MM-DD）。
+
     Returns:
-        str: 最后完整处理的日期(YYYY-MM-DD)，如果没有则返回None
+        str: 最后完整处理的日期（YYYY-MM-DD）；若未找到完整日期返回 None。
+
+    输入数据：
+        - `orchestrator/` 目录下以日期命名的 CSV 文件（每日库存与日志等）。
+
+    输出/副作用：
+        - 仅读取表头验证文件可用，不更改任何状态；打印诊断信息。
+
+    逻辑：
+        - 按日期遍历并检查必需文件是否存在且可解析；若全部存在则记录为最后完整日期并继续；遇到缺失或异常则停止并返回当前记录。
     """
     print(f"🔍 检测中断点...")
     
@@ -136,13 +159,24 @@ def detect_last_complete_date(output_base_dir: str, start_date: str, end_date: s
     return last_complete_date
 
 def restore_orchestrator_state(orchestrator, restore_date: str, output_base_dir: str):
-    """
-    从指定日期的状态文件恢复Orchestrator状态
-    
+    """从指定日期的状态文件恢复 Orchestrator 状态
+
+    目的：
+    - 依据已输出的 CSV 状态文件重建 Orchestrator 的内存状态（库存、在途、开放调拨、空间配额、日志与索引），以支持断点续跑。
+
     Args:
-        orchestrator: Orchestrator实例
-        restore_date: 恢复日期 (YYYY-MM-DD)
-        output_base_dir: 输出基础目录
+        orchestrator: Orchestrator 实例。
+        restore_date: 恢复日期 (YYYY-MM-DD)。
+        output_base_dir: 输出基础目录。
+
+    输入数据：
+        - `orchestrator/` 目录下以 `restore_date` 为基准的多类 CSV 文件（库存/在途/调拨/空间/日志等）。
+
+    输出/副作用：
+        - 回填 Orchestrator 的多个字典/列表属性；重建按日期索引的日志字典；设置 `current_date`。
+
+    逻辑：
+        - 逐类文件读取→标准化标识符→重建映射与列表→构建日期索引→设置当前日期，期间对空文件与解析异常采取容错策略。
     """
     print(f"🔄 从日期 {restore_date} 恢复Orchestrator状态...")
     
@@ -454,17 +488,22 @@ def restore_orchestrator_state(orchestrator, restore_date: str, output_base_dir:
         raise
 
 def check_resume_capability(output_base_dir: str, start_date: str, end_date: str):
-    """
-    检查是否可以续跑，返回续跑信息
-    
+    """检查是否可以续跑，返回续跑信息
+
+    目的：
+    - 综合最后完整日期与目标区间，计算续跑起点与剩余天数，指示是否已全部完成或可继续。
+
+    Args:
+        output_base_dir: 输出基础目录。
+        start_date: 仿真开始日期（YYYY-MM-DD）。
+        end_date: 仿真结束日期（YYYY-MM-DD）。
+
     Returns:
-        dict: {
-            'can_resume': bool,
-            'last_complete_date': str,  
-            'resume_from_date': str,
-            'days_completed': int,
-            'days_remaining': int
-        }
+        dict: 包含可续跑标志、最后完整日期、续跑起始日期、已完成和剩余天数等的字典。
+
+    输入/输出/逻辑：
+        - 调用 `detect_last_complete_date` 获取完整日期；
+        - 若已覆盖到 `end_date`，返回已完成标记；否则计算续跑起点（完整日期+1）与剩余范围。
     """
     last_complete_date = detect_last_complete_date(output_base_dir, start_date, end_date)
     
@@ -509,7 +548,14 @@ def check_resume_capability(output_base_dir: str, start_date: str, end_date: str
 
 # 标识符字段标准化函数（统一处理所有配置表）
 def _normalize_location(location_str) -> str:
-    """Normalize location string by padding with leading zeros to 4 digits if numeric"""
+    """标准化地点编号
+
+    目的/逻辑：
+    - 若为纯数字字符串则左侧补零至4位；非数字（如 A888）保持原样；空值返回空串。
+
+    输入：`location_str` 任意类型标识。
+    输出：规范化的字符串地点标识。
+    """
     if pd.isna(location_str) or location_str is None:
         return ""
     
@@ -526,7 +572,14 @@ def _normalize_location(location_str) -> str:
         return str(location_str)
 
 def _normalize_material(material_str) -> str:
-    """Normalize material string to ensure consistent format"""
+    """标准化物料编码
+
+    目的/逻辑：
+    - 将数值型/带小数的物料转换为无小数整数字符串；空/None/NAN 返回空串；其余去除首尾空格。
+
+    输入：`material_str` 任意类型标识。
+    输出：规范化的字符串物料编码。
+    """
     if material_str is None or material_str == '' or str(material_str).lower() in ['nan', 'none', '<na>']:
         return ""
     
@@ -542,7 +595,13 @@ def _normalize_material(material_str) -> str:
         return str(material_str).strip()
 
 def _normalize_sending(sending_str) -> str:
-    """Normalize sending string by padding with leading zeros to 4 digits if numeric"""
+    """标准化发送地编号
+
+    目的/逻辑：
+    - 纯数字补零至4位；非数字保持；空值返回空串。
+    输入：`sending_str`
+    输出：规范化字符串。
+    """
     if pd.isna(sending_str) or sending_str is None:
         return ""
     
@@ -559,7 +618,12 @@ def _normalize_sending(sending_str) -> str:
         return str(sending_str)
 
 def _normalize_receiving(receiving_str) -> str:
-    """Normalize receiving string by padding with leading zeros to 4 digits if numeric"""
+    """标准化接收地编号
+
+    目的/逻辑：同 `_normalize_sending`。
+    输入：`receiving_str`
+    输出：规范化字符串。
+    """
     if pd.isna(receiving_str) or receiving_str is None:
         return ""
     
@@ -576,7 +640,26 @@ def _normalize_receiving(receiving_str) -> str:
         return str(receiving_str)
 
 def _normalize_identifiers(df: pd.DataFrame) -> pd.DataFrame:
-    """Normalize identifier columns to string format with proper formatting"""
+    """标准化标识符字段（DataFrame级）
+
+    目的：
+    - 统一将多个标识符列转换为字符串并进行必要的格式化（地点补零、物料去小数等），确保跨模块数据类型一致。
+
+    Args:
+        df: 输入数据表。
+
+    Returns:
+        pd.DataFrame: 标识符标准化后的副本。
+
+    输入数据：
+        - 含 `material/location/sending/receiving/sourcing/...` 等列的表。
+
+    输出/副作用：
+        - 返回新 DataFrame，不修改原对象。
+
+    逻辑：
+        - 针对每个识别列执行 astype(str)+逐列规范化；空表直接返回。
+    """
     if df.empty:
         return df
     
@@ -617,18 +700,30 @@ def run_module4_integrated(
     simulation_start: pd.Timestamp,
     output_dir: str
 ) -> pd.DataFrame:
-    """
-    集成模式运行 Module4 生产计划，直接使用 config_dict 数据
-    
+    """集成模式运行 Module4 生产计划（直接用 config_dict）
+
+    目的：
+    - 无需临时文件，使用内存中的配置与 Module3 输出，构建并分配当日生产计划，立即入库可用产出。
+
     Args:
-        config_dict: 配置数据字典
-        module3_output_dir: Module3 输出目录
-        simulation_date: 当前仿真日期
-        simulation_start: 仿真开始日期
-        output_dir: 输出目录
-        
+        config_dict: 配置数据字典（包含 M4 所需表）。
+        module3_output_dir: Module3 输出目录，用于读取日度净需求。
+        simulation_date: 当前仿真日期。
+        simulation_start: 仿真开始日期。
+        output_dir: 输出目录，用于写每日 M4 输出。
+
     Returns:
-        pd.DataFrame: 生产计划数据
+        pd.DataFrame: 生产计划数据（含 available_date 等），用于当日入库处理。
+
+    输入数据：
+        - M4 配置表（LineCfg/Capacity/ChangeoverMatrix/Definition/ProductionReliability）。
+        - Module3 的日度净需求文件。
+
+    输出/副作用：
+        - 写每日 M4 输出文件；返回当日及未来的生产记录；可能更新产线状态与已分配产能持久化。
+
+    逻辑：
+        - 校验配置→加载净需求→构建无约束计划→处理换产与产能分配→模拟生产可靠性→提取并保存状态→返回可用生产。
     """
     try:
         # 验证必需的Module4配置数据
@@ -819,16 +914,21 @@ def run_module4_integrated(
 
 
 def load_all_historical_production_plans(module4_output_dir: str, current_date: pd.Timestamp, start_date: pd.Timestamp) -> pd.DataFrame:
-    """
-    加载所有历史的M4生产计划，筛选出当日应该入库的生产
-    
+    """加载历史 M4 生产计划并筛选当日入库
+
+    目的：
+    - 汇总从仿真开始至今的所有 M4 输出，提取 `available_date == current_date` 的生产记录用于入库。
+
     Args:
-        module4_output_dir: Module4 输出目录
-        current_date: 当前日期
-        start_date: 仿真开始日期
-        
+        module4_output_dir: Module4 输出目录。
+        current_date: 当前日期。
+        start_date: 仿真开始日期。
+
     Returns:
-        pd.DataFrame: 当日应该入库的生产计划数据
+        pd.DataFrame: 当日应该入库的生产计划。
+
+    输入/输出/逻辑：
+        - 遍历日期读取 `Module4Output_YYYYMMDD.xlsx`→合并→按 available_date 过滤当日→返回关键列。
     """
     all_production_plans = []
     
@@ -877,15 +977,20 @@ def load_all_historical_production_plans(module4_output_dir: str, current_date: 
     return pd.DataFrame()
 
 def load_module4_production_output(output_path: str, current_date: pd.Timestamp) -> pd.DataFrame:
-    """
-    从 Module4 输出文件中加载生产计划数据 (保留用于向后兼容)
-    
+    """从 Module4 输出文件加载生产计划（向后兼容）
+
+    目的：
+    - 兼容旧流程，从单个输出文件读取生产计划，并筛选当日及未来的可用生产。
+
     Args:
-        output_path: Module4 输出文件路径
-        current_date: 当前日期
-        
+        output_path: Module4 输出文件路径。
+        current_date: 当前日期。
+
     Returns:
-        pd.DataFrame: 生产计划数据
+        pd.DataFrame: 可用生产计划数据。
+
+    逻辑：
+        - 读取 Excel→解析 `ProductionPlan`→按 `available_date >= current_date` 过滤。
     """
     try:
         if not os.path.exists(output_path):
@@ -912,14 +1017,19 @@ def load_module4_production_output(output_path: str, current_date: pd.Timestamp)
         return pd.DataFrame()
 
 def load_global_seed(config_dict: dict) -> int:
-    """
-    统一从 Global_Seed sheet 读取随机种子
-    
+    """统一从 Global_Seed 读取随机种子
+
+    目的：
+    - 提供稳定的随机性来源，优先读取标准列 `seed`，兼容旧格式（第一列第一行）。
+
     Args:
-        config_dict: 配置数据字典
-        
+        config_dict: 配置数据字典。
+
     Returns:
-        int: 随机种子值，默认为 42
+        int: 随机种子值，默认 42。
+
+    逻辑：
+        - 按优先级读取→打印提示→返回默认或实际种子。
     """
     if 'Global_Seed' in config_dict and not config_dict['Global_Seed'].empty:
         seed_df = config_dict['Global_Seed']
@@ -937,12 +1047,20 @@ def load_global_seed(config_dict: dict) -> int:
     return 42
 
 def set_module_seeds(config_dict: dict, global_seed: int = None):
-    """
-    为所有模块设置统一的随机种子
-    
+    """为所有模块设置统一随机种子
+
+    目的：
+    - 将全局种子应用于 numpy 及各模块配置，确保仿真可复现。
+
     Args:
-        config_dict: 配置数据字典
-        global_seed: 全局种子值，如果为 None 则从配置读取
+        config_dict: 配置数据字典。
+        global_seed: 指定全局种子；为 None 时从配置读取。
+
+    Returns:
+        int: 实际使用的全局种子。
+
+    逻辑：
+        - 若未提供则读取→设置 numpy 种子→写入各模块种子键→打印确认。
     """
     if global_seed is None:
         global_seed = load_global_seed(config_dict)
@@ -961,14 +1079,25 @@ def set_module_seeds(config_dict: dict, global_seed: int = None):
     return global_seed
 
 def load_configuration(config_path: str) -> dict:
-    """
-    加载配置数据
-    
+    """加载与标准化配置数据
+
+    目的：
+    - 从 Excel 读取所有工作表，补齐缺失的必要表，统一标准化标识符字段，并对 M4 换产配置执行重复性检查与去重映射。
+
     Args:
-        config_path: 配置文件路径
-        
+        config_path: 配置文件路径（Excel）。
+
     Returns:
-        dict: 配置数据字典
+        dict: 标准化后的配置数据字典。
+
+    输入数据：
+        - Excel 工作簿；可能存在缺失表或非标准类型的标识符列。
+
+    输出/副作用：
+        - 打印加载与标准化日志；对 M4 的配置进行去重与键映射以向后兼容。
+
+    逻辑：
+        - 加载→补齐必要表→标准化标识符→检验并去重 Changeover 配置→映射关键表→返回字典。
     """
     print(f"📋 加载配置文件: {config_path}")
     
@@ -1121,15 +1250,29 @@ def run_integrated_simulation(
     output_base_dir: str = "./integrated_output",
     force_restart: bool = False
 ):
-    """
-    运行完整的集成仿真
-    
+    """运行完整的集成仿真
+
+    目的：
+    - 统一编排预验证、续跑检测、Orchestrator 初始化、每日模块执行与状态保存，最终生成汇总与验证报告。
+
     Args:
-        config_path: 配置文件路径
-        start_date: 仿真开始日期 (YYYY-MM-DD)
-        end_date: 仿真结束日期 (YYYY-MM-DD)
-        output_base_dir: 输出基础目录
-        force_restart: 强制从头开始，忽略续跑能力
+        config_path: 配置文件路径（Excel）。
+        start_date: 仿真开始日期 (YYYY-MM-DD)。
+        end_date: 仿真结束日期 (YYYY-MM-DD)。
+        output_base_dir: 输出基础目录。
+        force_restart: 强制从头开始（忽略续跑）。
+
+    Returns:
+        dict: 包含仿真执行状态、统计与输出路径等的结果字典。
+
+    输入数据：
+        - 配置文件、历史输出目录（用于续跑）、各模块的运行所需表。
+
+    输出/副作用：
+        - 创建/写入每日输出与日志、保存 Orchestrator 状态、生成最终汇总与验证报告。
+
+    逻辑：
+        - 预验证→续跑判断→初始化（新建或恢复）→按日执行模块→每日保存→最终报告与检查→返回结果。
     """
     print(f"🚀 开始集成仿真: {start_date} 到 {end_date}")
     print("=" * 60)
@@ -1601,7 +1744,14 @@ def run_integrated_simulation(
     }
 
 def main():
-    """主函数 - 独立执行集成仿真"""
+    """主函数 - 命令行入口执行集成仿真
+
+    目的：
+    - 解析命令行参数，进行存在性检查与默认值处理，支持仅检查续跑或执行完整仿真。
+
+    输入/输出/逻辑：
+    - 解析参数→检查配置文件→构造默认输出目录→可选续跑检查→调用 `run_integrated_simulation` 并打印结果或错误。
+    """
     # 配置文件路径（可以通过命令行参数或环境变量指定）
     import argparse
     

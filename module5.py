@@ -474,6 +474,7 @@ def apply_priority_allocation_vectorized(demand_rows, adjusted_qtys, current_sto
     # Build DataFrame with indices
     df = pd.DataFrame(demand_rows).copy()
     df['idx'] = np.arange(n)
+    df = df.set_index('idx', drop=False) # keep idx as column too
     df['priority'] = df['demand_element'].map(lambda x: demand_priority_map.get(x, 99))
     df['adjusted_qty'] = df['idx'].map(lambda i: int(adjusted_qtys.get(i, int(df.loc[df['idx']==i, 'demand_qty'].iloc[0]))))
     df['deployed_qty_invCon'] = 0
@@ -494,14 +495,14 @@ def apply_priority_allocation_vectorized(demand_rows, adjusted_qtys, current_sto
         adj = block['adjusted_qty'].to_numpy()
         if current_stock >= group_total:
             # fully satisfy
-            df.loc[df.index[df['idx'].isin(idxs)], 'deployed_qty_invCon'] = adj
+            df.loc[idxs, 'deployed_qty_invCon'] = adj
             current_stock -= group_total
             continue
         # partial: proportional by adjusted_qty, integer floors
         weights = adj.astype(float)
         shares = (current_stock * (weights / float(group_total))) if group_total > 0 else np.zeros_like(weights)
         alloc = np.minimum(np.floor(shares).astype(np.int64), adj)
-        df.loc[df.index[df['idx'].isin(idxs)], 'deployed_qty_invCon'] = alloc
+        df.loc[idxs, 'deployed_qty_invCon'] = alloc
         current_stock = 0
         # zero all remaining priorities implicitly
         break
@@ -509,6 +510,7 @@ def apply_priority_allocation_vectorized(demand_rows, adjusted_qtys, current_sto
     # Write back
     for i, val in df[['idx','deployed_qty_invCon']].itertuples(index=False):
         demand_rows[int(i)]['deployed_qty_invCon'] = int(val)
+    df = df.reset_index(drop=True)
     return current_stock
 
 def _build_ptf_lsk_cache(m4_mlcfg_df: pd.DataFrame | None) -> Dict[tuple[str, str], tuple[int, int]]:

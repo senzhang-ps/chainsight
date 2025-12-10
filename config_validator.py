@@ -1,6 +1,19 @@
-# config_validator.py
-# 配置验证器 - 在仿真开始前运行所有配置检查
-# 输出 validation.txt 供用户查看
+"""
+config_validator.py
+
+整体目的：
+- 在仿真运行前，对配置文件（Excel 多表）进行系统化校验，确保关键数据完备、类型正确、数值范围合理、并在跨模块之间保持一致性。
+- 将所有校验信息（INFO/WARN/ERROR）统一写入验证报告 `validation.txt`，供用户快速定位并修复问题。
+
+功能点：
+- 全局配置校验：网络、运输时效（LeadTime）、需求优先级、仓储容量等核心表的必填列、日期与数值有效性校验。
+- 模块配置校验：对 Module1、3、4、5、6 的关键输入表执行针对性规则检查（如数量非负、参数正数、日期可解析、枚举取值合法等）。
+- 跨模块一致性检查：例如库存地点是否存在于网络，卡车放行路线是否在 LeadTime 中有对应 OTD 等。
+- 统一输出：通过 `ValidationManager` 收集消息，最终生成验证报告文件，便于追踪。
+
+使用方法（入口）：
+- 调用 `run_pre_simulation_validation(config_path, output_dir)` 加载 Excel 配置并执行所有校验，返回是否通过和报告路径。
+"""
 
 import pandas as pd
 import os
@@ -9,27 +22,47 @@ from pathlib import Path
 from validation_manager import ValidationManager
 
 class ConfigValidator:
-    """配置验证器"""
+    """配置验证器
+
+    目的：
+    - 聚合并执行全量配置校验，封装各模块与跨模块的验证逻辑。
+
+    依赖：
+    - `ValidationManager`：用于记录 INFO/WARN/ERROR 并输出报告。
+    """
     
     def __init__(self, validation_manager: ValidationManager):
-        """
-        初始化配置验证器
-        
+        """初始化配置验证器
+
         Args:
-            validation_manager: 验证管理器实例
+            validation_manager: 验证管理器实例，用于收集与输出验证报告。
+
+        逻辑概述：
+        - 保存 `ValidationManager` 引用，供后续各校验函数调用统一记录接口。
         """
         self.vm = validation_manager
     
     def validate_all_configurations(self, config_path: str, config_dict: Dict) -> bool:
-        """
-        验证所有配置
-        
+        """验证所有配置（主控流程）
+
+        目的：
+        - 调度执行全局、各模块及跨模块校验，汇总整体结果。
+
         Args:
-            config_path: 配置文件路径
-            config_dict: 配置数据字典
-            
+            config_path: 配置文件路径（用于存在性检查与报错信息指引）。
+            config_dict: 由 Excel 各 `sheet_name -> pandas.DataFrame` 组成的配置字典。
+
         Returns:
-            bool: 验证是否通过
+            bool: 所有校验均通过返回 True；任一校验失败返回 False。
+
+        输入数据：
+        - `config_dict` 需包含预期的工作表，如 `Global_Network`, `Global_LeadTime`, `M1_InitialInventory` 等。
+
+        输出/副作用：
+        - 通过 `ValidationManager` 记录校验信息，并在最终写入验证报告。
+
+        逻辑：
+        - 先检查配置文件存在性；再依次调用各校验子函数；最后以 `all()` 汇总布尔结果并记录完成/失败。
         """
         self.vm.add_info("ConfigValidator", "Start", "Starting configuration validation")
         
@@ -60,7 +93,29 @@ class ConfigValidator:
         return overall_result
     
     def _validate_global_configs(self, config_dict: Dict) -> bool:
-        """验证全局配置"""
+        """验证全局配置
+
+        目的：
+        - 对 `Global_Network`, `Global_LeadTime`, `Global_DemandPriority`, `Global_SpaceCapacity` 等全局表进行完备性与合理性校验。
+
+        Args:
+            config_dict: Excel 配置字典。
+
+        Returns:
+            bool: 全局配置是否通过校验。
+
+        输入数据：
+            - `Global_Network`: 必填列校验、日期列转换与范围合理性检查。
+            - `Global_LeadTime`: 必填列校验、数值列类型与范围（OTD/GR 非负；PDT/MCT 为正）、同一路线 OTD 唯一性检查。
+            - `Global_DemandPriority`: 必填列与优先级正数校验。
+            - `Global_SpaceCapacity`: 必填列、日期转换与容量正数校验。
+
+        输出/副作用：
+        - 通过 `ValidationManager` 输出细粒度信息与错误；无直接数据变更。
+
+        逻辑：
+        - 针对每张表执行列存在性→数据类型转换→数值/日期范围校验→特定业务规则校验，累计结果并返回。
+        """
         self.vm.add_info("Global", "Start", "Validating global configurations")
         
         results = []
@@ -187,7 +242,28 @@ class ConfigValidator:
         return all(results) if results else False
     
     def _validate_module1_configs(self, config_dict: Dict) -> bool:
-        """验证 Module1 配置"""
+        """验证 Module1 配置
+
+        目的：
+        - 校验初始库存、需求预测、下单日历的必填列与数值/日期有效性。
+
+        Args:
+            config_dict: Excel 配置字典。
+
+        Returns:
+            bool: 模块1配置是否通过校验（若相关表缺失/为空，多为警告并总体返回 True）。
+
+        输入数据：
+            - `M1_InitialInventory`: 必填列与数量非负校验。
+            - `M1_DemandForecast`: 必填列与数量为正校验。
+            - `M1_OrderCalendar`: 必填列与日期可解析校验。
+
+        输出/副作用：
+        - 记录校验信息，不修改数据。
+
+        逻辑：
+        - 针对存在的相关表执行规则校验；缺失时记录警告/错误并累积结果。
+        """
         self.vm.add_info("Module1", "Start", "Validating Module1 configurations")
         
         results = []
@@ -251,7 +327,26 @@ class ConfigValidator:
         return all(results) if results else True
     
     def _validate_module3_configs(self, config_dict: Dict) -> bool:
-        """验证 Module3 配置"""
+        """验证 Module3 配置
+
+        目的：
+        - 校验安全库存表的必填列、日期解析与数量非负性。
+
+        Args:
+            config_dict: Excel 配置字典。
+
+        Returns:
+            bool: 模块3配置是否通过校验（为空/缺失多为警告并总体返回 True）。
+
+        输入数据：
+            - `M3_SafetyStock`: 检查列完整性、日期转换与 `safety_stock_qty` 非负。
+
+        输出/副作用：
+        - 记录校验信息，不修改数据。
+
+        逻辑：
+        - 逐项验证并累积结果，返回总体布尔值。
+        """
         self.vm.add_info("Module3", "Start", "Validating Module3 configurations")
         
         results = []
@@ -283,7 +378,27 @@ class ConfigValidator:
         return all(results) if results else True
     
     def _validate_module4_configs(self, config_dict: Dict) -> bool:
-        """验证 Module4 配置"""
+        """验证 Module4 配置
+
+        目的：
+        - 校验生产相关参数配置与产线产能表的完备性与数值/日期有效性。
+
+        Args:
+            config_dict: Excel 配置字典。
+
+        Returns:
+            bool: 模块4配置是否通过校验（严格要求关键表存在并有效）。
+
+        输入数据：
+            - `M4_MaterialLocationLineCfg`: 检查必填列；除 `ptf` 允许为 0 外，其余关键数值需为正；`ptf` 需非负。
+            - `M4_LineCapacity`: 检查必填列、日期解析、`capacity` 为正。
+
+        输出/副作用：
+        - 记录校验信息；不变更数据。
+
+        逻辑：
+        - 若关键配置缺失/为空，直接判定为失败；否则逐项校验后汇总布尔值。
+        """
         self.vm.add_info("Module4", "Start", "Validating Module4 configurations")
         
         results = []
@@ -344,7 +459,26 @@ class ConfigValidator:
         return all(results) if results else False
     
     def _validate_module5_configs(self, config_dict: Dict) -> bool:
-        """验证 Module5 配置"""
+        """验证 Module5 配置
+
+        目的：
+        - 校验推拉模型的必填列与枚举取值合法性。
+
+        Args:
+            config_dict: Excel 配置字典。
+
+        Returns:
+            bool: 模块5配置是否通过校验（缺失/为空返回警告但总体 True）。
+
+        输入数据：
+            - `M5_PushPullModel`: 检查列完整性与 `model` 取值是否在允许集合（push/pull/soft push 等）。
+
+        输出/副作用：
+        - 记录校验信息；不更改数据。
+
+        逻辑：
+        - 校验失败时记录错误并累积结果；否则返回通过。
+        """
         self.vm.add_info("Module5", "Start", "Validating Module5 configurations")
         
         results = []
@@ -373,7 +507,26 @@ class ConfigValidator:
         return all(results) if results else True
     
     def _validate_module6_configs(self, config_dict: Dict) -> bool:
-        """验证 Module6 配置"""
+        """验证 Module6 配置
+
+        目的：
+        - 校验卡车放行参数的必填列与比例范围有效性。
+
+        Args:
+            config_dict: Excel 配置字典。
+
+        Returns:
+            bool: 模块6配置是否通过校验（缺失/为空返回警告但总体 True）。
+
+        输入数据：
+            - `M6_TruckReleaseCon`: 检查列完整性；`WFR` 与 `VFR` 需在 (0, 1] 区间。
+
+        输出/副作用：
+            - 记录校验信息；不修改数据。
+
+        逻辑：
+            - 针对比例列执行范围过滤，发现异常即记录错误并返回失败。
+        """
         self.vm.add_info("Module6", "Start", "Validating Module6 configurations")
         
         results = []
@@ -402,7 +555,29 @@ class ConfigValidator:
         return all(results) if results else True
     
     def _validate_cross_module_consistency(self, config_dict: Dict) -> bool:
-        """验证跨模块配置一致性"""
+        """验证跨模块配置一致性
+
+        目的：
+        - 保证多个模块间的引用关系与业务主数据保持一致，如地点在网络存在、跨节点运输在 LeadTime 有对应 OTD 等。
+
+        Args:
+            config_dict: Excel 配置字典。
+
+        Returns:
+            bool: 一致性校验是否通过（如无检查项则返回 True）。
+
+        输入数据：
+            - `Global_Network`: 提取 `location` 与 `sourcing` 并构建地点全集用于对照。
+            - `M1_InitialInventory`: 校验 `location` 是否出现在网络地点/来源集合中。
+            - `Global_DemandPriority`: 检查是否包含基础需求类型（如 normal, AO）。
+            - `M6_TruckReleaseCon` 与 `Global_LeadTime`: 验证跨节点路线在 LeadTime 中具备唯一且存在的 OTD。
+
+        输出/副作用：
+            - 通过 `ValidationManager` 记录详细的匹配情况与缺失项，便于定位问题。
+
+        逻辑：
+            - 分场景执行集合对比与连接检查，发现缺失或不一致时输出错误/警告并累积结果。
+        """
         self.vm.add_info("CrossModule", "Start", "Validating cross-module consistency")
         
         results = []
@@ -502,15 +677,26 @@ class ConfigValidator:
                 results.append(False)
 
 def run_pre_simulation_validation(config_path: str, output_dir: str) -> tuple:
-    """
-    运行仿真前配置验证
-    
+    """运行仿真前配置验证（外部入口）
+
+    目的：
+    - 从 Excel 文件加载所有配置表，执行完整的配置校验流程，并输出验证报告。
+
     Args:
-        config_path: 配置文件路径
-        output_dir: 输出目录
-        
+        config_path: 配置文件路径（Excel）。
+        output_dir: 验证报告输出目录。
+
     Returns:
-        tuple: (验证是否通过, 验证报告路径)
+        tuple: `(passed: bool, report_path: str)`，分别表示是否通过校验与验证报告的文件路径。
+
+    输入数据：
+        - Excel 工作簿，包含若干工作表；函数将它们解析为 `Dict[str, DataFrame]`。
+
+    输出/副作用：
+        - 在 `output_dir` 下生成验证报告文件；并返回其路径。
+
+    逻辑：
+        - 先创建 `ValidationManager`；读取 Excel；若读取失败则写报告并返回失败；否则实例化 `ConfigValidator` 执行校验，最终写入报告并返回结果与路径。
     """
     # 创建验证管理器
     validation_manager = ValidationManager(output_dir)

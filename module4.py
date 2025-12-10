@@ -1,4 +1,20 @@
-#module 4
+"""
+module4.py
+
+整体目的：
+- 模块4负责工业级 APS 生产计划的日度执行逻辑：读取净需求，依据产线配置、产能与换产矩阵进行无约束计划与集中产能分配，跟踪跨天换产连续性，并输出生产与校验日志。
+
+功能点：
+- 配置加载与校验：读取 M4 相关配置（LineCfg/Capacity/Changeover）并进行必要的验证与类型标准化。
+- 净需求读取：按日从 Module3 输出读取净需求数据，筛选层级与日期，构建当日无约束计划。
+- 产能分配与换产：支持换产矩阵与定义，进行最优序列与集中分配，记录超额与未满足。
+- 跨天连续性：保存/恢复产线状态与已分配产能，支持未完成换产在次日延续。
+- 输出与汇总：每日输出生产计划、超额、校验与换产日志，支持合并输出。
+
+使用方法：
+- 日度模式：调用 `run_daily_production_planning(...)` 处理单日并生成每日输出。
+- 集成模式：由 `main_integration.py` 直接调用内部函数，如 `build_unconstrained_plan_for_single_day` 与 `centralized_capacity_allocation_with_changeover` 等。
+"""
 import pandas as pd
 import numpy as np
 from datetime import timedelta
@@ -8,19 +24,20 @@ from typing import Optional
 
 
 def get_or_init_simulation_start(output_dir: str, provided_start: Optional[pd.Timestamp]) -> pd.Timestamp:
-    """Load persistent simulation start date or initialize it.
+    """读取或初始化仿真开始日期（持久化）
 
-    During the first Module4 run we persist the provided start date to a
-    small state file in ``output_dir``. Subsequent runs reuse the stored
-    value so that review-day calculations remain consistent.
+    目的：
+    - 首次运行时将提供的开始日期写入 `simulation_start.txt`；后续运行读取持久化值，保证审查日计算一致。
 
     Args:
-        output_dir: Directory for Module4 outputs/state files.
-        provided_start: Start date supplied by the user (optional after the
-            first run).
+        output_dir: 模块4输出/状态目录。
+        provided_start: 用户提供的开始日期（首次必需，后续可选）。
 
     Returns:
-        pd.Timestamp: The persisted simulation start date.
+        pd.Timestamp: 持久化的仿真开始日期。
+
+    逻辑：
+        - 若状态文件存在则读取；否则要求提供开始日期并写入文件；返回最终开始日期。
     """
     state_file = os.path.join(output_dir, "simulation_start.txt")
 
@@ -44,12 +61,18 @@ def get_or_init_simulation_start(output_dir: str, provided_start: Optional[pd.Ti
 
 
 def save_line_state(output_dir: str, simulation_date: pd.Timestamp, line_states: dict):
-    """Save line states (last material and remaining changeover time) for cross-day continuity.
-    
+    """保存产线状态（最后物料与剩余换产时间）用于跨天连续性
+
+    目的：
+    - 在每日结束后持久化产线状态，支持次日延续未完成换产。
+
     Args:
-        output_dir: Directory for Module4 outputs/state files
-        simulation_date: Current simulation date
-        line_states: Dict with line keys containing {'last_material': str, 'remaining_changeover': float}
+        output_dir: 输出/状态目录。
+        simulation_date: 当前仿真日期。
+        line_states: 字典：`line -> {last_material, remaining_changeover, ...}`。
+
+    输出/逻辑：
+        - 写入 `line_states_YYYYMMDD.json`，不更改业务逻辑。
     """
     os.makedirs(output_dir, exist_ok=True)
     state_file = os.path.join(output_dir, f"line_states_{simulation_date.strftime('%Y%m%d')}.json")
@@ -60,12 +83,18 @@ def save_line_state(output_dir: str, simulation_date: pd.Timestamp, line_states:
 
 
 def save_allocated_capacity(output_dir: str, simulation_date: pd.Timestamp, allocated_capacity: dict):
-    """Save allocated capacity for future production dates to track capacity usage across simulation dates.
-    
+    """保存已分配产能（小时）用于跨日跟踪
+
+    目的：
+    - 将按生产计划日期的已分配产能持久化，避免多个仿真日对同一生产日重复分配。
+
     Args:
-        output_dir: Directory for Module4 outputs/state files
-        simulation_date: Current simulation date
-        allocated_capacity: Dict with capacity allocation info for future production dates
+        output_dir: 输出/状态目录。
+        simulation_date: 当前仿真日期。
+        allocated_capacity: 字典：`location|line|production_date -> hours`。
+
+    输出/逻辑：
+        - 写入 `allocated_capacity_YYYYMMDD.json`，供后续仿真日期读取校验。
     """
     os.makedirs(output_dir, exist_ok=True)
     capacity_file = os.path.join(output_dir, f"allocated_capacity_{simulation_date.strftime('%Y%m%d')}.json")
@@ -76,14 +105,17 @@ def save_allocated_capacity(output_dir: str, simulation_date: pd.Timestamp, allo
 
 
 def load_allocated_capacity(output_dir: str, simulation_date: pd.Timestamp) -> dict:
-    """Load previously allocated capacity for future production dates.
-    
+    """加载当前仿真日之前持久化的已分配产能
+
+    目的：
+    - 读取当前日期对应的产能文件，以在同一天内避免重复分配。
+
     Args:
-        output_dir: Directory for Module4 outputs/state files
-        simulation_date: Current simulation date
-        
+        output_dir: 输出/状态目录。
+        simulation_date: 当前仿真日期。
+
     Returns:
-        dict: Previously allocated capacity, empty dict if not found
+        dict: 已分配产能字典；不存在则返回空字典。
     """
     capacity_file = os.path.join(output_dir, f"allocated_capacity_{simulation_date.strftime('%Y%m%d')}.json")
     
@@ -100,14 +132,17 @@ def load_allocated_capacity(output_dir: str, simulation_date: pd.Timestamp) -> d
 
 
 def load_all_previous_capacity(output_dir: str, simulation_date: pd.Timestamp) -> dict:
-    """Load all previously allocated capacity from all previous simulation dates.
-    
+    """汇总所有历史仿真日的已分配产能
+
+    目的：
+    - 遍历 `output_dir` 下历史 `allocated_capacity_*.json`，合并为统一字典供校验使用。
+
     Args:
-        output_dir: Directory for Module4 outputs/state files
-        simulation_date: Current simulation date
-        
+        output_dir: 输出/状态目录。
+        simulation_date: 当前仿真日期。
+
     Returns:
-        dict: Consolidated capacity allocation from all previous simulation dates
+        dict: 之前所有仿真日的合并产能分配（小时）。
     """
     consolidated_capacity = {}
     
@@ -140,16 +175,21 @@ def load_all_previous_capacity(output_dir: str, simulation_date: pd.Timestamp) -
 
 
 def extract_allocated_capacity_from_plan(plan_df: pd.DataFrame, rate_map: dict, changeover_def: dict = None) -> dict:
-    """Extract allocated capacity information from production plan for persistence.
-    
+    """从生产计划提取已分配产能信息（小时）用于持久化
+
+    目的：
+    - 依据计划行汇总每个 `location/line/production_plan_date` 的生产与换产耗时。
+
     Args:
-        plan_df: Production plan DataFrame
-        rate_map: Production rate mapping (material, line) -> rate
-        changeover_def: Changeover definition mapping (changeover_id, line) -> time
-        
+        plan_df: 生产计划 DataFrame。
+        rate_map: 产率映射 `(material, line) -> rate`。
+        changeover_def: 换产定义 `(changeover_id, line) -> time`（可选）。
+
     Returns:
-        dict: Capacity allocation info in HOURS keyed by (location, line, production_plan_date)
-        Includes both production time and changeover time
+        dict: 键为 `location|line|date`，值为小时数（float）。
+
+    逻辑：
+        - 分组累加生产时间与换产时间→转为 float 便于 JSON 序列化→返回字典。
     """
     allocated_capacity = {}
     
@@ -189,17 +229,23 @@ def extract_allocated_capacity_from_plan(plan_df: pd.DataFrame, rate_map: dict, 
 
 def validate_capacity_allocation(plan_log: pd.DataFrame, previously_allocated_capacity: dict, 
                                 simulation_date: pd.Timestamp, rate_map: dict, changeover_def: dict = None) -> list:
-    """Validate that capacity allocation respects previously allocated capacity.
-    
+    """校验产能分配是否尊重历史已分配产能
+
+    目的：
+    - 对每个生产计划日检查当前分配与历史分配之和，记录校验信息用于后续分析。
+
     Args:
-        plan_log: Current production plan DataFrame
-        previously_allocated_capacity: Previously allocated capacity dict (in hours)
-        simulation_date: Current simulation date
-        rate_map: Production rate mapping (material, line) -> rate
-        changeover_def: Changeover definition mapping (changeover_id, line) -> time
-        
+        plan_log: 当前生产计划 DataFrame。
+        previously_allocated_capacity: 历史已分配产能字典（小时）。
+        simulation_date: 当前仿真日期。
+        rate_map: 产率映射。
+        changeover_def: 换产定义（可选）。
+
     Returns:
-        list: Validation issues found
+        list: 校验记录列表（非错误，仅信息）。
+
+    逻辑：
+        - 按 `location/line/production_date` 分组→计算当前耗时→与历史耗时合并→生成校验记录。
     """
     issues = []
     
@@ -245,14 +291,17 @@ def validate_capacity_allocation(plan_log: pd.DataFrame, previously_allocated_ca
 
 
 def load_line_state(output_dir: str, simulation_date: pd.Timestamp) -> dict:
-    """Load line states from previous day for cross-day changeover continuity.
-    
+    """加载前一日的产线状态（支持跨天换产连续性）
+
+    目的：
+    - 读取 `line_states_YYYYMMDD.json`，恢复未完成换产或最后物料状态。
+
     Args:
-        output_dir: Directory for Module4 outputs/state files
-        simulation_date: Current simulation date
-        
+        output_dir: 输出/状态目录。
+        simulation_date: 当前仿真日期。
+
     Returns:
-        dict: Line states from previous day, empty dict if not found
+        dict: 前一日产线状态；不存在或异常时返回空字典。
     """
     prev_date = simulation_date - pd.Timedelta(days=1)
     state_file = os.path.join(output_dir, f"line_states_{prev_date.strftime('%Y%m%d')}.json")
@@ -272,20 +321,23 @@ def load_line_state(output_dir: str, simulation_date: pd.Timestamp) -> dict:
 def analyze_end_of_day_changeover_state(plan_df: pd.DataFrame, cap_df: pd.DataFrame, 
                                         co_def: dict, simulation_date: pd.Timestamp,
                                         rate_map: dict) -> dict:
-    """Analyze if there are incomplete changeovers at end of day by reconstructing capacity allocation.
-    
-    This function reconstructs the actual capacity allocation algorithm to detect changeovers
-    that started but didn't complete, even if they don't have corresponding production records.
-    
+    """分析日末是否存在未完成换产（基于产能分配重构）
+
+    目的：
+    - 通过重建分配逻辑，检测即便未产生生产记录也可能已启动但未完成的换产，并推断剩余时间。
+
     Args:
-        plan_df: Production plan DataFrame for the day
-        cap_df: Capacity DataFrame
-        co_def: Changeover definition dict
-        simulation_date: Current simulation date
-        rate_map: Production rate mapping for calculating production time
-        
+        plan_df: 当日生产计划。
+        cap_df: 产能数据。
+        co_def: 换产定义字典。
+        simulation_date: 当前仿真日期。
+        rate_map: 产率映射，用于计算生产时间。
+
     Returns:
-        dict: Line changeover states {line: changeover_info or None}
+        dict: 产线换产状态 `{line: changeover_info 或 None}`。
+
+    逻辑：
+        - 逐线逐生产日重构耗时→比对剩余产能→若与典型换产时长接近则推断未完成换产并记录。
     """
     changeover_states = {}
     
@@ -373,18 +425,23 @@ def analyze_end_of_day_changeover_state(plan_df: pd.DataFrame, cap_df: pd.DataFr
 def extract_line_states_from_plan(plan_df: pd.DataFrame, cap_df: pd.DataFrame = None, 
                                   co_def: dict = None, simulation_date: pd.Timestamp = None,
                                   rate_map: dict = None) -> dict:
-    """Extract line states from production plan for state persistence.
-    Enhanced to track changeover states for cross-day continuity.
-    
+    """从生产计划提取产线状态（包含换产信息）用于持久化
+
+    目的：
+    - 提取每条产线的最后生产/换产状态，记录剩余换产以支持跨天连续性。
+
     Args:
-        plan_df: Production plan DataFrame
-        cap_df: Capacity DataFrame (optional, for changeover analysis)
-        co_def: Changeover definition dict (optional, for changeover analysis)
-        simulation_date: Current simulation date (optional, for changeover analysis)
-        rate_map: Production rate mapping (optional, for changeover analysis)
-        
+        plan_df: 生产计划。
+        cap_df: 产能（可选，用于换产分析）。
+        co_def: 换产定义（可选）。
+        simulation_date: 当前仿真日期（可选）。
+        rate_map: 产率映射（可选）。
+
     Returns:
-        dict: Line states with last material and remaining changeover info
+        dict: 产线状态字典，包含 `last_material/last_location/last_activity/changeover_info`。
+
+    逻辑：
+        - 若提供必要参数则先分析未完成换产→按线与仿真日取最后生产→合并换产状态并返回。
     """
     line_states = {}
     
@@ -434,13 +491,13 @@ IDENTIFIER_COLS = [
 
 
 def _normalize_location(location_str: str) -> str:
-    """Normalize location string by padding with leading zeros to 4 digits if numeric.
-    
+    """标准化地点字符串（数字左补零至4位）
+
     Args:
-        location_str: Location string (e.g., "386", "0386", or "A888")
-        
+        location_str: 地点字符串（如 "386"/"0386"/"A888"）。
+
     Returns:
-        str: Normalized location - zero-padded if numeric, unchanged if alphanumeric
+        str: 数字补零后的地点或原样返回的字母数字地点。
     """
     if pd.isna(location_str) or location_str is None:
         return ""
@@ -459,14 +516,14 @@ def _normalize_location(location_str: str) -> str:
 
 
 def _cast_identifiers_to_str(df: pd.DataFrame, cols=None) -> pd.DataFrame:
-    """Cast identifier columns to pandas string dtype and normalize locations.
+    """将标识符列转换为字符串类型并标准化地点
 
     Args:
-        df: DataFrame to process
-        cols: Optional list of columns; defaults to IDENTIFIER_COLS
+        df: 待处理 DataFrame。
+        cols: 目标列列表，默认使用 `IDENTIFIER_COLS`。
 
     Returns:
-        DataFrame with specified columns cast to string dtype and normalized
+        DataFrame: 指定列为字符串类型且地点已标准化的副本。
     """
     cols = cols or IDENTIFIER_COLS
     for c in cols:
@@ -479,7 +536,7 @@ def _cast_identifiers_to_str(df: pd.DataFrame, cols=None) -> pd.DataFrame:
 
 
 def _validate_merge_keys(df1: pd.DataFrame, df2: pd.DataFrame, keys):
-    """Validate that merge keys share the same dtype in both DataFrames."""
+    """校验合并键在两个 DataFrame 中的 dtype 一致性"""
     for k in keys:
         if k in df1.columns and k in df2.columns:
             if df1[k].dtype != df2[k].dtype:
@@ -488,16 +545,20 @@ def _validate_merge_keys(df1: pd.DataFrame, df2: pd.DataFrame, keys):
                 )
 
 def load_daily_net_demand(module3_output_dir: str, simulation_date: pd.Timestamp) -> pd.DataFrame:
-    """
-    Load NetDemand from Module3 daily output, filter layer=0 and convert negative to positive
-    按照数据流规范，Module4读取前一天Module3产生的NetDemand数据
-    
+    """加载前一日 Module3 的净需求，筛选层级并规范化数量
+
+    目的：
+    - 按数据流规范读取前一日输出，筛选 `layer=0` 下游需求，数量取绝对值，保证 `requirement_date` 为日期类型。
+
     Args:
-        module3_output_dir: Directory containing Module3 daily output files
-        simulation_date: The simulation date to load data for
-        
+        module3_output_dir: Module3 每日输出目录。
+        simulation_date: 当前仿真日期。
+
     Returns:
-        DataFrame: Filtered and processed NetDemand data
+        DataFrame: 处理后的净需求数据。
+
+    逻辑：
+        - 找到前一日文件→读取 NetDemand→筛选层级→数量绝对值→日期规范化→返回。
     """
     try:
         # 按照设计逻辑：Module4读取前一天的Module3输出
@@ -548,17 +609,18 @@ def load_daily_net_demand(module3_output_dir: str, simulation_date: pd.Timestamp
 
 
 def compute_planning_window(simulation_date: pd.Timestamp, ptf: int, lsk: int) -> tuple:
-    """
-    Calculate planning window for both NetDemand filtering AND production distribution
-    Respects PTF frozen period for all planning decisions
-    
+    """计算计划窗口（同时用于净需求筛选与生产分布）
+
+    目的：
+    - 尊重 PTF 冻结期，生成 `[window_start, window_end]` 日期区间供后续分配。
+
     Args:
-        simulation_date: Current simulation date (review date)
-        ptf: Planning Time Fence (frozen period in days)
-        lsk: Lot Size Key (planning horizon in days)
-        
+        simulation_date: 当前仿真日期（审查日）。
+        ptf: 计划冻结期（天）。
+        lsk: 批量/周期键（规划视窗天数）。
+
     Returns:
-        tuple: (window_start, window_end)
+        tuple: `(window_start, window_end)`。
     """
     window_start = simulation_date + timedelta(days=ptf)          # After frozen period
     window_end = simulation_date + timedelta(days=ptf + lsk - 1)  # PTF + planning horizon (LSK days)
@@ -566,15 +628,20 @@ def compute_planning_window(simulation_date: pd.Timestamp, ptf: int, lsk: int) -
 
 
 def calculate_changeover_metrics(production_plan: pd.DataFrame, changeover_def: pd.DataFrame) -> pd.DataFrame:
-    """
-    Calculate changeover metrics (count, time, cost, mu_loss) from production plan
-    
+    """基于生产计划计算换产指标（次数、时间、成本、mu_loss）
+
+    目的：
+    - 汇总每个生产日/地点/产线的换产发生次数并乘以定义值，生成换产日志。
+
     Args:
-        production_plan: Production plan DataFrame with changeover_id
-        changeover_def: Changeover definition with time, cost, mu_loss by changeover_id and line
-        
+        production_plan: 包含 `changeover_id` 的生产计划。
+        changeover_def: 换产定义（含 `time/cost/mu_loss`）。
+
     Returns:
-        DataFrame: Changeover log with metrics
+        DataFrame: 换产日志（date/location/line/type/count/time/cost/mu_loss）。
+
+    逻辑：
+        - 分组计数→与定义合并→计算总指标→返回日志表。
     """
     changeover_log = []
     
@@ -640,6 +707,17 @@ def calculate_changeover_metrics(production_plan: pd.DataFrame, changeover_def: 
 
 
 def load_config(filepath):
+    """加载模块4配置（并做向后兼容映射）
+
+    目的：
+    - 读取必需工作表，转换标识符类型，映射到旧键名，兼容可选 `NetDemand` 与 `Global_seed`。
+
+    Args:
+        filepath: 配置 Excel 路径。
+
+    Returns:
+        dict: 配置字典，含标准化后的各表。
+    """
     xl = pd.ExcelFile(filepath)
     required = [
         'M4_MaterialLocationLineCfg', 'M4_LineCapacity',
@@ -679,6 +757,17 @@ def load_config(filepath):
     return cfg
 
 def validate_config(cfg):
+    """校验配置一致性与潜在问题
+
+    目的：
+    - 检查 `NetDemand` 与 `MaterialLocationLineCfg` 的可合并性，提示缺少线配置或一物料地点多线情况。
+
+    Args:
+        cfg: 配置字典。
+
+    Returns:
+        list: 问题列表（非致命，供报告）。
+    """
     issues = []
     
     # Skip NetDemand validation if it doesn't exist (daily execution mode)
@@ -709,17 +798,16 @@ def validate_config(cfg):
     return issues
 
 def is_review_day(simulation_date, simulation_start, lsk, day):
-    """
-    Check if a simulation date is a review day for a material based on integer LSK
-    
+    """判断是否为某物料的审查日（基于整数 LSK）
+
     Args:
-        simulation_date: Current simulation date
-        simulation_start: First day of simulation period
-        lsk: Review interval in days (integer)
-        day: Offset days from simulation_start for first review
-        
+        simulation_date: 当前仿真日期。
+        simulation_start: 仿真起始日期。
+        lsk: 审查间隔天数（整数）。
+        day: 首次审查相对起始的偏移天数。
+
     Returns:
-        bool: True if this is a review day for the material
+        bool: 若是审查日返回 True。
     """
     days_since_start = (simulation_date - simulation_start).days
     first_review_day = int(day)-1  # offset from start
@@ -728,18 +816,23 @@ def is_review_day(simulation_date, simulation_start, lsk, day):
 
 
 def build_unconstrained_plan_for_single_day(net_demand_df, mlcfg, simulation_date, simulation_start, issues):
-    """
-    Build unconstrained plan for a single simulation date
-    Only plans materials that are on review day
-        Args:
-        net_demand_df: NetDemand DataFrame for this simulation date
-        mlcfg: Material location line configuration
-        simulation_date: Current simulation date
-        simulation_start: Simulation period start date
-        issues: List to append validation issues
-        
+    """构建单日无约束生产计划（仅针对审查日物料）
+
+    目的：
+    - 读取当日净需求（严格匹配 `requirement_date == simulation_date`），依据 MLCFG 计算最小批与舍入，得到无约束计划。
+
+    Args:
+        net_demand_df: 当日净需求。
+        mlcfg: 物料地点产线配置。
+        simulation_date: 当前仿真日期。
+        simulation_start: 仿真起始日期（用于审查日逻辑）。
+        issues: 问题收集列表。
+
     Returns:
-        DataFrame: Unconstrained production plans
+        DataFrame: 无约束计划（material/location/line/planned_date/uncon_planned_qty/...）。
+
+    逻辑：
+        - 过滤审查日物料→按物料地点合并配置→严格匹配当日需求→聚合数量→按最小批与 RV 上取整→生成结果。
     """
     plans = []
     
@@ -839,16 +932,19 @@ def build_unconstrained_plan_for_single_day(net_demand_df, mlcfg, simulation_dat
     return pd.concat(plans, ignore_index=True)
 
 def optimal_changeover_sequence(batches, co_mat, co_def, line):
-    """
-    Enhanced production sequencing with quantity-based prioritization:
-    1. First SKU: Select by largest original quantity (not batch size)
-    2. Subsequent SKUs: Minimize changeover time, with quantity as tie-breaker
-    
-    batches: list of dict, each batch at least: 'material', 'uncon_planned_qty', 'original_quantity'
-    co_mat: pandas.Series, MultiIndex [from, to] -> changeover_id
-    co_def: dict, (changeover_id, line) -> time
-    line: str
-    Returns: list of batch indices (order)
+    """优化换产序列（数量优先与换产时间联合策略）
+
+    目的：
+    - 首件按原始需求量最大选择；后续优先最小换产时间，若并列使用数量打破。
+
+    Args:
+        batches: 批次列表，含 `material/uncon_planned_qty/original_quantity`。
+        co_mat: MultiIndex 序列 `[(from,to)] -> changeover_id`。
+        co_def: 换产定义 `(changeover_id, line) -> time`。
+        line: 产线标识。
+
+    Returns:
+        list: 批次索引的执行顺序。
     """
     batch_idx_list = list(range(len(batches)))
     if not batch_idx_list:
@@ -899,23 +995,28 @@ def optimal_changeover_sequence(batches, co_mat, co_def, line):
 def centralized_capacity_allocation_with_changeover(uncon, cap_df, rate_map, co_mat, co_def, mlcfg, 
                                                    previous_line_states=None, simulation_date=None, 
                                                    previously_allocated_capacity=None, issues=None):
-    """
-    Enhanced capacity allocation with cross-day changeover continuity and capacity tracking.
-    
+    """集中式产能分配（含跨天换产连续性与产能跟踪）
+
+    目的：
+    - 在审查窗内分配产能并考虑换产时间，延续前一日未完成换产，记录未满足与校验信息。
+
     Args:
-        uncon: Unconstrained production plan
-        cap_df: Capacity DataFrame
-        rate_map: Production rate mapping
-        co_mat: Changeover matrix
-        co_def: Changeover definition
-        mlcfg: Material location line configuration
-        previous_line_states: Line states from previous day (optional)
-        simulation_date: Current simulation date (optional)
-        previously_allocated_capacity: Previously allocated capacity from earlier simulation dates (optional)
-        issues: List to append validation issues (optional)
-        
+        uncon: 无约束计划 DataFrame。
+        cap_df: 产能 DataFrame。
+        rate_map: 产率映射。
+        co_mat: 换产矩阵。
+        co_def: 换产定义。
+        mlcfg: 物料地点产线配置。
+        previous_line_states: 前一日产线状态（可选）。
+        simulation_date: 当前仿真日期（可选）。
+        previously_allocated_capacity: 历史已分配产能（可选）。
+        issues: 问题列表（可选）。
+
     Returns:
-        tuple: (plans_log, exceed_log)
+        tuple: `(plans_log, exceed_log)` 产能分配结果与未满足记录。
+
+    逻辑：
+        - 按线与仿真日分组→优化序列→处理跨天换产→在视窗内按日分配（先换产后生产）→更新剩余产能→记录未满足。
     """
     plans_log = []
     exceed = []
@@ -1169,6 +1270,16 @@ def centralized_capacity_allocation_with_changeover(uncon, cap_df, rate_map, co_
     return pd.DataFrame(plans_log), pd.DataFrame(exceed)
 
 def simulate_production(plan, pr_cfg, seed=None):
+    """仿真生产可靠性（将计划量转为实际产出）
+
+    Args:
+        plan: 生产计划。
+        pr_cfg: 生产可靠性配置 `pr`（按地点/线）。
+        seed: 随机种子。
+
+    Returns:
+        DataFrame: 增加 `produced_qty` 的计划表。
+    """
     if plan.empty or 'con_planned_qty' not in plan.columns:
         plan['produced_qty'] = []
         return plan
@@ -1181,6 +1292,7 @@ def simulate_production(plan, pr_cfg, seed=None):
     return plan
 
 def dedup_issues(issues):
+    """去重校验问题记录，返回字典列表"""
     if not issues:
         return issues
     df = pd.DataFrame(issues)
@@ -1188,6 +1300,22 @@ def dedup_issues(issues):
     return df.to_dict(orient='records')
 
 def write_output(plan, exc, issues, changeover_log, out_path, simulation_date=None):
+    """写出每日或汇总输出文件
+
+    目的：
+    - 保障列头一致，按 `simulation_date` 写每日版本或写合并版本；包含四张表：ProductionPlan/CapacityExceed/Validation/ChangeoverLog。
+
+    Args:
+        plan: 生产计划 DataFrame。
+        exc: 超额记录 DataFrame。
+        issues: 校验问题列表（或 DataFrame）。
+        changeover_log: 换产日志 DataFrame。
+        out_path: 基础输出路径。
+        simulation_date: 仿真日期（提供则写每日版本）。
+
+    Returns:
+        str: 实际写出的文件路径。
+    """
     # 🆕 列头保障函数
     def _ensure(df, cols):
         if df is None or df.empty:
@@ -1232,18 +1360,23 @@ def write_output(plan, exc, issues, changeover_log, out_path, simulation_date=No
 def run_daily_production_planning(config_file: str, module3_output_dir: str, 
                                  simulation_date: pd.Timestamp, simulation_start: pd.Timestamp,
                                  output_dir: str) -> str:
-    """
-    Run daily production planning for a single simulation date with cross-day changeover continuity
-    
+    """运行单日生产计划（含跨天换产连续性）
+
+    目的：
+    - 加载配置与净需求→构建无约束计划→分配产能与仿真生产→保存状态与产能→去重问题并写出当日输出。
+
     Args:
-        config_file: Path to M4 configuration Excel file
-        module3_output_dir: Directory containing Module3 daily outputs
-        simulation_date: Current simulation date
-        simulation_start: Simulation period start date
-        output_dir: Directory to save output files
-        
+        config_file: M4 配置 Excel 路径。
+        module3_output_dir: Module3 每日输出目录。
+        simulation_date: 当前仿真日期。
+        simulation_start: 仿真起始日期。
+        output_dir: 输出目录。
+
     Returns:
-        str: Path to generated output file
+        str: 生成的每日输出文件路径。
+
+    逻辑：
+        - 加载与校验→读取净需求→构建无约束→读取前日状态与历史产能→集中分配→仿真与计算换产指标→保存状态与产能→写输出。
     """
     try:
         # Load configuration
@@ -1367,12 +1500,14 @@ def run_daily_production_planning(config_file: str, module3_output_dir: str,
 
 
 def generate_consolidated_output(daily_output_files: list, output_path: str):
-    """
-    Generate consolidated output from multiple daily output files
-    
+    """合并多个每日输出生成汇总文件
+
     Args:
-        daily_output_files: List of daily output file paths
-        output_path: Path for consolidated output file
+        daily_output_files: 每日输出文件列表。
+        output_path: 汇总输出路径。
+
+    逻辑/输出：
+        - 逐文件读取四张表→合并并去重→调用 `write_output` 生成汇总文件。
     """
     if not daily_output_files:
         print("Warning: No daily output files to consolidate.")
@@ -1432,6 +1567,11 @@ def generate_consolidated_output(daily_output_files: list, output_path: str):
 
 
 def main():
+    """命令行入口：支持日度与旧版兼容模式
+
+    目的：
+    - 解析参数并按模式执行：日度模式读取 Module3 输出；旧版模式走整段窗口逻辑并保持向后兼容。
+    """
     parser = argparse.ArgumentParser(description='Module 4: APS Industrial Production Simulation with Daily Execution Support')
     parser.add_argument('--config', required=True, help='Path to configuration Excel file')
     parser.add_argument('--mode', choices=['daily', 'legacy'], default='daily', help='Execution mode')

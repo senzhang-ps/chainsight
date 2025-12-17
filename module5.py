@@ -385,59 +385,111 @@ def apply_moq_rv(qty, moq, rv, is_cross_node=True):
         return moq
     return int(np.ceil(qty / rv)) * rv
 
+def _lookup_moq_rv(deploy_cfg: pd.DataFrame, material: str, sending: str, receiving: str | None) -> tuple[int, int]:
+    """
+    从 DeployConfig 查找 (material, sending, receiving) 的 MOQ/RV。
+    - 优先按三键 (material, sending, receiving) 精确匹配；
+    - 若无 receiving 列或未命中，则回退按 (material, sending)；
+    - 仍未命中则回退 (moq=1, rv=1)。
+    """
+    try:
+        if 'receiving' in deploy_cfg.columns and receiving is not None:
+            rows = deploy_cfg[
+                (deploy_cfg['material'] == str(material)) &
+                (deploy_cfg['sending'] == str(sending)) &
+                (deploy_cfg['receiving'] == str(receiving))
+            ]
+            if not rows.empty:
+                moq = int(pd.to_numeric(rows.iloc[0].get('moq', 1), errors='coerce') or 1)
+                rv  = int(pd.to_numeric(rows.iloc[0].get('rv', 1), errors='coerce') or 1)
+                return max(0, moq), max(0, rv)
+        # fallback: (material, sending)
+        rows2 = deploy_cfg[
+            (deploy_cfg['material'] == str(material)) &
+            (deploy_cfg['sending'] == str(sending))
+        ]
+        if not rows2.empty:
+            moq = int(pd.to_numeric(rows2.iloc[0].get('moq', 1), errors='coerce') or 1)
+            rv  = int(pd.to_numeric(rows2.iloc[0].get('rv', 1), errors='coerce') or 1)
+            return max(0, moq), max(0, rv)
+    except Exception:
+        pass
+    return 1, 1
+
 def apply_grouped_moq_rv(demand_rows, location):
     """
     按调运路径分组应用 MOQ/RV（来自 `DeployConfig`）：
-    - 分组维度：(material, sending, receiving, demand_element)
+    - 分组维度：仅 (material, sending, receiving)
     - 仅跨节点（sending != receiving）应用 MOQ/RV，自循环不应用。
-    影响：决定各优先级组的实际需求量，从而影响库存分配与缺口传递。
+    - 组内数量回分使用“最大余数法”，保证组内合计等于目标调整量。
     """
-    # Timing handled at caller to avoid excessive logs
-    # 按 (material, sending, receiving, demand_element) 分组
+    # 路径级分组（不按 demand_element 拆分）
     route_groups = {}
     for i, d in enumerate(demand_rows):
         receiving = d.get('from_location', d.get('receiving', location))
         is_cross_node = (location != receiving)
-        
-        route_key = (d['material'], location, receiving, d['demand_element'])
+        route_key = (d['material'], location, receiving)
         if route_key not in route_groups:
             route_groups[route_key] = {
                 'items': [],
                 'total_qty': 0,
                 'is_cross_node': is_cross_node,
-                'moq': d['moq'],
-                'rv': d['rv']
+                'moq': int(d.get('moq', 0) or 0),
+                'rv': int(d.get('rv', 0) or 0)
             }
-        
-        route_groups[route_key]['items'].append((i, d))
-        route_groups[route_key]['total_qty'] += d['demand_qty']
-    
-    # 对每个路径组应用MOQ/RV
+        # 组内聚合：取保守的最大 MOQ/RV
+        group = route_groups[route_key]
+        group['items'].append((i, d))
+        group['total_qty'] += max(0, int(d.get('demand_qty', 0) or 0))
+        group['moq'] = max(group['moq'], int(d.get('moq', 0) or 0))
+        group['rv']  = max(group['rv'],  int(d.get('rv', 0)  or 0))
+
     adjusted_qtys = {}
-    
     for route_key, group in route_groups.items():
-        material, sending, receiving, demand_element = route_key
-        total_qty = group['total_qty']
+        material, sending, receiving = route_key
+        total_qty = int(group['total_qty'] or 0)
         is_cross_node = group['is_cross_node']
-        moq = group['moq']
-        rv = group['rv']
-        
-        # 对组合后的总量应用MOQ/RV
+        moq = int(group['moq'] or 0)
+        rv = int(group['rv'] or 0)
+
+        # 组合后的总量应用 MOQ/RV
         adjusted_total = apply_moq_rv(total_qty, moq, rv, is_cross_node=is_cross_node)
-        
-        # print(f"      📦 路径组 {sending}→{receiving} [{demand_element}]: 原始={total_qty} → 调整={adjusted_total} (MOQ={moq}, 跨节点={is_cross_node})")
-        
-        # 将调整后的总量按原始比例分配回各个需求项
-        if total_qty > 0:
-            adjustment_ratio = adjusted_total / total_qty
-        else:
-            adjustment_ratio = 1.0
-            
-        for item_idx, item in group['items']:
-            original_qty = item['demand_qty']
-            adjusted_qty = int(original_qty * adjustment_ratio)
-            adjusted_qtys[item_idx] = adjusted_qty
-            
+
+        # 组内“最大余数法”保和回分
+        if total_qty <= 0:
+            # 若目标调整量为正且组内原量为零，最小改动：全部给第一行
+            if adjusted_total > 0 and group['items']:
+                first_idx, _ = group['items'][0]
+                adjusted_qtys[first_idx] = int(adjusted_total)
+                for item_idx, _ in group['items'][1:]:
+                    adjusted_qtys[item_idx] = 0
+            else:
+                for item_idx, _ in group['items']:
+                    adjusted_qtys[item_idx] = 0
+            continue
+
+        r = adjusted_total / float(total_qty)
+        floors = []  # (idx, floor_share, remainder, original_qty, position)
+        for pos, (item_idx, item) in enumerate(group['items']):
+            original_qty = max(0, int(item.get('demand_qty', 0) or 0))
+            exact = original_qty * r
+            floor_val = int(np.floor(exact))
+            remainder = float(exact - floor_val)
+            floors.append((item_idx, floor_val, remainder, original_qty, pos))
+
+        P = int(sum(x[1] for x in floors))
+        R = int(max(0, adjusted_total - P))
+
+        # 按 remainder 降序；并列用 original_qty 降序；再用原始顺序稳定
+        floors.sort(key=lambda x: (-x[2], -x[3], x[4]))
+        # 先写入 floor 分配
+        for item_idx, floor_val, _, _, _ in floors:
+            adjusted_qtys[item_idx] = int(floor_val)
+        # 把剩余的 R 逐个 +1 分配给排名靠前的行
+        for k in range(min(R, len(floors))):
+            idx = floors[k][0]
+            adjusted_qtys[idx] += 1
+
     return adjusted_qtys
 
 def apply_priority_allocation_vectorized(demand_rows, adjusted_qtys, current_stock, demand_priority_map):
@@ -1291,17 +1343,13 @@ def collect_node_demands(material, location, sim_date, config, up_gap_buffer,
     network           = config['Network']
     leadtime_df       = config['LeadTime']
 
-    # 读取 MOQ/RV/LSK/Day（保持你现有口径：以本节点作为 sending 去读）
-    param_row = deploy_cfg[
-        (deploy_cfg['material'] == material) & (deploy_cfg['sending'] == location)
-    ]
+    # 读取 LSK/Day（保留原有，用于元数据）；MOQ/RV 将在逐行按 (material,sending,receiving) 获取
+    param_row = deploy_cfg[(deploy_cfg['material'] == material) & (deploy_cfg['sending'] == location)]
     if not param_row.empty:
-        moq = int(param_row.iloc[0]['moq'])
-        rv  = int(param_row.iloc[0]['rv'])
-        lsk = param_row.iloc[0]['lsk']  # 此处 lsk/day 仅作为后续模块可能用到的元数据，窗口不再依赖它
-        day = int(param_row.iloc[0]['day'])
+        lsk = param_row.iloc[0].get('lsk', 1)
+        day = int(param_row.iloc[0].get('day', 1) or 1)
     else:
-        moq, rv, lsk, day = 1, 1, 1, 1
+        lsk, day = 1, 1
 
     # 上游
     network_row = get_active_network(network, material, location, sim_date, cache=active_network_cache)
@@ -1373,6 +1421,8 @@ def collect_node_demands(material, location, sim_date, config, up_gap_buffer,
 
         # 🚀 OPTIMIZATION: Use itertuples instead of iterrows (20-27x faster)
         for row in pd.concat([sdl_fc, sdl_others], ignore_index=True).itertuples():
+            # 自补（接收端=本地）；业务规则：自补货不应用 MOQ/RV，默认 moq=1, rv=1
+            row_moq, row_rv = 1, 1
             demand_rows.append({
                 'material': material,
                 'location': location,
@@ -1381,11 +1431,12 @@ def collect_node_demands(material, location, sim_date, config, up_gap_buffer,
                 'demand_element': row.demand_element,
                 'demand_qty': int(row.quantity),
                 'planned_qty': int(row.quantity),
-                'moq': moq,
-                'rv': rv,
+                'moq': int(row_moq),
+                'rv': int(row_rv),
                 'leadtime': leadtime_for_row if upstream else 0,  # 顶层自补 0，跨节点=统一 horizon
                 'requirement_date': row.requirement_date,
-                'plan_deploy_date': sim_date  # 计划触发日在窗口内分配环节使用，这里先放 sim_date
+                'plan_deploy_date': sim_date,  # 计划触发日在窗口内分配环节使用，这里先放 sim_date
+                'orig_location': location
             })
 
     # ========= 2) 安全库存：只取 horizon_end 当天 =========
@@ -1400,6 +1451,8 @@ def collect_node_demands(material, location, sim_date, config, up_gap_buffer,
             ss_qty = int(pd.to_numeric(ss_end['safety_stock_qty'], errors='coerce').fillna(0).sum())
 
     if ss_qty > 0:
+        # 自补安全库存：业务规则默认 moq=1, rv=1
+        row_moq, row_rv = 1, 1
         demand_rows.append({
             'material': material,
             'location': location,
@@ -1408,11 +1461,12 @@ def collect_node_demands(material, location, sim_date, config, up_gap_buffer,
             'demand_element': 'safety',
             'demand_qty': ss_qty,
             'planned_qty': ss_qty,
-            'moq': moq,
-            'rv': rv,
+            'moq': int(row_moq),
+            'rv': int(row_rv),
             'leadtime': leadtime_for_row if upstream else 0,
             'requirement_date': horizon_end,     # 目标日 = horizon_end
-            'plan_deploy_date': sim_date
+            'plan_deploy_date': sim_date,
+            'orig_location': location
         })
 
     # ========= 3) 订单池（AO/normal）：[sim_date, horizon_end] =========
@@ -1432,6 +1486,8 @@ def collect_node_demands(material, location, sim_date, config, up_gap_buffer,
             # 🚀 OPTIMIZATION: Use itertuples instead of iterrows (20-27x faster)
             for row in orders.itertuples():
                 qty = int(row.quantity)
+                # 自补订单：业务规则默认 moq=1, rv=1
+                row_moq, row_rv = 1, 1
                 demand_rows.append({
                     'material': material,
                     'location': location,
@@ -1440,8 +1496,8 @@ def collect_node_demands(material, location, sim_date, config, up_gap_buffer,
                     'demand_element': str(row.demand_element),
                     'demand_qty': qty,
                     'planned_qty': qty,
-                    'moq': moq,
-                    'rv': rv,
+                    'moq': int(row_moq),
+                    'rv': int(row_rv),
                     'leadtime': leadtime_for_row if upstream else 0,
                     'requirement_date': row.requirement_date,
                     'plan_deploy_date': sim_date,
@@ -1453,6 +1509,10 @@ def collect_node_demands(material, location, sim_date, config, up_gap_buffer,
         for gap in up_gap_buffer[(material, location)]:
             req_dt = pd.to_datetime(gap.get('requirement_date', sim_date))
             if (req_dt >= sim_date) and (req_dt <= horizon_end):
+                # 对 GAP 行，接收端为本节点（self），但后续生成计划时会用 from_location 作为真正的 receiving
+                # 因此 MOQ/RV 需按 (material, sending=location, receiving=from_location) 获取
+                recv_for_cfg = str(gap.get('from_location', gap.get('location', location)))
+                row_moq, row_rv = _lookup_moq_rv(deploy_cfg, material=str(material), sending=str(location), receiving=recv_for_cfg)
                 demand_rows.append({
                     'material': material,
                     'location': gap.get('location', location),
@@ -1462,8 +1522,8 @@ def collect_node_demands(material, location, sim_date, config, up_gap_buffer,
                     'demand_element': gap['demand_element'],
                     'demand_qty': int(gap['planned_qty']),
                     'planned_qty': int(gap['planned_qty']),
-                    'moq': moq,
-                    'rv': rv,
+                    'moq': int(row_moq),
+                    'rv': int(row_rv),
                     'leadtime': leadtime_for_row if upstream else 0,
                     'requirement_date': req_dt,
                     'plan_deploy_date': sim_date,

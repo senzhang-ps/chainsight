@@ -32,6 +32,74 @@ def apply_moq_rv(qty, moq, rv, is_cross_node=True):
         return moq
     return int(np.ceil(qty / rv)) * rv
 
+def _lookup_moq_rv_three_keys(deploy_config_df: pd.DataFrame | None,
+                              material: str,
+                              sending: str,
+                              receiving: str | None) -> tuple[int, int]:
+    """
+    在 deploy_config_df 中按 (material, sending, receiving) 优先命中 moq/rv；
+    回退到 (material, sending)；仍未命中则 (1,1)。
+    """
+    try:
+        if deploy_config_df is not None and not deploy_config_df.empty:
+            if ('receiving' in deploy_config_df.columns) and (receiving is not None):
+                rows = deploy_config_df[
+                    (deploy_config_df['material'] == str(material)) &
+                    (deploy_config_df['sending'] == str(sending)) &
+                    (deploy_config_df['receiving'] == str(receiving))
+                ]
+                if not rows.empty:
+                    moq = int(pd.to_numeric(rows.iloc[0].get('moq', 1), errors='coerce') or 1)
+                    rv  = int(pd.to_numeric(rows.iloc[0].get('rv', 1), errors='coerce') or 1)
+                    return max(0, moq), max(0, rv)
+            # fallback: (material, sending)
+            rows2 = deploy_config_df[
+                (deploy_config_df['material'] == str(material)) &
+                (deploy_config_df['sending'] == str(sending))
+            ]
+            if not rows2.empty:
+                moq = int(pd.to_numeric(rows2.iloc[0].get('moq', 1), errors='coerce') or 1)
+                rv  = int(pd.to_numeric(rows2.iloc[0].get('rv', 1), errors='coerce') or 1)
+                return max(0, moq), max(0, rv)
+    except Exception:
+        pass
+    return 1, 1
+
+def _apportion_largest_remainder(values: list[float], target: int) -> list[int]:
+    """
+    最大余数法保和分配：给定非负 values 与整数 target，按比例分配且合计=target。
+    并列打破：余数降序→原值降序→稳定顺序。
+    """
+    n = len(values)
+    if n == 0:
+        return []
+    if target <= 0:
+        return [0] * n
+    total = float(sum(max(0.0, float(v)) for v in values))
+    if total <= 0:
+        # 若无基数，全部给第一个（与M5对齐的极简策略）
+        out = [0] * n
+        out[0] = int(target)
+        return out
+    r = float(target) / total
+    floors = []  # (idx, floor_val, remainder, orig, pos)
+    for pos, v in enumerate(values):
+        orig = max(0.0, float(v))
+        exact = orig * r
+        fval = int(np.floor(exact))
+        rem = float(exact - fval)
+        floors.append((pos, fval, rem, orig, pos))
+    P = int(sum(x[1] for x in floors))
+    R = int(max(0, target - P))
+    # sort by remainder desc, orig desc, pos asc
+    floors.sort(key=lambda x: (-x[2], -x[3], x[4]))
+    out = [0] * n
+    for idx, fval, _, _, _ in floors:
+        out[idx] = int(fval)
+    for k in range(min(R, n)):
+        out[floors[k][0]] += 1
+    return out
+
 # 标识符字段标准化函数（与main_integration.py保持一致）
 def _normalize_location(location_str) -> str:
     """Normalize location string by padding with leading zeros to 4 digits"""
@@ -984,25 +1052,41 @@ def run_mrp_layered_simulation_daily(
                 'horizon_days': horizon
             })
 
-        # 计算向父节点传递的经过 MOQ/RV 调整后的 gap
+        # 计算向父节点传递的“路径级一次放大+最大余数回分”的 gap（与M5对齐）
         parent_key = None
         parent_gaps = {'AO': 0.0, 'FC': 0.0, 'SS': 0.0}
         if upstream and pd.notna(upstream):
             parent_key = (material, str(upstream))
-            # 获取 MOQ/RV 配置
-            moq, rv = 1, 1
-            if deploy_config_df is not None and not deploy_config_df.empty:
-                config_row = deploy_config_df[
-                    (deploy_config_df['material'] == material) &
-                    (deploy_config_df['sending'] == str(upstream))
-                ]
-                if not config_row.empty:
-                    moq = int(config_row.iloc[0].get('moq', 1))
-                    rv = int(config_row.iloc[0].get('rv', 1))
 
-            gap_dict = {'AO': AO_gap, 'FC': FC_gap, 'SS': SS_gap}
-            for de, gv in gap_dict.items():
-                parent_gaps[de] = apply_moq_rv(gv, moq, rv, is_cross_node=True) if gv > 0 else 0.0
+            # 1) 汇总同一路径（sending=upstream, receiving=location）的总缺口 S（仅正值）
+            components = [('AO', float(max(0.0, AO_gap))),
+                          ('FC', float(max(0.0, FC_gap))),
+                          ('SS', float(max(0.0, SS_gap)))]
+            S = float(sum(v for _, v in components))
+            if S <= 0:
+                return records, parent_key, parent_gaps
+
+            # 2) 按 (material, sending=upstream, receiving=location) 命中 MOQ/RV（回退到二键，再默认(1,1)）
+            recv_loc = str(location)
+            moq, rv = _lookup_moq_rv_three_keys(
+                deploy_config_df=deploy_config_df,
+                material=str(material),
+                sending=str(upstream),
+                receiving=recv_loc
+            )
+
+            # 3) 路径级一次放大，计算目标 T
+            #    沿用 apply_moq_rv 的口径（跨节点）
+            T = int(apply_moq_rv(S, moq, rv, is_cross_node=True))
+            if T <= 0:
+                return records, parent_key, parent_gaps
+
+            # 4) 最大余数法回分，确保 AO/FC/SS 合计= T
+            base_vals = [v for _, v in components]
+            apportion = _apportion_largest_remainder(base_vals, int(T))
+            # 写回 parent_gaps，类别未出现的保持 0
+            for (de, _), q in zip(components, apportion):
+                parent_gaps[de] = float(q)
 
         return records, parent_key, parent_gaps
 

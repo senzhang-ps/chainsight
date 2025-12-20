@@ -600,7 +600,7 @@ class Orchestrator:
             date: Simulation date in YYYY-MM-DD format
         """
         date_obj = pd.to_datetime(date).normalize()
-        # === A) 缓存全量计划（含未来），供 M3 读用 ===
+        # === A) 缓存当日GR的生产计划到 backlog 中，供 M3 查询未来生产计划使用 ===
         if production_df is not None and not production_df.empty:
             tmp = production_df.copy()
             # 标准列名：available_date / quantity
@@ -615,15 +615,33 @@ class Orchestrator:
             tmp['location'] = tmp['location'].apply(_normalize_location)
             tmp['quantity'] = tmp['quantity'].fillna(0).astype(int)
 
-            # 追加到 backlog（可按需要去重合并）
-            if self.production_plan_backlog:
-                self.production_plan_backlog = pd.concat(
-                    [pd.DataFrame(self.production_plan_backlog), tmp],
-                    ignore_index=True
-                ).drop_duplicates(subset=['material','location','available_date'], keep='last') \
-                .to_dict('records')
+            # 新增：用于精确去重的维度
+            tmp['simulation_date'] = date_obj
+            if 'production_plan_date' in production_df.columns:
+                tmp['production_plan_date'] = pd.to_datetime(production_df['production_plan_date']).dt.normalize()
             else:
-                self.production_plan_backlog = tmp.to_dict('records')
+                # 若未提供生产日期，则回退为可用日期（同日生产与可用）
+                tmp['production_plan_date'] = tmp['available_date']
+            # 追加到 backlog（两阶段：先5维去重，再3维汇总）
+            existing_df = pd.DataFrame(self.production_plan_backlog) if self.production_plan_backlog else pd.DataFrame()
+            # 确保旧记录具备新字段
+            for col in ['simulation_date', 'production_plan_date']:
+                if col not in existing_df.columns:
+                    existing_df[col] = pd.NaT
+
+            combined = pd.concat([existing_df, tmp], ignore_index=True)
+
+            # 第一阶段：按 material, location, simulation_date, production_plan_date, available_date 去重
+            combined = combined.drop_duplicates(
+                subset=['material', 'location', 'simulation_date', 'production_plan_date', 'available_date'],
+                keep='first'
+            )
+
+            # 第二阶段：按 material, location, available_date 汇总数量
+            aggregated = combined.groupby(['material', 'location', 'available_date'], as_index=False).agg({'quantity': 'sum'})
+            aggregated['quantity'] = aggregated['quantity'].fillna(0).astype(int)
+
+            self.production_plan_backlog = aggregated.to_dict('records')
 
         # === B) 原有逻辑：只对“今天到货”的进行 GR 入库 ===
         # Filter production for current date (available_date = inventory receipt date)

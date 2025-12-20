@@ -913,7 +913,7 @@ def run_module4_integrated(
 
 
 
-def load_all_historical_production_plans(module4_output_dir: str, current_date: pd.Timestamp, start_date: pd.Timestamp) -> pd.DataFrame:
+def load_current_date_production_gr(module4_output_dir: str, current_date: pd.Timestamp, start_date: pd.Timestamp) -> pd.DataFrame:
     """加载历史 M4 生产计划并筛选当日入库
 
     目的：
@@ -1430,17 +1430,17 @@ def run_integrated_simulation(
             
             # 🔄 第2步：处理历史生产的当日入库 (historical production → inventory)
             print(f"  🏭 处理历史生产当日入库...")
-            historical_production = load_all_historical_production_plans(
+            current_date_production_gr = load_current_date_production_gr(
                 module4_output_dir=str(module_outputs['module4']),
                 current_date=current_date,
                 start_date=pd.to_datetime(start_date)
             )
             
-            if not historical_production.empty:
-                print(f"    📦 当日需要入库的历史生产: {len(historical_production)} 条记录")
+            if not current_date_production_gr.empty:
+                print(f"    📦 当日需要入库的历史生产: {len(current_date_production_gr)} 条记录")
                 # 🔧 标准化标识符字段，确保数据类型一致性
-                historical_production_normalized = _normalize_identifiers(historical_production)
-                orchestrator.process_module4_production(historical_production_normalized, current_date.strftime('%Y-%m-%d'))
+                current_date_production_gr_normalized = _normalize_identifiers(current_date_production_gr)
+                orchestrator.process_module4_production(current_date_production_gr_normalized, current_date.strftime('%Y-%m-%d'))
             else:
                 print(f"    📦 当日无历史生产入库")
                 
@@ -1493,21 +1493,19 @@ def run_integrated_simulation(
                     output_dir=str(module_outputs['module4'])
                 )
                 
-                # 🔄 立即处理M4当日生产入库
-                if not m4_production.empty:
-                    # 筛选当日可用的生产 (available_date = current_date)
-                    daily_available = m4_production[
-                        pd.to_datetime(m4_production['available_date']).dt.normalize() == current_date.normalize()
-                    ]
-                    
-                    if not daily_available.empty:
-                        print(f"    🏭 立即处理M4当日生产入库...")
-                        # 🔧 标准化标识符字段，确保数据类型一致性
-                        daily_available_normalized = _normalize_identifiers(daily_available)
-                        orchestrator.process_module4_production(daily_available_normalized, current_date.strftime('%Y-%m-%d'))
-                        print(f"    ✅ 已入库 {len(daily_available_normalized)} 条当日生产")
+                # 🔄 简化调用：仅持久化“未来 available_date”的生产计划，避免重复当日GR
+                if not m4_production.empty and 'available_date' in m4_production.columns:
+                    m4_production['available_date'] = pd.to_datetime(m4_production['available_date'])
+                    future_plans = m4_production[m4_production['available_date'].dt.normalize() > current_date.normalize()]
+                    if not future_plans.empty:
+                        print(f"    🗂️ 持久化未来生产计划（不触发当日GR）...")
+                        future_plans_normalized = _normalize_identifiers(future_plans)
+                        orchestrator.process_module4_production(future_plans_normalized, current_date.strftime('%Y-%m-%d'))
+                        print(f"    ✅ 已写入未来计划回补: {len(future_plans_normalized)} 条")
                     else:
-                        print(f"    📦 M4当日无可用生产入库")
+                        print(f"    📦 当日无未来 available_date 的计划需要持久化")
+                else:
+                    print(f"    📦 M4当日未生成生产计划或缺少 available_date 列")
                 
                 print(f"  ✅ Module4 完成 - 生成生产计划: {len(m4_production)} 条记录")
                 all_results['module4'].append({'production_df': m4_production})

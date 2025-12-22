@@ -1534,7 +1534,8 @@ def collect_node_demands(material, location, sim_date, config, up_gap_buffer,
 
 def push_softpush_allocation(
     deployment_plan_rows, config, dynamic_soh, sim_date,
-    ptf_lsk_cache=None, lead_time_cache=None, projected_soh=None
+    ptf_lsk_cache=None, lead_time_cache=None, projected_soh=None,
+    node_demands_map: Dict[tuple[str, str], List] | None = None
 ):
     """
     目的（Purpose）：
@@ -1700,6 +1701,52 @@ def push_softpush_allocation(
             pi_map = {x['receiving']: float(projected_soh.get((mat, x['receiving']), 0) or 0) for x in receiving_ss_data}
         else:
             pi_map = {x['receiving']: float(dynamic_soh.get((mat, x['receiving']), 0) or 0) for x in receiving_ss_data}
+
+        # 额外扣减：未来 leadtime 窗口内的 AO/normal 与 forecast，以及在窗口末日的 safety stock
+        # 目的：使接收端基线库存考虑到到货前的承诺消耗与目标安全库存，从而更贴近现实
+        commitments_map: dict[str, float] = {}
+        for x in receiving_ss_data:
+            rec = str(x['receiving'])
+            target_date = pd.to_datetime(x['planned_delivery_date'])
+            # 优先使用主流程已经收集好的节点需求，避免重复计算
+            if node_demands_map is not None:
+                rows = node_demands_map.get((mat, rec), [])
+            else:
+                try:
+                    # 复用已实现的窗口需求收集逻辑，最小化改动
+                    rows = collect_node_demands(
+                        material=mat,
+                        location=rec,
+                        sim_date=sim_date,
+                        config=config,
+                        up_gap_buffer=None,
+                        ptf_lsk_cache=ptf_lsk_cache,
+                        lead_time_cache=lead_time_cache,
+                        active_network_cache=None
+                    )
+                except Exception:
+                    rows = []
+
+            commit_qty = 0.0
+            for r in rows:
+                de = str(r.get('demand_element', '')).lower()
+                rq = int(r.get('planned_qty', r.get('demand_qty', 0)) or 0)
+                req_dt = pd.to_datetime(r.get('requirement_date', sim_date))
+
+                # 仅计【未来】窗口内的 AO/normal/forecast，避免与 projected_soh 中的当日对客发货重复
+                if de in ['ao', 'normal', 'forecast']:
+                    if (req_dt > sim_date) and (req_dt <= target_date):
+                        commit_qty += rq
+                # 计入窗口末日的安全库存目标
+                elif de == 'safety':
+                    if req_dt == target_date:
+                        commit_qty += rq
+
+            commitments_map[rec] = commit_qty
+
+        # 将承诺消耗从接收端库存基线中扣减，避免负数
+        for rec, commit in commitments_map.items():
+            pi_map[rec] = float(max(0.0, (pi_map.get(rec, 0.0) or 0.0) - float(commit or 0.0)))
 
         # 选择最高可行挡位
         feasible_level = None
@@ -2256,6 +2303,9 @@ def main(
         demand_collect_only_elapsed = 0.0
         up_gap_next = {}
 
+        # 全局需求缓存（当天所有节点）用于 push 阶段避免重复计算
+        global_node_demands_map: Dict[tuple[str, str], List] = {}
+
         for layer in layer_list:
             # print(f"\n📦 处理层级 {layer}")
             # print(f"{'-'*40}")
@@ -2306,6 +2356,10 @@ def main(
                     print(f"  ⚠️  并行收集需求初始化失败，回退串行: {e}")
                     node_demands_map = {}
             
+            # 合并到全局缓存，避免 push 阶段重复收集
+            for k, v in node_demands_map.items():
+                global_node_demands_map[k] = v
+
             for mat, loc in all_pairs:
                 node_key = (mat, loc)
                 current_stock = dynamic_soh.get(node_key, 0)
@@ -2563,7 +2617,8 @@ def main(
         dynamic_soh_for_push = dynamic_soh.copy()
         plan_push = push_softpush_allocation(
             deployment_plan_rows, config, dynamic_soh_for_push, sim_date,
-            ptf_lsk_cache=ptf_lsk_cache, lead_time_cache=lead_time_cache, projected_soh=projected_soh
+            ptf_lsk_cache=ptf_lsk_cache, lead_time_cache=lead_time_cache, projected_soh=projected_soh,
+            node_demands_map=global_node_demands_map
         )
 
         if plan_push:

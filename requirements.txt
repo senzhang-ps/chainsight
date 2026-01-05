@@ -1,7 +1,14 @@
-# Core dependencies inferred from project imports
+# ChainSight 项目依赖文件
+# 
+# 主依赖文件位于: config/requirements.txt
+# 本文件为便利副本，安装时请使用:
+#   pip install -r config/requirements.txt
+#
+# 核心依赖（数据处理和科学计算）
 pandas==2.2.3
 numpy==2.2.5
 scipy==1.16.0
-# Excel engines commonly needed by pandas
+
+# Excel处理
 openpyxl==3.1.5
 xlsxwriter==3.2.5

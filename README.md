@@ -37,7 +37,10 @@ cd chainsight
 python -m venv .venv
 
 # 激活虚拟环境
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope Process -Force; . .\.venv\Scripts\Activate.ps1
+--- 
 .\.venv\Scripts\Activate.ps1
+--- 
 ```
 
 **Windows (CMD):**
@@ -67,7 +70,7 @@ pip install -r requirements.txt
 # 更新所有环境依赖
 pip freeze > requirements.txt
 # 或使用 config 目录下的依赖文件
-pip install -r config/requirements.txt
+pip install -r requirements.txt
 ```
 
 **核心依赖说明:**

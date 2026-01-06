@@ -279,6 +279,12 @@ def _run_with_database(ns: argparse.Namespace) -> int:
     logger, redirector = setup_logging(str(log_dir), log_level="INFO", redirect_print=True)
     
     total_start = time.time()
+    program_start_datetime = datetime.now()
+    
+    logger.info("\n" + "=" * 60)
+    logger.info("🕐 程序时间信息")
+    logger.info("=" * 60)
+    logger.info(f"📅 程序开始时间: {program_start_datetime.strftime('%Y-%m-%d %H:%M:%S')}")
     
     try:
         # ========== 步骤1: 从数据库获取配置 ==========
@@ -293,22 +299,30 @@ def _run_with_database(ns: argparse.Namespace) -> int:
         
         logger.info(f"✅ 已加载 {len(config_data)} 个配置表")
         
-        # ========== 步骤2: 运行仿真 ==========
+        # ========== 步骤2: 使用DuckDB处理并运行仿真 ==========
         logger.info("\n" + "=" * 60)
-        logger.info("🚀 步骤2: 运行仿真")
+        logger.info("🦆 步骤2: DuckDB处理配置并运行仿真")
         logger.info("=" * 60)
         
-        # 创建临时配置对象用于仿真
-        result = _run_simulation_with_db_config(
+        # 创建临时输出目录
+        import tempfile
+        temp_dir = Path(tempfile.mkdtemp())
+        temp_output = temp_dir / "output"
+        temp_output.mkdir(exist_ok=True)
+        
+        # 🦆 直接使用DataFrame字典运行仿真（无需创建临时Excel）
+        from .main_integration import run_integrated_simulation_from_dict
+        
+        result = run_integrated_simulation_from_dict(
             config_data=config_data,
             config_name=config_name,
             start_date=start_date,
             end_date=end_date,
-            log_dir=log_dir,
-            logger=logger
+            output_base_dir=str(temp_output),
+            skip_validation=True  # 数据库数据已验证
         )
         
-        if not result or not result.get('success'):
+        if not result or not result.get('simulation_completed'):
             logger.error("❌ 仿真运行失败")
             return 1
         
@@ -317,30 +331,46 @@ def _run_with_database(ns: argparse.Namespace) -> int:
         logger.info("📤 步骤3: 写入输出到数据库")
         logger.info("=" * 60)
         
-        output_dir = result.get('output_dir')
+        output_dir = result.get('output_directory')
         if output_dir and Path(output_dir).exists():
             writer = ModuleDataWriter(db)
             run_id = f"{config_name}_{ts}"
             
-            # 写入各模块输出（使用replace模式避免列不匹配问题）
-            writer.write_all_modules(output_dir, run_id=run_id, if_exists='replace')
+            # 写入各模块输出（使用append模式追加数据，自动添加写入时间列）
+            writer.write_all_modules(output_dir, run_id=run_id, if_exists='append')
             
             # 写入orchestrator数据
             orch_dir = Path(output_dir) / "orchestrator"
             if orch_dir.exists():
-                writer.write_orchestrator_data(str(orch_dir), run_id=run_id, if_exists='replace')
+                writer.write_orchestrator_data(str(orch_dir), run_id=run_id, if_exists='append')
             
             writer.print_summary()
             
             # 删除本地数据文件，只保留日志
             logger.info("\n🧹 清理本地数据文件（仅保留日志）...")
-            _cleanup_data_files(output_dir, log_dir)
+            _cleanup_data_files(str(output_dir), log_dir)
         
         total_time = time.time() - total_start
+        program_end_datetime = datetime.now()
+        
+        # 格式化运行时间
+        hours, remainder = divmod(total_time, 3600)
+        minutes, seconds = divmod(remainder, 60)
+        if hours >= 1:
+            runtime_str = f"{int(hours)}小时 {int(minutes)}分钟 {seconds:.2f}秒"
+        elif minutes >= 1:
+            runtime_str = f"{int(minutes)}分钟 {seconds:.2f}秒"
+        else:
+            runtime_str = f"{seconds:.2f}秒"
+        
         logger.info("\n" + "=" * 60)
-        logger.info(f"✅ 数据库模式运行完成")
-        logger.info(f"   总耗时: {total_time:.2f}s")
-        logger.info(f"   日志目录: {log_dir}")
+        logger.info("✅ 数据库模式运行完成 (DuckDB)")
+        logger.info("=" * 60)
+        logger.info("🕐 程序时间统计:")
+        logger.info(f"   📅 开始时间: {program_start_datetime.strftime('%Y-%m-%d %H:%M:%S')}")
+        logger.info(f"   📅 结束时间: {program_end_datetime.strftime('%Y-%m-%d %H:%M:%S')}")
+        logger.info(f"   ⏱️  总运行时间: {runtime_str}")
+        logger.info(f"   📁 日志目录: {log_dir}")
         logger.info("=" * 60)
         
         return 0
@@ -710,6 +740,15 @@ def main(argv: list[str] | None = None) -> int:
 
     # 🆕 设置日志系统 - 同时输出到terminal和文件
     logger, redirector = setup_logging(str(output_base_dir), log_level="INFO", redirect_print=True)
+    
+    import time
+    program_start_time = time.time()
+    program_start_datetime = datetime.now()
+    
+    logger.info("\n" + "=" * 60)
+    logger.info("🕐 程序时间信息")
+    logger.info("=" * 60)
+    logger.info(f"📅 程序开始时间: {program_start_datetime.strftime('%Y-%m-%d %H:%M:%S')}")
     logger.info(f"🚀 供应链仿真系统启动")
     logger.info(f"📂 配置文件: {cfg_path}")
     logger.info(f"📁 输出目录: {output_base_dir}")
@@ -749,7 +788,28 @@ def main(argv: list[str] | None = None) -> int:
             force_restart=ns.force_restart,
         )
         
+        program_end_time = time.time()
+        program_end_datetime = datetime.now()
+        total_runtime = program_end_time - program_start_time
+        
+        # 格式化运行时间
+        hours, remainder = divmod(total_runtime, 3600)
+        minutes, seconds = divmod(remainder, 60)
+        if hours >= 1:
+            runtime_str = f"{int(hours)}小时 {int(minutes)}分钟 {seconds:.2f}秒"
+        elif minutes >= 1:
+            runtime_str = f"{int(minutes)}分钟 {seconds:.2f}秒"
+        else:
+            runtime_str = f"{seconds:.2f}秒"
+        
+        logger.info("\n" + "=" * 60)
         logger.info("✅ 仿真成功完成")
+        logger.info("=" * 60)
+        logger.info("🕐 程序时间统计:")
+        logger.info(f"   📅 开始时间: {program_start_datetime.strftime('%Y-%m-%d %H:%M:%S')}")
+        logger.info(f"   📅 结束时间: {program_end_datetime.strftime('%Y-%m-%d %H:%M:%S')}")
+        logger.info(f"   ⏱️  总运行时间: {runtime_str}")
+        logger.info("=" * 60)
         return 0
         
     except Exception as e:

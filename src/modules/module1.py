@@ -902,7 +902,8 @@ def run_daily_order_generation(
     config_dict: dict,
     simulation_date: pd.Timestamp,
     output_dir: str,
-    orchestrator: object = None
+    orchestrator: object = None,
+    skip_file_output: bool = False
 ) -> dict:
     """
     集成模式主入口：生成指定日期的订单与发货，并输出供需日志。
@@ -1057,18 +1058,20 @@ def run_daily_order_generation(
         )
         print(f"[M1] 供需日志生成完成，条目: {len(supply_demand_df)}，耗时: {time.perf_counter()-t3:.3f}s")
 
-        # 10) 落盘
-        output_file = f"{output_dir}/module1_output_{simulation_date.strftime('%Y%m%d')}.xlsx"
-        # 自动设置异常日志保存路径到与Module1输出相同的目录，无需用户额外配置
-        try:
-            globals()['DEFAULT_ERROR_LOG_PATH'] = os.path.join(
-                output_dir,
-                f"module1_parallel_errors_{simulation_date.strftime('%Y%m%d')}.txt"
-            )
-        except Exception:
-            # 如果设置失败，忽略，不影响主流程
-            pass
-        save_module1_output_with_supply_demand(orders_df, shipment_df, supply_demand_df, output_file, cut_df)
+        # 10) 落盘（仅在非数据库模式下写入）
+        output_file = None
+        if not skip_file_output:
+            output_file = f"{output_dir}/module1_output_{simulation_date.strftime('%Y%m%d')}.xlsx"
+            # 自动设置异常日志保存路径到与Module1输出相同的目录，无需用户额外配置
+            try:
+                globals()['DEFAULT_ERROR_LOG_PATH'] = os.path.join(
+                    output_dir,
+                    f"module1_parallel_errors_{simulation_date.strftime('%Y%m%d')}.txt"
+                )
+            except Exception:
+                # 如果设置失败，忽略，不影响主流程
+                pass
+            save_module1_output_with_supply_demand(orders_df, shipment_df, supply_demand_df, output_file, cut_df)
 
         # print(f"✅ Module1 完成 - 生成 {len(orders_df)} 个订单, {len(shipment_df)} 个发货, {len(cut_df)} 个cut")
         return {

@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Any
 import time
 import os
+from datetime import datetime
 
 from .db_connection import DatabaseConnection
 
@@ -75,7 +76,19 @@ class ModuleDataWriter:
             try:
                 df = pd.read_csv(csv_file)
                 if not df.empty:
-                    table_name = f"{module_name}_{self._clean_name(csv_file.stem)}"
+                    import re
+                    # 从文件名中提取日期（格式：xxx_YYYYMMDD.csv）
+                    date_match = re.search(r'_(\d{8})(?:\.csv)?$', csv_file.stem)
+                    file_date = date_match.group(1) if date_match else None
+                    
+                    # 构建表名（去除日期部分）
+                    stem_without_date = re.sub(r'_\d{8}$', '', csv_file.stem)
+                    table_name = f"{module_name}_{self._clean_name(stem_without_date)}"
+                    
+                    # 添加日期列
+                    if file_date:
+                        df['file_date'] = file_date
+                    
                     if run_id:
                         df['run_id'] = run_id
                     self.db.create_table_from_df(df, table_name, if_exists)
@@ -98,11 +111,23 @@ class ModuleDataWriter:
         run_id: str = None,
         if_exists: str = "append"
     ) -> Dict[str, int]:
-        """写入单个Excel文件的所有sheet"""
+        """写入单个Excel文件的所有sheet
+        
+        文件名中的日期（如 Module1Output_20251006.xlsx）会被提取为 file_date 列，
+        而不是作为表名的一部分，这样相同结构的数据会追加到同一张表中。
+        """
+        import re
         results = {}
         
         xl = pd.ExcelFile(excel_path)
-        file_prefix = f"{module_name}_{self._clean_name(excel_path.stem)}"
+        
+        # 从文件名中提取日期（格式：xxx_YYYYMMDD.xlsx）
+        date_match = re.search(r'_(\d{8})(?:\.xlsx)?$', excel_path.stem)
+        file_date = date_match.group(1) if date_match else None
+        
+        # 构建表名前缀（去除日期部分）
+        stem_without_date = re.sub(r'_\d{8}$', '', excel_path.stem)
+        file_prefix = f"{module_name}_{self._clean_name(stem_without_date)}"
         
         for sheet_name in xl.sheet_names:
             try:
@@ -112,8 +137,12 @@ class ModuleDataWriter:
                     results[sheet_name] = 0
                     continue
                 
-                # 构建表名
+                # 构建表名（不包含日期）
                 table_name = f"{file_prefix}_{self._clean_name(sheet_name)}"
+                
+                # 添加日期列（从文件名提取）
+                if file_date:
+                    df['file_date'] = file_date
                 
                 # 添加run_id列
                 if run_id:

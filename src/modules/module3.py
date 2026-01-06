@@ -1267,7 +1267,9 @@ def run_integrated_mode(
     config_dict: dict,
     start_date: str,
     end_date: str,
-    output_dir: str
+    output_dir: str,
+    skip_file_output: bool = False,
+    module1_result: dict = None  # 新增：直接从内存获取Module1输出
 ) -> dict:
     """
     Module3 集成模式运行函数
@@ -1280,6 +1282,8 @@ def run_integrated_mode(
         start_date: 仿真开始日期
         end_date: 仿真结束日期
         output_dir: 输出目录
+        skip_file_output: 是否跳过写入Excel文件（数据库模式使用）
+        module1_result: 直接从内存获取Module1输出（数据库模式使用）
         
     Returns:
         dict: 包含输出结果的字典
@@ -1324,9 +1328,20 @@ def run_integrated_mode(
         
         # 从Module1加载每日数据（只处理模拟周期内的数据）
         try:
-            module1_daily_data = load_module1_daily_outputs(module1_output_dir, current_date)
-            supply_demand_df = module1_daily_data.get('supply_demand_df', pd.DataFrame())
-            today_shipment_df = module1_daily_data.get('shipment_df', pd.DataFrame())
+            # 🔧 优先从内存获取Module1数据（数据库模式）
+            if module1_result is not None:
+                supply_demand_df = module1_result.get('supply_demand_df', pd.DataFrame())
+                today_shipment_df = module1_result.get('shipment_df', pd.DataFrame())
+                module1_daily_data = {
+                    'supply_demand_df': supply_demand_df,
+                    'shipment_df': today_shipment_df,
+                    'order_df': module1_result.get('orders_df', pd.DataFrame())
+                }
+            else:
+                # 从文件加载（传统模式）
+                module1_daily_data = load_module1_daily_outputs(module1_output_dir, current_date)
+                supply_demand_df = module1_daily_data.get('supply_demand_df', pd.DataFrame())
+                today_shipment_df = module1_daily_data.get('shipment_df', pd.DataFrame())
             # print(f"  ✅ 从 Module1 加载了 {len(supply_demand_df)} 条供需记录")
             # print(f"  ✅ 从 Module1 加载了 {len(today_shipment_df)} 条发货记录")
         except Exception as e:
@@ -1394,21 +1409,21 @@ def run_integrated_mode(
             traceback.print_exc()
             net_demand_df = pd.DataFrame()
         
-        # 保存每日输出
-        daily_output_file = f"{output_dir}/Module3Output_{current_date.strftime('%Y%m%d')}.xlsx"
-        try:
-            expected_cols = ['material','location','requirement_date','quantity','demand_element','layer','simulation_date','horizon_days']
-            if net_demand_df.empty:
-                net_demand_df = pd.DataFrame(columns=expected_cols)
-            else:
-                for c in expected_cols:
-                    if c not in net_demand_df.columns:
-                        net_demand_df[c] = pd.Series(dtype='object')
-                net_demand_df = net_demand_df[expected_cols]
-            with pd.ExcelWriter(daily_output_file, engine='openpyxl') as writer:
-                net_demand_df.to_excel(writer, index=False, sheet_name='NetDemand')
-        except Exception as e:
-            print(f"  ⚠️  保存失败: {e}")
+        # 保存每日输出（仅在非数据库模式下写入）
+        if not skip_file_output:
+            daily_output_file = f"{output_dir}/Module3Output_{current_date.strftime('%Y%m%d')}.xlsx"
+            try:
+                expected_cols = ['material','location','requirement_date','quantity','demand_element','layer','simulation_date','horizon_days']
+                output_df = net_demand_df.copy() if not net_demand_df.empty else pd.DataFrame(columns=expected_cols)
+                if not output_df.empty:
+                    for c in expected_cols:
+                        if c not in output_df.columns:
+                            output_df[c] = pd.Series(dtype='object')
+                    output_df = output_df[expected_cols]
+                with pd.ExcelWriter(daily_output_file, engine='openpyxl') as writer:
+                    output_df.to_excel(writer, index=False, sheet_name='NetDemand')
+            except Exception as e:
+                print(f"  ⚠️  保存失败: {e}")
         
         all_net_demand.extend(net_demand_df.to_dict('records') if not net_demand_df.empty else [])
     

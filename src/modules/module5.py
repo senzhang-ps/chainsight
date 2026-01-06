@@ -914,12 +914,13 @@ def load_integrated_config(
     module1_output_dir: str,
     module4_output_path: str, 
     orchestrator: object,
-    current_date: pd.Timestamp
+    current_date: pd.Timestamp,
+    module1_result: dict = None  # 新增：直接从内存获取Module1输出
 ) -> dict:
     """
     加载集成配置数据（替代 `load_config`）：
     - 静态表：`SafetyStock/Network/LeadTime/DemandPriority/PushPullModel/DeployConfig`
-    - 当日数据：从 Module1 日输出读取 `SupplyDemandLog/OrderLog/TodayShipment`
+    - 当日数据：优先从module1_result内存获取，否则从 Module1 日输出文件读取 `SupplyDemandLog/OrderLog/TodayShipment`
     - 动态数据：从 orchestrator 读取 `BeginningInventory/InTransit/DeliveryGR/OpenDeployment/ReceivingSpace`
     - 生产：优先读取 orchestrator 当日历史生产GR（避免重复），若无则回退至 Module4 `ProductionPlan`
     影响：决定 `Module5` 当日库存基线与需求池、在途与开放调拨，以及后续分配与缺口传递的依据。
@@ -942,11 +943,29 @@ def load_integrated_config(
         if not config[sheet_name].empty:
             config[sheet_name] = _normalize_identifiers(config[sheet_name])
     
-    # 2. 从Module1加载当日数据
-    config['SupplyDemandLog'] = config_dict.get('M5_SupplyDemandLog', pd.DataFrame())  # 从测试配置加载
+    # 2. 从Module1加载当日数据 - 优先使用内存数据
+    config['SupplyDemandLog'] = config_dict.get('M5_SupplyDemandLog', pd.DataFrame())
     
-    # 并行从 Module1 加载当日数据（OrderLog, SupplyDemandLog, TodayShipment）
-    if module1_output_dir and current_date:
+    # 🔧 优先从内存获取Module1数据（数据库模式）
+    if module1_result is not None:
+        # 直接从内存获取Module1输出
+        orders_df = module1_result.get('orders_df', pd.DataFrame())
+        supply_demand_df = module1_result.get('supply_demand_df', pd.DataFrame())
+        shipment_df = module1_result.get('shipment_df', pd.DataFrame())
+        
+        if not orders_df.empty:
+            config['OrderLog'] = _normalize_identifiers(orders_df)
+        else:
+            config['OrderLog'] = pd.DataFrame()
+            
+        if not supply_demand_df.empty:
+            config['SupplyDemandLog'] = _normalize_identifiers(supply_demand_df)
+            
+        if not shipment_df.empty:
+            config['TodayShipment'] = _normalize_identifiers(shipment_df)
+        else:
+            config['TodayShipment'] = pd.DataFrame()
+    elif module1_output_dir and current_date:
         try:
             from concurrent.futures import ThreadPoolExecutor
 
@@ -1989,7 +2008,9 @@ def main(
     module1_output_dir: str = None,
     module4_output_path: str = None,
     orchestrator: object = None,
-    current_date: str = None
+    current_date: str = None,
+    skip_file_output: bool = False,
+    module1_result: dict = None  # 新增：直接从内存获取Module1输出
 ):
     """
     Module 5 主入口：多层级部署规划。
@@ -2004,7 +2025,8 @@ def main(
         current_date_obj = pd.to_datetime(current_date) if current_date else None
         config = load_integrated_config(
             config_dict, module1_output_dir, module4_output_path, 
-            orchestrator, current_date_obj
+            orchestrator, current_date_obj,
+            module1_result=module1_result  # 传递Module1内存数据
         )
         sim_dates = [current_date_obj] if current_date_obj else pd.date_range(sim_start, sim_end, freq='D')
         
@@ -2715,7 +2737,9 @@ def main(
         'StockOnHandLog': pd.DataFrame(stock_on_hand_log),
         'Validation': pd.DataFrame(validation_log),
     }
-    log_outputs(output_path, outputs)
+    # 仅在非数据库模式下写入Excel文件
+    if not skip_file_output:
+        log_outputs(output_path, outputs)
     print(f"[M5] Full day total 用时: {time.perf_counter()-day_start:.3f}s")
     
     # 集成模式：将部署计划发送给Orchestrator（由主集成脚本统一处理）

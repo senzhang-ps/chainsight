@@ -701,7 +701,8 @@ def run_module4_integrated(
     module3_output_dir: str,
     simulation_date: pd.Timestamp,
     simulation_start: pd.Timestamp,
-    output_dir: str
+    output_dir: str,
+    skip_file_output: bool = False
 ) -> pd.DataFrame:
     """集成模式运行 Module4 生产计划（直接用 config_dict）
 
@@ -714,6 +715,7 @@ def run_module4_integrated(
         simulation_date: 当前仿真日期。
         simulation_start: 仿真开始日期。
         output_dir: 输出目录，用于写每日 M4 输出。
+        skip_file_output: 是否跳过写入Excel文件（数据库模式使用）。
 
     Returns:
         pd.DataFrame: 生产计划数据（含 available_date 等），用于当日入库处理。
@@ -723,7 +725,7 @@ def run_module4_integrated(
         - Module3 的日度净需求文件。
 
     输出/副作用：
-        - 写每日 M4 输出文件；返回当日及未来的生产记录；可能更新产线状态与已分配产能持久化。
+        - 写每日 M4 输出文件（除非 skip_file_output=True）；返回当日及未来的生产记录；可能更新产线状态与已分配产能持久化。
 
     逻辑：
         - 校验配置→加载净需求→构建无约束计划→处理换产与产能分配→模拟生产可靠性→提取并保存状态→返回可用生产。
@@ -871,14 +873,14 @@ def run_module4_integrated(
         # 去重问题
         issues = module4.dedup_issues(issues)
         
-        # 生成输出文件
-        base_output_file = os.path.join(output_dir, "Module4Output.xlsx")
-        daily_output_path = module4.write_output(
-            plan_log, exceed_log, issues, changeover_log, 
-            base_output_file, simulation_date
-        )
-        
-        print(f"Module4 daily output generated: {daily_output_path}")
+        # 生成输出文件（仅在非数据库模式下写入）
+        if not skip_file_output:
+            base_output_file = os.path.join(output_dir, "Module4Output.xlsx")
+            daily_output_path = module4.write_output(
+                plan_log, exceed_log, issues, changeover_log, 
+                base_output_file, simulation_date
+            )
+            print(f"Module4 daily output generated: {daily_output_path}")
         
         # 返回生产计划数据（只返回当日可用的生产）
         if not plan_log.empty and 'available_date' in plan_log.columns:
@@ -1081,6 +1083,196 @@ def set_module_seeds(config_dict: dict, global_seed: int = None):
     print(f"✨已为所有模块设置统一随机种子: {global_seed}")
     return global_seed
 
+
+def load_configuration_from_dict(config_data: dict, config_name: str = "DB_Config") -> dict:
+    """从DataFrame字典加载与标准化配置数据（用于数据库模式）
+
+    目的：
+    - 直接接收DataFrame字典，无需创建临时Excel文件
+    - 执行与load_configuration相同的标准化处理
+
+    Args:
+        config_data: 配置数据字典 {sheet_name: DataFrame}
+        config_name: 配置名称（用于日志）
+
+    Returns:
+        dict: 标准化后的配置数据字典
+    """
+    print(f"📋 处理配置数据: {config_name} (共 {len(config_data)} 个表)")
+    
+    # Sheet名称映射（数据库小写 -> 原始大小写）
+    sheet_mapping = {
+        'sit_design': 'SIT Design',
+        'global_seed': 'Global_seed',
+        'config_guide': 'Config Guide',
+        'global_network': 'Global_Network',
+        'global_spacecapacity': 'Global_SpaceCapacity',
+        'global_leadtime': 'Global_LeadTime',
+        'global_demandpriority': 'Global_DemandPriority',
+        'm1_initialinventory': 'M1_InitialInventory',
+        'm1_initialinventory_30d': 'M1_InitialInventory_30D',
+        'sheet1': 'Sheet1',
+        'm1_demandforecast': 'M1_DemandForecast',
+        'm1_forecasterror': 'M1_ForecastError',
+        'm1_ordercalendar': 'M1_OrderCalendar',
+        'm1_aoconfig': 'M1_AOConfig',
+        'm1_dpsconfig': 'M1_DPSConfig',
+        'm1_supplychoiceconfig': 'M1_SupplyChoiceConfig',
+        'm3_safetystock': 'M3_SafetyStock',
+        'covalidation': 'COValidation',
+        'm4_materiallocationlinecfg': 'M4_MaterialLocationLineCfg',
+        'm4_linecapacity': 'M4_LineCapacity',
+        'm4_changeovermatrix': 'M4_ChangeoverMatrix',
+        'm4_changeoverdefinition': 'M4_ChangeoverDefinition',
+        'm4_productionreliability': 'M4_ProductionReliability',
+        'm5_pushpullmodel': 'M5_PushPullModel',
+        'm5_deployconfig': 'M5_DeployConfig',
+        'm6_truckreleasecon': 'M6_TruckReleaseCon',
+        'm6_materialmd': 'M6_MaterialMD',
+        'm6_deliverydelaydistribution': 'M6_DeliveryDelayDistribution',
+        'm6_mdqbypassrules': 'M6_MDQBypassRules',
+        'm6_trucktypespecs': 'M6_TruckTypeSpecs',
+        'm6_truckcapacityplan': 'M6_TruckCapacityPlan',
+    }
+    
+    # 列名映射（数据库小写 -> 原始大小写）
+    column_mapping = {
+        'material': 'material', 'location': 'location', 'sourcing': 'sourcing',
+        'location_type': 'location_type', 'quantity': 'quantity', 'date': 'date',
+        'week': 'week', 'day': 'day', 'seed': 'seed', 'eff_from': 'eff_from',
+        'eff_to': 'eff_to', 'demand_element': 'demand_element', 'priority': 'priority',
+        'order_type': 'order_type', 'error_std_percent': 'error_std_percent',
+        'order_day_flag': 'order_day_flag', 'advance_days': 'advance_days',
+        'ao_percent': 'ao_percent', 'dps_location': 'dps_location',
+        'dps_percent': 'dps_percent', 'safety_stock_qty': 'safety_stock_qty',
+        'key': 'key', 'sending': 'sending', 'receiving': 'receiving',
+        'pdt': 'PDT', 'gr': 'GR', 'mct': 'MCT', 'otd': 'OTD',
+        'delegate_line': 'delegate_line', 'prd_rate': 'prd_rate',
+        'min_batch': 'min_batch', 'rv': 'rv', 'ptf': 'ptf', 'lsk': 'lsk',
+        'line': 'line', 'capacity': 'capacity', 'from_material': 'from_material',
+        'to_material': 'to_material', 'changeover_id': 'changeover_id',
+        'from_line': 'from line', 'to_line': 'to line', 'time': 'time',
+        'cost': 'cost', 'mu_loss': 'mu_loss', 'pr': 'pr', 'model': 'model',
+        'moq': 'moq', 'truck_type': 'truck_type', 'optimal_type': 'optimal_type',
+        'wfr': 'WFR', 'vfr': 'VFR', 'mdq': 'MDQ', 'weight': 'weight',
+        'volume': 'volume', 'demand_unit_to_weight': 'demand_unit_to_weight',
+        'demand_unit_to_volume': 'demand_unit_to_volume', 'delay_days': 'delay_days',
+        'probability': 'probability', 'condition_logic': 'condition_logic',
+        'rule_id': 'rule_id', 'max_weight': 'max_weight', 'max_volume': 'max_volume',
+        'capacity_qty_in_weight': 'capacity_qty_in_weight',
+        'capacity_qty_in_volume': 'capacity_qty_in_volume',
+    }
+    
+    config_dict = {}
+    
+    # 转换配置数据
+    for db_name, df in config_data.items():
+        if not isinstance(df, pd.DataFrame) or df.empty:
+            continue
+        
+        # 映射sheet名称
+        sheet_name = sheet_mapping.get(db_name.lower(), db_name)
+        
+        # 恢复列名大小写
+        df_copy = df.copy()
+        df_copy.columns = [column_mapping.get(col.lower(), col) for col in df_copy.columns]
+        
+        config_dict[sheet_name] = df_copy
+        print(f"  ✅ 加载配置表: {sheet_name} ({len(df_copy)} 行)")
+    
+    # 确保必要的配置表存在
+    required_sheets = [
+        'M1_InitialInventory',
+        'Global_SpaceCapacity',
+        'Global_Network',
+        'Global_LeadTime',
+        'Global_DemandPriority'
+    ]
+    
+    missing_sheets = [sheet for sheet in required_sheets if sheet not in config_dict]
+    if missing_sheets:
+        print(f"⚠️  缺少必要配置表: {missing_sheets}")
+        for sheet in missing_sheets:
+            config_dict[sheet] = pd.DataFrame()
+    
+    # 统一标准化所有配置表的标识符字段
+    print(f"🔧 正在标准化标识符字段...")
+    standardized_count = 0
+    for sheet_name, df in config_dict.items():
+        if isinstance(df, pd.DataFrame) and not df.empty:
+            identifier_cols = ['material', 'location', 'sending', 'receiving', 'sourcing', 
+                             'dps_location', 'from_material', 'to_material', 'line', 
+                             'delegate_line', 'changeover_id']
+            has_identifiers = any(col in df.columns for col in identifier_cols)
+            
+            if has_identifiers:
+                original_dtypes = {col: str(df[col].dtype) for col in identifier_cols if col in df.columns}
+                config_dict[sheet_name] = _normalize_identifiers(df)
+                new_dtypes = {col: str(config_dict[sheet_name][col].dtype) for col in identifier_cols if col in config_dict[sheet_name].columns}
+                
+                normalized_fields = []
+                for col in identifier_cols:
+                    if col in df.columns and original_dtypes[col] != new_dtypes[col]:
+                        normalized_fields.append(f"{col}({original_dtypes[col]}→{new_dtypes[col]})")
+                
+                if normalized_fields:
+                    print(f"  🔧 {sheet_name}: {', '.join(normalized_fields)}")
+                    standardized_count += 1
+    
+    if standardized_count > 0:
+        print(f"✅ 已标准化 {standardized_count} 个配置表的标识符字段")
+    
+    # Changeover 配置校验和去重
+    if 'M4_ChangeoverMatrix' in config_dict and not config_dict['M4_ChangeoverMatrix'].empty:
+        print(f"\n🔧 校验 Changeover Matrix 配置...")
+        co_matrix = config_dict['M4_ChangeoverMatrix']
+        duplicates = co_matrix[co_matrix.duplicated(subset=['from_material', 'to_material'], keep=False)]
+        if not duplicates.empty:
+            original_count = len(co_matrix)
+            config_dict['M4_ChangeoverMatrix'] = co_matrix.drop_duplicates(
+                subset=['from_material', 'to_material'], keep='first'
+            )
+            print(f"  🔧 已去除 {original_count - len(config_dict['M4_ChangeoverMatrix'])} 条重复记录")
+        else:
+            print(f"  ✅ Changeover Matrix 无重复定义")
+    
+    # ChangeoverDefinition 配置校验和去重
+    if 'M4_ChangeoverDefinition' in config_dict and not config_dict['M4_ChangeoverDefinition'].empty:
+        print(f"\n🔧 校验 Changeover Definition 配置...")
+        co_def = config_dict['M4_ChangeoverDefinition']
+        duplicates = co_def[co_def.duplicated(subset=['changeover_id', 'line'], keep=False)]
+        if not duplicates.empty:
+            original_count = len(co_def)
+            config_dict['M4_ChangeoverDefinition'] = co_def.drop_duplicates(
+                subset=['changeover_id', 'line'], keep='first'
+            )
+            print(f"  🔧 已去除 {original_count - len(config_dict['M4_ChangeoverDefinition'])} 条重复记录")
+        else:
+            print(f"  ✅ Changeover Definition 无重复定义")
+    
+    # Module4 配置表映射
+    print(f"\n🔧 正在映射 Module4 配置表...")
+    module4_mappings = {
+        'M4_MaterialLocationLineCfg': 'MaterialLocationLineCfg',
+        'M4_LineCapacity': 'LineCapacity',
+        'M4_ChangeoverMatrix': 'ChangeoverMatrix',
+        'M4_ChangeoverDefinition': 'ChangeoverDefinition',
+        'M4_ProductionReliability': 'ProductionReliability'
+    }
+    
+    mapped_count = 0
+    for original_key, mapped_key in module4_mappings.items():
+        if original_key in config_dict and not config_dict[original_key].empty:
+            config_dict[mapped_key] = config_dict[original_key]
+            print(f"  🔧 映射 {original_key} → {mapped_key}")
+            mapped_count += 1
+    
+    if mapped_count > 0:
+        print(f"✅ 已映射 {mapped_count} 个 Module4 配置表")
+    
+    return config_dict
+
+
 def load_configuration(config_path: str) -> dict:
     """加载与标准化配置数据
 
@@ -1278,8 +1470,14 @@ def run_integrated_simulation(
         - 预验证→续跑判断→初始化（新建或恢复）→按日执行模块→每日保存→最终报告与检查→返回结果。
     """
     import time
+    from datetime import datetime
     simulation_start_time = time.time()
+    simulation_start_datetime = datetime.now()
     
+    print("\n" + "=" * 60)
+    print("🕐 程序时间信息")
+    print("=" * 60)
+    print(f"📅 程序开始时间: {simulation_start_datetime.strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"🚀 开始集成仿真: {start_date} 到 {end_date}")
     print("=" * 60)
     
@@ -1653,7 +1851,9 @@ def run_integrated_simulation(
                         config_dict=config_dict,
                         start_date=current_date.strftime('%Y-%m-%d'),
                         end_date=current_date.strftime('%Y-%m-%d'),
-                        output_dir=str(module_outputs['module3'])
+                        output_dir=str(module_outputs['module3']),
+                        skip_file_output=True,
+                        module1_result=m1_result  # 直接从内存传递Module1输出
                     )
                 print(f"  ✅ Module3 完成")
                 all_results['module3'].append(m3_result)
@@ -1753,9 +1953,15 @@ def run_integrated_simulation(
         print(f"总共处理: {total_processed} 天")
     
     # 输出运行时间统计
-    print("⏱️运行时间统计:")
-    print(f"总运行时间: {runtime_str}")
-    print(f"平均每天耗时: {total_runtime_seconds / len(sim_dates):.2f}秒")
+    simulation_end_datetime = datetime.now()
+    print("\n" + "=" * 60)
+    print("🕐 程序时间统计")
+    print("=" * 60)
+    print(f"📅 开始时间: {simulation_start_datetime.strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"📅 结束时间: {simulation_end_datetime.strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"⏱️  总运行时间: {runtime_str}")
+    print(f"📊 平均每天耗时: {total_runtime_seconds / len(sim_dates):.2f}秒")
+    print("=" * 60)
     
     return {
         'validation_passed': True,
@@ -1772,6 +1978,376 @@ def run_integrated_simulation(
         'balance_report': balance_report_path,
         'summary_reports': summary_reports
     }
+
+
+def run_integrated_simulation_from_dict(
+    config_data: dict,
+    config_name: str,
+    start_date: str,
+    end_date: str,
+    output_base_dir: str = "./integrated_output",
+    skip_validation: bool = True
+) -> dict:
+    """从DataFrame字典运行集成仿真（数据库模式专用）
+    
+    目的：
+    - 直接接收DataFrame字典，无需创建临时Excel文件
+    - 使用DuckDB内存处理配置数据
+    - 用于数据库模式运行
+    
+    Args:
+        config_data: 配置数据字典 {sheet_name: DataFrame}
+        config_name: 配置名称（用于日志）
+        start_date: 仿真开始日期 (YYYY-MM-DD)
+        end_date: 仿真结束日期 (YYYY-MM-DD)
+        output_base_dir: 输出基础目录
+        skip_validation: 是否跳过预验证（数据库数据已验证）
+    
+    Returns:
+        dict: 仿真结果字典
+    """
+    import time
+    simulation_start_time = time.time()
+    simulation_start_datetime = datetime.now()
+    
+    print("\n" + "=" * 60)
+    print("🕐 程序时间信息")
+    print("=" * 60)
+    print(f"📅 程序开始时间: {simulation_start_datetime.strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"🚀 开始集成仿真 (数据库模式): {start_date} 到 {end_date}")
+    print(f"📋 配置: {config_name}")
+    print("=" * 60)
+    
+    # 跳过预验证（数据库数据已经过验证）
+    if skip_validation:
+        print("✅ 跳过预验证（数据库模式）")
+    
+    # 创建输出目录
+    output_dir = Path(output_base_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    orchestrator_output_dir = output_dir / "orchestrator"
+    module_outputs = {
+        'module1': output_dir / "module1",
+        'module3': output_dir / "module3", 
+        'module4': output_dir / "module4",
+        'module5': output_dir / "module5",
+        'module6': output_dir / "module6"
+    }
+    
+    for module_dir in module_outputs.values():
+        module_dir.mkdir(parents=True, exist_ok=True)
+    
+    # 🦆 使用DuckDB处理配置数据（无需临时Excel文件）
+    print("🦆 DuckDB处理配置数据...")
+    config_dict = load_configuration_from_dict(config_data, config_name)
+    
+    # 设置全局随机种子
+    global_seed = set_module_seeds(config_dict)
+    
+    # 初始化时间管理器
+    time_manager = initialize_time_manager(start_date)
+    
+    # 初始化Orchestrator
+    print("🎯 初始化Orchestrator")
+    orch = create_orchestrator(
+        start_date=start_date,
+        output_dir=str(orchestrator_output_dir)
+    )
+    orch.set_past_due_cleanup_grace_days(100)
+    
+    # 全新开始：设置初始状态
+    print("🆕全新开始：设置初始状态")
+    
+    # 设置初始库存
+    if 'M1_InitialInventory' in config_dict and not config_dict['M1_InitialInventory'].empty:
+        orch.initialize_inventory(config_dict['M1_InitialInventory'])
+    else:
+        print("⚠️未找到初始库存配置，使用空库存")
+        orch.initialize_inventory(pd.DataFrame(columns=['material', 'location', 'quantity']))
+    
+    # 设置空间容量
+    if 'Global_SpaceCapacity' in config_dict and not config_dict['Global_SpaceCapacity'].empty:
+        orch.set_space_capacity(config_dict['Global_SpaceCapacity'])
+    else:
+        print("⚠️未找到空间容量配置")
+    
+    # 生成仿真日期范围
+    sim_dates = pd.date_range(start_date, end_date, freq='D')
+    print(f"📅 仿真日期范围: {len(sim_dates)} 天")
+    
+    # 每日循环执行
+    all_results = {
+        'module1': [],
+        'module3': [],
+        'module4': [], 
+        'module5': [],
+        'module6': []
+    }
+    
+    for i, current_date in enumerate(sim_dates, 1):
+        print(f"{'='*20} 第 {i}/{len(sim_dates)} 天: {current_date.strftime('%Y-%m-%d')} {'='*20}")
+        
+        # ==================== 每日开始：GR入库处理 ====================
+        try:
+            print("🌅 每日开始状态更新")
+            print("💾保存期初库存快照...")
+            orch.save_beginning_inventory(current_date.strftime('%Y-%m-%d'))
+            orch.cleanup_past_due_open_deployments(current_date.strftime('%Y-%m-%d'), grace_days=getattr(orch, "cleanup_grace_days", 0), write_audit=True)
+            
+            print("📦处理当日delivery GR到达...")
+            orch._process_delivery_arrivals(current_date.strftime('%Y-%m-%d'))
+            
+            print("🏭处理历史生产当日入库...")
+            current_date_production_gr = load_current_date_production_gr(
+                module4_output_dir=str(module_outputs['module4']),
+                current_date=current_date,
+                start_date=pd.to_datetime(start_date)
+            )
+            
+            if not current_date_production_gr.empty:
+                print(f"📦当日需要入库的历史生产: {len(current_date_production_gr)} 条记录")
+                current_date_production_gr_normalized = _normalize_identifiers(current_date_production_gr)
+                orch.process_module4_production(current_date_production_gr_normalized, current_date.strftime('%Y-%m-%d'))
+            else:
+                print("📦当日无历史生产入库")
+                
+        except Exception as e:
+            print(f"❌ 每日开始处理失败: {e}")
+        
+        # ==================== 模块运行序列 ====================
+        m1_shipments = pd.DataFrame()
+        m4_production = pd.DataFrame()
+        m5_deployment_df = pd.DataFrame()
+        m6_delivery_df = pd.DataFrame()
+        
+        try:
+            # ========== M1: 订单生成 ==========
+            print("1️⃣ 运行 Module1 - 订单生成")
+            try:
+                m1_result = module1.run_daily_order_generation(
+                    config_dict=config_dict,
+                    simulation_date=current_date,
+                    output_dir=str(module_outputs['module1']),
+                    orchestrator=orch,
+                    skip_file_output=True  # 数据库模式下跳过写入Excel
+                )
+                m1_shipments = m1_result.get('shipment_df', pd.DataFrame())
+                
+                if not m1_shipments.empty:
+                    print("🚚立即处理M1 shipment，扣减库存...")
+                    m1_shipments_normalized = _normalize_identifiers(m1_shipments)
+                    orch.process_module1_shipments(m1_shipments_normalized, current_date.strftime('%Y-%m-%d'))
+                    print(f"✅ 已扣减 {len(m1_shipments_normalized)} 个shipment的库存")
+                
+                print(f"✅ Module1 完成 - 生成 {len(m1_result.get('orders_df', []))} 个订单, {len(m1_shipments)} 个发货")
+                all_results['module1'].append(m1_result)
+            except Exception as e:
+                print(f"❌ Module1 失败: {e}")
+                m1_shipments = pd.DataFrame()
+            
+            # ========== M4: 生产计划 ==========
+            print("2️⃣ 运行 Module4 - 生产计划")
+            try:
+                m4_production = run_module4_integrated(
+                    config_dict=config_dict,
+                    module3_output_dir=str(module_outputs['module3']),
+                    simulation_date=current_date,
+                    simulation_start=pd.to_datetime(start_date),
+                    output_dir=str(module_outputs['module4']),
+                    skip_file_output=True  # 数据库模式下跳过写入Excel
+                )
+                
+                if not m4_production.empty and 'available_date' in m4_production.columns:
+                    m4_production['available_date'] = pd.to_datetime(m4_production['available_date'])
+                    future_plans = m4_production[m4_production['available_date'].dt.normalize() > current_date.normalize()]
+                    if not future_plans.empty:
+                        print("🗂️ 持久化未来生产计划...")
+                        future_plans_normalized = _normalize_identifiers(future_plans)
+                        orch.process_module4_production(future_plans_normalized, current_date.strftime('%Y-%m-%d'))
+                        print(f"✅已写入未来计划: {len(future_plans_normalized)} 条")
+                else:
+                    print(f"📦M4当日未生成生产计划或缺少 available_date 列")
+                
+                print(f"✅ Module4 完成 - 生成生产计划: {len(m4_production)} 条记录")
+                all_results['module4'].append({'production_df': m4_production})
+            except Exception as e:
+                print(f"❌ Module4 失败: {e}")
+                m4_production = pd.DataFrame()
+            
+            # ========== M5: 部署计划 ==========
+            print("3️⃣ 运行 Module5 - 部署计划")
+            try:
+                m5_result = module5.main(
+                    config_dict=config_dict,
+                    module1_output_dir=None,  # 数据库模式下不依赖M1输出文件
+                    module4_output_path=None,  # 数据库模式下不依赖M4输出文件
+                    orchestrator=orch,
+                    current_date=current_date.strftime('%Y-%m-%d'),
+                    output_path=None,  # 数据库模式下不写入输出文件
+                    skip_file_output=True,  # 数据库模式下跳过写入Excel
+                    module1_result=m1_result  # 直接传递Module1内存数据
+                )
+                
+                if m5_result and 'deployment_plan' in m5_result:
+                    deployment_plan_df = m5_result['deployment_plan']
+                    if not deployment_plan_df.empty:
+                        valid_deployment = deployment_plan_df[
+                            (deployment_plan_df['deployed_qty_invCon'] > 0) & 
+                            (deployment_plan_df['deployed_qty_invCon'].notna()) &
+                            (deployment_plan_df['sending'] != deployment_plan_df['receiving'])
+                        ].copy()
+                        
+                        print(f"    🎯 有效部署计划: {len(valid_deployment)}/{len(deployment_plan_df)} 条")
+                        
+                        if not valid_deployment.empty:
+                            if 'deployed_qty' in valid_deployment.columns:
+                                m5_deployment_df = valid_deployment[[
+                                    'material', 'sending', 'receiving', 'date', 'deployed_qty', 'demand_element'
+                                ]].rename(columns={'date': 'planned_deployment_date'})
+                            else:
+                                m5_deployment_df = valid_deployment.rename(columns={
+                                    'date': 'planned_deployment_date',
+                                    'deployed_qty_invCon': 'deployed_qty'
+                                })[['material', 'sending', 'receiving', 'planned_deployment_date', 'deployed_qty', 'demand_element']]
+                            
+                            m5_deployment_df = _normalize_identifiers(m5_deployment_df)
+                            print("\n    📦 立即处理M5 deployment，更新open deployment...")
+                            orch.process_module5_deployment(m5_deployment_df, current_date.strftime('%Y-%m-%d'))
+                            print(f"    ✅ 已更新 {len(m5_deployment_df)} 条部署计划到open deployment")
+                
+                print(f"\n  ✅ Module5 完成 - 生成 {len(valid_deployment) if 'valid_deployment' in dir() else 0} 条有效部署计划")
+                all_results['module5'].append(m5_result)
+            except Exception as e:
+                print(f"❌ Module5 失败: {e}")
+                m5_deployment_df = pd.DataFrame()
+            
+            # ========== M6: 物流执行 ==========
+            print("4️⃣ 运行 Module6 - 物流执行")
+            try:
+                m6_result = module6.run_daily_physical_flow(
+                    config_dict=config_dict,
+                    orchestrator=orch,
+                    current_date=current_date,
+                    output_dir=str(module_outputs['module6']),
+                    max_wait_days=30,
+                    random_seed=config_dict.get('M6_RandomSeed', 42),
+                    skip_file_output=True  # 数据库模式下跳过写入Excel
+                )
+                
+                if m6_result and 'delivery_plan' in m6_result:
+                    m6_delivery_df = m6_result.get('delivery_plan', pd.DataFrame())
+                    if not m6_delivery_df.empty:
+                        m6_delivery_normalized = _normalize_identifiers(m6_delivery_df)
+                        orch.process_module6_delivery(m6_delivery_normalized, current_date.strftime('%Y-%m-%d'))
+                        print(f"    ✅ 已处理 {len(m6_delivery_normalized)} 条delivery计划")
+                
+                print(f"\n  ✅ Module6 完成 - 生成 {len(m6_delivery_df) if 'm6_delivery_df' in dir() else 0} 条交付计划")
+                all_results['module6'].append(m6_result)
+            except Exception as e:
+                print(f"❌ Module6 失败: {e}")
+                m6_delivery_df = pd.DataFrame()
+            
+            # ========== M3: 净需求计算 ==========
+            print("5️⃣ 运行 Module3 - 净需求计算")
+            try:
+                m3_result = module3.run_integrated_mode(
+                    module1_output_dir=str(module_outputs['module1']),
+                    orchestrator=orch,
+                    config_dict=config_dict,
+                    start_date=current_date.strftime('%Y-%m-%d'),
+                    end_date=current_date.strftime('%Y-%m-%d'),
+                    output_dir=str(module_outputs['module3']),
+                    skip_file_output=True  # 数据库模式下跳过写入Excel
+                )
+                print(f"  ✅ Module3 完成")
+                all_results['module3'].append(m3_result)
+            except Exception as e:
+                print(f"❌ Module3 失败: {e}")
+            
+        except Exception as e:
+            print(f"❌ 当日模块执行失败: {e}")
+            import traceback
+            traceback.print_exc()
+        
+        # ==================== 每日结束：状态保存 ====================
+        try:
+            print("💾 每日结束状态保存")
+            # 保存期末库存快照
+            orch.save_ending_inventory(current_date.strftime('%Y-%m-%d'))
+            # 输出每日库存汇总
+            orch.output_daily_inventory_summary(current_date.strftime('%Y-%m-%d'))
+            # 保存每日状态
+            orch.save_daily_state(current_date.strftime('%Y-%m-%d'))
+            # 获取当日统计
+            stats = orch.get_summary_statistics(current_date.strftime('%Y-%m-%d'))
+            print(f"📊 当日统计: {stats}")
+            print(f"✅ 第 {i} 天处理完成")
+        except Exception as e:
+            print(f"❌ 每日状态保存失败: {e}")
+    
+    # 仿真结束统计
+    total_runtime_seconds = time.time() - simulation_start_time
+    if total_runtime_seconds >= 60:
+        minutes = int(total_runtime_seconds // 60)
+        seconds = total_runtime_seconds % 60
+        runtime_str = f"{minutes}分钟 {seconds:.2f}秒"
+    else:
+        runtime_str = f"{total_runtime_seconds:.2f}秒"
+    
+    # 生成汇总报告
+    print("📊 正在生成汇总报告...")
+    try:
+        report_generator = SummaryReportGenerator(
+            output_base_dir=str(output_dir),
+            config_dict=config_dict
+        )
+        # start_date 和 end_date 在本函数中已是字符串格式
+        summary_reports = report_generator.generate_all_reports(
+            start_date=start_date,
+            end_date=end_date
+        )
+        print(f"✅ 汇总报告生成完成，输出目录: {output_dir / 'summary'}")
+    except Exception as e:
+        print(f"⚠️ 汇总报告生成失败: {e}")
+        import traceback
+        traceback.print_exc()
+        summary_reports = {}
+    
+    # 最终统计
+    try:
+        final_stats = orch.get_summary_statistics(end_date)
+        print(f"🎯 最终Orchestrator状态:")
+        for key, value in final_stats.items():
+            print(f"{key}: {value}")
+    except Exception as e:
+        print(f"⚠️ 获取最终统计失败: {e}")
+        final_stats = {}
+    
+    print("🎉 集成仿真完成!")
+    print(f"总共处理: {len(sim_dates)} 天")
+    
+    # 输出运行时间统计
+    simulation_end_datetime = datetime.now()
+    print("\n" + "=" * 60)
+    print("🕐 程序时间统计")
+    print("=" * 60)
+    print(f"📅 开始时间: {simulation_start_datetime.strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"📅 结束时间: {simulation_end_datetime.strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"⏱️  总运行时间: {runtime_str}")
+    print(f"📊 平均每天耗时: {total_runtime_seconds / len(sim_dates):.2f}秒")
+    print("=" * 60)
+    
+    return {
+        'validation_passed': True,
+        'simulation_completed': True,
+        'dates_processed_this_run': len(sim_dates),
+        'results': all_results,
+        'final_stats': final_stats,
+        'output_directory': str(output_dir),
+        'summary_reports': summary_reports
+    }
+
 
 def main():
     """主函数 - 命令行入口执行集成仿真

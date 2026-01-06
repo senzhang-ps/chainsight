@@ -513,7 +513,8 @@ def run_daily_physical_flow(
     current_date: pd.Timestamp,
     output_dir: str,
     max_wait_days: int = 30,
-    random_seed: int = None
+    random_seed: int = None,
+    skip_file_output: bool = False
 ) -> dict:
     """
     每日物流执行函数，处理当日的部署计划
@@ -525,6 +526,7 @@ def run_daily_physical_flow(
         output_dir: 输出目录
         max_wait_days: 最大等待天数
         random_seed: 随机种子
+        skip_file_output: 是否跳过写入Excel文件（数据库模式使用）
         
     Returns:
         dict: 包含输出结果的字典
@@ -546,7 +548,8 @@ def run_daily_physical_flow(
         output_path=daily_output_file,
         # 公共参数
         max_wait_days=max_wait_days,
-        random_seed=random_seed
+        random_seed=random_seed,
+        skip_file_output=skip_file_output
     )
     
     return {
@@ -633,7 +636,8 @@ def run_physical_flow_module(
     output_path: str = None,
     # Common parameters
     max_wait_days: int = 30,
-    random_seed: int = None
+    random_seed: int = None,
+    skip_file_output: bool = False
 ):
     # 判断运行模式
     if config_dict is not None:
@@ -1332,17 +1336,18 @@ def run_physical_flow_module(
     validation_df = pd.DataFrame(validation_log)
     bypass_df = pd.DataFrame(bypass_log)
     
-    # Excel 输出
-    with pd.ExcelWriter(output_file, engine='xlsxwriter') as writer:
-        delivery_plan_df.to_excel(writer, sheet_name='DeliveryPlan', index=False)
-        vehicle_df_final.to_excel(writer, sheet_name='VehicleLog', index=False)
-        usage_df.to_excel(writer, sheet_name='TruckUsageLog', index=False)
-        unsat_df.to_excel(writer, sheet_name='UnsatisfiedMDQLog', index=False)
-        validation_df.to_excel(writer, sheet_name='ValidationLog', index=False)
-        bypass_df.to_excel(writer, sheet_name='BypassRuleHitLog', index=False)
-    
-    # 生成validation.txt报告
-    _generate_validation_report(validation_log, output_file)
+    # Excel 输出（仅在非数据库模式下写入）
+    if not skip_file_output:
+        with pd.ExcelWriter(output_file, engine='xlsxwriter') as writer:
+            delivery_plan_df.to_excel(writer, sheet_name='DeliveryPlan', index=False)
+            vehicle_df_final.to_excel(writer, sheet_name='VehicleLog', index=False)
+            usage_df.to_excel(writer, sheet_name='TruckUsageLog', index=False)
+            unsat_df.to_excel(writer, sheet_name='UnsatisfiedMDQLog', index=False)
+            validation_df.to_excel(writer, sheet_name='ValidationLog', index=False)
+            bypass_df.to_excel(writer, sheet_name='BypassRuleHitLog', index=False)
+        
+        # 生成validation.txt报告
+        _generate_validation_report(validation_log, output_file)
 
     # 注意：Orchestrator状态更新由main_integration.py统一处理
     # 避免重复调用导致双重库存扣减

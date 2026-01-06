@@ -1852,7 +1852,7 @@ def run_integrated_simulation(
                         start_date=current_date.strftime('%Y-%m-%d'),
                         end_date=current_date.strftime('%Y-%m-%d'),
                         output_dir=str(module_outputs['module3']),
-                        skip_file_output=True,
+                        skip_file_output=False,
                         module1_result=m1_result  # 直接从内存传递Module1输出
                     )
                 print(f"  ✅ Module3 完成")

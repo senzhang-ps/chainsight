@@ -75,29 +75,35 @@ class ModuleDataWriter:
         for csv_file in csv_files:
             try:
                 df = pd.read_csv(csv_file)
-                if not df.empty:
-                    import re
-                    # 从文件名中提取日期（格式：xxx_YYYYMMDD.csv）
-                    date_match = re.search(r'_(\d{8})(?:\.csv)?$', csv_file.stem)
-                    file_date = date_match.group(1) if date_match else None
-                    
-                    # 构建表名（去除日期部分）
-                    stem_without_date = re.sub(r'_\d{8}$', '', csv_file.stem)
-                    table_name = f"{module_name}_{self._clean_name(stem_without_date)}"
-                    
-                    # 添加日期列
-                    if file_date:
+                import re
+                # 从文件名中提取日期（格式：xxx_YYYYMMDD.csv）
+                date_match = re.search(r'_(\d{8})(?:\.csv)?$', csv_file.stem)
+                file_date = date_match.group(1) if date_match else None
+                
+                # 构建表名（去除日期部分）
+                stem_without_date = re.sub(r'_\d{8}$', '', csv_file.stem)
+                table_name = f"{module_name}_{self._clean_name(stem_without_date)}"
+                
+                # 添加日期列
+                if file_date:
+                    if df.empty:
+                        df['file_date'] = pd.Series(dtype='string')
+                    else:
                         df['file_date'] = file_date
-                    
-                    if run_id:
+                
+                if run_id:
+                    if df.empty:
+                        df['run_id'] = pd.Series(dtype='string')
+                    else:
                         df['run_id'] = run_id
-                    self.db.create_table_from_df(df, table_name, if_exists)
-                    results[csv_file.name] = len(df)
-                    self.written_tables[table_name] = {
-                        "source": str(csv_file),
-                        "module": module_name,
-                        "rows": len(df)
-                    }
+                        
+                self.db.create_table_from_df(df, table_name, if_exists)
+                results[csv_file.name] = len(df)
+                self.written_tables[table_name] = {
+                    "source": str(csv_file),
+                    "module": module_name,
+                    "rows": len(df)
+                }
             except Exception as e:
                 print(f"  ❌ CSV文件写入失败 [{csv_file.name}]: {e}")
                 results[csv_file.name] = {"error": str(e)}
@@ -133,10 +139,6 @@ class ModuleDataWriter:
             try:
                 df = xl.parse(sheet_name)
                 
-                if df.empty:
-                    results[sheet_name] = 0
-                    continue
-                
                 # 构建表名（不包含日期）
                 table_name = f"{file_prefix}_{self._clean_name(sheet_name)}"
                 
@@ -148,7 +150,7 @@ class ModuleDataWriter:
                 if run_id:
                     df['run_id'] = run_id
                 
-                # 写入数据库
+                # 写入数据库 (即使 df.empty 也会创建表结构)
                 self.db.create_table_from_df(df, table_name, if_exists)
                 results[sheet_name] = len(df)
                 
@@ -282,13 +284,18 @@ class ModuleDataWriter:
                 for csv_file in csv_files:
                     try:
                         df = pd.read_csv(csv_file)
-                        if not df.empty:
-                            # 从文件名提取日期
-                            date_part = csv_file.stem.split("_")[-1]
+                        # 从文件名提取日期
+                        date_part = csv_file.stem.split("_")[-1]
+                        
+                        if df.empty:
+                            df['file_date'] = pd.Series(dtype='string')
+                            if run_id:
+                                df['run_id'] = pd.Series(dtype='string')
+                        else:
                             df['file_date'] = date_part
                             if run_id:
                                 df['run_id'] = run_id
-                            dfs.append(df)
+                        dfs.append(df)
                     except Exception as e:
                         print(f"    ⚠️ 读取失败 [{csv_file.name}]: {e}")
                 
@@ -351,6 +358,9 @@ class ModuleDataWriter:
             },
             'module4': {
                 'production_df': 'module4_output_productionplan',
+                'exceed_log': 'module4_output_capacityexceed',
+                'issues_df': 'module4_output_validation',
+                'changeover_log': 'module4_output_changeover',
             },
             'module5': {
                 'deployment_plan': 'module5_output_deploymentplan',
@@ -385,7 +395,7 @@ class ModuleDataWriter:
                 
                 for df_key, table_name in df_mapping.items():
                     df = day_result.get(df_key)
-                    if df is not None and isinstance(df, pd.DataFrame) and not df.empty:
+                    if df is not None and isinstance(df, pd.DataFrame):
                         table_data[table_name].append(df)
             
             # 写入每个表
@@ -398,9 +408,12 @@ class ModuleDataWriter:
                 
                 # 添加run_id列
                 if run_id:
-                    combined_df['run_id'] = run_id
+                    if combined_df.empty:
+                        combined_df['run_id'] = pd.Series(dtype='string')
+                    else:
+                        combined_df['run_id'] = run_id
                 
-                # 写入数据库
+                # 写入数据库 (即使 combined_df.empty 也会创建表结构)
                 try:
                     self.db.create_table_from_df(combined_df, table_name, if_exists)
                     results[table_name] = len(combined_df)

@@ -1,12 +1,7 @@
-"""
-数据库表映射配置
-定义Excel配置表与数据库表、输出表之间的对应关系
-"""
 
-from typing import Dict, List
+import pandas as pd
 
-# ==================== 配置表映射 ====================
-# Excel Sheet名称 -> 数据库表名（不含前缀）
+# Data from pgsql_db/table_mapping.py
 
 CONFIG_TABLE_MAPPING = {
     # Global配置
@@ -59,10 +54,6 @@ CONFIG_TABLE_MAPPING = {
     "safety_stock_summary": "safety_stock_summary",
     "Sheet1": "sheet1",
 }
-
-
-# ==================== 输出表映射 ====================
-# 模块输出文件 -> 数据库表名
 
 OUTPUT_TABLE_MAPPING = {
     # Module1 输出
@@ -131,106 +122,32 @@ OUTPUT_TABLE_MAPPING = {
     },
 }
 
+# Generate rows
+rows = []
 
-# ==================== 必需的配置表 ====================
-# 运行仿真必须存在的配置表
+# Config
+for sheet, table in CONFIG_TABLE_MAPPING.items():
+    rows.append({
+        'Type': 'Input (Config)',
+        'Module': 'Global/Input',
+        'Excel Sheet Name / Output Key': sheet,
+        'Database Table Name': table,
+        'Description': 'Excel configuration sheet'
+    })
 
-REQUIRED_CONFIG_TABLES = [
-    "global_network",
-    "global_leadtime",
-    "m1_demandforecast",
-    "m1_initialinventory",
-    "m3_safetystock",
-]
+# Output
+for module, mapping in OUTPUT_TABLE_MAPPING.items():
+    for key, table in mapping.items():
+        rows.append({
+            'Type': 'Output',
+            'Module': module.upper(),
+            'Excel Sheet Name / Output Key': key,
+            'Database Table Name': table,
+            'Description': f'Simulation output for {module}'
+        })
 
+df = pd.DataFrame(rows)
 
-# ==================== 可选的配置表 ====================
-# 可选的配置表（不存在时使用默认值）
-
-OPTIONAL_CONFIG_TABLES = [
-    "global_seed",
-    "global_spacecapacity",
-    "m1_forecasterror",
-    "m1_ordercalendar",
-    "m1_aoconfig",
-    "m1_dpsconfig",
-    "m4_productionreliability",
-    "m6_mdqbypassrules",
-]
-
-
-def get_config_table_name(sheet_name: str, prefix: str) -> str:
-    """
-    获取配置表的完整数据库表名
-    
-    Args:
-        sheet_name: Excel Sheet名称
-        prefix: 配置前缀（如 BC_S5）
-    
-    Returns:
-        str: 数据库表名
-    """
-    # 清理前缀
-    clean_prefix = prefix.lower().replace("-", "_").replace(" ", "_")
-    
-    # 查找映射
-    if sheet_name in CONFIG_TABLE_MAPPING:
-        base_name = CONFIG_TABLE_MAPPING[sheet_name]
-    else:
-        # 默认转换
-        base_name = sheet_name.lower().replace(" ", "_").replace("-", "_")
-    
-    return f"{clean_prefix}_{base_name}"
-
-
-def get_output_table_name(module: str, file_pattern: str) -> str:
-    """
-    获取输出表的数据库表名
-    
-    Args:
-        module: 模块名称
-        file_pattern: 文件模式
-    
-    Returns:
-        str: 数据库表名，如果没找到则返回None
-    """
-    if module in OUTPUT_TABLE_MAPPING:
-        for pattern, table_name in OUTPUT_TABLE_MAPPING[module].items():
-            # 简单匹配（忽略日期部分）
-            pattern_base = pattern.replace("*", "").replace(".xlsx", "").replace(".csv", "")
-            file_base = file_pattern.replace(".xlsx", "").replace(".csv", "")
-            if pattern_base.lower() in file_base.lower():
-                return table_name
-    return None
-
-
-def get_all_output_tables() -> List[str]:
-    """
-    获取所有输出表名列表
-    
-    Returns:
-        List[str]: 所有输出表名
-    """
-    tables = []
-    for module_tables in OUTPUT_TABLE_MAPPING.values():
-        tables.extend(module_tables.values())
-    return tables
-
-
-def print_table_mapping():
-    """打印表映射关系"""
-    print("\n" + "=" * 70)
-    print("📋 配置表映射关系")
-    print("=" * 70)
-    print(f"{'Excel Sheet':<40} {'数据库表名':<30}")
-    print("-" * 70)
-    for sheet, table in CONFIG_TABLE_MAPPING.items():
-        print(f"{sheet:<40} {table:<30}")
-    
-    print("\n" + "=" * 70)
-    print("📋 输出表映射关系")
-    print("=" * 70)
-    for module, tables in OUTPUT_TABLE_MAPPING.items():
-        print(f"\n📁 {module}:")
-        for pattern, table in tables.items():
-            print(f"   {pattern:<45} → {table}")
+# Save to Excel
+df.to_excel('database_table_mapping.xlsx', index=False)
+print("database_table_mapping.xlsx created successfully.")

@@ -104,6 +104,15 @@ python run.py --config BC_S5 --start-date 2025-10-06 --end-date 2025-10-10 \
   --db-user postgres --db-password 123456
 ```
 
+### 5. 导出表映射关系
+
+如果您需要查看 Excel 配置表、模块输出与数据库表名之间的详细对应关系，可以运行以下命令生成映射表：
+
+```bash
+python tools/export_mapping.py
+```
+该命令会在项目根目录下生成 `database_table_mapping.xlsx` 文件。
+
 ---
 
 ## 🔄 运行模式

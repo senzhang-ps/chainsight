@@ -304,6 +304,124 @@ class ModuleDataWriter:
         
         return results
     
+    def write_module_results_from_dict(
+        self,
+        all_results: Dict[str, Any],
+        run_id: str = None,
+        if_exists: str = "append"
+    ) -> Dict[str, int]:
+        """
+        从内存中的模块结果字典直接写入数据库
+        
+        这个方法用于数据库模式，绕过文件系统直接将DataFrame写入数据库。
+        
+        Args:
+            all_results: 模块运行结果字典，结构为:
+                {
+                    'module1': [{'orders_df': df, 'shipment_df': df, 'cut_df': df, ...}, ...],
+                    'module3': [{'net_demand_df': df}, ...],
+                    'module4': [{'production_df': df}, ...],
+                    'module5': [{'deployment_plan': df, 'stock_log': df, ...}, ...],
+                    'module6': [{'delivery_plan': df, 'truck_usage': df, ...}, ...]
+                }
+            run_id: 运行ID
+            if_exists: 如果表存在的处理方式
+        
+        Returns:
+            dict: 每个表的写入行数
+        """
+        results = {}
+        
+        print("\n" + "=" * 60)
+        print("📤 从内存写入模块输出到数据库")
+        print(f"运行ID: {run_id}")
+        print("=" * 60)
+        
+        # 定义模块输出的DataFrame到表名的映射
+        # 键名必须与模块返回的字典键名一致
+        module_df_mapping = {
+            'module1': {
+                'orders_df': 'module1_output_orderlog',
+                'shipment_df': 'module1_output_shipmentlog',
+                'cut_df': 'module1_output_cutlog',
+                'supply_demand_df': 'module1_output_supplydemandlog',
+            },
+            'module3': {
+                'net_demand_df': 'module3_output_netdemand',
+            },
+            'module4': {
+                'production_df': 'module4_output_productionplan',
+            },
+            'module5': {
+                'deployment_plan': 'module5_output_deploymentplan',
+                'stock_on_hand_log': 'module5_output_stockonhandlog',
+                'unfulfilled_log': 'module5_output_unfulfilledlog',
+                'validation_log': 'module5_output_validation',
+            },
+            'module6': {
+                'delivery_plan': 'module6_output_deliveryplan',
+                'truck_usage': 'module6_output_truckusagelog',
+                'vehicle_log': 'module6_output_vehiclelog',
+                'validation_log': 'module6_output_validationlog',
+                'unsatisfied_log': 'module6_output_unsatisfiedlog',
+                'bypass_log': 'module6_output_bypasslog',
+            },
+        }
+        
+        for module_name, df_mapping in module_df_mapping.items():
+            module_results = all_results.get(module_name, [])
+            
+            if not module_results:
+                continue
+            
+            print(f"\n📁 写入 {module_name} 输出...")
+            
+            # 收集同一个表的所有数据
+            table_data = {table_name: [] for table_name in df_mapping.values()}
+            
+            for day_result in module_results:
+                if not isinstance(day_result, dict):
+                    continue
+                
+                for df_key, table_name in df_mapping.items():
+                    df = day_result.get(df_key)
+                    if df is not None and isinstance(df, pd.DataFrame) and not df.empty:
+                        table_data[table_name].append(df)
+            
+            # 写入每个表
+            for table_name, dfs in table_data.items():
+                if not dfs:
+                    continue
+                
+                # 合并所有天的数据
+                combined_df = pd.concat(dfs, ignore_index=True)
+                
+                # 添加run_id列
+                if run_id:
+                    combined_df['run_id'] = run_id
+                
+                # 写入数据库
+                try:
+                    self.db.create_table_from_df(combined_df, table_name, if_exists)
+                    results[table_name] = len(combined_df)
+                    self.written_tables[table_name] = {
+                        "module": module_name,
+                        "rows": len(combined_df)
+                    }
+                except Exception as e:
+                    print(f"  ❌ 写入表 {table_name} 失败: {e}")
+                    results[table_name] = -1
+        
+        # 统计
+        total_tables = sum(1 for v in results.values() if v > 0)
+        total_rows = sum(v for v in results.values() if v > 0)
+        
+        print(f"\n✅ 模块输出写入完成:")
+        print(f"   表数量: {total_tables}")
+        print(f"   总行数: {total_rows}")
+        
+        return results
+    
     def _clean_name(self, name: str) -> str:
         """清理名称"""
         clean = name.replace(" ", "_").replace("-", "_").replace(".", "_")

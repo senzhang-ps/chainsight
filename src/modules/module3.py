@@ -1433,7 +1433,11 @@ def run_integrated_mode(
     # print(f"  生成了 {len(all_net_demand)} 条Net Demand记录")
     # print(f"  所有模块只处理模拟周期内的数据")
     
+    # 将收集的数据转换为 DataFrame 返回
+    net_demand_result_df = pd.DataFrame(all_net_demand) if all_net_demand else pd.DataFrame()
+    
     return {
+        'net_demand_df': net_demand_result_df,  # 添加 DataFrame 返回
         'net_demand_count': len(all_net_demand),
         'processed_dates': len(date_range),
         'output_files': [f"Module3Output_{d.strftime('%Y%m%d')}.xlsx" for d in date_range]

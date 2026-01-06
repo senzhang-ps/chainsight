@@ -1,5 +1,144 @@
 # ChainSight - 供应链规划仿真系统
 
+## 📋 目录
+
+- [环境要求](#-环境要求)
+- [快速开始](#-快速开始)
+- [运行模式](#-运行模式)
+- [项目架构](#-项目架构)
+- [模块说明](#-模块说明)
+- [数据库配置](#-数据库配置)
+- [故障排除](#-故障排除)
+
+---
+
+## 💻 环境要求
+
+- **Python**: 3.10+ (推荐 3.11 或 3.13)
+- **操作系统**: Windows / Linux / macOS
+- **数据库** (可选): PostgreSQL 14+ (用于数据库模式)
+
+---
+
+## 🚀 快速开始
+
+### 1. 克隆项目
+
+```bash
+git clone <repository-url>
+cd chainsight
+```
+
+### 2. 创建虚拟环境
+
+**Windows (PowerShell):**
+```powershell
+# 创建虚拟环境
+python -m venv .venv
+
+# 激活虚拟环境
+.\.venv\Scripts\Activate.ps1
+```
+
+**Windows (CMD):**
+```cmd
+# 创建虚拟环境
+python -m venv .venv
+
+# 激活虚拟环境
+.\.venv\Scripts\activate.bat
+```
+
+**Linux / macOS:**
+```bash
+# 创建虚拟环境
+python3 -m venv .venv
+
+# 激活虚拟环境
+source .venv/bin/activate
+```
+
+### 3. 安装依赖
+
+```bash
+# 安装所有依赖
+pip install -r requirements.txt
+
+# 更新所有环境依赖
+pip freeze > requirements.txt
+# 或使用 config 目录下的依赖文件
+pip install -r config/requirements.txt
+```
+
+**核心依赖说明:**
+| 依赖 | 版本 | 用途 |
+|------|------|------|
+| pandas | 2.2.3 | 数据处理 |
+| openpyxl | 3.1.5 | Excel 读写 |
+| duckdb | 1.1.3 | 高性能数据处理 |
+| psycopg[binary] | 3.2.3 | PostgreSQL 连接 |
+| numpy | 2.0+ | 数值计算 |
+
+### 4. 运行仿真
+
+**本地文件模式 (默认):**
+```bash
+# 首次运行（需指定起始日期）
+python run.py --config test_files/BC_S5.xlsx --start-date 2025-10-06 --end-date 2025-10-10
+
+# 续跑模式
+python run.py --config test_files/BC_S5.xlsx --end-date 2025-10-15 --resume
+```
+
+**数据库模式:**
+```bash
+# 使用数据库读写配置和输出
+python run.py --config BC_S5 --start-date 2025-10-06 --end-date 2025-10-10 --use-db
+
+# 指定数据库参数
+python run.py --config BC_S5 --start-date 2025-10-06 --end-date 2025-10-10 \
+  --use-db --db-host localhost --db-port 5432 --db-name test_db \
+  --db-user postgres --db-password 123456
+```
+
+---
+
+## 🔄 运行模式
+
+### 本地文件模式
+
+- 从 Excel 配置文件读取配置
+- 输出保存到本地文件系统
+- 适合开发和测试
+
+```bash
+python run.py --config test_files/BC_S5.xlsx --start-date 2025-10-06 --end-date 2025-10-10
+```
+
+### 数据库模式 (`--use-db`)
+
+- 从 PostgreSQL 读取配置
+- 输出写入 PostgreSQL 数据库
+- 自动检测数据库是否存在，不存在则创建
+- 自动检测配置表是否存在，不存在则从 Excel 导入
+- 适合生产环境和数据持久化
+
+```bash
+python run.py --config BC_S5 --start-date 2025-10-06 --end-date 2025-10-10 --use-db
+```
+
+**数据库自动初始化流程:**
+```
+🔍 检测数据库 'test_db'...
+   └─ 不存在 → ✅ 自动创建数据库
+🔍 测试数据库连接...
+   └─ ✅ 连接成功
+🔍 检测配置表 'BC_S5'...
+   └─ 不存在 → 📁 查找 Excel 文件 → ✅ 自动导入配置表
+```
+
+---
+
 ## 📦 项目架构
 
 该项目已按标准分层架构进行重组织，便于维护和扩展。
@@ -78,41 +217,75 @@ chainsight/
 └── .gitignore
 ```
 
-## 🚀 快速开始
+### CLI 参数说明
 
-### 安装依赖
+| 参数 | 必需 | 说明 |
+|------|------|------|
+| `--config` | ✅ | 配置文件路径（文件模式）或配置名称（数据库模式） |
+| `--start-date` | 首次运行 | 仿真开始日期 (YYYY-MM-DD) |
+| `--end-date` | ✅ | 仿真结束日期 (YYYY-MM-DD) |
+| `--use-db` | ❌ | 启用数据库模式 |
+| `--db-host` | ❌ | 数据库主机 (默认: localhost) |
+| `--db-port` | ❌ | 数据库端口 (默认: 5432) |
+| `--db-name` | ❌ | 数据库名称 (默认: test_db) |
+| `--db-user` | ❌ | 数据库用户 (默认: postgres) |
+| `--db-password` | ❌ | 数据库密码 (默认: 123456) |
+| `--resume` | ❌ | 启用断点续跑 |
+| `--force-restart` | ❌ | 强制重新开始 |
+| `--list-runs` | ❌ | 列出可用的运行目录 |
 
+---
+
+## 🗄️ 数据库配置
+
+### PostgreSQL 安装
+
+**Windows:**
+1. 下载 PostgreSQL: https://www.postgresql.org/download/windows/
+2. 安装时记住设置的密码
+3. 默认端口: 5432
+
+**Linux (Ubuntu/Debian):**
 ```bash
-pip install -r config/requirements.txt
+sudo apt update
+sudo apt install postgresql postgresql-contrib
+sudo systemctl start postgresql
 ```
 
-### 运行仿真
+### 数据库模块 (pgsql_db)
 
-```bash
-# 首次运行（需指定起始日期）
-python run.py \
-  --config config/config.xlsx \
-  --start-date 2024-01-01 \
-  --end-date 2024-01-31
+项目包含完整的 PostgreSQL 数据库支持模块：
 
-# 列出所有可用的运行目录
-python run.py \
-  --config config/config.xlsx \
-  --end-date 2024-01-31 \
-  --list-runs
+```python
+from pgsql_db import DatabaseInitializer, initialize_database
 
-# 继续上次的运行（交互式选择）
-python run.py \
-  --config config/config.xlsx \
-  --end-date 2024-01-31 \
-  --resume
+# 方式1: 使用便捷函数
+result = initialize_database(
+    config_name='BC_S5',
+    database='test_db',
+    auto_import=True
+)
 
-# 检查是否可以继续
-python run.py \
-  --config config/config.xlsx \
-  --end-date 2024-01-31 \
-  --check-resume
+# 方式2: 使用初始化器类
+initializer = DatabaseInitializer(database='test_db')
+result = initializer.initialize(config_name='BC_S5')
+print(initializer.get_status_report('BC_S5'))
 ```
+
+### 数据库表结构
+
+| 表类型 | 命名格式 | 示例 |
+|--------|----------|------|
+| 配置表 | `{config}_*` | `bc_s5_m1_demandforecast` |
+| Module1输出 | `module1_output_*` | `module1_output_orderlog` |
+| Module3输出 | `module3_output_*` | `module3_output_netdemand` |
+| Module4输出 | `module4_output_*` | `module4_output_productionplan` |
+| Module5输出 | `module5_output_*` | `module5_output_deploymentplan` |
+| Module6输出 | `module6_output_*` | `module6_output_deliveryplan` |
+| Orchestrator | `orchestrator_*` | `orchestrator_daily_logs` |
+| 汇总报告 | `summary_*` | `summary_historical_inventory_record` |
+
+---
 
 ## 📁 模块说明
 
@@ -262,6 +435,14 @@ from src.core.main_integration import run_integrated_simulation
 
 ## 🐛 故障排除
 
+### ImportError: No module named 'psycopg'
+
+**原因**: 未安装 PostgreSQL 驱动
+**解决**:
+```bash
+pip install psycopg[binary]
+```
+
 ### ImportError: No module named 'module1'
 
 **原因**: 在项目外直接运行代码
@@ -272,19 +453,42 @@ from src.core.main_integration import run_integrated_simulation
 **原因**: 路径相对于当前工作目录
 **解决**: 使用绝对路径或从项目root目录运行
 
+### 数据库连接失败
+
+**原因**: PostgreSQL 未启动或连接参数错误
+**解决**:
+```bash
+# 检查 PostgreSQL 是否运行
+# Windows
+net start postgresql-x64-14
+
+# Linux
+sudo systemctl status postgresql
+
+# 测试连接
+python -c "from pgsql_db import DatabaseConnection; db = DatabaseConnection(); print(db.test_connection())"
+```
+
 ### 断点续跑不工作
 
 **原因**: 运行目录结构不完整
 **解决**: 使用 `--check-resume` 检查状态，必要时使用 `--force-restart`
+
+### bigint 类型错误
+
+**原因**: 浮点数写入整数列
+**解决**: 已在代码中自动处理，确保使用最新版本
+
+---
 
 ## 📞 支持
 
 遇到问题？检查：
 1. `docs/` 目录中的设计文档
 2. 各模块的代码注释
-3. 运行日志（保存在output目录中）
+3. 运行日志（保存在output目录或db_runs目录中）
 
 ---
 
-**版本**: 1.0.0  
-**最后更新**: 2026-01-05
+**版本**: 2.0.0  
+**最后更新**: 2026-01-06

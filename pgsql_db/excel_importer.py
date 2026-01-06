@@ -62,13 +62,20 @@ class ExcelImporter:
             try:
                 df = xl.parse(sheet_name)
                 
-                if df.empty:
-                    print(f"  ⚠️ Sheet [{sheet_name}] 为空，跳过")
-                    results[sheet_name] = 0
-                    continue
-                
                 # 构建表名: prefix_sheetname
                 table_name = f"{prefix}_{self._clean_name(sheet_name)}"
+                
+                # 空表也要创建（只要有列名）
+                if df.empty:
+                    # 检查是否有列定义
+                    if len(df.columns) > 0:
+                        print(f"  📋 Sheet [{sheet_name}] 为空表，创建表结构 ({len(df.columns)} 列)")
+                        self.db.create_table_from_df(df, table_name, if_exists)
+                        results[sheet_name] = 0
+                    else:
+                        print(f"  ⚠️ Sheet [{sheet_name}] 无数据且无列定义，跳过")
+                        results[sheet_name] = -1
+                    continue
                 
                 # 写入数据库
                 self.db.create_table_from_df(df, table_name, if_exists)

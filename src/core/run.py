@@ -245,13 +245,14 @@ def _run_with_database(ns: argparse.Namespace) -> int:
         from pgsql_db.db_connection import DatabaseConnection
         from pgsql_db.excel_importer import ExcelImporter
         from pgsql_db.module_data_writer import ModuleDataWriter
+        from pgsql_db.db_initializer import DatabaseInitializer
     except ImportError as e:
         print(f"❌ 无法导入数据库模块: {e}")
         print("   请确保已安装 psycopg: pip install psycopg[binary]")
         return 1
     
-    # 创建数据库连接
-    db = DatabaseConnection(
+    # ========== 使用 DatabaseInitializer 自动检测和初始化 ==========
+    initializer = DatabaseInitializer(
         host=ns.db_host,
         port=ns.db_port,
         database=ns.db_name,
@@ -259,13 +260,19 @@ def _run_with_database(ns: argparse.Namespace) -> int:
         password=ns.db_password
     )
     
-    # 测试数据库连接
-    print("\n🔍 测试数据库连接...")
-    conn_result = db.test_connection()
-    if not conn_result["success"]:
-        print(f"❌ 数据库连接失败: {conn_result['message']}")
+    # 执行初始化（检测数据库、创建数据库、检测配置表、导入配置）
+    init_result = initializer.initialize(
+        config_name=config_name,
+        auto_import_config=True,
+        verbose=True
+    )
+    
+    if not init_result["success"]:
+        print("❌ 数据库初始化失败")
         return 1
-    print(f"✅ 数据库连接成功 (版本: {conn_result['version'][:40]}...)")
+    
+    # 获取数据库连接供后续使用
+    db = initializer.db
     
     # 创建本地日志目录（只保存txt日志）
     project_root = Path(__file__).parent.parent.parent
@@ -332,17 +339,25 @@ def _run_with_database(ns: argparse.Namespace) -> int:
         logger.info("=" * 60)
         
         output_dir = result.get('output_directory')
+        writer = ModuleDataWriter(db)
+        run_id = f"{config_name}_{ts}"
+        
+        # 从内存中的模块结果直接写入数据库（数据库模式下 skip_file_output=True，没有中间文件）
+        all_results = result.get('results', {})
+        if all_results:
+            logger.info("📤 写入模块输出数据（从内存）...")
+            writer.write_module_results_from_dict(all_results, run_id=run_id, if_exists='append')
+        
+        # 写入orchestrator数据（CSV文件方式）
         if output_dir and Path(output_dir).exists():
-            writer = ModuleDataWriter(db)
-            run_id = f"{config_name}_{ts}"
-            
-            # 写入各模块输出（使用append模式追加数据，自动添加写入时间列）
-            writer.write_all_modules(output_dir, run_id=run_id, if_exists='append')
-            
-            # 写入orchestrator数据
             orch_dir = Path(output_dir) / "orchestrator"
             if orch_dir.exists():
                 writer.write_orchestrator_data(str(orch_dir), run_id=run_id, if_exists='append')
+            
+            # 写入summary数据（从文件）
+            summary_dir = Path(output_dir) / "summary"
+            if summary_dir.exists():
+                writer.write_module_output("summary", str(summary_dir), run_id=run_id, if_exists='append')
             
             writer.print_summary()
             

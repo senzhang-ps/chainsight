@@ -85,6 +85,86 @@ class DatabaseConnection:
         finally:
             cursor.close()
     
+    def database_exists(self) -> bool:
+        """
+        检测目标数据库是否存在
+        
+        Returns:
+            bool: 数据库是否存在
+        """
+        try:
+            # 连接到postgres数据库检查目标数据库是否存在
+            temp_conn = psycopg.connect(
+                host=self.host,
+                port=self.port,
+                dbname='postgres',
+                user=self.user,
+                password=self.password,
+                client_encoding='UTF8'
+            )
+            with temp_conn.cursor() as cursor:
+                cursor.execute(
+                    "SELECT 1 FROM pg_database WHERE datname = %s",
+                    (self.database,)
+                )
+                exists = cursor.fetchone() is not None
+            temp_conn.close()
+            return exists
+        except Exception as e:
+            print(f"检测数据库存在性时出错: {e}")
+            return False
+    
+    def create_database_if_not_exists(self) -> bool:
+        """
+        如果数据库不存在则创建
+        
+        Returns:
+            bool: 是否成功
+        """
+        if self.database_exists():
+            print(f"✅ 数据库已存在: {self.database}")
+            return True
+        
+        try:
+            # 连接到postgres数据库创建新数据库
+            temp_conn = psycopg.connect(
+                host=self.host,
+                port=self.port,
+                dbname='postgres',
+                user=self.user,
+                password=self.password,
+                client_encoding='UTF8',
+                autocommit=True  # 创建数据库需要autocommit
+            )
+            with temp_conn.cursor() as cursor:
+                # 使用安全的方式创建数据库
+                cursor.execute(
+                    sql.SQL("CREATE DATABASE {}").format(sql.Identifier(self.database))
+                )
+            temp_conn.close()
+            print(f"✅ 已创建数据库: {self.database}")
+            return True
+        except Exception as e:
+            print(f"❌ 创建数据库失败: {e}")
+            return False
+    
+    def check_tables_exist(self, table_names: List[str]) -> Dict[str, bool]:
+        """
+        检查多个表是否存在
+        
+        Args:
+            table_names: 表名列表
+        
+        Returns:
+            dict: 表名 -> 是否存在
+        """
+        result = {}
+        existing_tables = set(self.get_all_tables())
+        for table_name in table_names:
+            clean_name = self._clean_name(table_name)
+            result[table_name] = clean_name in existing_tables
+        return result
+    
     def test_connection(self) -> Dict[str, Any]:
         """
         测试数据库连接
@@ -168,17 +248,20 @@ class DatabaseConnection:
         Returns:
             bool: 是否成功
         """
-        if df.empty:
-            print(f"⚠️DataFrame为空，跳过创建表: {table_name}")
-            return False
-        
         # 清理表名（去除特殊字符）
         clean_table_name = self._clean_name(table_name)
+        
+        # 检查是否为空表（只有列定义）
+        is_empty_table = df.empty
         
         # 添加写入时间列
         df_to_write = df.copy()
         if add_write_time:
-            df_to_write['db_write_time'] = datetime.now()
+            if is_empty_table:
+                # 空表只添加列定义
+                df_to_write['db_write_time'] = pd.Series(dtype='datetime64[ns]')
+            else:
+                df_to_write['db_write_time'] = datetime.now()
         
         # 检查表是否存在
         exists = self.table_exists(clean_table_name)
@@ -210,10 +293,14 @@ class DatabaseConnection:
             
             print(f"✅已创建表: {clean_table_name} ({len(df_to_write)} 行, {len(df_to_write.columns)} 列)")
         else:
-            print(f"✅追加数据到表: {clean_table_name} (+{len(df_to_write)} 行)")
+            if is_empty_table:
+                print(f"✅表已存在（空表）: {clean_table_name}")
+            else:
+                print(f"✅追加数据到表: {clean_table_name} (+{len(df_to_write)} 行)")
         
-        # 插入数据
-        self._insert_dataframe(df_to_write, clean_table_name)
+        # 插入数据（非空表才插入）
+        if not is_empty_table:
+            self._insert_dataframe(df_to_write, clean_table_name)
         
         return True
     

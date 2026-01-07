@@ -1187,7 +1187,7 @@ def run_physical_flow_module(
                     # 新增：等待天数达到上限时强制发运（即使未达阈值也未命中bypass）
                     elif load_records and max_wait_in_load >= max_wait_days:
                         trigger_cause = 'force_wait_timeout'
-                    # print(f"  🚦 触发原因: {trigger_cause}")
+                    print(f"  🚦 触发原因: {trigger_cause}")
 
                     if trigger_cause:
                         # —— 触发后再尽量贴近 1.0（仍不超）——

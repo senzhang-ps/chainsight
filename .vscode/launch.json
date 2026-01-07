@@ -1,0 +1,31 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Run BC_S5 Simulation (2025-10-06)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/run.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--config", "test_files/DRP-RV Simulation-RV 6CS for Mar 1 SKU.xlsx",
+                "--start-date", "2026-03-02",
+                "--end-date", "2026-03-03"
+            ],
+            "justMyCode": true
+        },
+        {
+            "name": "Resume BC_S5 Simulation",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/run.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--config", "test_files/DRP-RV Simulation-RV 6CS for Mar 1 SKU.xlsx",
+                "--end-date", "2026-03-03",
+                "--resume"
+            ],
+            "justMyCode": true
+        }
+    ]
+}

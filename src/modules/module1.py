@@ -1,35 +1,61 @@
-import pandas as pd
-import numpy as np
-from scipy. stats import truncnorm
-from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
-from typing import Optional, Tuple, List, Dict, Any
-import time
-import os
-import re
-import pickle
+"""Module 1: 需求预测与订单生成模块。
 
-# ----------- 0.  CONSTANTS AND CONFIGURATION -----------
+本模块负责：
+- 加载并处理需求预测配置
+- 将周度预测拆分为日度预测
+- 生成AO（提前订单）与Normal（普通订单）
+- 计算发货与缺货
+- 生成供需日志
+
+主要函数：
+    - load_config: 加载Excel配置文件
+    - apply_dps: DPS地点拆分
+    - apply_supply_choice: 供应选择数量调整
+    - expand_forecast_to_days_integer_split: 周度转日度预测
+    - generate_daily_orders: 生成单日订单
+    - run_daily_order_generation: 集成模式主入口
+"""
+
+# 标准库
+import os
+import pickle
+import re
+import time
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
+from typing import Any, Dict, List, Optional, Tuple
+
+# 第三方库
+import numpy as np
+import pandas as pd
+from scipy.stats import truncnorm
+
+
+# ----------- 0.CONSTANTS AND CONFIGURATION -----------
 
 # 性能优化：最大AO提前天数的默认值（从配置中动态获取，此为后备值）
-DEFAULT_MAX_ADVANCE_DAYS = 10
+DEFAULT_MAX_ADVANCE_DAYS: int = 10
 
 # 并行计算的默认开关与并发度（谨慎使用，默认关闭以确保与旧版输出一致）
 # - use_parallel_ao_consume：是否启用 AO 消耗的并行分组计算（按物料-地点拆分，进程池）
 # - use_parallel_file_load：是否启用历史订单文件的并行读取（线程池，适合I/O）
 # - parallel_max_workers：并发工作进程/线程数（None表示自动：CPU核心数）
-DEFAULT_USE_PARALLEL_AO_CONSUME = True
-DEFAULT_USE_PARALLEL_FILE_LOAD = True
-DEFAULT_PARALLEL_MAX_WORKERS: Optional[int] = 8  # 并发工作进程/线程数（None表示自动：CPU核心数）
-DEFAULT_ERROR_LOG_PATH: Optional[str] = None  # 异常日志输出路径（txt），为空则不写盘
-DEFAULT_USE_PARALLEL_NORMAL_CONSUME: Optional[bool] = None  # Normal并行开关（None表示继承AO并行开关）
+DEFAULT_USE_PARALLEL_AO_CONSUME: bool = True
+DEFAULT_USE_PARALLEL_FILE_LOAD: bool = True
+DEFAULT_PARALLEL_MAX_WORKERS: Optional[int] = 8
+DEFAULT_ERROR_LOG_PATH: Optional[str] = None
+DEFAULT_USE_PARALLEL_NORMAL_CONSUME: Optional[bool] = None
 
 # 简易异常日志记录工具（中文信息）
-def _append_error_log(message: str):
-    """
-    将异常信息追加写入到txt文件。
-    使用说明（中文）：
-    - 默认不写盘，需在集成入口里设置 `DEFAULT_ERROR_LOG_PATH` 为某个文件路径。
-    - 日志内容为简单文本，方便用户快速定位问题（哪个模块、哪个ML/文件、异常类型与信息）。
+def _append_error_log(message: str) -> None:
+    """追加错误消息到日志文件。
+
+    参数:
+        message: 需要记录的错误消息。
+
+    说明:
+        - 默认不写入磁盘。
+        - 设置 `DEFAULT_ERROR_LOG_PATH` 为文件路径以启用日志。
+        - 写入失败时静默处理，避免影响主流程。
     """
     try:
         path = globals().get('DEFAULT_ERROR_LOG_PATH', None)
@@ -43,16 +69,24 @@ def _append_error_log(message: str):
         # 日志写入失败时静默，避免影响主流程
         pass
 
-# ----------- 0. STRING NORMALIZATION FUNCTIONS -----------
+# ----------- 0.STRING NORMALIZATION FUNCTIONS -----------
 
-def _normalize_location(location_str) -> str:
+
+def _normalize_location(location_str: Any) -> str:
+    """规范化地点标识为4位零填充字符串。
+
+    参数:
+        location_str: 地点标识（可为int、str或None）。
+
+    返回:
+        4位零填充的字符串。None/NaN返回空字符串。
+
+    示例:
+        >>> _normalize_location(7)
+        '0007'
+        >>> _normalize_location('12')
+        '0012'
     """
-    规范化地点（location）字符串：
-    - 将数值或字符串形式的地点编号统一为4位、左侧补零的字符串（如"7"→"0007"）
-    - 对 None/NaN 返回空字符串，避免后续合并键出现非预期类型
-    重要：本函数用于保障所有与地点相关的键在数据处理中的一致性，防止因类型或位数不同导致的重复键或匹配失败。
-    """
-    # Handle None and pandas NA
     if location_str is None or pd.isna(location_str):
         return ""
     try:
@@ -60,56 +94,73 @@ def _normalize_location(location_str) -> str:
     except (ValueError, TypeError):
         return str(location_str).zfill(4)
 
-def _normalize_material(material_str) -> str:
+def _normalize_material(material_str: Any) -> str:
+    """规范化物料标识为字符串格式。
+
+    参数:
+        material_str: 物料标识（可为任意类型）。
+
+    返回:
+        物料的字符串表示。None/NaN返回空字符串。
     """
-    规范化物料（material）字符串：
-    - 将输入统一转为字符串；对 None/NaN 返回空字符串
-    用途：确保合并与分组时的键一致，避免类型差异造成的对齐问题。
-    """
-    # Handle None and pandas NA
     if material_str is None or pd.isna(material_str):
         return ""
     return str(material_str)
 
 def _normalize_identifiers(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    统一规范化标识符列（material/location/sending/receiving/sourcing/dps_location）：
-    - 全部转换为字符串类型，缺失值填充为空字符串
-    - `location` 与 `dps_location` 使用向量化 `zfill(4)` 保证4位编号
-    目的：在整个模块中保持键一致性，减少合并时的重复键与错配。
-    特殊处理：采用向量化字符串操作，避免逐行 `apply` 带来的性能损耗。
+    """规范化DataFrame中的标识列以确保键一致性。
+
+    规范化以下列（如存在）:
+        - material: 转为字符串，NaN填充空字符串
+        - location/dps_location: 零填充为4位
+        - sending/receiving/sourcing: 转为字符串
+
+    参数:
+        df: 需要规范化的输入DataFrame。
+
+    返回:
+        标识列已规范化的DataFrame。
     """
     if df.empty:
         return df
-    
-    # Define identifier columns that need string conversion
-    identifier_cols = ['material', 'location', 'sending', 'receiving', 'sourcing', 'dps_location']
-    
+
+    identifier_cols = [
+        'material', 'location', 'sending', 'receiving', 'sourcing', 'dps_location'
+    ]
+
     df = df.copy()
     for col in identifier_cols:
         if col in df.columns:
-            # Convert to string and handle NaN values
             df[col] = df[col].astype('string')
-            # Apply specific normalization for location (vectorized)
             if col in ['location', 'dps_location']:
-                # ✅ 性能优化：使用向量化字符串操作替代apply
+                # Vectorized string operation for performance
                 df[col] = df[col].str.zfill(4)
-            # Apply specific normalization for material
             elif col == 'material':
                 df[col] = df[col].fillna("")
-            # For other identifier columns, ensure they are properly formatted strings
             else:
                 df[col] = df[col].fillna("")
-    
+
     return df
 
-# ----------- 1. LOAD CONFIG (Enhanced) -----------
-def load_config(filename, sheet_mapping=None):
-    """
-    从 Excel 文件加载各配置页为 DataFrame 字典：
-    - 对已存在的 sheet 进行解析并调用 `_normalize_identifiers` 保证键规范
-    - 对不存在的 sheet 使用默认空表或 None 填充
-    异常处理：读取失败时抛出 RuntimeError，便于上层捕获并提示。
+# ----------- 1.LOAD CONFIG (Enhanced) -----------
+
+
+def load_config(
+    filename: str,
+    sheet_mapping: Optional[Dict[str, Tuple[str, Any]]] = None
+) -> Dict[str, pd.DataFrame]:
+    """从Excel文件加载配置表到DataFrame字典。
+
+    参数:
+        filename: Excel配置文件路径。
+        sheet_mapping: 可选的表名到(键名, 默认值)的映射。
+            若为None，使用标准配置表的默认映射。
+
+    返回:
+        键名到DataFrame的字典。
+
+    异常:
+        RuntimeError: 文件加载失败时抛出。
     """
     if sheet_mapping is None:
         sheet_mapping = {
@@ -130,7 +181,6 @@ def load_config(filename, sheet_mapping=None):
         for sheet_name, (key, default) in sheet_mapping.items():
             if sheet_name in xl.sheet_names:
                 df = xl.parse(sheet_name)
-                # 确保标识符字段为字符串格式
                 loaded_sheets[key] = _normalize_identifiers(df)
             else:
                 loaded_sheets[key] = default
@@ -167,49 +217,89 @@ def apply_dps(df, dps_cfg):
     print(f"[M1] DPS拆分完成，条目: {len(out)}，耗时: {time.perf_counter()-t0:.3f}s")
     return _normalize_identifiers(out)
 
-# ----------- 3. SUPPLY CHOICE -----------
-def apply_supply_choice(df, supply_cfg):
-    """
-    应用供应选择（Supply Choice）对周度预测进行数量调整：
-    - 在 MaterialLocationWeek（物料-地点-周）粒度合并 `adjust_quantity` 并进行向量化加总
-    - 缺失调整量按 0 处理
-    目的：在周度阶段完成所有数量修正，确保后续日度拆分与订单生成的基线正确。
+# ----------- 3.SUPPLY CHOICE -----------
+
+
+def apply_supply_choice(
+    df: pd.DataFrame,
+    supply_cfg: pd.DataFrame
+) -> pd.DataFrame:
+    """应用供应选择调整到周度预测。
+
+    将supply_cfg中的调整数量合并到预测中。
+
+    参数:
+        df: 周度预测DataFrame，包含[material, location, week, quantity]列。
+        supply_cfg: 供应选择配置，包含[material, location, week, adjust_quantity]列。
+
+    返回:
+        在物料-地点-周粒度调整后的DataFrame。
     """
     if supply_cfg.empty:
         return df.copy()
+
     t0 = time.perf_counter()
-    df_g = df.groupby(['material','location','week'], as_index=False)['quantity'].sum()
-    sup_g = supply_cfg.groupby(['material','location','week'], as_index=False)['adjust_quantity'].sum()
-    m = df_g.merge(sup_g, on=['material','location','week'], how='left')
+    df_g = df.groupby(
+        ['material', 'location', 'week'], as_index=False
+    )['quantity'].sum()
+    sup_g = supply_cfg.groupby(
+        ['material', 'location', 'week'], as_index=False
+    )['adjust_quantity'].sum()
+
+    m = df_g.merge(sup_g, on=['material', 'location', 'week'], how='left')
     m['quantity'] = (m['quantity'] + m['adjust_quantity'].fillna(0)).astype(int)
-    out = m[['material','location','week','quantity']]
-    print(f"[M1] SupplyChoice调整完成，条目: {len(out)}，耗时: {time.perf_counter()-t0:.3f}s")
+    out = m[['material', 'location', 'week', 'quantity']]
+
+    print(
+        f"[M1] SupplyChoice调整完成，条目: {len(out)}，"
+        f"耗时: {time.perf_counter() - t0:.3f}s"
+    )
     return _normalize_identifiers(out)
 
-# ----------- 4. SPLIT WEEKLY FORECAST TO DAILY (INTEGER, NO ERROR) -----------
-def expand_forecast_to_days_integer_split(demand_weekly, start_date, num_weeks, simulation_end_date=None):
-    """
-    将周度预测均匀拆分为7天的日度预测（整数分配）：
-    - 每周数量按 `base_qty = quantity // 7` 分配，余数 `remainder = quantity % 7` 的前 `remainder` 天各加 1
-    - 仅生成至 `simulation_end_date`（如提供）
-    - 输出保留 `original_quantity` 便于追溯拆分前的数量
-    性能优化：仅进行 7 次复制并向量化计算每日数量，避免对每条记录逐日循环。
+# ----------- 4.SPLIT WEEKLY FORECAST TO DAILY (INTEGER, NO ERROR) -----------
+
+
+def expand_forecast_to_days_integer_split(
+    demand_weekly: pd.DataFrame,
+    start_date: pd.Timestamp,
+    num_weeks: int,
+    simulation_end_date: Optional[pd.Timestamp] = None
+) -> pd.DataFrame:
+    """将周度预测拆分为日度预测（整数分配）。
+
+    使用整数除法将周度数量均匀分配到7天。
+    余数分配给前N天，其中N = quantity % 7。
+
+    参数:
+        demand_weekly: 周度预测DataFrame，包含[material, location, week, quantity]。
+        start_date: 仿真开始日期。
+        num_weeks: 周数（仅作参考，不直接用于计算）。
+        simulation_end_date: 可选结束日期用于过滤结果。
+
+    返回:
+        日度预测DataFrame，包含列:
+        [date, material, location, week, demand_type, quantity, original_quantity]。
     """
     if demand_weekly.empty:
-        return pd.DataFrame(columns=['date', 'material', 'location', 'week', 'demand_type', 'quantity', 'original_quantity'])
-    
-    # ✅ 向量化计算
+        return pd.DataFrame(columns=[
+            'date', 'material', 'location', 'week',
+            'demand_type', 'quantity', 'original_quantity'
+        ])
+
+    # Vectorized computation
     start_date = pd.to_datetime(start_date)
     demand_weekly = demand_weekly.copy()
-    
-    # ✅ 预计算每周的起始日期
-    demand_weekly['week_start'] = start_date + pd.to_timedelta((demand_weekly['week'] - 1) * 7, unit='D')
-    
-    # ✅ 计算每日基础数量和余数
+
+    # Pre-calculate week start dates
+    demand_weekly['week_start'] = start_date + pd.to_timedelta(
+        (demand_weekly['week'] - 1) * 7, unit='D'
+    )
+
+    # Calculate daily base quantity and remainder
     demand_weekly['base_qty'] = (demand_weekly['quantity'] // 7).astype(int)
     demand_weekly['remainder'] = (demand_weekly['quantity'] % 7).astype(int)
-    
-    # ✅ 生成7天的数据（只循环7次，而不是N*7次）
+
+    # Generate 7 days of data (loop only 7 times, not N*7 times)
     t0 = time.perf_counter()
     days = []
     for day_offset in range(7):
@@ -233,7 +323,19 @@ def expand_forecast_to_days_integer_split(demand_weekly, start_date, num_weeks, 
     return _normalize_identifiers(result_df)
 
 # ----------- Helper: Top-level parallel workers for Windows spawn -----------
-def _consume_ao_for_ml_worker(args: Tuple[pd.DataFrame, pd.DataFrame, np.ndarray, str, str]) -> pd.DataFrame:
+
+
+def _consume_ao_for_ml_worker(
+    args: Tuple[pd.DataFrame, pd.DataFrame, np.ndarray, str, str]
+) -> pd.DataFrame:
+    """处理单个物料-地点对的AO订单消耗。
+
+    参数:
+        args: 元组，包含(ml_orders, ml_forecast, offsets, material, location)。
+
+    返回:
+        该物料-地点消耗后预测数量的DataFrame。
+    """
     ml_orders, ml_forecast, offsets_local, mat, loc = args
     if ml_orders.empty or ml_forecast.empty:
         return pd.DataFrame(columns=['material','location','date','new_quantity'])
@@ -260,7 +362,471 @@ def _consume_ao_for_ml_worker(args: Tuple[pd.DataFrame, pd.DataFrame, np.ndarray
     out = out.rename(columns={'quantity':'new_quantity'})
     return out[['material','location','date','new_quantity']]
 
-def _consume_normal_for_ml_worker(args: Tuple[pd.DataFrame, pd.DataFrame, np.ndarray, str, str]) -> pd.DataFrame:
+
+# ----------- 5. DAILY ORDER GENERATION HELPERS -----------
+
+
+def _compute_ml_avg_demand(
+    original_forecast: pd.DataFrame,
+    sim_date: pd.Timestamp,
+    window_days: int = 7
+) -> pd.DataFrame:
+    """计算物料-地点粒度的平均日需求。
+
+    参数:
+        original_forecast: 原始预测DataFrame。
+        sim_date: 仿真日期。
+        window_days: 窗口天数，默认7天。
+
+    返回:
+        包含[material, location, avg_daily_demand]的DataFrame。
+    """
+    end_date = sim_date + pd.Timedelta(days=window_days)
+    windowed = original_forecast[
+        (original_forecast['date'] >= sim_date) &
+        (original_forecast['date'] < end_date)
+    ].copy()
+
+    if not windowed.empty:
+        ml_avg = windowed.groupby(
+            ['material', 'location'], as_index=False
+        )['quantity'].mean()
+        ml_avg.columns = ['material', 'location', 'avg_daily_demand']
+        return ml_avg
+
+    # 回退至1天窗口
+    short_end = sim_date + pd.Timedelta(days=1)
+    short_windowed = original_forecast[
+        (original_forecast['date'] >= sim_date) &
+        (original_forecast['date'] < short_end)
+    ].copy()
+
+    if not short_windowed.empty:
+        ml_avg = short_windowed.groupby(
+            ['material', 'location'], as_index=False
+        )['quantity'].mean()
+        ml_avg.columns = ['material', 'location', 'avg_daily_demand']
+        return ml_avg
+
+    return pd.DataFrame(columns=['material', 'location', 'avg_daily_demand'])
+
+
+def _generate_ao_orders(
+    ml_avg_demand: pd.DataFrame,
+    ao_config: pd.DataFrame,
+    forecast_error: pd.DataFrame,
+    sim_date: pd.Timestamp
+) -> pd.DataFrame:
+    """生成AO订单。
+
+    参数:
+        ml_avg_demand: 物料-地点平均需求DataFrame。
+        ao_config: AO配置DataFrame。
+        forecast_error: 预测误差DataFrame。
+        sim_date: 仿真日期。
+
+    返回:
+        AO订单DataFrame。
+    """
+    if ao_config.empty or ml_avg_demand.empty:
+        return pd.DataFrame(columns=[
+            'date', 'material', 'location', 'demand_type',
+            'quantity', 'simulation_date', 'advance_days'
+        ])
+
+    # AO配置去重（仅移除完全重复行）
+    ao_cols = ['material', 'location', 'advance_days', 'ao_percent']
+    ao_cfg = ao_config[ao_cols].drop_duplicates()
+
+    # 合并平均需求
+    ao_lines = ml_avg_demand.merge(ao_cfg, on=['material', 'location'], how='left')
+    ao_lines = ao_lines.dropna(subset=['ao_percent'])
+
+    if ao_lines.empty:
+        return pd.DataFrame(columns=[
+            'date', 'material', 'location', 'demand_type',
+            'quantity', 'simulation_date', 'advance_days'
+        ])
+
+    # 计算AO日均需求
+    ao_lines['ao_daily_avg'] = ao_lines['avg_daily_demand'] * ao_lines['ao_percent']
+
+    # 获取AO误差配置
+    fe = forecast_error.groupby(
+        ['material', 'location', 'order_type'], as_index=False
+    )['error_std_percent'].max()
+    fe_ao = fe[fe['order_type'] == 'AO'][['material', 'location', 'error_std_percent']]
+    ao_e = ao_lines.merge(fe_ao, on=['material', 'location'], how='left')
+
+    # 向量化生成数量
+    ao_abs_std = ao_e['ao_daily_avg'] * ao_e['error_std_percent'].fillna(0)
+    ao_qty = np.maximum(
+        0, np.round(np.random.normal(ao_e['ao_daily_avg'], ao_abs_std))
+    ).astype(int)
+    ao_dates = sim_date + pd.to_timedelta(ao_e['advance_days'].astype(int), unit='D')
+
+    return pd.DataFrame({
+        'date': ao_dates,
+        'material': ao_e['material'].astype(str),
+        'location': ao_e['location'].astype(str),
+        'demand_type': 'AO',
+        'quantity': ao_qty,
+        'simulation_date': sim_date,
+        'advance_days': ao_e['advance_days'].astype(int)
+    })
+
+
+def _generate_normal_orders(
+    ml_avg_demand: pd.DataFrame,
+    ao_config: pd.DataFrame,
+    forecast_error: pd.DataFrame,
+    sim_date: pd.Timestamp
+) -> pd.DataFrame:
+    """生成Normal订单。
+
+    参数:
+        ml_avg_demand: 物料-地点平均需求DataFrame。
+        ao_config: AO配置DataFrame（用于计算Normal比例）。
+        forecast_error: 预测误差DataFrame。
+        sim_date: 仿真日期。
+
+    返回:
+        Normal订单DataFrame。
+    """
+    if ml_avg_demand.empty:
+        return pd.DataFrame(columns=[
+            'date', 'material', 'location', 'demand_type',
+            'quantity', 'simulation_date', 'advance_days'
+        ])
+
+    # 计算总AO百分比
+    ao_cols = ['material', 'location', 'advance_days', 'ao_percent']
+    ao_cfg = ao_config[ao_cols].drop_duplicates() if not ao_config.empty else pd.DataFrame(columns=ao_cols)
+    total_ao = ao_cfg.groupby(['material', 'location'], as_index=False)['ao_percent'].sum()
+
+    # 计算Normal日均需求
+    normal = ml_avg_demand.merge(total_ao, on=['material', 'location'], how='left')
+    normal['ao_percent'] = normal['ao_percent'].fillna(0).clip(0, 1)
+    normal['normal_daily_avg'] = normal['avg_daily_demand'] * (1 - normal['ao_percent'])
+    normal = normal[normal['normal_daily_avg'] > 0]
+
+    if normal.empty:
+        return pd.DataFrame(columns=[
+            'date', 'material', 'location', 'demand_type',
+            'quantity', 'simulation_date', 'advance_days'
+        ])
+
+    # 获取Normal误差配置
+    fe = forecast_error.groupby(
+        ['material', 'location', 'order_type'], as_index=False
+    )['error_std_percent'].max()
+    fe_n = fe[fe['order_type'] == 'normal'][['material', 'location', 'error_std_percent']]
+    n_e = normal.merge(fe_n, on=['material', 'location'], how='left')
+
+    # 向量化生成数量
+    n_abs_std = n_e['normal_daily_avg'] * n_e['error_std_percent'].fillna(0)
+    normal_qty = np.maximum(
+        0, np.round(np.random.normal(n_e['normal_daily_avg'], n_abs_std))
+    ).astype(int)
+
+    return pd.DataFrame({
+        'date': pd.Series([sim_date] * len(n_e)),
+        'material': n_e['material'].astype(str),
+        'location': n_e['location'].astype(str),
+        'demand_type': 'normal',
+        'quantity': normal_qty,
+        'simulation_date': pd.Series([sim_date] * len(n_e)),
+        'advance_days': 0
+    })
+
+
+def _consume_ao_orders_serial(
+    ao_consume: pd.DataFrame,
+    consumed_forecast: pd.DataFrame,
+    offsets: np.ndarray
+) -> pd.DataFrame:
+    """串行处理AO订单消耗。
+
+    参数:
+        ao_consume: AO订单DataFrame。
+        consumed_forecast: 当前预测视图。
+        offsets: 消耗窗口偏移数组。
+
+    返回:
+        消耗后的预测DataFrame。
+    """
+    for r in ao_consume.itertuples():
+        if r.quantity <= 0:
+            continue
+        target_dates = pd.to_datetime(r.date) + pd.to_timedelta(offsets, unit='D')
+        ml_mask = (
+            (consumed_forecast['material'] == r.material) &
+            (consumed_forecast['location'] == r.location)
+        )
+        window_mask = ml_mask & consumed_forecast['date'].isin(target_dates)
+        window = consumed_forecast.loc[window_mask, ['date', 'quantity']].copy()
+        remaining = int(r.quantity)
+
+        for od in offsets:
+            if remaining <= 0:
+                break
+            d = pd.to_datetime(r.date) + pd.to_timedelta(int(od), unit='D')
+            idxs = window.index[window['date'] == d]
+            if len(idxs) == 0:
+                continue
+            idx = idxs[0]
+            avail = int(window.at[idx, 'quantity'])
+            take = min(avail, remaining)
+            window.at[idx, 'quantity'] = avail - take
+            remaining -= take
+
+        for _, w in window.iterrows():
+            consumed_forecast.loc[
+                ml_mask & (consumed_forecast['date'] == w['date']),
+                'quantity'
+            ] = int(w['quantity'])
+
+    return consumed_forecast
+
+
+def _consume_normal_orders_serial(
+    normal_consume: pd.DataFrame,
+    consumed_forecast: pd.DataFrame,
+    offsets: np.ndarray
+) -> pd.DataFrame:
+    """串行处理Normal订单消耗。
+
+    参数:
+        normal_consume: Normal订单DataFrame。
+        consumed_forecast: 当前预测视图。
+        offsets: 消耗窗口偏移数组。
+
+    返回:
+        消耗后的预测DataFrame。
+    """
+    for r in normal_consume.itertuples():
+        if r.quantity <= 0:
+            continue
+        target_dates = pd.to_datetime(r.date) + pd.to_timedelta(offsets, unit='D')
+        ml_mask = (
+            (consumed_forecast['material'] == r.material) &
+            (consumed_forecast['location'] == r.location)
+        )
+        window_mask = ml_mask & consumed_forecast['date'].isin(target_dates)
+        window = consumed_forecast.loc[window_mask, ['date', 'quantity']].copy()
+        remaining = int(r.quantity)
+
+        for od in offsets:
+            if remaining <= 0:
+                break
+            d = pd.to_datetime(r.date) + pd.to_timedelta(int(od), unit='D')
+            idxs = window.index[window['date'] == d]
+            if len(idxs) == 0:
+                continue
+            idx = idxs[0]
+            avail = int(window.at[idx, 'quantity'])
+            take = min(avail, remaining)
+            window.at[idx, 'quantity'] = avail - take
+            remaining -= take
+
+        for _, w in window.iterrows():
+            consumed_forecast.loc[
+                ml_mask & (consumed_forecast['date'] == w['date']),
+                'quantity'
+            ] = int(w['quantity'])
+
+    return consumed_forecast
+
+
+def _consume_ao_orders_parallel(
+    ao_consume: pd.DataFrame,
+    consumed_forecast: pd.DataFrame,
+    offsets: np.ndarray,
+    max_workers: Optional[int]
+) -> pd.DataFrame:
+    """并行处理AO订单消耗。
+
+    参数:
+        ao_consume: AO订单DataFrame。
+        consumed_forecast: 当前预测视图。
+        offsets: 消耗窗口偏移数组。
+        max_workers: 并行工作进程数。
+
+    返回:
+        消耗后的预测DataFrame。
+    """
+    tasks: List[Tuple[pd.DataFrame, pd.DataFrame, np.ndarray, str, str]] = []
+    for (mat, loc), grp in ao_consume.groupby(['material', 'location']):
+        ml_mask = (
+            (consumed_forecast['material'] == mat) &
+            (consumed_forecast['location'] == loc)
+        )
+        ml_forecast = consumed_forecast.loc[ml_mask, ['date', 'quantity']].copy()
+        if ml_forecast.empty:
+            continue
+        sample = (
+            grp[['date', 'quantity', 'advance_days', 'simulation_date']],
+            ml_forecast, offsets, mat, loc
+        )
+        try:
+            pickle.dumps(sample)
+            tasks.append(sample)
+        except Exception:
+            pass  # 跳过不可序列化的任务
+
+    patches: List[pd.DataFrame] = []
+    try:
+        with ProcessPoolExecutor(max_workers=max_workers) as ex:
+            futures = [ex.submit(_consume_ao_for_ml_worker, t) for t in tasks]
+            for f in as_completed(futures):
+                try:
+                    res = f.result()
+                    if res is not None and not res.empty:
+                        patches.append(res)
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+    if patches:
+        patch_df = pd.concat(patches, ignore_index=True)
+        cf = consumed_forecast.merge(patch_df, on=['material', 'location', 'date'], how='left')
+        cf['new_quantity'] = pd.to_numeric(cf['new_quantity'], errors='coerce')
+        cf['quantity'] = np.where(
+            cf['new_quantity'].notna(),
+            np.maximum(0, cf['new_quantity'].fillna(0)).astype(int),
+            pd.to_numeric(cf['quantity'], errors='coerce').fillna(0).astype(int)
+        )
+        consumed_forecast = cf[['material', 'location', 'date', 'quantity']]
+
+    return consumed_forecast
+
+
+def _consume_normal_orders_parallel(
+    normal_consume: pd.DataFrame,
+    consumed_forecast: pd.DataFrame,
+    offsets: np.ndarray,
+    max_workers: Optional[int]
+) -> pd.DataFrame:
+    """并行处理Normal订单消耗。
+
+    参数:
+        normal_consume: Normal订单DataFrame。
+        consumed_forecast: 当前预测视图。
+        offsets: 消耗窗口偏移数组。
+        max_workers: 并行工作进程数。
+
+    返回:
+        消耗后的预测DataFrame。
+    """
+    tasks: List[Tuple[pd.DataFrame, pd.DataFrame, np.ndarray, str, str]] = []
+    for (mat, loc), grp in normal_consume.groupby(['material', 'location']):
+        ml_mask = (
+            (consumed_forecast['material'] == mat) &
+            (consumed_forecast['location'] == loc)
+        )
+        ml_forecast = consumed_forecast.loc[ml_mask, ['date', 'quantity']].copy()
+        if ml_forecast.empty:
+            continue
+        sample = (grp[['date', 'quantity', 'simulation_date']], ml_forecast, offsets, mat, loc)
+        try:
+            pickle.dumps(sample)
+            tasks.append(sample)
+        except Exception:
+            pass
+
+    patches: List[pd.DataFrame] = []
+    try:
+        with ProcessPoolExecutor(max_workers=max_workers) as ex:
+            futures = [ex.submit(_consume_normal_for_ml_worker, t) for t in tasks]
+            for f in as_completed(futures):
+                try:
+                    res = f.result()
+                    if res is not None and not res.empty:
+                        patches.append(res)
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+    if patches:
+        patch_df = pd.concat(patches, ignore_index=True)
+        cf = consumed_forecast.merge(patch_df, on=['material', 'location', 'date'], how='left')
+        cf['new_quantity'] = pd.to_numeric(cf['new_quantity'], errors='coerce')
+        cf['quantity'] = np.where(
+            cf['new_quantity'].notna(),
+            np.maximum(0, cf['new_quantity'].fillna(0)).astype(int),
+            pd.to_numeric(cf['quantity'], errors='coerce').fillna(0).astype(int)
+        )
+        consumed_forecast = cf[['material', 'location', 'date', 'quantity']]
+
+    return consumed_forecast
+
+
+def _consume_orders(
+    orders_df: pd.DataFrame,
+    consumed_forecast: pd.DataFrame
+) -> pd.DataFrame:
+    """处理订单消耗（AO优先，然后Normal）。
+
+    参数:
+        orders_df: 订单DataFrame。
+        consumed_forecast: 当前预测视图。
+
+    返回:
+        消耗后的预测DataFrame。
+    """
+    offsets = np.array([0, -1, -2, 1, 2, 3], dtype=int)
+    use_parallel = globals().get('DEFAULT_USE_PARALLEL_AO_CONSUME', False)
+    max_workers = globals().get('DEFAULT_PARALLEL_MAX_WORKERS', None)
+
+    # AO消耗
+    ao_consume = orders_df[orders_df['demand_type'] == 'AO'].copy()
+    if not ao_consume.empty:
+        ao_consume = ao_consume.sort_values(
+            by=['date', 'advance_days', 'quantity', 'simulation_date']
+        )
+        if use_parallel:
+            consumed_forecast = _consume_ao_orders_parallel(
+                ao_consume, consumed_forecast, offsets, max_workers
+            )
+        else:
+            consumed_forecast = _consume_ao_orders_serial(
+                ao_consume, consumed_forecast, offsets
+            )
+
+    # Normal消耗
+    normal_consume = orders_df[orders_df['demand_type'] == 'normal'].copy()
+    inherit_flag = globals().get('DEFAULT_USE_PARALLEL_NORMAL_CONSUME', None)
+    use_parallel_normal = inherit_flag if inherit_flag is not None else use_parallel
+
+    if not normal_consume.empty:
+        normal_consume = normal_consume.sort_values(
+            by=['date', 'quantity', 'simulation_date']
+        )
+        if use_parallel_normal:
+            consumed_forecast = _consume_normal_orders_parallel(
+                normal_consume, consumed_forecast, offsets, max_workers
+            )
+        else:
+            consumed_forecast = _consume_normal_orders_serial(
+                normal_consume, consumed_forecast, offsets
+            )
+
+    return consumed_forecast
+
+
+def _consume_normal_for_ml_worker(
+    args: Tuple[pd.DataFrame, pd.DataFrame, np.ndarray, str, str]
+) -> pd.DataFrame:
+    """处理单个物料-地点对的Normal订单消耗。
+
+    参数:
+        args: 元组，包含(ml_orders, ml_forecast, offsets, material, location)。
+
+    返回:
+        该物料-地点消耗后预测数量的DataFrame。
+    """
     ml_orders, ml_forecast, offsets_local, mat, loc = args
     if ml_orders.empty or ml_forecast.empty:
         return pd.DataFrame(columns=['material','location','date','new_quantity'])
@@ -288,7 +854,16 @@ def _consume_normal_for_ml_worker(args: Tuple[pd.DataFrame, pd.DataFrame, np.nda
     return out[['material','location','date','new_quantity']]
 
 # ----------- 5. DAILY ORDER GENERATION -----------
-def generate_daily_orders(sim_date, original_forecast, current_forecast, ao_config, order_calendar, forecast_error):
+
+
+def generate_daily_orders(
+    sim_date: pd.Timestamp,
+    original_forecast: pd.DataFrame,
+    current_forecast: pd.DataFrame,
+    ao_config: pd.DataFrame,
+    order_calendar: pd.DataFrame,
+    forecast_error: pd.DataFrame
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
     生成单日订单（含 AO 与 Normal），并消耗预测：
         - 仅在订单日生成；非订单日直接返回空订单与原预测
@@ -302,13 +877,12 @@ def generate_daily_orders(sim_date, original_forecast, current_forecast, ao_conf
         - AO 采样在“每条 AO 配置行”颗粒度（material-location-advance_days）向量化生成数量
         - Normal 采样在“每个 ML 当日”颗粒度（material-location 当日一行）向量化生成数量
         - 通过整列 `np.random.normal(mean_vector, std_vector)` 一次性生成，再裁剪为非负整数
-    特殊处理与保障：
-    - 预测合并与订单生成均在 ML 粒度，避免周或更细粒度导致的重复键
-    - 误差生成采用正态并非截断正态，结果向上取整并裁剪为非负整数
-    - 统一规范标识符，确保后续库存与发货环节的键一致
-    返回：`orders_df`（当日生成的所有订单）与 `consumed_forecast`（扣减后的预测视图）
+
+    Returns:
+        Tuple of (orders_df, consumed_forecast):
+        - orders_df: All orders generated today
+        - consumed_forecast: Forecast view after consumption
     """
-    
     # Check if today is an order day
     is_order_day = not order_calendar[order_calendar['date'] == sim_date].empty
     if not is_order_day:
@@ -341,7 +915,7 @@ def generate_daily_orders(sim_date, original_forecast, current_forecast, ao_conf
             (original_forecast['date'] < short_end_date)
         ].copy()
         
-        if not windowed_forecast_short. empty:
+        if not windowed_forecast_short.empty:
             ml_avg_demand = windowed_forecast_short.groupby(['material', 'location'], as_index=False)['quantity'].mean()
             ml_avg_demand.columns = ['material', 'location', 'avg_daily_demand']
         else:
@@ -636,13 +1210,170 @@ def generate_daily_orders(sim_date, original_forecast, current_forecast, ao_conf
     return orders_df, consumed_forecast
 
 
-def generate_quantity_with_percent_error(mean_qty, material, location, order_type, forecast_error):
+# ----------- 14. INTEGRATION MODE HELPERS -----------
+
+
+def _validate_m1_config(config_dict: dict) -> Tuple[
+    pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame
+]:
+    """校验并返回M1必需配置。
+
+    参数:
+        config_dict: 配置字典。
+
+    返回:
+        (demand_forecast, forecast_error, order_calendar, ao_config)元组。
+
+    异常:
+        ValueError: 缺少必需配置时抛出。
     """
-    根据百分比误差生成带噪声的订单数量（兼容旧格式）：
-    - 优先读取 `forecast_error` 中指定 `order_type` 的 `error_std_percent`，计算绝对标准差
-    - 若缺失则回退至旧版 `error_std`（绝对误差）
-    - 使用截断正态（下限0）生成值并四舍五入为整数
-    注：此函数为逐条调用版本，当前主路径使用向量化正态采样；保留该函数用于兼容与单点生成场景。
+    demand_forecast = config_dict.get('M1_DemandForecast', pd.DataFrame())
+    forecast_error = config_dict.get('M1_ForecastError', pd.DataFrame())
+    order_calendar = config_dict.get('M1_OrderCalendar', pd.DataFrame())
+    ao_config = config_dict.get('M1_AOConfig', pd.DataFrame())
+
+    if demand_forecast.empty:
+        raise ValueError("缺少必需的配置数据：M1_DemandForecast")
+    if order_calendar.empty:
+        raise ValueError("缺少必需的配置数据：M1_OrderCalendar")
+    if ao_config.empty:
+        raise ValueError("缺少必需的配置数据：M1_AOConfig")
+    if forecast_error.empty:
+        raise ValueError("缺少必需的配置数据：M1_ForecastError")
+
+    return demand_forecast, forecast_error, order_calendar, ao_config
+
+
+def _prepare_daily_forecasts(
+    config_dict: dict,
+    demand_forecast: pd.DataFrame,
+    orchestrator: Any
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """准备订单和供需日志的日度预测。
+
+    参数:
+        config_dict: 配置字典。
+        demand_forecast: 需求预测DataFrame。
+        orchestrator: 编排器对象。
+
+    返回:
+        (daily_forecast_for_orders, daily_forecast_for_supply)元组。
+    """
+    dps_config = config_dict.get('M1_DPSConfig', pd.DataFrame())
+    supply_choice = config_dict.get('M1_SupplyChoiceConfig', pd.DataFrame())
+
+    if 'week' not in demand_forecast.columns:
+        return demand_forecast.copy(), demand_forecast.copy()
+
+    # DPS后基线（用于订单）
+    demand_dps = apply_dps(
+        demand_forecast,
+        dps_config if dps_config is not None else pd.DataFrame()
+    )
+
+    # DPS+SupplyChoice基线（用于供需日志）
+    demand_dps_sc = apply_supply_choice(
+        demand_dps,
+        supply_choice if supply_choice is not None else pd.DataFrame()
+    )
+
+    # 起始日期来自orchestrator
+    sim_start = pd.to_datetime(orchestrator.start_date).normalize()
+
+    # 生成日度基线
+    max_week_dps = int(demand_dps['week'].max()) if not demand_dps.empty else 1
+    daily_for_orders = expand_forecast_to_days_integer_split(
+        demand_dps, sim_start, max_week_dps
+    )
+
+    max_week_sc = int(demand_dps_sc['week'].max()) if not demand_dps_sc.empty else 1
+    daily_for_supply = expand_forecast_to_days_integer_split(
+        demand_dps_sc, sim_start, max_week_sc
+    )
+
+    return daily_for_orders, daily_for_supply
+
+
+def _merge_historical_orders(
+    output_dir: str,
+    simulation_date: pd.Timestamp,
+    today_orders_df: pd.DataFrame,
+    max_advance_days: int
+) -> pd.DataFrame:
+    """合并历史未到期订单与当日订单。
+
+    参数:
+        output_dir: 输出目录。
+        simulation_date: 仿真日期。
+        today_orders_df: 当日订单DataFrame。
+        max_advance_days: 最大提前天数。
+
+    返回:
+        合并后的订单DataFrame。
+    """
+    previous_orders = _load_previous_orders(
+        output_dir, simulation_date, max_advance_days
+    )
+
+    # 过滤未来订单
+    if not previous_orders.empty and 'date' in previous_orders.columns:
+        previous_orders['date'] = pd.to_datetime(previous_orders['date'])
+        previous_orders = previous_orders[
+            previous_orders['date'] >= simulation_date
+        ].copy()
+
+    # 去重
+    if not previous_orders.empty:
+        dedup_keys = [
+            c for c in [
+                'date', 'material', 'location', 'demand_type',
+                'simulation_date', 'advance_days', 'quantity'
+            ]
+            if c in previous_orders.columns
+        ]
+        if dedup_keys:
+            previous_orders = previous_orders.drop_duplicates(subset=dedup_keys)
+
+    # 合并
+    if today_orders_df is not None and not today_orders_df.empty:
+        orders_df = pd.concat(
+            [previous_orders, today_orders_df], ignore_index=True
+        )
+    else:
+        orders_df = previous_orders.copy()
+
+    # 规范化
+    if not orders_df.empty:
+        if 'quantity' in orders_df.columns:
+            orders_df['quantity'] = orders_df['quantity'].astype(int)
+        if 'simulation_date' not in orders_df.columns:
+            orders_df['simulation_date'] = orders_df['date']
+        orders_df = _normalize_identifiers(orders_df)
+
+    return orders_df
+
+
+def generate_quantity_with_percent_error(
+    mean_qty: float,
+    material: str,
+    location: str,
+    order_type: str,
+    forecast_error: pd.DataFrame
+) -> int:
+    """基于百分比误差生成订单数量。
+
+    使用截断正态分布（下界0）生成数量。
+    若找不到百分比误差，回退使用绝对误差标准差。
+
+    参数:
+        mean_qty: 生成的平均数量。
+        material: 物料标识。
+        location: 地点标识。
+        order_type: 订单类型（'AO'或'normal'）。
+        forecast_error: 误差配置DataFrame。
+
+    返回:
+        生成的非负整数数量。
     """
     
     # Get error percentage for this material-location-order_type
@@ -653,7 +1384,7 @@ def generate_quantity_with_percent_error(mean_qty, material, location, order_typ
     )
     error_config = forecast_error[mask]
     
-    if error_config. empty:
+    if error_config.empty:
         # Fallback to old error_std format if order_type not found
         mask_old = (
             (forecast_error['material'] == material) & 
@@ -683,17 +1414,33 @@ def generate_quantity_with_percent_error(mean_qty, material, location, order_typ
     # Generate truncated normal (>= 0)
     lower_bound = 0
     a = (lower_bound - mean_qty) / abs_std
-    value = truncnorm. rvs(a, np.inf, loc=mean_qty, scale=abs_std)
+    value = truncnorm.rvs(a, np.inf, loc=mean_qty, scale=abs_std)
     
     return max(0, int(round(value)))
 
 
-def consume_forecast_ao_logic(forecast_df, material, location, order_date, consume_qty):
-    """
-    AO 预测消耗（示例/兼容函数）：
-    - 固定窗口：订单日当天、前2天、后3天（顺序为 [0, -1, -2, 1, 2, 3]）
-    - 贪婪扣减，且不产生负数
-    说明：主路径的 AO 消耗在 `generate_daily_orders` 内完成，此函数保留用于兼容或单独调用。
+def consume_forecast_ao_logic(
+    forecast_df: pd.DataFrame,
+    material: str,
+    location: str,
+    order_date: pd.Timestamp,
+    consume_qty: int
+) -> pd.DataFrame:
+    """应用AO预测消耗逻辑（固定窗口）。
+
+    消耗窗口: [order_date, order_date-1, order_date-2,
+                  order_date+1, order_date+2, order_date+3]
+    使用贪婪扣减，不产生负数。
+
+    参数:
+        forecast_df: 预测DataFrame。
+        material: 物料标识。
+        location: 地点标识。
+        order_date: 订单日期。
+        consume_qty: 要消耗的数量。
+
+    返回:
+        消耗后的预测DataFrame。
     """
     if consume_qty <= 0:
         return forecast_df
@@ -729,11 +1476,26 @@ def consume_forecast_ao_logic(forecast_df, material, location, order_date, consu
     return result_forecast
 
 
-def consume_forecast_normal_logic(forecast_df, material, location, order_date, consume_qty):
-    """
-    Normal 预测消耗（示例/兼容函数）：
-    - 仅订单当日进行扣减，且不产生负数
-    说明：主路径的 Normal 消耗在 `generate_daily_orders` 内完成，此函数保留用于兼容或单独调用。
+def consume_forecast_normal_logic(
+    forecast_df: pd.DataFrame,
+    material: str,
+    location: str,
+    order_date: pd.Timestamp,
+    consume_qty: int
+) -> pd.DataFrame:
+    """应用Normal预测消耗逻辑（仅当天）。
+
+    仅从订单日期扣减，不产生负数。
+
+    参数:
+        forecast_df: 预测DataFrame。
+        material: 物料标识。
+        location: 地点标识。
+        order_date: 订单日期。
+        consume_qty: 要消耗的数量。
+
+    返回:
+        消耗后的预测DataFrame。
     """
     if consume_qty <= 0:
         return forecast_df
@@ -759,7 +1521,7 @@ def consume_forecast_normal_logic(forecast_df, material, location, order_date, c
     return result_forecast
 
 
-# ----------- 8. SIMULATE SHIPMENT FOR SINGLE DAY -----------
+# ----------- 8.SIMULATE SHIPMENT FOR SINGLE DAY -----------
 def simulate_shipment_for_single_day(
     simulation_date, order_log, current_inventory, material_list, location_list,
     production_plan=None, delivery_plan=None
@@ -819,17 +1581,30 @@ def simulate_shipment_for_single_day(
     )
 
 
-# ----------- 14. 集成模式支持 -----------
+# ----------- 14. INTEGRATION MODE SUPPORT -----------
 
-def _load_previous_orders(m1_output_dir: str, current_date: pd.Timestamp, max_advance_days: int = DEFAULT_MAX_ADVANCE_DAYS,
-                          use_parallel: Optional[bool] = None,
-                          max_workers: Optional[int] = None) -> pd.DataFrame:
-    """
-    加载近期历史订单（集成模式优化）：
-    - 只读取 `current_date - (max_advance_days+1)` 到 `current_date` 之间的 `module1_output_YYYYMMDD.xlsx`
-    - 只提取 `OrderLog` 工作表，并统一日期类型；过滤到期在 `current_date` 及之后的订单
-    - 目的：控制历史读取范围，避免随着仿真推进导致 I/O 和内存消耗快速增长
-    容错：遇到文件/解析错误时跳过该文件，整体返回合并后的结果或空表。
+
+def _load_previous_orders(
+    m1_output_dir: str,
+    current_date: pd.Timestamp,
+    max_advance_days: int = DEFAULT_MAX_ADVANCE_DAYS,
+    use_parallel: Optional[bool] = None,
+    max_workers: Optional[int] = None
+) -> pd.DataFrame:
+    """加载近期历史订单（集成模式优化）。
+
+    仅读取current_date - (max_advance_days+1)到current_date的文件。
+    提取OrderLog表并过滤到期日在current_date或之后的订单。
+
+    参数:
+        m1_output_dir: 包含Module1输出文件的目录。
+        current_date: 当前仿真日期。
+        max_advance_days: 最大回溯天数。
+        use_parallel: 是否使用并行文件加载。
+        max_workers: 并行工作者数量。
+
+    返回:
+        合并的历史订单DataFrame，错误时返回空DataFrame。
     """
     try:
         if not os.path.isdir(m1_output_dir):
@@ -923,14 +1698,14 @@ def run_daily_order_generation(
     
     try:
         # 1) 读取集成配置
-        demand_forecast = config_dict. get('M1_DemandForecast', pd.DataFrame())
+        demand_forecast = config_dict.get('M1_DemandForecast', pd.DataFrame())
         forecast_error = config_dict.get('M1_ForecastError', pd.DataFrame())
         order_calendar = config_dict.get('M1_OrderCalendar', pd.DataFrame())
         ao_config = config_dict.get('M1_AOConfig', pd.DataFrame())
         dps_cfg = config_dict.get('M1_DPSConfig', pd.DataFrame())
         supply_choice_cfg = config_dict.get('M1_SupplyChoiceConfig', pd.DataFrame())
         # 2) 基本校验（必须）
-        if demand_forecast. empty:
+        if demand_forecast.empty:
             raise ValueError("缺少必需的配置数据：M1_DemandForecast")
         if order_calendar.empty:
             raise ValueError("缺少必需的配置数据：M1_OrderCalendar")
@@ -950,7 +1725,7 @@ def run_daily_order_generation(
         # —— 将周度预测转换为日度预测（先做 DPS → Supply Choice），且起始日期必须与全局一致 —— 
         # 强制要求 orchestrator 存在且提供 start_date
         if orchestrator is None or not hasattr(orchestrator, 'start_date'):
-            raise ValueError("orchestrator. start_date 必须提供，且 Module1 的起始日期必须与全局一致")
+            raise ValueError("orchestrator.start_date 必须提供，且 Module1 的起始日期必须与全局一致")
 
         # 读取 M1_* 配置（若未提供则用空表）
         dps_config = config_dict.get('M1_DPSConfig', pd.DataFrame())
@@ -996,7 +1771,7 @@ def run_daily_order_generation(
 
         # 7) 合并历史未到期订单 → 当日版本订单视图
         # 性能优化：从ao_config中获取最大advance_days，用于优化历史订单加载范围
-        if not ao_config.empty and 'advance_days' in ao_config. columns:
+        if not ao_config.empty and 'advance_days' in ao_config.columns:
             max_val = ao_config['advance_days'].max(skipna=True)
             max_advance_days = int(max_val) if pd.notna(max_val) else DEFAULT_MAX_ADVANCE_DAYS
         else:
@@ -1019,12 +1794,12 @@ def run_daily_order_generation(
             if dedup_keys:
                 previous_orders_all = previous_orders_all.drop_duplicates(subset=dedup_keys)
 
-        previous_orders_future = previous_orders_all.copy() if not previous_orders_all. empty else pd.DataFrame()
+        previous_orders_future = previous_orders_all.copy() if not previous_orders_all.empty else pd.DataFrame()
 
         orders_df = (
             pd.concat([previous_orders_future, today_orders_df], ignore_index=True)
             if (today_orders_df is not None and not today_orders_df.empty)
-            else previous_orders_future. copy()
+            else previous_orders_future.copy()
         )
 
         if not orders_df.empty:
@@ -1095,20 +1870,28 @@ def run_daily_order_generation(
 
 
 def generate_supply_demand_log_for_integration(
-    demand_forecast: pd.DataFrame, 
-    consumed_forecast: pd. DataFrame, 
+    demand_forecast: pd.DataFrame,
+    consumed_forecast: pd.DataFrame,
     simulation_date: pd.Timestamp
 ) -> pd.DataFrame:
+    """为集成模式生成供需日志。
+
+    输出simulation_date之后90天的需求。
+    使用consumed_forecast反映订单消耗后的状态。
+
+    参数:
+        demand_forecast: 原始需求预测（未使用，保留以兼容）。
+        consumed_forecast: 订单消耗后的预测。
+        simulation_date: 当前仿真日期。
+
+    返回:
+        包含[date, material, location, quantity, demand_element]列的DataFrame。
     """
-    生成集成模式的供需日志（SupplyDemandLog）：
-    - 仅输出仿真日期之后、未来 90 天内的需求（demand_element="forecast"）
-    - 使用 `consumed_forecast` 作为来源，反映订单消耗后的最新需求视图
-    - 统一规范标识符，避免后续模块的键不一致
-    返回：包含 `date/material/location/quantity/demand_element` 的 DataFrame。
-    """
-    # 处理空DataFrame
+    # Handle empty DataFrame
     if consumed_forecast.empty or 'date' not in consumed_forecast.columns:
-        return pd.DataFrame(columns=['date', 'material', 'location', 'quantity', 'demand_element'])
+        return pd.DataFrame(columns=[
+            'date', 'material', 'location', 'quantity', 'demand_element'
+        ])
     
     # 性能优化：只生成未来90天的需求数据，减少数据量
     # 90天（约3个月），足够满足业务需求
@@ -1218,17 +2001,25 @@ def _apply_orders_consumption_to_forecast(
     return _normalize_identifiers(consumed)
 
 def save_module1_output_with_supply_demand(
-    orders_df: pd.DataFrame, 
-    shipment_df: pd. DataFrame, 
+    orders_df: pd.DataFrame,
+    shipment_df: pd.DataFrame,
     supply_demand_df: pd.DataFrame,
     output_file: str,
-    cut_df: pd. DataFrame = None
-):
-    """
-    将 Module1 的主输出写入 Excel：
-    - 工作表：OrderLog、ShipmentLog、CutLog（始终写出）、SupplyDemandLog、Summary
-    - 使用 `_ensure_cols` 保证列完整，调用 `_normalize_identifiers` 保持键规范
-    容错：整体写入异常时仅打印警告，防止中断主流程。
+    cut_df: Optional[pd.DataFrame] = None
+) -> None:
+    """将Module1输出写入Excel文件。
+
+    写入表: OrderLog, ShipmentLog, CutLog, SupplyDemandLog, Summary。
+
+    参数:
+        orders_df: 订单DataFrame。
+        shipment_df: 发货DataFrame。
+        supply_demand_df: 供需日志DataFrame。
+        output_file: 输出Excel文件路径。
+        cut_df: 可选的缺货DataFrame。
+
+    容错:
+        整体写入异常时仅打印警告，防止中断主流程。
     """
     # 🆕 统一列头保障函数
     def _ensure_cols(df: pd.DataFrame, cols: list) -> pd.DataFrame:
@@ -1260,30 +2051,42 @@ def save_module1_output_with_supply_demand(
     except Exception as e:
         print(f"⚠️  Module1 输出保存失败: {e}")
 
-def _build_available_inventory_from_orchestrator(orchestrator, simulation_date: pd.Timestamp) -> dict:
-    """
-    构建当日可用库存（ML 字典）：
-    - 可用库存 = 期初库存 + 当日生产入库（location）+ 当日调运入库（receiving）
-    - 三视图统一到 ML 粒度并汇总；显式数值转换避免 `fillna` 的 downcasting 预警
-    - 返回字典 `{(material, location): qty}` 供发货环节使用
-    特别说明：地点列名称在不同视图中不同（production: location；delivery: receiving），此处已统一处理。
+def _build_available_inventory_from_orchestrator(
+    orchestrator: Any,
+    simulation_date: pd.Timestamp
+) -> Dict[Tuple[str, str], int]:
+    """从编排器视图构建可用库存字典。
+
+    可用库存 = 期初库存 + 当日生产GR + 当日调运GR。
+
+    参数:
+        orchestrator: 提供库存视图方法的编排器对象。
+        simulation_date: 当前仿真日期。
+
+    返回:
+        (material, location)到可用数量的字典。
     """
     date_str = simulation_date.strftime('%Y-%m-%d')
 
-    # 期初
+    # Beginning inventory
     beg_df = orchestrator.get_beginning_inventory_view(date_str)
-    # 当日 GR
+    # Today's GR
     prod_df = orchestrator.get_production_gr_view(date_str)
     delv_df = orchestrator.get_delivery_gr_view(date_str)
 
-    # 统一并聚合为 ML 粒度
-    def _to_ml(df, loc_col):
+    def _to_ml(
+        df: Optional[pd.DataFrame],
+        loc_col: str
+    ) -> pd.DataFrame:
+        """Convert DataFrame to material-location granularity."""
         if df is None or df.empty:
-            return pd.DataFrame(columns=['material','location','quantity'])
+            return pd.DataFrame(columns=['material', 'location', 'quantity'])
         o = df[['material', loc_col, 'quantity']].copy()
         o['material'] = o['material'].astype(str)
         o['location'] = o[loc_col].astype(str).str.zfill(4)
-        return o.groupby(['material','location'], as_index=False)['quantity'].sum()
+        return o.groupby(
+            ['material', 'location'], as_index=False
+        )['quantity'].sum()
 
     beg = _to_ml(beg_df, 'location')
     prod = _to_ml(prod_df, 'location')
@@ -1302,26 +2105,44 @@ def _build_available_inventory_from_orchestrator(orchestrator, simulation_date: 
     return {(r.material, r.location): int(r.qty) for r in inv_df.itertuples(index=False)}
 
 def generate_shipment_with_inventory_check(
-    orders_df: pd. DataFrame, 
-    simulation_date: pd.Timestamp, 
-    orchestrator: object,
-    demand_forecast: pd.DataFrame = None,
-    forecast_error: pd.DataFrame = None
-) -> tuple:
-    """
-    基于真实可用库存（期初+当日 GR）生成当日发货与缺货：
-    - 过滤当日到期订单；规范化物料/地点以匹配库存键
-    - 通过 `_build_available_inventory_from_orchestrator` 获取当日 ML 库存
-    - 调用 `simulate_shipment_for_single_day` 计算 shipment/cut，并为 shipment 生成 `order_id`
-    - 返回两个 DataFrame：`shipment_df`（新增 `demand_type='customer'` 与 `order_id`）与 `cut_df`
-    说明：不叠加 production_plan/delivery_plan，避免与 orchestrator 的 GR 重复计入。
+    orders_df: pd.DataFrame,
+    simulation_date: pd.Timestamp,
+    orchestrator: Optional[Any],
+    demand_forecast: Optional[pd.DataFrame] = None,
+    forecast_error: Optional[pd.DataFrame] = None
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """基于真实可用库存生成当日发货与缺货。
+
+    使用实际可用库存（期初+当日GR）为到期订单生成发货和缺货。
+
+    处理步骤:
+        1. 过滤当日到期订单
+        2. 规范化物料/地点标识以匹配库存键
+        3. 通过orchestrator构建可用库存
+        4. 使用simulate_shipment_for_single_day计算发货
+        5. 为已完成发货分配订单ID
+
+    注意:
+        不添加production_plan/delivery_plan以避免GR重复计算。
+
+    参数:
+        orders_df: 包含['date', 'material', 'location', 'quantity']列的订单DataFrame。
+        simulation_date: 生成发货的日期。
+        orchestrator: 提供库存状态访问的编排器对象。
+        demand_forecast: 可选需求预测DataFrame（当前实现未使用）。
+        forecast_error: 可选预测误差DataFrame（当前实现未使用）。
+
+    返回:
+        (shipment_df, cut_df)元组:
+            - shipment_df: 已完成发货，含'demand_type'和'order_id'列。
+            - cut_df: 因库存不足未完成的订单。
     """
     if orders_df.empty:
         return pd.DataFrame(), pd.DataFrame()
     
     # 当日到期订单
     today_orders = orders_df[
-        pd.to_datetime(orders_df['date']) == simulation_date. normalize()
+        pd.to_datetime(orders_df['date']) == simulation_date.normalize()
     ].copy()
     if today_orders.empty:
         return pd.DataFrame(), pd.DataFrame()

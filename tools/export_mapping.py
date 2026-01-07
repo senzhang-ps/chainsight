@@ -7,6 +7,7 @@ CONFIG_TABLE_MAPPING = {
     # Global配置
     "Config Guide": "config_guide",
     "Global_Network": "global_network",
+    "Global_Network_old": "global_network_old",
     "Global_LeadTime": "global_leadtime",
     "Global_DemandPriority": "global_demandpriority",
     "Global_seed": "global_seed",
@@ -20,6 +21,7 @@ CONFIG_TABLE_MAPPING = {
     "M1_OrderCalendar": "m1_ordercalendar",
     "M1_AOConfig": "m1_aoconfig",
     "M1_DPSConfig": "m1_dpsconfig",
+    "M1_SupplyChoiceConfig": "m1_supplychoiceconfig",
     
     # Module3 配置
     "M3_SafetyStock": "m3_safetystock",
@@ -42,9 +44,14 @@ CONFIG_TABLE_MAPPING = {
     "M6_TruckReleaseCon": "m6_truckreleasecon",
     "M6_DeliveryDelayDistribution": "m6_deliverydelaydistribution",
     "M6_MDQBypassRules": "m6_mdqbypassrules",
+    "M6_TruckCapacityPlan": "m6_truckcapacityplan",
     
     # 验证配置
     "COValidation": "covalidation",
+    "MaterialValidation": "material_validation",
+    "LaneValidation": "lane_validation",
+    "LocationValidation": "location_validation",
+    "MatLocValidation": "matloc_validation",
     
     # SIT设计
     "SIT Design": "sit_design",

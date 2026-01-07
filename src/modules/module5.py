@@ -1337,20 +1337,29 @@ def validate_config_before_run(config, validation_log):
     needed = sdl_types | ol_types  # AO/normal 也在其中
 
     # 缺啥补啥（默认：AO=1，normal=2，其余给个较低优先级 9）
-    def _ensure_priority(elem, default_p):
-        if dp[dp['demand_element'] == elem].empty:
-            dp.loc[len(dp)] = {'demand_element': elem, 'priority': default_p}
+    new_rows = []
+    existing_elements = set(dp['demand_element'].unique()) if not dp.empty and 'demand_element' in dp.columns else set()
+
+    for elem in needed:
+        if elem not in existing_elements:
+            default_p = 9
+            if elem == 'AO':
+                default_p = 1
+            elif elem == 'normal':
+                default_p = 2
+            
+            new_rows.append({'demand_element': elem, 'priority': default_p})
             validation_log.append({
                 'No': len(validation_log)+1,
                 'Issue': f'Auto add DemandPriority for {elem}={default_p}'
             })
-    for elem in needed:
-        if elem == 'AO':
-            _ensure_priority('AO', 1)
-        elif elem == 'normal':
-            _ensure_priority('normal', 2)
-        else:
-            _ensure_priority(elem, 9)
+            existing_elements.add(elem) # 防止重复添加
+
+    if new_rows:
+        new_df = pd.DataFrame(new_rows)
+        # 修正 FutureWarning: 使用 pd.concat 代替 .loc[len(df)] 并在合并前确保类型一致
+        dp = pd.concat([dp, new_df], ignore_index=True)
+
     # 回写
     config['DemandPriority'] = dp
 

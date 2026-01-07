@@ -283,7 +283,7 @@ class DatabaseConnection:
             columns = []
             for col_name, dtype in df_to_write.dtypes.items():
                 clean_col = self._clean_name(str(col_name))
-                pg_type = self._pandas_to_pg_type(dtype)
+                pg_type = self._pandas_to_pg_type(dtype, col_name=clean_col)
                 columns.append(f'"{clean_col}" {pg_type}')
             
             create_sql = f'CREATE TABLE IF NOT EXISTS "{clean_table_name}" ({", ".join(columns)})'
@@ -368,10 +368,44 @@ class DatabaseConnection:
             clean = "_" + clean
         return clean.lower()
     
-    def _pandas_to_pg_type(self, dtype) -> str:
+    def _pandas_to_pg_type(self, dtype, col_name: Optional[str] = None) -> str:
         """将Pandas数据类型转换为PostgreSQL类型"""
-        dtype_str = str(dtype)
+        dtype_str = str(dtype).lower()
         
+        # 针对特定列名的规则增强（统一输入输出表的类型）
+        if col_name:
+            col_name_lower = str(col_name).lower()
+            
+            # 1. 标识符类 -> 始终使用 TEXT (防止前导零丢失)
+            text_identifiers = [
+                'material', 'location', 'sending', 'receiving', 'sourcing', 
+                'dps_location', 'line', 'truck', 'vehicle', 'vendor', 'customer',
+                'item', 'sku', 'node', 'plant', 'warehouse', 'dc',
+                'status', 'type', 'group', 'category', 'id', 'uid', 'uuid',
+                'file_date', 'run_id', 'issue', 'severity', 'impact'
+            ]
+            if any(name == col_name_lower or col_name_lower.endswith('_' + name) or col_name_lower.startswith(name + '_') for name in text_identifiers):
+                 return "TEXT"
+                 
+            # 2. 数量/度量类 -> 始终使用 DOUBLE PRECISION (防止 int/float 混淆)
+            float_measures = [
+                'qty', 'quantity', 'amount', 'inventory', 'stock', 'capacity', 
+                'demand', 'supply', 'shipment', 'production', 'weight', 'volume',
+                'price', 'cost', 'ratio', 'percent', 'rate', 'yield',
+                'leadtime', 'duration', 'hours', 'time_needed'
+            ]
+            if any(name in col_name_lower for name in float_measures):
+                return "DOUBLE PRECISION"
+            
+            # 3. 日期类 -> 始终使用 DATE 或 TIMESTAMP (处理包含 _date 的列)
+            if 'date' in col_name_lower:
+                return "DATE"
+            
+            # 4. 索引/排序类 -> 始终使用 BIGINT
+            int_indexes = ['day', 'week', 'month', 'year', 'priority', 'sequence', 'order', 'step', 'count', 'seed']
+            if any(name == col_name_lower for name in int_indexes):
+                return "BIGINT"
+
         if "int" in dtype_str:
             return "BIGINT"
         elif "float" in dtype_str:
@@ -399,11 +433,21 @@ class DatabaseConnection:
         # 创建列名到索引的映射
         col_name_to_idx = {col: idx for idx, col in enumerate(clean_columns)}
         
-        # 确定需要转换为整数的列索引
+        # 确定需要显式转换类型的列索引
         int_col_indices = set()
+        float_col_indices = set()
+        text_col_indices = set()
+        
         for col_name, col_type in col_types.items():
-            if col_name in col_name_to_idx and col_type.upper() in ('BIGINT', 'INTEGER', 'SMALLINT', 'INT', 'INT4', 'INT8', 'INT2'):
-                int_col_indices.add(col_name_to_idx[col_name])
+            if col_name in col_name_to_idx:
+                idx = col_name_to_idx[col_name]
+                ct_upper = col_type.upper()
+                if ct_upper in ('BIGINT', 'INTEGER', 'SMALLINT', 'INT', 'INT4', 'INT8', 'INT2'):
+                    int_col_indices.add(idx)
+                elif ct_upper in ('DOUBLE PRECISION', 'REAL', 'NUMERIC', 'FLOAT4', 'FLOAT8'):
+                    float_col_indices.add(idx)
+                elif ct_upper in ('TEXT', 'VARCHAR', 'CHAR', 'CHARACTER'):
+                    text_col_indices.add(idx)
         
         # 准备插入数据
         records = df.values.tolist()
@@ -414,9 +458,19 @@ class DatabaseConnection:
             for j, val in enumerate(row):
                 if pd.isna(val):
                     new_row.append(None)
-                elif j in int_col_indices and isinstance(val, float):
-                    # 将浮点数转换为整数（如 0.0 -> 0）
-                    new_row.append(int(val))
+                elif j in int_col_indices:
+                    try:
+                        # 兼容处理：float -> int
+                        new_row.append(int(float(val)))
+                    except (ValueError, TypeError):
+                        new_row.append(None)
+                elif j in float_col_indices:
+                    try:
+                        new_row.append(float(val))
+                    except (ValueError, TypeError):
+                        new_row.append(None)
+                elif j in text_col_indices:
+                    new_row.append(str(val))
                 else:
                     new_row.append(val)
             records[i] = tuple(new_row)

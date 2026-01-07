@@ -215,19 +215,28 @@ def load_integrated_config(
                 if config_key in ['TruckReleaseCon', 'TruckCapacityPlan', 'DeliveryDelayDistribution']:
                     # 检查并添加缺失的标识符列
                     required_identifier_cols = ['sending', 'receiving']
+                    
+                    # 对于延迟分布表，还需要检查 delay_days 和 probability
+                    if config_key == 'DeliveryDelayDistribution':
+                        required_identifier_cols += ['delay_days', 'probability']
+                        
                     for col in required_identifier_cols:
                         if col not in config[config_key].columns:
                             # 尝试从可能的列名变体中找到
-                            possible_names = [col.upper(), col.capitalize(), f'{col.capitalize()}', 
-                                            'Sending' if col == 'sending' else 'Receiving',
-                                            'from' if col == 'sending' else 'to',
-                                            'From' if col == 'sending' else 'To']
+                            possible_names = [col.upper(), col.capitalize(), col.replace('_', ' '), 
+                                            col.replace('_', ' ').title(), col.replace('_', ' ').capitalize()]
+                            
+                            # 针对 sending/receiving 的特殊变体
+                            if col == 'sending':
+                                possible_names += ['Sending', 'from', 'From']
+                            elif col == 'receiving':
+                                possible_names += ['Receiving', 'to', 'To']
+                            
                             found = False
                             for possible_name in possible_names:
                                 if possible_name in config[config_key].columns:
                                     config[config_key][col] = config[config_key][possible_name]
                                     found = True
-                                    # print(f"  🔧 {sheet_name}: 映射列名 {possible_name} -> {col}")
                                     break
                             if not found:
                                 validation_log.append({
@@ -252,26 +261,32 @@ def load_integrated_config(
                 config[config_key] = config_dict[sheet_name].copy()
                 # 确保LeadTime表包含正确的标识符列
                 if config_key == 'LeadTime':
-                    required_identifier_cols = ['sending', 'receiving']
+                    required_identifier_cols = ['sending', 'receiving', 'PDT', 'GR']
                     for col in required_identifier_cols:
                         if col not in config[config_key].columns:
                             # 尝试从可能的列名变体中找到
-                            possible_names = [col.upper(), col.capitalize(), f'{col.capitalize()}', 
-                                            'Sending' if col == 'sending' else 'Receiving',
-                                            'from' if col == 'sending' else 'to',
-                                            'From' if col == 'sending' else 'To']
+                            possible_names = [col.upper(), col.lower(), col.capitalize(), 
+                                            'Sending' if col == 'sending' else 'Receiving' if col == 'receiving' else col]
+                            
+                            # 针对 sending/receiving 的特殊变体
+                            if col == 'sending':
+                                possible_names += ['from', 'From']
+                            elif col == 'receiving':
+                                possible_names += ['to', 'To']
+                            
                             found = False
                             for possible_name in possible_names:
                                 if possible_name in config[config_key].columns:
                                     config[config_key][col] = config[config_key][possible_name]
                                     found = True
-                                    # print(f"  🔧 {sheet_name}: 映射列名 {possible_name} -> {col}")
                                     break
                             if not found:
-                                validation_log.append({
-                                    'sheet': sheet_name, 'row': '', 
-                                    'issue': f'Missing required column: {col}. Available columns: {list(config[config_key].columns)}'
-                                })
+                                # 对于 PDT, GR 以外的列才报错
+                                if col in ['sending', 'receiving']:
+                                    validation_log.append({
+                                        'sheet': sheet_name, 'row': '', 
+                                        'issue': f'Missing required column: {col}. Available columns: {list(config[config_key].columns)}'
+                                    })
             else:
                 validation_log.append({
                     'sheet': sheet_name, 'row': '',
@@ -488,6 +503,15 @@ def sample_delivery_delay(sending, receiving, dist_df: pd.DataFrame) -> int:
     """
     if dist_df is None or dist_df.empty:
         return 0
+        
+    # 🔧 修复：确保必需的列存在
+    if 'delay_days' not in dist_df.columns or 'probability' not in dist_df.columns:
+        return 0
+        
+    # 确保 sending/receiving 列存在 (可能在 load 阶段因为配置丢失)
+    if 'sending' not in dist_df.columns or 'receiving' not in dist_df.columns:
+        return 0
+
     exact = dist_df[(dist_df['sending']==sending) & (dist_df['receiving']==receiving)]
     if not exact.empty:
         delays = exact['delay_days'].to_numpy()
@@ -833,8 +857,15 @@ def run_physical_flow_module(
 
     # Normalize fields
     dp['planned_deployment_date'] = pd.to_datetime(dp['planned_deployment_date'])
-    lead_time[['PDT','GR']] = lead_time[['PDT','GR']].astype(int)
-    delay_dist['delay_days'] = delay_dist['delay_days'].astype(int)
+    
+    # 🔧 修复：安全转换数据类型，避免KeyError
+    if not lead_time.empty:
+        cols_to_convert = [c for c in ['PDT', 'GR'] if c in lead_time.columns]
+        if cols_to_convert:
+            lead_time[cols_to_convert] = lead_time[cols_to_convert].fillna(0).astype(int)
+            
+    if not delay_dist.empty and 'delay_days' in delay_dist.columns:
+        delay_dist['delay_days'] = delay_dist['delay_days'].fillna(0).astype(int)
 
     # UIDs & priority - 使用Orchestrator提供的原始UID
     dp = dp.reset_index(drop=True)
@@ -1230,18 +1261,34 @@ def run_physical_flow_module(
                             # 使用demand_row而不是group.loc
                             sub = rec['demand_row']
                             uid = sub['ori_deployment_uid']
-                            lt  = lead_time[(lead_time['sending']==sending) & (lead_time['receiving']==receiving)]
-                            PDT = int(lt['PDT'].iloc[0]) if not lt.empty else 0
-                            GR  = int(lt['GR'].iloc[0])  if not lt.empty else 0
+                            
+                            # 🔧 修复：安全读取 LeadTime 列
+                            lt_rows  = lead_time[(lead_time['sending']==sending) & (lead_time['receiving']==receiving)]
+                            PDT = 0
+                            if not lt_rows.empty:
+                                if 'PDT' in lt_rows.columns:
+                                    PDT = int(pd.to_numeric(lt_rows['PDT'].iloc[0]))
+                                elif 'pdt' in lt_rows.columns:
+                                    PDT = int(pd.to_numeric(lt_rows['pdt'].iloc[0]))
+                            
                             delay = sample_delivery_delay(sending, receiving, delay_dist)
                             #actual_delivery_date 的新定义是 actual_ship_date + OTD + GR + delay；
                             #PDT 的角色从“定义”降级为“计划用估计值”（仅用于 M5 倒排、排程预估，而非实际物流入库时效）。
-                            lt = lead_time[(lead_time['sending']==sending) & (lead_time['receiving']==receiving)]
+                            lt = lt_rows # 重用前面的过滤结果
                             if lt.empty:
                                 raise ValueError(f"缺少路线 {sending}->{receiving} 的 LeadTime 行")
 
-                            OTD = int(pd.to_numeric(lt['OTD'].iloc[0])) if 'OTD' in lt.columns else 0
-                            GR  = int(pd.to_numeric(lt['GR'].iloc[0]))  if 'GR'  in lt.columns else 0
+                            OTD = 0
+                            if 'OTD' in lt.columns:
+                                OTD = int(pd.to_numeric(lt['OTD'].iloc[0]))
+                            elif 'otd' in lt.columns:
+                                OTD = int(pd.to_numeric(lt['otd'].iloc[0]))
+                                
+                            GR = 0
+                            if 'GR' in lt.columns:
+                                GR = int(pd.to_numeric(lt['GR'].iloc[0]))
+                            elif 'gr' in lt.columns:
+                                GR = int(pd.to_numeric(lt['gr'].iloc[0]))
 
                             OTD = max(0, OTD)
                             GR  = max(0, GR)

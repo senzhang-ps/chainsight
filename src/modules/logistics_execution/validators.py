@@ -44,14 +44,19 @@ def check_and_deduplicate(
     if df.empty:
         return df
     
-    if not df[key_column].duplicated().any():
+    # 检查是否有重复
+    has_duplicates = df[key_column].duplicated().any()
+    if not has_duplicates:
         return df
     
+    # 分析重复数据
     dup_info = _analyze_duplicates(df, key_column)
-    _log_duplicate_warning(sheet_name, key_column, dup_info, validation_log)
     
-    print(f"  ⚠️  发现{sheet_name}中有 {dup_info['unique_count']} 个重复的"
-          f"{key_column}（共 {dup_info['total_count']} 条记录），将去重保留第一条")
+    # 只有真正有重复时才记录和打印
+    if dup_info['unique_count'] > 0:
+        _log_duplicate_warning(sheet_name, key_column, dup_info, validation_log)
+        print(f"  ⚠️  发现{sheet_name}中有 {dup_info['unique_count']} 个重复的"
+              f"{key_column}（共 {dup_info['total_count']} 条记录），将去重保留第一条")
     
     return df.drop_duplicates(subset=[key_column], keep='first')
 

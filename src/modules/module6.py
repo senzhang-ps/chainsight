@@ -350,10 +350,9 @@ def _prepare_data(run_params: Dict[str, Any]) -> Dict[str, Any]:
     dp = validate_deployment_plan(dp, validation_log)
     truck_con = validate_truck_config(truck_con, validation_log)
     
-    # 去重处理
-    demand_prio = check_and_deduplicate(
-        demand_prio, 'demand_element', 'Global_DemandPriority', validation_log
-    )
+    # 去重处理（注意：DemandPriority 允许重复，不做去重）
+    # demand_prio: 仅过滤空值，不去重
+    demand_prio = _filter_empty_demand_element(demand_prio, validation_log)
     material_md = check_and_deduplicate(
         material_md, 'material', 'M6_MaterialMD', validation_log
     )
@@ -404,11 +403,55 @@ def _prepare_data(run_params: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _filter_empty_demand_element(
+    demand_prio: pd.DataFrame,
+    validation_log: List[Dict]
+) -> pd.DataFrame:
+    """
+    过滤 demand_element 为空的记录。
+    
+    demand_element 字段允许重复，但不允许为空。
+    
+    Args:
+        demand_prio: DemandPriority DataFrame
+        validation_log: 验证日志
+        
+    Returns:
+        过滤后的 DataFrame
+    """
+    if demand_prio.empty:
+        return demand_prio
+    
+    # 检查空值
+    empty_mask = demand_prio['demand_element'].isna() | (demand_prio['demand_element'] == '')
+    empty_count = empty_mask.sum()
+    
+    if empty_count > 0:
+        print(f"  ⚠️  Global_DemandPriority中有 {empty_count} 条demand_element为空的记录，已过滤")
+        validation_log.append({
+            'sheet': 'Global_DemandPriority',
+            'row': '',
+            'issue': f'Found {empty_count} records with empty demand_element. '
+                     f'Records have been filtered out.',
+            'severity': 'WARNING',
+            'impact': f'Data Filtering - {empty_count} records removed'
+        })
+        return demand_prio[~empty_mask].copy()
+    
+    return demand_prio
+
+
 def _build_priority_map(demand_prio: pd.DataFrame) -> Dict[str, int]:
-    """构建优先级映射。"""
+    """
+    构建优先级映射。
+    
+    当 demand_element 有重复时，保留第一条记录的优先级。
+    """
     if demand_prio.empty:
         return {}
-    return demand_prio.set_index('demand_element')['priority'].to_dict()
+    # 如果有重复的 demand_element，使用 drop_duplicates 保留第一条
+    unique_prio = demand_prio.drop_duplicates(subset=['demand_element'], keep='first')
+    return unique_prio.set_index('demand_element')['priority'].to_dict()
 
 
 def _build_material_map(material_md: pd.DataFrame) -> Dict[str, Dict[str, float]]:

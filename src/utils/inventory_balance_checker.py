@@ -143,12 +143,18 @@ class InventoryBalanceChecker:
             
             # 如果没有期末库存记录，使用当前库存状态
             inventory_df = self.orchestrator.get_unrestricted_inventory_view(date)
-            
+
             inventory_dict = {}
-            for _, row in inventory_df.iterrows():
-                key = (row['material'], row['location'])
-                normalized_location = _normalize_location(row['location'])
-                inventory_dict[key] = float(row['quantity'])
+            if not inventory_df.empty:
+                # 优化：使用向量化替代 iterrows()
+                inventory_df = inventory_df.copy()
+                inventory_df['location'] = inventory_df['location'].apply(_normalize_location)
+                inventory_dict = (
+                    inventory_df.groupby(['material', 'location'])['quantity']
+                    .sum()
+                    .astype(float)
+                    .to_dict()
+                )
             
             # print(f"    🔍 从当前库存状态获取 [{date}]: {len(inventory_dict)} 项")
             return inventory_dict
@@ -212,11 +218,18 @@ class InventoryBalanceChecker:
             
             # 方法1：从Orchestrator实例获取
             production_gr_df = self.orchestrator.get_production_gr_view(date)
-            
-            for _, row in production_gr_df.iterrows():
-                key = (row['material'], row['location'])
-                normalized_location = _normalize_location(row['location'])
-                receipts_dict[key] = receipts_dict.get(key, 0) + float(row['quantity'])
+
+            receipts_dict = {}
+            if not production_gr_df.empty:
+                # 优化：使用向量化替代 iterrows()
+                production_gr_df = production_gr_df.copy()
+                production_gr_df['location'] = production_gr_df['location'].apply(_normalize_location)
+                receipts_dict = (
+                    production_gr_df.groupby(['material', 'location'])['quantity']
+                    .sum()
+                    .astype(float)
+                    .to_dict()
+                )
             
             # 如果从Orchestrator实例获取不到数据，记录警告
             if not receipts_dict:
@@ -246,11 +259,19 @@ class InventoryBalanceChecker:
             
             # 方法1：从Orchestrator实例获取
             delivery_gr_df = self.orchestrator.get_delivery_gr_view(date)
-            
-            for _, row in delivery_gr_df.iterrows():
-                key = (row['material'], row['receiving'])
-                normalized_location = _normalize_location(row['receiving'])
-                receipts_dict[key] = receipts_dict.get(key, 0) + float(row['quantity'])
+
+            receipts_dict = {}
+            if not delivery_gr_df.empty:
+                # 优化：使用向量化替代 iterrows()
+                delivery_gr_df = delivery_gr_df.copy()
+                delivery_gr_df['receiving'] = delivery_gr_df['receiving'].apply(_normalize_location)
+                receipts_dict = (
+                    delivery_gr_df.groupby(['material', 'receiving'])['quantity']
+                    .sum()
+                    .astype(float)
+                    .rename_axis(['material', 'location'])
+                    .to_dict()
+                )
             
             # 如果从Orchestrator实例获取不到数据，记录警告
             if not receipts_dict:

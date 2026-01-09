@@ -1,0 +1,920 @@
+# -*- coding: utf-8 -*-
+"""
+Module 5 主流程模块
+
+提供多层级部署规划的主入口函数。
+"""
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Dict, List, Optional
+
+import numpy as np
+import pandas as pd
+
+from .allocation import (
+    apply_grouped_moq_rv,
+    apply_priority_allocation_vectorized,
+    apply_receiving_space_quota
+)
+from .cache_utils import (
+    assign_location_layers,
+    build_active_network_cache,
+    build_deploy_config_index,
+    build_lead_time_cache,
+    build_order_log_index,
+    build_ptf_lsk_cache,
+    build_safety_stock_index,
+    build_sdl_index,
+    determine_lead_time,
+    get_active_network,
+    get_ptf_lsk,
+    get_sending_location_type,
+    get_upstream
+)
+from .data_loader import load_config, load_integrated_config
+from .demand_collector import collect_node_demands
+from .inventory import (
+    build_delivery_gr_dict,
+    build_intransit_dicts,
+    build_open_deployment_dict,
+    build_open_deployment_inbound,
+    build_production_dicts,
+    build_shipment_dict,
+    calculate_available_inventory,
+    calculate_projected_inventory
+)
+from .push_allocation import push_softpush_allocation
+from .validation import log_outputs, validate_config_before_run
+
+
+def _initialize_soh_dict(
+    config: dict,
+    inventory_log: pd.DataFrame,
+    actual_sim_start: pd.Timestamp
+) -> dict:
+    """
+    初始化库存字典。
+
+    Args:
+        config: 配置字典
+        inventory_log: 库存日志DataFrame
+        actual_sim_start: 仿真开始日期
+
+    Returns:
+        dict: (material, location) -> 库存量
+    """
+    ol_df = config.get('OrderLog', pd.DataFrame())
+    mats_from_ol = (
+        set(ol_df['material'].unique())
+        if 'material' in ol_df.columns and not ol_df.empty else set()
+    )
+    locs_from_ol = (
+        set(ol_df['location'].unique())
+        if 'location' in ol_df.columns and not ol_df.empty else set()
+    )
+
+    all_mats = (
+        set(config['SupplyDemandLog']['material'].unique()) |
+        set(config['SafetyStock']['material'].unique()) |
+        mats_from_ol
+    )
+    all_locs = (
+        set(config['SupplyDemandLog']['location'].unique()) |
+        set(config['SafetyStock']['location'].unique()) |
+        locs_from_ol
+    )
+
+    inv_df = inventory_log[inventory_log['date'] == actual_sim_start]
+    if inv_df.empty:
+        print(f"[WARN] No inventory records found for sim_start: {actual_sim_start}")
+
+    # 检查重复
+    duplicates = inv_df.duplicated(subset=['material', 'location'], keep=False)
+    if duplicates.any():
+        dup_rows = inv_df[duplicates]
+        raise ValueError(
+            f"InventoryLog contains duplicate (material, location) "
+            f"on sim_start:\n{dup_rows[['material', 'location', 'date']]}"
+        )
+
+    soh_dict = {(mat, loc): 0 for mat in all_mats for loc in all_locs}
+
+    for row in inv_df.itertuples():
+        soh_dict[(row.material, row.location)] = int(row.quantity)
+
+    return soh_dict
+
+
+def _process_layer_demands(
+    layer: int,
+    all_pairs: set,
+    sim_date: pd.Timestamp,
+    config: dict,
+    up_gap_buffer: dict,
+    ptf_lsk_cache: dict,
+    lead_time_cache: dict,
+    active_network_cache: dict,
+    sdl_index: Optional[dict] = None,
+    ss_index: Optional[dict] = None,
+    order_index: Optional[dict] = None,
+    deploy_config_index: Optional[dict] = None
+) -> Dict[tuple, list]:
+    """
+    并行收集层内所有节点的需求。
+
+    Args:
+        layer: 层级
+        all_pairs: (material, location)对集合
+        sim_date: 仿真日期
+        config: 配置字典
+        up_gap_buffer: 上游缺口缓冲区
+        ptf_lsk_cache: PTF/LSK缓存
+        lead_time_cache: LeadTime缓存
+        active_network_cache: Network缓存
+        sdl_index: SDL预建索引
+        ss_index: SafetyStock预建索引
+        order_index: OrderLog预建索引
+        deploy_config_index: DeployConfig预建索引
+
+    Returns:
+        dict: (material, location) -> 需求行列表
+    """
+    node_demands_map: Dict[tuple, list] = {}
+
+    if not all_pairs:
+        return node_demands_map
+
+    try:
+        with ThreadPoolExecutor(max_workers=min(32, len(all_pairs))) as ex:
+            futures = {
+                ex.submit(
+                    collect_node_demands,
+                    mat, loc, sim_date, config, up_gap_buffer,
+                    ptf_lsk_cache, lead_time_cache, active_network_cache,
+                    sdl_index, ss_index, order_index, deploy_config_index
+                ): (mat, loc)
+                for (mat, loc) in all_pairs
+            }
+            for fut in as_completed(futures):
+                key = futures[fut]
+                try:
+                    node_demands_map[key] = fut.result()
+                except Exception as e:
+                    print(f"  ⚠️  并行收集需求失败: {key} -> {e}")
+                    node_demands_map[key] = []
+    except Exception as e:
+        print(f"  ⚠️  并行收集需求初始化失败，回退串行: {e}")
+
+    return node_demands_map
+
+
+def _allocate_pipeline_sources(
+    demand_rows: List[dict],
+    adjusted_qtys: Dict[int, int],
+    loc: str,
+    mat: str,
+    demand_priority_map: Dict[str, int],
+    future_intransit: dict,
+    open_deployment_inbound: dict,
+    future_production: dict
+) -> None:
+    """
+    用pipeline supply覆盖剩余gap（向量化）。
+
+    Args:
+        demand_rows: 需求行列表（会被修改）
+        adjusted_qtys: 调整后的数量
+        loc: 位置编码
+        mat: 物料编码
+        demand_priority_map: 优先级映射
+        future_intransit: 未来在途
+        open_deployment_inbound: 开放调拨入库
+        future_production: 未来生产
+    """
+    if not demand_rows:
+        return
+
+    ndr_df = pd.DataFrame(demand_rows).copy()
+    ndr_df['idx'] = np.arange(len(demand_rows))
+
+    rec_arr = [
+        r.get('from_location', r.get('receiving', loc))
+        for r in demand_rows
+    ]
+    ndr_df['receiving'] = rec_arr
+    ndr_df['is_self'] = ndr_df['receiving'] == loc
+    ndr_df['priority'] = ndr_df['demand_element'].map(
+        lambda x: demand_priority_map.get(x, 99)
+    )
+
+    # 优化：向量化生成调整后数量
+    ndr_df['adjusted_qty'] = ndr_df['idx'].map(
+        lambda i: int(adjusted_qtys.get(int(i), int(ndr_df.at[int(i), 'demand_qty'])))
+    )
+
+    ndr_df['allocated_invcon'] = [
+        int(r.get('deployed_qty_invCon', 0) or 0)
+        for r in demand_rows
+    ]
+    ndr_df['plan_order_cover'] = [
+        int(r.get('deploy_qty_with_plan_order', 0) or 0)
+        for r in demand_rows
+    ]
+
+    self_df = ndr_df[ndr_df['is_self']].copy()
+    if self_df.empty:
+        return
+
+    for col in ['adjusted_qty', 'allocated_invcon', 'plan_order_cover']:
+        if col not in self_df.columns:
+            self_df[col] = 0
+
+    self_df['raw_gap'] = (
+        self_df['adjusted_qty'] -
+        self_df['allocated_invcon'] -
+        self_df['plan_order_cover']
+    )
+    self_df['alloc_intrans'] = 0
+    self_df['alloc_odi'] = 0
+    self_df['alloc_future'] = 0
+
+    node_key = (mat, loc)
+    pool_in_transit = int(future_intransit.get(node_key, 0) or 0)
+    pool_odi = int(open_deployment_inbound.get(node_key, 0) or 0)
+    pool_future_production = int(future_production.get(node_key, 0) or 0)
+
+    def _alloc_source(df_src, pool, col_name):
+        if pool <= 0 or df_src.empty:
+            return df_src, 0
+
+        df_rem = df_src[df_src['raw_gap'] > 0].sort_values('priority')
+        if df_rem.empty:
+            return df_src, 0
+
+        total_gap = float(df_rem['raw_gap'].sum())
+        if total_gap <= 0:
+            return df_src, 0
+
+        weights = df_rem['raw_gap'].to_numpy(dtype=float) / total_gap
+        shares = np.floor(pool * weights).astype(np.int64)
+        shares = np.minimum(
+            shares, df_rem['raw_gap'].to_numpy(dtype=np.int64)
+        )
+
+        df_src.loc[df_rem.index, col_name] = shares
+        df_src.loc[df_rem.index, 'raw_gap'] = (
+            df_rem['raw_gap'].to_numpy(dtype=np.int64) - shares
+        )
+        return df_src, int(shares.sum())
+
+    self_df, used_intrans = _alloc_source(
+        self_df, pool_in_transit, 'alloc_intrans'
+    )
+    self_df, used_odi = _alloc_source(self_df, pool_odi, 'alloc_odi')
+    self_df, used_future = _alloc_source(
+        self_df, pool_future_production, 'alloc_future'
+    )
+
+    self_df['plan_order_cover'] = (
+        self_df['plan_order_cover'] +
+        self_df['alloc_intrans'] +
+        self_df['alloc_odi'] +
+        self_df['alloc_future']
+    )
+
+    for row in self_df.itertuples(index=False):
+        i = int(row.idx)
+        demand_rows[i]['deploy_qty_with_plan_order'] = int(row.plan_order_cover)
+        demand_rows[i]['deploy_from_in_transit'] = int(row.alloc_intrans)
+        demand_rows[i]['deploy_from_open_deployment_inbound'] = int(row.alloc_odi)
+        demand_rows[i]['deploy_from_future_production'] = int(row.alloc_future)
+
+
+def _process_gaps_and_create_plans(
+    demand_rows: List[dict],
+    adjusted_qtys: Dict[int, int],
+    mat: str,
+    loc: str,
+    sim_date: pd.Timestamp,
+    config: dict,
+    demand_priority_map: Dict[str, int],
+    active_network_cache: dict,
+    lead_time_cache: dict,
+    ptf_lsk_cache: dict,
+    deployment_plan_rows: List[dict],
+    unfulfilled_rows: List[dict],
+    up_gap_next: dict
+) -> None:
+    """
+    处理GAP和生成调拨计划。
+
+    Args:
+        demand_rows: 需求行列表
+        adjusted_qtys: 调整后的数量
+        mat: 物料编码
+        loc: 位置编码
+        sim_date: 仿真日期
+        config: 配置字典
+        demand_priority_map: 优先级映射
+        active_network_cache: Network缓存
+        lead_time_cache: LeadTime缓存
+        ptf_lsk_cache: PTF/LSK缓存
+        deployment_plan_rows: 计划行列表（会被修改）
+        unfulfilled_rows: 未满足行列表（会被修改）
+        up_gap_next: 上游缺口（会被修改）
+    """
+    if not demand_rows:
+        return
+
+    network = config['Network']
+
+    df_gap = pd.DataFrame(demand_rows).copy()
+    df_gap['idx'] = np.arange(len(demand_rows))
+    df_gap['receiving'] = [
+        r.get('from_location', r.get('receiving', loc))
+        for r in demand_rows
+    ]
+    df_gap['is_self'] = df_gap['receiving'] == loc
+    df_gap['priority'] = df_gap['demand_element'].map(
+        lambda x: demand_priority_map.get(x, 99)
+    )
+
+    # 优化：向量化生成调整后数量
+    df_gap['adjusted_qty'] = df_gap['idx'].map(
+        lambda i: int(adjusted_qtys.get(int(i), int(df_gap.at[int(i), 'demand_qty'])))
+    )
+
+    df_gap['allocated_invcon'] = [
+        int(r.get('deployed_qty_invCon', 0) or 0)
+        for r in demand_rows
+    ]
+    df_gap['plan_order_cover'] = [
+        int(r.get('deploy_qty_with_plan_order', 0) or 0)
+        for r in demand_rows
+    ]
+    df_gap['gap_qty'] = (
+        df_gap['adjusted_qty'] -
+        df_gap['allocated_invcon'] -
+        df_gap['plan_order_cover']
+    )
+
+    df_gap_pos = df_gap[df_gap['gap_qty'] > 0]
+    up_loc = get_upstream(
+        loc, mat, network, sim_date,
+        active_network_cache=active_network_cache
+    )
+
+    if not df_gap_pos.empty:
+        # 未满足记录
+        for row in df_gap_pos.itertuples(index=False):
+            unfulfilled_rows.append({
+                'date': row.plan_deploy_date,
+                'sending': loc,
+                'receiving': row.receiving,
+                'demand_qty': row.demand_qty,
+                'demand_element': row.demand_element,
+                'unfulfilled_qty': int(row.gap_qty),
+                'reason': "supply shortage"
+            })
+
+        # 上游缺口传递
+        if up_loc:
+            for row in df_gap_pos.itertuples(index=False):
+                new_demand_element = f"net demand for {row.demand_element}"
+                req_dt = (
+                    row.requirement_date
+                    if hasattr(row, 'requirement_date') and pd.notna(row.requirement_date)
+                    else row.plan_deploy_date
+                )
+                up_gap_next.setdefault((mat, up_loc), []).append({
+                    'demand_element': new_demand_element,
+                    'planned_qty': int(row.gap_qty),
+                    'leadtime': int(row.leadtime),
+                    'requirement_date': req_dt,
+                    'location': up_loc,
+                    'from_location': loc,
+                    'orig_location': (
+                        row.orig_location
+                        if hasattr(row, 'orig_location')
+                        else row.location
+                    )
+                })
+
+    # 预计算lead time
+    sending_location_type = get_sending_location_type(
+        material=str(mat),
+        sending=str(loc),
+        sim_date=sim_date,
+        network_df=network,
+        location_layer_map=config.get('LocationLayerMap', {})
+    )
+    ptf_val, lsk_val = get_ptf_lsk(
+        material=str(mat),
+        site=str(loc),
+        m4_mlcfg_df=config.get('M4_MaterialLocationLineCfg', pd.DataFrame()),
+        cache=ptf_lsk_cache
+    )
+
+    unique_receivings = set()
+    for d in demand_rows:
+        rcv = d.get('from_location', d.get('receiving', loc))
+        if rcv != loc:
+            unique_receivings.add(str(rcv))
+
+    lt_map: Dict[tuple, int] = {}
+    if unique_receivings:
+        for rcv in unique_receivings:
+            if lead_time_cache is not None:
+                base_vals = lead_time_cache.get((str(loc), str(rcv)))
+                if base_vals is None:
+                    pdt, gr, mct = 0, 0, 0
+                else:
+                    pdt, gr, mct = base_vals
+            else:
+                row_lt = config['LeadTime'][
+                    (config['LeadTime']['sending'] == str(loc)) &
+                    (config['LeadTime']['receiving'] == str(rcv))
+                ]
+                pdt = int(pd.to_numeric(
+                    row_lt['PDT'], errors='coerce'
+                ).fillna(0).iloc[0]) if not row_lt.empty else 0
+                gr = int(pd.to_numeric(
+                    row_lt['GR'], errors='coerce'
+                ).fillna(0).iloc[0]) if not row_lt.empty else 0
+                mct = int(pd.to_numeric(
+                    row_lt['MCT'], errors='coerce'
+                ).fillna(0).iloc[0]) if not row_lt.empty else 0
+
+            if str(sending_location_type).lower() == 'plant':
+                base_lt = max(int(mct), int(pdt) + int(gr))
+                leadtime_val = max(1, int(base_lt + int(ptf_val) + int(lsk_val) - 1))
+            else:
+                leadtime_val = max(1, int(int(pdt) + int(gr)))
+
+            lt_map[(str(mat), str(loc), str(rcv))] = int(leadtime_val)
+
+    # 生成计划行
+    for i, d in enumerate(demand_rows):
+        receiving = d.get('from_location', d.get('receiving', loc))
+        is_cross_node = (loc != receiving)
+        actual_planned_qty = adjusted_qtys.get(i, d['demand_qty'])
+
+        if loc == receiving:
+            planned_delivery_date = d['plan_deploy_date']
+            leadtime_for_row = 0
+        else:
+            planned_delivery_date = d.get(
+                'requirement_date', d['plan_deploy_date']
+            )
+            leadtime_for_row = int(lt_map.get(
+                (str(mat), str(loc), str(receiving)), 1
+            ))
+
+        plan_row = {
+            'date': d['plan_deploy_date'],
+            'material': mat,
+            'sending': loc,
+            'receiving': receiving,
+            'demand_qty': d['demand_qty'],
+            'demand_element': d['demand_element'],
+            'planned_qty': actual_planned_qty,
+            'deployed_qty_invCon': d['deployed_qty_invCon'],
+            'deploy_qty_with_plan_order': d.get('deploy_qty_with_plan_order', 0),
+            'deploy_from_in_transit': d.get('deploy_from_in_transit', 0),
+            'deploy_from_open_deployment_inbound': d.get(
+                'deploy_from_open_deployment_inbound', 0
+            ),
+            'deploy_from_future_production': d.get(
+                'deploy_from_future_production', 0
+            ),
+            'planned_delivery_date': planned_delivery_date,
+            'orig_location': d.get('orig_location', d['location']),
+            'leadtime': leadtime_for_row,
+            'is_cross_node': is_cross_node,
+        }
+
+        deployment_plan_rows.append(plan_row)
+
+
+def _update_soh_dict(
+    soh_dict: dict,
+    deployment_plan_rows: List[dict],
+    sim_date: pd.Timestamp,
+    beginning_inventory: dict,
+    today_production_gr: dict,
+    today_intransit: dict,
+    delivery_gr: dict,
+    today_shipment: dict,
+    stock_on_hand_log: List[dict]
+) -> None:
+    """
+    更新库存字典为下一日的期初库存。
+
+    Args:
+        soh_dict: 库存字典（会被修改）
+        deployment_plan_rows: 计划行列表
+        sim_date: 仿真日期
+        beginning_inventory: 期初库存
+        today_production_gr: 当日生产
+        today_intransit: 当日在途
+        delivery_gr: 当日收货
+        today_shipment: 当日发货
+        stock_on_hand_log: 库存日志（会被修改）
+    """
+    deployed_dict = {}
+    df = pd.DataFrame(deployment_plan_rows)
+
+    if not df.empty:
+        today_rows = df[df['date'] == sim_date].copy()
+        if not today_rows.empty:
+            # 只统计 sending != receiving 的 deployed_qty_invCon
+            today_rows['deploy_qty'] = today_rows.apply(
+                lambda r: r['deployed_qty_invCon'] if r['sending'] != r['receiving'] else 0,
+                axis=1
+            )
+            deployed_dict = (
+                today_rows.groupby(['material', 'sending'])['deploy_qty']
+                .sum().to_dict()
+            )
+
+    all_keys = set(
+        list(beginning_inventory.keys()) +
+        list(today_production_gr.keys()) +
+        list(today_intransit.keys()) +
+        list(deployed_dict.keys()) +
+        list(today_shipment.keys()) +
+        list(delivery_gr.keys())
+    )
+
+    for (mat, loc) in all_keys:
+        beginning_soh = beginning_inventory.get((mat, loc), 0)
+        prod = today_production_gr.get((mat, loc), 0)
+        intrans = today_intransit.get((mat, loc), 0)
+        deliv_gr = delivery_gr.get((mat, loc), 0)
+        deployed = deployed_dict.get((mat, loc), 0)
+        shipped = today_shipment.get((mat, loc), 0)
+
+        end_soh = beginning_soh + prod + intrans + deliv_gr - shipped - deployed
+        soh_dict[(mat, loc)] = end_soh
+
+        stock_on_hand_log.append({
+            'material': mat,
+            'location': loc,
+            'date': sim_date,
+            'beginning_soh': beginning_soh,
+            'production': prod,
+            'in_transit': intrans,
+            'delivery_gr': deliv_gr,
+            'today_shipment': shipped,
+            'deployed_qty': deployed,
+            'ending_soh': end_soh
+        })
+
+
+def main(
+    input_path: str = None,
+    output_path: str = None,
+    sim_start: str = None,
+    sim_end: str = None,
+    config_dict: dict = None,
+    module1_output_dir: str = None,
+    module4_output_path: str = None,
+    orchestrator: object = None,
+    current_date: str = None,
+    skip_file_output: bool = False,
+    module1_result: dict = None
+) -> dict:
+    """
+    Module 5 主入口：多层级部署规划。
+
+    支持两种运行模式：
+    - 独立模式：使用Excel文件
+    - 集成模式：使用各模块/Orchestrator视图
+
+    Args:
+        input_path: 输入Excel路径（独立模式）
+        output_path: 输出Excel路径
+        sim_start: 仿真开始日期（独立模式）
+        sim_end: 仿真结束日期（独立模式）
+        config_dict: 配置字典（集成模式）
+        module1_output_dir: Module1输出目录
+        module4_output_path: Module4输出文件路径
+        orchestrator: Orchestrator实例
+        current_date: 当前日期（集成模式）
+        skip_file_output: 是否跳过文件输出
+        module1_result: Module1运行结果（内存数据）
+
+    Returns:
+        dict: 运行结果，包含deployment_plan等
+    """
+    # 判断运行模式
+    if config_dict is not None:
+        current_date_obj = (
+            pd.to_datetime(current_date) if current_date else None
+        )
+        config = load_integrated_config(
+            config_dict, module1_output_dir, module4_output_path,
+            orchestrator, current_date_obj,
+            module1_result=module1_result
+        )
+        sim_dates = (
+            [current_date_obj] if current_date_obj
+            else pd.date_range(sim_start, sim_end, freq='D')
+        )
+
+        if output_path is None:
+            output_path = (
+                f"./Module5Output_{current_date_obj.strftime('%Y%m%d')}.xlsx"
+                if current_date_obj else "./Module5Output.xlsx"
+            )
+    else:
+        config = load_config(input_path)
+        sim_dates = pd.date_range(sim_start, sim_end, freq='D')
+
+    # 校验配置
+    validation_log = list(config.get('ValidationLog', []))
+    validate_config_before_run(config, validation_log)
+
+    network = config['Network']
+    inventory_log = config['InventoryLog']
+    production_plan = config['ProductionPlan']
+    in_transit = config['InTransit']
+    demand_priority = config['DemandPriority']
+    receiving_space = config['ReceivingSpace']
+
+    # 构建层级映射
+    network_layers = assign_location_layers(network)
+    location_to_layer = dict(zip(
+        network_layers['location'], network_layers['layer']
+    ))
+    layer_list = sorted(network_layers['layer'].unique(), reverse=True)
+    demand_priority_map = dict(zip(
+        demand_priority['demand_element'], demand_priority['priority']
+    ))
+    config['LocationLayerMap'] = location_to_layer
+
+    # 构建缓存
+    ptf_lsk_cache = build_ptf_lsk_cache(
+        config.get('M4_MaterialLocationLineCfg', pd.DataFrame())
+    )
+    lead_time_cache = build_lead_time_cache(
+        config.get('LeadTime', pd.DataFrame())
+    )
+    active_network_cache = build_active_network_cache(network)
+
+    # 构建DataFrame索引（优化重复过滤）
+    sdl_index = build_sdl_index(config['SupplyDemandLog'])
+    ss_index = build_safety_stock_index(config['SafetyStock'])
+    order_index = build_order_log_index(config.get('OrderLog', pd.DataFrame()))
+    deploy_config_index = build_deploy_config_index(config['DeployConfig'])
+
+    print(
+        f"✅缓存已初始化: PTF/LSK={len(ptf_lsk_cache)} | "
+        f"LeadTime={len(lead_time_cache)} | Network={len(active_network_cache)}"
+    )
+    print(
+        f"✅索引已构建: SDL={len(sdl_index)} | SS={len(ss_index)} | "
+        f"Order={len(order_index)} | DeployCfg={len(deploy_config_index)}"
+    )
+
+    # 初始化库存
+    actual_sim_start = (
+        sim_dates[0] if hasattr(sim_dates, '__getitem__')
+        else pd.to_datetime(sim_start)
+    )
+    soh_dict = _initialize_soh_dict(config, inventory_log, actual_sim_start)
+
+    deployment_plan_rows = []
+    unfulfilled_rows = []
+    stock_on_hand_log = []
+    up_gap_buffer = {}
+
+    for sim_date in sim_dates:
+        day_start = time.perf_counter()
+        beginning_inventory = soh_dict.copy()
+
+        # 构建生产字典
+        today_production_gr, future_production = build_production_dicts(
+            production_plan, sim_date
+        )
+
+        # 构建在途字典
+        today_intransit, future_intransit = build_intransit_dicts(
+            in_transit, sim_date
+        )
+
+        # 构建其他字典
+        delivery_gr_data = config.get('DeliveryGR', pd.DataFrame())
+        today_shipment_data = config.get('TodayShipment', pd.DataFrame())
+        open_deployment_data = config.get('OpenDeployment', pd.DataFrame())
+
+        delivery_gr = build_delivery_gr_dict(delivery_gr_data, sim_date)
+        today_shipment = build_shipment_dict(today_shipment_data, sim_date)
+        open_deployment = build_open_deployment_dict(open_deployment_data)
+        open_deployment_inbound = build_open_deployment_inbound(
+            open_deployment_data
+        )
+
+        # 计算库存
+        projected_soh = calculate_projected_inventory(
+            beginning_inventory=beginning_inventory,
+            in_transit=today_intransit,
+            delivery_gr=delivery_gr,
+            today_production_gr=today_production_gr,
+            future_production=future_production,
+            today_shipment=today_shipment,
+            open_deployment=open_deployment
+        )
+
+        dynamic_soh = calculate_available_inventory(
+            beginning_inventory=beginning_inventory,
+            delivery_gr=delivery_gr,
+            today_production_gr=today_production_gr,
+            today_shipment=today_shipment,
+            open_deployment=open_deployment,
+            open_deployment_inbound=open_deployment_inbound
+        )
+
+        demand_collect_total_start = time.perf_counter()
+        demand_collect_only_elapsed = 0.0
+        up_gap_next = {}
+        global_node_demands_map: Dict[tuple, list] = {}
+
+        # 预计算materials_union - 移动到循环外部避免重复计算
+        materials_union = set(
+            config['SupplyDemandLog']['material'].unique()
+        )
+        if 'OrderLog' in config and not config['OrderLog'].empty:
+            materials_union |= set(config['OrderLog']['material'].unique())
+        if not config['SafetyStock'].empty:
+            materials_union |= set(config['SafetyStock']['material'].unique())
+
+        # 按层级处理
+        for layer in layer_list:
+            # 计算当前层级的pairs
+            base_pairs = set(
+                (mat, loc) for loc, l in location_to_layer.items() 
+                if l == layer for mat in materials_union
+            )
+            gap_pairs = set(
+                (mat, loc)
+                for (mat, loc) in up_gap_buffer
+                if location_to_layer.get(loc, None) == layer
+            )
+            all_pairs = base_pairs | gap_pairs
+
+            # 并行收集需求
+            layer_collect_start = time.perf_counter()
+            node_demands_map = _process_layer_demands(
+                layer, all_pairs, sim_date, config, up_gap_buffer,
+                ptf_lsk_cache, lead_time_cache, active_network_cache,
+                sdl_index, ss_index, order_index, deploy_config_index
+            )
+            demand_collect_only_elapsed += (
+                time.perf_counter() - layer_collect_start
+            )
+
+            for k, v in node_demands_map.items():
+                global_node_demands_map[k] = v
+
+            # 处理每个节点
+            for mat, loc in all_pairs:
+                node_key = (mat, loc)
+                current_stock = dynamic_soh.get(node_key, 0)
+
+                demand_rows = node_demands_map.get((mat, loc))
+                if demand_rows is None:
+                    demand_rows = collect_node_demands(
+                        mat, loc, sim_date, config, up_gap_buffer,
+                        ptf_lsk_cache=ptf_lsk_cache,
+                        lead_time_cache=lead_time_cache,
+                        active_network_cache=active_network_cache,
+                        sdl_index=sdl_index,
+                        ss_index=ss_index,
+                        order_index=order_index,
+                        deploy_config_index=deploy_config_index
+                    )
+
+                if not demand_rows:
+                    continue
+
+                # 初始化planned_qty
+                for d in demand_rows:
+                    d['planned_qty'] = d['demand_qty']
+
+                # 分组MOQ/RV
+                adjusted_qtys = apply_grouped_moq_rv(demand_rows, loc)
+
+                # 优先级分配
+                current_stock = apply_priority_allocation_vectorized(
+                    demand_rows=demand_rows,
+                    adjusted_qtys=adjusted_qtys,
+                    current_stock=current_stock,
+                    demand_priority_map=demand_priority_map
+                )
+
+                # 初始化pipeline字段
+                for d in demand_rows:
+                    d.setdefault('deploy_qty_with_plan_order', 0)
+                    d.setdefault('deploy_from_in_transit', 0)
+                    d.setdefault('deploy_from_open_deployment_inbound', 0)
+                    d.setdefault('deploy_from_future_production', 0)
+
+                # Pipeline分配
+                _allocate_pipeline_sources(
+                    demand_rows, adjusted_qtys, loc, mat,
+                    demand_priority_map, future_intransit,
+                    open_deployment_inbound, future_production
+                )
+
+                # 处理GAP和生成计划
+                _process_gaps_and_create_plans(
+                    demand_rows, adjusted_qtys, mat, loc, sim_date,
+                    config, demand_priority_map, active_network_cache,
+                    lead_time_cache, ptf_lsk_cache, deployment_plan_rows,
+                    unfulfilled_rows, up_gap_next
+                )
+
+            up_gap_buffer = up_gap_next.copy()
+
+        print(
+            f"[M5] Demand collection only 用时: "
+            f"{demand_collect_only_elapsed:.3f}s"
+        )
+        print(
+            f"[M5] Demand collection+allocation 总用时: "
+            f"{time.perf_counter()-demand_collect_total_start:.3f}s"
+        )
+
+        # Push/Soft-push分配
+        dynamic_soh_for_push = dynamic_soh.copy()
+        plan_push = push_softpush_allocation(
+            deployment_plan_rows, config, dynamic_soh_for_push, sim_date,
+            ptf_lsk_cache=ptf_lsk_cache,
+            lead_time_cache=lead_time_cache,
+            projected_soh=projected_soh,
+            node_demands_map=global_node_demands_map
+        )
+
+        if plan_push:
+            deployment_plan_rows.extend(plan_push)
+
+        # 更新库存
+        _update_soh_dict(
+            soh_dict, deployment_plan_rows, sim_date,
+            beginning_inventory, today_production_gr, today_intransit,
+            delivery_gr, today_shipment, stock_on_hand_log
+        )
+
+    # 应用接收空间配额
+    deployment_plan_rows_df, unfulfilled_space = apply_receiving_space_quota(
+        deployment_plan_rows, receiving_space, sim_date, demand_priority_map
+    )
+    unfulfilled_all = pd.DataFrame(unfulfilled_rows + unfulfilled_space)
+
+    outputs = {
+        'DeploymentPlan': deployment_plan_rows_df,
+        'UnfulfilledLog': unfulfilled_all,
+        'StockOnHandLog': pd.DataFrame(stock_on_hand_log),
+        'Validation': pd.DataFrame(validation_log),
+    }
+
+    if not skip_file_output:
+        log_outputs(output_path, outputs)
+
+    print(f"[M5] Full day total 用时: {time.perf_counter()-day_start:.3f}s")
+
+    return {
+        'deployment_plan': deployment_plan_rows_df,
+        'unfulfilled_log': unfulfilled_all,
+        'stock_on_hand_log': pd.DataFrame(stock_on_hand_log),
+        'validation_log': pd.DataFrame(validation_log),
+        'statistics': {
+            'deployment_count': len(deployment_plan_rows_df),
+            'unfulfilled_count': len(unfulfilled_all),
+            'processed_dates': (
+                len(sim_dates) if isinstance(sim_dates, list) else 1
+            )
+        }
+    }
+
+
+if __name__ == '__main__':
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description='Module 5: Multi-echelon Deployment Planning'
+    )
+    parser.add_argument('--input', required=True, help='Input config excel path')
+    parser.add_argument('--output', required=True, help='Output excel path')
+    parser.add_argument(
+        '--sim_start', required=True,
+        help='Simulation start date, YYYY-MM-DD'
+    )
+    parser.add_argument(
+        '--sim_end', required=True,
+        help='Simulation end date, YYYY-MM-DD'
+    )
+    args = parser.parse_args()
+
+    main(args.input, args.output, args.sim_start, args.sim_end)

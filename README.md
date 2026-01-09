@@ -1,5 +1,7 @@
 # ChainSight - 供应链规划仿真系统
 
+**中文** | [English](README_EN.md)
+
 ## 📋 目录
 
 - [环境要求](#-环境要求)
@@ -159,74 +161,91 @@ python run.py --config BC_S5 --start-date 2025-10-06 --end-date 2025-10-10 --use
 
 ```
 chainsight/
-├── src/                           # 核心源代码包
-│   ├── __init__.py
+├── run.py                              # 🚀 主入口 CLI
+├── requirements.txt                    # 依赖声明
+├── README.md / README_EN.md            # 中英文文档
+│
+├── src/                                # 📦 核心源代码包
+│   ├── core/                           #    编排引擎
+│   │   ├── main_integration.py         #    主集成调度器（日循环 M1→M4→M5→M6→M3）
+│   │   ├── orchestrator.py             #    统一状态管理中枢
+│   │   ├── parallel_executor.py        #    并行执行框架（ThreadPoolExecutor）
+│   │   └── run.py                      #    CLI 解析（被根 run.py 调用）
 │   │
-│   ├── core/                      # 核心执行引擎
-│   │   ├── __init__.py
-│   │   ├── orchestrator.py        # 统一状态管理中枢
-│   │   ├── main_integration.py    # 主集成编排器
-│   │   └── run.py                 # CLI运行管理（被root run.py调用）
+│   ├── modules/                        #    业务模块层
+│   │   ├── module1.py                  #    M1: 需求规划 (Demand Planning)
+│   │   ├── module3.py                  #    M3: MRP计划 (MRP Planning)
+│   │   ├── module4.py                  #    M4: 生产计划 (Production Planning)
+│   │   ├── module5.py                  #    M5: 部署规划 (Deployment Planning)
+│   │   ├── module6.py                  #    M6: 物流执行 (Logistics Execution)
+│   │   ├── demand_planning/            #    M1 子模块（forecast, order, shipment）
+│   │   ├── mrp_planning/               #    M3 子模块（net_demand, mrp_simulation）
+│   │   ├── production_planning/        #    M4 子模块（plan_builder, capacity_allocator）
+│   │   ├── deployment_planning/        #    M5 子模块（allocation, inventory, push）
+│   │   └── logistics_execution/        #    M6 子模块（vehicle_packer, delivery）
 │   │
-│   ├── modules/                   # 业务模块层
-│   │   ├── __init__.py
-│   │   ├── module1.py             # 库存需求规划
-│   │   ├── module1_optimized.py   # Module1性能优化版
-│   │   ├── module3.py             # 交付规划
-│   │   ├── module4.py             # 生产排程
-│   │   ├── module5.py             # 库存优化
-│   │   └── module6.py             # 物流执行
+│   ├── utils/                          #    工具库
+│   │   ├── config_validator.py         #    配置校验
+│   │   ├── logger_config.py            #    日志配置
+│   │   ├── validation_manager.py       #    数据验证
+│   │   ├── inventory_balance_checker.py#    库存平衡检查
+│   │   └── time_manager.py             #    时间管理
 │   │
-│   ├── utils/                     # 工具库
-│   │   ├── __init__.py
-│   │   ├── config_validator.py    # 配置验证
-│   │   ├── logger_config.py       # 日志配置
-│   │   ├── validation_manager.py  # 数据验证管理
-│   │   ├── inventory_balance_checker.py  # 库存平衡检查
-│   │   └── time_manager.py        # 时间管理
-│   │
-│   └── services/                  # 业务服务
-│       ├── __init__.py
-│       ├── summary_report_generator.py   # 汇总报告生成
-│       └── performance_profiler.py       # 性能分析
+│   └── services/                       #    业务服务
+│       ├── summary_report_generator.py #    汇总报告生成
+│       └── performance_profiler.py     #    性能分析器
 │
-├── tests/                         # 测试模块
-│   ├── __init__.py
-│   ├── e2e_integration_test.py    # 端到端集成测试
-│   ├── test_logger.py             # 日志模块测试
-│   └── conftest.py                # pytest配置（可扩展）
+├── pgsql_db/                           # 🗄️ 数据库支持模块
+│   ├── db_connection.py                #    连接管理
+│   ├── db_initializer.py               #    数据库初始化
+│   ├── excel_importer.py               #    Excel 导入
+│   ├── module_data_writer.py           #    模块输出写入
+│   ├── table_mapping.py                #    表名映射
+│   ├── duckdb_processor.py             #    DuckDB 高性能处理
+│   ├── optimized_processor.py          #    优化处理器
+│   ├── data_pipeline.py                #    数据管道（DuckDB + PostgreSQL）
+│   ├── run_with_db.py                  #    数据库集成运行入口
+│   ├── run_with_duckdb.py              #    DuckDB 增强运行（输出→outputs/db_duckdb_*）
+│   ├── run_optimized.py                #    优化高性能运行（输出→outputs/db_optimized_cache）
+│   ├── run_optimized_example.py        #    优化示例脚本（输出→outputs/db_optimized）
+│   └── test_write_output.py            #    数据库输出写入测试（输出→outputs/integrated_output）
 │
-├── tools/                         # 独立工具脚本
-│   ├── __init__.py
-│   ├── apply_push_fix.py
-│   ├── create_production_config.py
-│   ├── diagnose.py
-│   ├── order_log_generator.py
-│   ├── performance_profiler.py
-│   ├── summary_report_generator.py
-│   ├── wip_cov_generator.py
-│   └── run.ps1
+├── tools/                              # 🔧 辅助工具脚本
+│   ├── init_database.py                #    数据库初始化
+│   ├── export_mapping.py               #    表映射导出
+│   ├── diagnose.py                     #    诊断工具
+│   ├── verify_architecture.py          #    架构验证
+│   ├── compare_summary.py              #    结果对比
+│   └── apply_push_fix.py               #    推式分配修复
 │
-├── config/                        # 配置文件目录
-│   ├── requirements.txt           # Python依赖
-│   ├── config_guide.xlsx          # 配置指南
-│   ├── config.xlsx                # 生产配置（示例）
-│   └── ChainSight 1st SIT.xlsx    # 样例配置
+├── tests/                              # 🧪 测试模块
+│   ├── e2e_integration_test.py         #    端到端集成测试
+│   ├── test_module6_refactored.py      #    M6 单元测试
+│   └── test_logger.py                  #    日志测试
 │
-├── docs/                          # 文档目录
-│   ├── README.md（本文件）
-│   ├── MODULE*.md                 # 模块设计文档
-│   ├── OPTIMIZATION*.md           # 优化说明
-│   └── *.docx                     # Word文档
+├── test_files/                         # 📋 测试数据与规范
+│   ├── BC_S5.xlsx                      #    主测试配置
+│   ├── Python_former.md                #    编码规范
+│   └── Data_Type.md                    #    类型说明
 │
-├── outputs/                       # 仿真输出目录（自动生成）
-│   └── runs/
-│       └── run_YYYYMMDD_HHMMSS/   # 每次运行的结果
+├── config/                             # ⚙️ 配置文件
+│   ├── ChainSight 1st SIT.xlsx         #    SIT 样例配置
+│   └── config_guide.xlsx               #    配置指南
 │
-├── run.py                         # 主入口脚本（CLI）
-├── requirements.txt               # 依赖文件副本（root）
-├── setup.py                       # Python包管理（可选）
-└── .gitignore
+├── docs/                               # 📚 设计文档
+│   ├── ARCHITECTURE.md                 #    架构设计
+│   ├── MODULE*_DESIGN.md               #    模块设计
+│   ├── OPTIMIZATION_SUMMARY.md         #    优化总结
+│   └── MIGRATION.md                    #    迁移指南
+│
+└── outputs/                            # 📤 运行输出（自动生成）
+    ├── BC_S5/                          #    本地仿真输出（按配置名称组织）
+    │   └── run_YYYYMMDD_HHMMSS/
+    ├── db_BC_S5_YYYYMMDD_HHMMSS/      #    数据库模式日志输出
+    ├── db_duckdb_*/                    #    DuckDB 增强测试输出
+    ├── db_optimized/                   #    优化仿真示例输出
+    ├── db_optimized_cache/             #    优化处理缓存
+    └── integrated_output/              #    集成模块输出（DB 写入测试）
 ```
 
 ### CLI 参数说明
@@ -245,6 +264,53 @@ chainsight/
 | `--resume` | ❌ | 启用断点续跑 |
 | `--force-restart` | ❌ | 强制重新开始 |
 | `--list-runs` | ❌ | 列出可用的运行目录 |
+
+---
+
+## 📤 输出目录说明
+
+### outputs/ 目录结构
+
+所有仿真运行输出统一管理在 `outputs/` 目录中：
+
+```
+outputs/
+├── BC_S5/                              # 本地仿真输出（配置文件名为目录名）
+│   └── run_YYYYMMDD_HHMMSS/           # 单次运行目录
+│       ├── module1/                    # M1 输出
+│       ├── module3/                    # M3 输出
+│       ├── module4/                    # M4 输出
+│       ├── module5/                    # M5 输出
+│       ├── module6/                    # M6 输出
+│       ├── orchestrator/               # 状态管理输出
+│       ├── summary/                    # 汇总报告
+│       ├── performance/                # 性能分析
+│       └── validation_report.txt       # 数据一致性验证
+│
+├── db_BC_S5_YYYYMMDD_HHMMSS/          # 数据库模式输出（--use-db 参数）
+│   ├── simulation_log_YYYYMMDD_HHMMSS.txt  # 运行日志
+│   └── [其他txt日志文件]
+│
+├── db_duckdb_BC_S5_YYYYMMDD_HHMMSS/  # DuckDB 增强模式（run_with_duckdb.py）
+│   ├── run_log_*.txt                   # 运行日志
+│   └── [处理后的数据表]
+│
+├── db_optimized/                       # 优化仿真输出（run_optimized_example.py）
+│   ├── cache/                          # 缓存数据
+│   ├── performance/                    # 性能分析
+│   └── orchestrator/                   # 状态输出
+│
+├── db_optimized_cache/                 # 优化处理缓存（run_optimized.py）
+│   └── [Parquet 缓存文件]
+│
+└── integrated_output/                  # 集成模块输出（test_write_output.py）
+    ├── module1/
+    ├── module3/
+    ├── module4/
+    ├── module5/
+    ├── module6/
+    └── orchestrator/
+```
 
 ---
 
@@ -316,12 +382,17 @@ print(initializer.get_status_report('BC_S5'))
 
 ### Modules 层 (`src/modules/`)
 
-6个业务模块，按供应链流程组织：
-- **M1**: 库存需求规划（Inventory Planning）
-- **M3**: 交付规划（Delivery Planning）
-- **M4**: 生产排程（Production Scheduling）
-- **M5**: 库存优化（Inventory Optimization）
-- **M6**: 物流执行（Logistics Execution）
+5个业务模块，按供应链流程组织：
+
+| 模块 | 入口文件 | 子包 | 说明 |
+|------|---------|------|------|
+| **M1** | module1.py | `demand_planning/` | 需求规划 (Demand Planning) |
+| **M3** | module3.py | `mrp_planning/` | MRP计划 (MRP Planning) |
+| **M4** | module4.py | `production_planning/` | 生产计划 (Production Planning) |
+| **M5** | module5.py | `deployment_planning/` | 部署规划 (Deployment Planning) |
+| **M6** | module6.py | `logistics_execution/` | 物流执行 (Logistics Execution) |
+
+> 每个模块的入口文件 (moduleX.py) 作为向后兼容层，实际业务逻辑位于对应子包中。
 
 ### Utils 层 (`src/utils/`)
 
@@ -347,15 +418,15 @@ main_integration.run_integrated_simulation()
   ├→ 加载并验证配置
   ├→ 检查断点续跑能力
   ├→ FOR each_day in [start_date, end_date]:
-  │   ├→ Module1 (库存规划)
+  │   ├→ Module1 (需求规划)
   │   ├→ Orchestrator.update_state()
-  │   ├→ Module4 (生产排程)
+  │   ├→ Module4 (生产计划)
   │   ├→ Orchestrator.update_state()
-  │   ├→ Module5 (库存优化)
+  │   ├→ Module5 (部署规划)
   │   ├→ Orchestrator.update_state()
   │   ├→ Module6 (物流执行)
   │   ├→ Orchestrator.update_state()
-  │   ├→ Module3 (交付规划)
+  │   ├→ Module3 (MRP计划)
   │   ├→ Orchestrator.update_state()
   │   └→ 生成每日汇总与快照
   └→ 生成最终报告与一致性检查
@@ -498,9 +569,24 @@ python -c "from pgsql_db import DatabaseConnection; db = DatabaseConnection(); p
 遇到问题？检查：
 1. `docs/` 目录中的设计文档
 2. 各模块的代码注释
-3. 运行日志（保存在output目录或db_runs目录中）
+3. 运行日志（保存在outputs目录中）
 
 ---
 
-**版本**: 2.0.0  
-**最后更新**: 2026-01-06
+## 🗂️ 项目维护
+
+### 目录清洁度
+- ✅ 根目录仅保留必要文件（run.py, README.md, requirements.txt 等）
+- ✅ 临时文档已移至 docs/ 或删除
+- ✅ 工具脚本已整理至 tools/
+- ✅ 样例配置已归档至 config/
+- ✅ 运行输出自动存储在 outputs/ (本地和数据库模式统一)
+
+### 代码风格
+- 遵循 [test_files/Python_former.md](test_files/Python_former.md) 编码规范
+- 类型说明参考 [test_files/Data_Type.md](test_files/Data_Type.md)
+
+---
+
+**版本**: 2.1.0  
+**最后更新**: 2026-01-09

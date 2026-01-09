@@ -48,8 +48,8 @@ def run_with_duckdb(
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     run_id = f"{config_name}_{ts}"
     
-    # 创建日志目录
-    log_dir = project_root / "db_runs" / f"duckdb_{run_id}"
+    # 创建日志目录（输出到 outputs）
+    log_dir = project_root / "outputs" / f"db_duckdb_{run_id}"
     log_dir.mkdir(parents=True, exist_ok=True)
     
     total_start = time.time()

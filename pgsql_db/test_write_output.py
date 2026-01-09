@@ -18,11 +18,11 @@ def main():
     if result['success']:
         print('\n写入模块输出数据...')
         writer = ModuleDataWriter(db)
-        writer.write_all_modules('integrated_output')
+        writer.write_all_modules('outputs/integrated_output')
         
         # 写入orchestrator数据
         print('\n写入Orchestrator数据...')
-        writer.write_orchestrator_data('integrated_output/orchestrator')
+        writer.write_orchestrator_data('outputs/integrated_output/orchestrator')
         
         writer.print_summary()
     

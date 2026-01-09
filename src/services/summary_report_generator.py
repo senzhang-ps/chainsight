@@ -552,12 +552,17 @@ class SummaryReportGenerator:
             # 确保日期格式
             if 'date' in ss_df.columns:
                 ss_df['date'] = pd.to_datetime(ss_df['date'])
-            for _, row in ss_df.iterrows():
-                material = self._normalize_material_value(str(row['material']))
-                location = self._normalize_location_value(str(row['location']))
-                key = (material, location)
-                # 使用最新的safety stock值（如果有多个日期）
-                safety_stock_dict[key] = int(row.get('safety_stock_qty', 0))
+            # 向量化构建safety_stock_dict
+            ss_df['material'] = ss_df['material'].astype(str).map(self._normalize_material_value)
+            ss_df['location'] = ss_df['location'].astype(str).map(self._normalize_location_value)
+            ss_df['ss_qty'] = pd.to_numeric(ss_df.get('safety_stock_qty', 0), errors='coerce').fillna(0).astype(int)
+            # 如果有多个日期,按日期排序后取最后一条(最新值)
+            if 'date' in ss_df.columns:
+                ss_df = ss_df.sort_values('date')
+            safety_stock_dict = (
+                ss_df.groupby(['material', 'location'])['ss_qty']
+                .last().to_dict()
+            )
         
         all_records = []
         
@@ -580,12 +585,18 @@ class SummaryReportGenerator:
             if inv_file.exists():
                 try:
                     inv_df = pd.read_csv(inv_file)
-                    for _, row in inv_df.iterrows():
-                        # 🔧 确保使用标准化的 material 和 location
-                        material = self._normalize_material_value(str(row['material']))
-                        location = self._normalize_location_value(str(row['location']))
-                        key = (material, location)
-                        ending_inv_dict[key] = int(row['quantity'])
+                    if not inv_df.empty:
+                        inv_df = inv_df.assign(
+                            material=inv_df['material'].astype(str).map(self._normalize_material_value),
+                            location=inv_df['location'].astype(str).map(self._normalize_location_value),
+                            quantity=pd.to_numeric(inv_df.get('quantity', 0), errors='coerce').fillna(0).astype(int)
+                        )
+                        ending_inv_dict = (
+                            inv_df.groupby(['material', 'location'], dropna=False)['quantity']
+                            .sum()
+                            .astype(int)
+                            .to_dict()
+                        )
                 except Exception as e:
                     print(f"Warning: Failed to read {inv_file}: {e}")
             
@@ -595,12 +606,18 @@ class SummaryReportGenerator:
                 try:
                     intransit_df = pd.read_csv(intransit_file)
                     if not intransit_df.empty:
-                        # 按接收地点汇总在途数量
-                        for _, row in intransit_df.iterrows():
-                            material = self._normalize_material_value(str(row['material']))
-                            location = self._normalize_location_value(str(row['receiving']))
-                            key = (material, location)
-                            in_transit_dict[key] = in_transit_dict.get(key, 0) + int(row['quantity'])
+                        tmp = intransit_df.assign(
+                            material=intransit_df['material'].astype(str).map(self._normalize_material_value),
+                            receiving=intransit_df['receiving'].astype(str).map(self._normalize_location_value),
+                            quantity=pd.to_numeric(intransit_df.get('quantity', 0), errors='coerce').fillna(0).astype(int)
+                        )
+                        in_transit_dict = (
+                            tmp.groupby(['material', 'receiving'], dropna=False)['quantity']
+                            .sum()
+                            .astype(int)
+                            .rename_axis(['material', 'location'])
+                            .to_dict()
+                        )
                 except Exception as e:
                     print(f"Warning: Failed to read {intransit_file}: {e}")
             
@@ -610,11 +627,17 @@ class SummaryReportGenerator:
                 try:
                     prod_gr_df = pd.read_csv(prod_gr_file)
                     if not prod_gr_df.empty:
-                        for _, row in prod_gr_df.iterrows():
-                            material = self._normalize_material_value(str(row['material']))
-                            location = self._normalize_location_value(str(row['location']))
-                            key = (material, location)
-                            production_gr_dict[key] = production_gr_dict.get(key, 0) + int(row['quantity'])
+                        tmp = prod_gr_df.assign(
+                            material=prod_gr_df['material'].astype(str).map(self._normalize_material_value),
+                            location=prod_gr_df['location'].astype(str).map(self._normalize_location_value),
+                            quantity=pd.to_numeric(prod_gr_df.get('quantity', 0), errors='coerce').fillna(0).astype(int)
+                        )
+                        production_gr_dict = (
+                            tmp.groupby(['material', 'location'], dropna=False)['quantity']
+                            .sum()
+                            .astype(int)
+                            .to_dict()
+                        )
                 except Exception as e:
                     print(f"Warning: Failed to read {prod_gr_file}: {e}")
             
@@ -624,11 +647,18 @@ class SummaryReportGenerator:
                 try:
                     del_gr_df = pd.read_csv(del_gr_file)
                     if not del_gr_df.empty:
-                        for _, row in del_gr_df.iterrows():
-                            material = self._normalize_material_value(str(row['material']))
-                            location = self._normalize_location_value(str(row['receiving']))
-                            key = (material, location)
-                            delivery_gr_dict[key] = delivery_gr_dict.get(key, 0) + int(row['quantity'])
+                        tmp = del_gr_df.assign(
+                            material=del_gr_df['material'].astype(str).map(self._normalize_material_value),
+                            receiving=del_gr_df['receiving'].astype(str).map(self._normalize_location_value),
+                            quantity=pd.to_numeric(del_gr_df.get('quantity', 0), errors='coerce').fillna(0).astype(int)
+                        )
+                        delivery_gr_dict = (
+                            tmp.groupby(['material', 'receiving'], dropna=False)['quantity']
+                            .sum()
+                            .astype(int)
+                            .rename_axis(['material', 'location'])
+                            .to_dict()
+                        )
                 except Exception as e:
                     print(f"Warning: Failed to read {del_gr_file}: {e}")
             
@@ -639,28 +669,37 @@ class SummaryReportGenerator:
                     xl = pd.ExcelFile(order_file)
                     if 'OrderLog' in xl.sheet_names:
                         order_df = xl.parse('OrderLog')
-                        # 只统计当日到期的订单
-                        today_orders = order_df[pd.to_datetime(order_df['date']) == date]
-                        if not today_orders.empty:
-                            for _, row in today_orders.iterrows():
-                                material = self._normalize_material_value(str(row['material']))
-                                location = self._normalize_location_value(str(row['location']))
-                                key = (material, location)
-                                order_dict[key] = order_dict.get(key, 0) + int(row['quantity'])
-                    
+                        if not order_df.empty and 'date' in order_df.columns:
+                            today_orders = order_df[pd.to_datetime(order_df['date']) == date]
+                            if not today_orders.empty:
+                                tmp = today_orders.assign(
+                                    material=today_orders['material'].astype(str).map(self._normalize_material_value),
+                                    location=today_orders['location'].astype(str).map(self._normalize_location_value),
+                                    quantity=pd.to_numeric(today_orders.get('quantity', 0), errors='coerce').fillna(0).astype(int)
+                                )
+                                order_dict = (
+                                    tmp.groupby(['material', 'location'], dropna=False)['quantity']
+                                    .sum()
+                                    .astype(int)
+                                    .to_dict()
+                                )
                     # 读取供需日志 (supply demand log)
                     if 'SupplyDemandLog' in xl.sheet_names:
                         sd_df = xl.parse('SupplyDemandLog')
                         if not sd_df.empty and 'date' in sd_df.columns:
-                            # 只统计当日的供需数据
                             today_sd = sd_df[pd.to_datetime(sd_df['date']) == date]
                             if not today_sd.empty:
-                                for _, row in today_sd.iterrows():
-                                    material = self._normalize_material_value(str(row['material']))
-                                    location = self._normalize_location_value(str(row['location']))
-                                    key = (material, location)
-                                    # 汇总所有demand_element的quantity
-                                    supply_demand_dict[key] = supply_demand_dict.get(key, 0) + int(row.get('quantity', 0))
+                                tmp = today_sd.assign(
+                                    material=today_sd['material'].astype(str).map(self._normalize_material_value),
+                                    location=today_sd['location'].astype(str).map(self._normalize_location_value),
+                                    quantity=pd.to_numeric(today_sd.get('quantity', 0), errors='coerce').fillna(0).astype(int)
+                                )
+                                supply_demand_dict = (
+                                    tmp.groupby(['material', 'location'], dropna=False)['quantity']
+                                    .sum()
+                                    .astype(int)
+                                    .to_dict()
+                                )
                 except Exception as e:
                     print(f"Warning: Failed to read orders/supply-demand from {order_file}: {e}")
             
@@ -670,11 +709,17 @@ class SummaryReportGenerator:
                 try:
                     shipment_df = pd.read_csv(shipment_file)
                     if not shipment_df.empty:
-                        for _, row in shipment_df.iterrows():
-                            material = self._normalize_material_value(str(row['material']))
-                            location = self._normalize_location_value(str(row['location']))
-                            key = (material, location)
-                            shipment_dict[key] = shipment_dict.get(key, 0) + int(row['quantity'])
+                        tmp = shipment_df.assign(
+                            material=shipment_df['material'].astype(str).map(self._normalize_material_value),
+                            location=shipment_df['location'].astype(str).map(self._normalize_location_value),
+                            quantity=pd.to_numeric(shipment_df.get('quantity', 0), errors='coerce').fillna(0).astype(int)
+                        )
+                        shipment_dict = (
+                            tmp.groupby(['material', 'location'], dropna=False)['quantity']
+                            .sum()
+                            .astype(int)
+                            .to_dict()
+                        )
                 except Exception as e:
                     print(f"Warning: Failed to read {shipment_file}: {e}")
             
@@ -684,11 +729,18 @@ class SummaryReportGenerator:
                 try:
                     del_ship_df = pd.read_csv(del_ship_file)
                     if not del_ship_df.empty:
-                        for _, row in del_ship_df.iterrows():
-                            material = self._normalize_material_value(str(row['material']))
-                            location = self._normalize_location_value(str(row['sending']))
-                            key = (material, location)
-                            delivery_ship_dict[key] = delivery_ship_dict.get(key, 0) + int(row['quantity'])
+                        tmp = del_ship_df.assign(
+                            material=del_ship_df['material'].astype(str).map(self._normalize_material_value),
+                            sending=del_ship_df['sending'].astype(str).map(self._normalize_location_value),
+                            quantity=pd.to_numeric(del_ship_df.get('quantity', 0), errors='coerce').fillna(0).astype(int)
+                        )
+                        delivery_ship_dict = (
+                            tmp.groupby(['material', 'sending'], dropna=False)['quantity']
+                            .sum()
+                            .astype(int)
+                            .rename_axis(['material', 'location'])
+                            .to_dict()
+                        )
                 except Exception as e:
                     print(f"Warning: Failed to read {del_ship_file}: {e}")
             

@@ -1,0 +1,78 @@
+# -*- coding: utf-8 -*-
+"""
+标识符规范化模块
+
+提供物料编码和位置编码的标准化函数，确保数据一致性。
+"""
+import pandas as pd
+
+from .constants import IDENTIFIER_COLUMNS, LOCATION_COLUMNS
+
+
+def normalize_location(location_str) -> str:
+    """
+    规范化地点编码：补齐为4位数字字符串。
+
+    作用：统一 location/sending/receiving/sourcing 字段格式，避免匹配失败。
+
+    Args:
+        location_str: 地点编码，可以是字符串、数字或None
+
+    Returns:
+        str: 规范化后的4位地点编码字符串
+    """
+    if location_str is None or pd.isna(location_str):
+        return ""
+    try:
+        return str(int(location_str)).zfill(4)
+    except (ValueError, TypeError):
+        return str(location_str).zfill(4)
+
+
+def normalize_material(material_str) -> str:
+    """
+    规范化物料编码为字符串。
+
+    作用：统一 material 字段格式，避免数值/字符串混用导致的合并分组问题。
+
+    Args:
+        material_str: 物料编码，可以是字符串、数字或None
+
+    Returns:
+        str: 规范化后的物料编码字符串
+    """
+    if material_str is None or pd.isna(material_str):
+        return ""
+    return str(material_str)
+
+
+def normalize_identifiers(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    标识字段统一为字符串（并格式化地点字段）。
+
+    作用：确保配置与日志中的标识符可一致匹配。
+
+    Args:
+        df: 需要规范化的DataFrame
+
+    Returns:
+        pd.DataFrame: 规范化后的DataFrame
+    """
+    if df.empty:
+        return df
+
+    df = df.copy()
+    for col in IDENTIFIER_COLUMNS:
+        if col not in df.columns:
+            continue
+
+        df[col] = df[col].astype('string')
+
+        if col in LOCATION_COLUMNS:
+            df[col] = df[col].apply(normalize_location)
+        elif col == 'material':
+            df[col] = df[col].apply(normalize_material)
+        else:
+            df[col] = df[col].fillna('').astype(str)
+
+    return df

@@ -478,6 +478,11 @@ def write_run_data_to_db(
     """
     将运行输出数据写入数据库
     
+    优化流程：
+    1. 批量写入所有表数据（不创建索引）
+    2. 完成所有写入后，批量创建所有索引
+    3. 显著提升总体性能（避免写入期间的I/O竞争）
+    
     Args:
         run_output_dir: 运行输出目录
         db_host: 数据库主机
@@ -508,8 +513,13 @@ def write_run_data_to_db(
     writer = ModuleDataWriter(db)
     
     try:
+        # 阶段1：批量写入所有表数据（不创建索引）
         writer.write_all_modules(run_output_dir)
         writer.print_summary()
+        
+        # 阶段2：所有数据写入完成后，批量创建所有索引
+        db.build_all_pending_indexes()
+        
         return True
     except Exception as e:
         print(f"❌ 写入失败: {e}")

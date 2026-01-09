@@ -134,10 +134,10 @@ def _ensure_output_dir(config_path: Path, resume_mode: bool = False,
                       start_date: Optional[str] = None,
                       end_date: Optional[str] = None,
                       interactive: bool = True) -> Path:
-    """Create the output directory rooted by the config filename stem.
+    """Create the output directory rooted in centralized outputs/ folder.
 
     Structure:
-      <config_dir>/<config_stem>/
+      outputs/<config_stem>/
         └─ run_YYYYMMDD_HHMMSS/  (actual write target to avoid overwrites)
 
     Args:
@@ -150,10 +150,11 @@ def _ensure_output_dir(config_path: Path, resume_mode: bool = False,
 
     Returns the leaf path to be used as `output_base_dir`.
     """
-    cfg_dir = config_path.parent
     cfg_stem = config_path.stem
-
-    root_dir = cfg_dir / cfg_stem
+    project_root = Path.cwd()
+    
+    # Centralized output directory structure
+    root_dir = project_root / "outputs" / cfg_stem
     # Always ensure the top-level directory exists so its name matches the config
     root_dir.mkdir(parents=True, exist_ok=True)
 
@@ -277,7 +278,7 @@ def _run_with_database(ns: argparse.Namespace) -> int:
     # 创建本地日志目录（只保存txt日志）
     project_root = Path(__file__).parent.parent.parent
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    log_dir = project_root / "db_runs" / f"{config_name}_{ts}"
+    log_dir = project_root / "outputs" / f"db_{config_name}_{ts}"
     log_dir.mkdir(parents=True, exist_ok=True)
     print(f"📁 日志目录: {log_dir}")
     
@@ -697,9 +698,9 @@ def main(argv: list[str] | None = None) -> int:
     _ = load_configuration(str(cfg_path))  # noqa: F841
 
     # Get root directory and dates early for --list-runs
-    cfg_dir = cfg_path.parent
     cfg_stem = cfg_path.stem
-    root_dir = cfg_dir / cfg_stem
+    project_root = Path.cwd()
+    root_dir = project_root / "outputs" / cfg_stem
     root_dir.mkdir(parents=True, exist_ok=True)
     
     start_arg = ns["start_date"] if isinstance(ns, dict) else ns.start_date
@@ -910,5 +911,5 @@ if __name__ == "__main__":
 # | 配置来源       | --config test_files/BC_S5.xlsx | --config BC_S5 --use-db       |
 # | 输出位置       | 本地文件夹（xlsx/csv）          | PostgreSQL数据库               |
 # | 本地保留       | 完整数据表和日志                 | 仅txt日志文件                   |
-# | 日志目录       | test_files/BC_S5/run_xxx/      | db_runs/BC_S5_xxx/            |
+# | 日志目录       | outputs/BC_S5/run_xxx/        | outputs/db_BC_S5_xxx/         |
 # | 适用场景       | 开发调试、本地验证               | 生产环境、数据分析              |

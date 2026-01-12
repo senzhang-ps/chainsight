@@ -27,7 +27,7 @@ def _normalize_material(material_str) -> str:
     # Handle None and pandas NA
     if material_str is None or pd.isna(material_str):
         return ""
-    
+
     try:
         # 如果是数字（int或float），转换为整数字符串以移除多余的.0
         if isinstance(material_str, (int, float)) or str(material_str).replace('.', '').replace('-', '').isdigit():

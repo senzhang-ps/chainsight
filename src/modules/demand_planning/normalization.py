@@ -40,6 +40,9 @@ def normalize_location(location_str: Any) -> str:
 def normalize_material(material_str: Any) -> str:
     """规范化物料标识为字符串格式。
 
+    作用：统一 material 字段格式，与code_v0保持一致。
+    注意：直接转换为字符串，不做额外处理，以确保与code_v0输出一致。
+
     参数:
         material_str: 物料标识（可为任意类型）。
 

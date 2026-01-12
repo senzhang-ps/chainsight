@@ -36,16 +36,20 @@ class SummaryReportGenerator:
     
     @staticmethod
     def _normalize_material_value(material_str: str) -> str:
-        """标准化 material 值：移除.0后缀"""
+        """标准化 material 值：作为文本处理，仅移除误读的.0后缀"""
         if not material_str or material_str in ['nan', 'None', '']:
             return ""
+        
+        material_str = str(material_str).strip()
+        
         try:
-            # 如果是数字，移除.0后缀
-            if '.' in material_str and material_str.replace('.', '').replace('-', '').isdigit():
+            # 仅当是以 .0 结尾的纯数字字符串时，才移除 .0
+            # 这样可以保留 '00123' 这种带前导零的物料编码
+            if material_str.endswith('.0') and material_str[:-2].replace('.', '').replace('-', '').isdigit():
                 return str(int(float(material_str)))
-            return material_str.strip()
+            return material_str
         except:
-            return material_str.strip()
+            return material_str
     
     @staticmethod
     def _normalize_location_value(location_str: str) -> str:

@@ -75,6 +75,9 @@ def normalize_material(material_str: Union[str, int, float, None]) -> str:
     """
     将物料标识符规范化为字符串。
 
+    作用：统一 material 字段格式，与code_v0保持一致。
+    注意：直接转换为字符串，不做额外处理，以确保与code_v0输出一致。
+
     Args:
         material_str: 物料标识符
 

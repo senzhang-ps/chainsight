@@ -578,14 +578,16 @@ def _normalize_material(material_str) -> str:
     """标准化物料编码
 
     目的/逻辑：
-    - 将数值型/带小数的物料转换为无小数整数字符串；空/None/NAN 返回空串；其余去除首尾空格。
+    - 将数值型/带小数的物料转换为无小数整数字符串；空/None/NAN 返回空串；
+      其余去除首尾空格。
+    - 与code_v0保持一致的实现。
 
     输入：`material_str` 任意类型标识。
     输出：规范化的字符串物料编码。
     """
     if material_str is None or material_str == '' or str(material_str).lower() in ['nan', 'none', '<na>']:
         return ""
-    
+
     try:
         # 如果是数字（int或float），转换为整数字符串以移除多余的.0
         if isinstance(material_str, (int, float)) or str(material_str).replace('.', '').replace('-', '').isdigit():

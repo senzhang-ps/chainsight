@@ -33,7 +33,8 @@ def normalize_material(material_str) -> str:
     """
     规范化物料编码为字符串。
 
-    作用：统一 material 字段格式，避免数值/字符串混用导致的合并分组问题。
+    作用：统一 material 字段格式，与code_v0保持一致。
+    注意：直接转换为字符串，不做额外处理，以确保与code_v0输出一致。
 
     Args:
         material_str: 物料编码，可以是字符串、数字或None

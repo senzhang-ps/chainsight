@@ -143,6 +143,15 @@ def log_outputs(output_path: str, outputs: Dict[str, pd.DataFrame]) -> None:
         output_path: 输出文件路径
         outputs: 输出表字典
     """
+    # 定义各表的排序键，确保输出顺序一致性
+    sort_keys = {
+        'DeploymentPlan': ['date', 'material', 'sending', 'receiving', 'demand_element', 
+                          'planned_delivery_date', 'demand_qty'],
+        'UnfulfilledLog': ['date', 'material', 'location', 'demand_element'],
+        'StockOnHandLog': ['date', 'material', 'location'],
+        'Validation': ['No']
+    }
+    
     with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
         for sheet, df in outputs.items():
             if df.empty:
@@ -151,4 +160,9 @@ def log_outputs(output_path: str, outputs: Dict[str, pd.DataFrame]) -> None:
                 )
             else:
                 normalized_df = normalize_identifiers(df)
+                # 应用排序以确保输出顺序一致
+                if sheet in sort_keys:
+                    available_keys = [k for k in sort_keys[sheet] if k in normalized_df.columns]
+                    if available_keys:
+                        normalized_df = normalized_df.sort_values(available_keys).reset_index(drop=True)
                 normalized_df.to_excel(writer, sheet_name=sheet, index=False)

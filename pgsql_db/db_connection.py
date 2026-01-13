@@ -390,7 +390,7 @@ class DatabaseConnection:
                 'dps_location', 'line', 'truck', 'vehicle', 'vendor', 'customer',
                 'item', 'sku', 'node', 'plant', 'warehouse', 'dc',
                 'status', 'type', 'group', 'category', 'id', 'uid', 'uuid',
-                'file_date', 'run_id', 'issue', 'severity', 'impact',
+                'file_date', 'sim_date', 'run_id', 'issue', 'severity', 'impact',
                 'demand_element', 'demand_type', 'element'  # 需求元素标识符
             ]
             if any(name == col_name_lower or col_name_lower.endswith('_' + name) or col_name_lower.startswith(name + '_') for name in text_identifiers):
@@ -408,10 +408,11 @@ class DatabaseConnection:
             
             # 3. 日期类 -> 仅对明确的日期字段使用 DATE 类型
             # 注意：某些包含 "date" 的列可能存储 "ALL" 等特殊值，需要使用 TEXT
+            # file_date 和 sim_date 作为标识符使用 TEXT 类型（格式：YYYYMMDD）
             date_specific_names = [
                 'start_date', 'end_date', 'order_date', 'delivery_date', 
                 'ship_date', 'arrival_date', 'due_date', 'created_date',
-                'updated_date', 'forecast_date', 'plan_date', 'file_date'
+                'updated_date', 'forecast_date', 'plan_date'
             ]
             # 只有明确的日期字段才使用 DATE 类型，避免误判
             if any(name == col_name_lower or col_name_lower.endswith('_' + name) for name in date_specific_names):

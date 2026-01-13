@@ -1681,6 +1681,8 @@ def run_integrated_simulation(
                     print(f"✅ 已扣减 {len(m1_shipments_normalized)} 个shipment的库存")
                 
                 print(f"✅ Module1 完成 - 生成 {len(m1_result.get('orders_df', []))} 个订单, {len(m1_shipments)} 个发货")
+                if m1_result is not None:
+                    m1_result['simulation_date'] = current_date
                 all_results['module1'].append(m1_result)
             except Exception as e:
                 print(f"❌ Module1 失败: {e}")
@@ -1714,7 +1716,7 @@ def run_integrated_simulation(
                     print("📦M4当日未生成生产计划或缺少 available_date 列")
                 
                 print(f"✅ Module4 完成 - 生成生产计划: {len(m4_production)} 条记录")
-                all_results['module4'].append({'production_df': m4_production})
+                all_results['module4'].append({'production_df': m4_production, 'simulation_date': current_date})
             except Exception as e:
                 print(f"❌ Module4 失败: {e}")
                 m4_production = pd.DataFrame()  # 失败时使用空数据
@@ -1795,6 +1797,8 @@ def run_integrated_simulation(
                 else:
                     print(f"\n  ✅ Module5 完成 - 无返回结果")
                 
+                if m5_result is not None:
+                    m5_result['simulation_date'] = current_date
                 all_results['module5'].append(m5_result)
             except Exception as e:
                 print(f"  ❌ Module5 失败: {e}")
@@ -1830,6 +1834,8 @@ def run_integrated_simulation(
                     print(f"\n  ✅ Module6 完成 - 无交付计划")
                     m6_delivery_df = pd.DataFrame()
                 
+                if m6_result is not None:
+                    m6_result['simulation_date'] = current_date
                 all_results['module6'].append(m6_result)
             except KeyError as ke:
                 print(f"  ❌ Module6 失败: 缺少列 '{ke}' - {str(ke)}")
@@ -1858,6 +1864,8 @@ def run_integrated_simulation(
                         module1_result=m1_result  # 直接从内存传递Module1输出
                     )
                 print(f"  ✅ Module3 完成")
+                if m3_result is not None:
+                    m3_result['simulation_date'] = current_date
                 all_results['module3'].append(m3_result)
             except Exception as e:
                 print(f"  ❌ Module3 失败: {e}")
@@ -2143,6 +2151,8 @@ def run_integrated_simulation_from_dict(
                     print(f"✅ 已扣减 {len(m1_shipments_normalized)} 个shipment的库存")
                 
                 print(f"✅ Module1 完成 - 生成 {len(m1_result.get('orders_df', []))} 个订单, {len(m1_shipments)} 个发货")
+                if m1_result is not None:
+                    m1_result['simulation_date'] = current_date
                 all_results['module1'].append(m1_result)
             except Exception as e:
                 print(f"❌ Module1 失败: {e}")
@@ -2172,7 +2182,7 @@ def run_integrated_simulation_from_dict(
                     print(f"📦M4当日未生成生产计划或缺少 available_date 列")
                 
                 print(f"✅ Module4 完成 - 生成生产计划: {len(m4_production)} 条记录")
-                all_results['module4'].append({'production_df': m4_production})
+                all_results['module4'].append({'production_df': m4_production, 'simulation_date': current_date})
             except Exception as e:
                 print(f"❌ Module4 失败: {e}")
                 m4_production = pd.DataFrame()
@@ -2219,6 +2229,8 @@ def run_integrated_simulation_from_dict(
                             print(f"    ✅ 已更新 {len(m5_deployment_df)} 条部署计划到open deployment")
                 
                 print(f"\n  ✅ Module5 完成 - 生成 {len(valid_deployment) if 'valid_deployment' in dir() else 0} 条有效部署计划")
+                if m5_result is not None:
+                    m5_result['simulation_date'] = current_date
                 all_results['module5'].append(m5_result)
             except Exception as e:
                 print(f"❌ Module5 失败: {e}")
@@ -2245,6 +2257,8 @@ def run_integrated_simulation_from_dict(
                         print(f"    ✅ 已处理 {len(m6_delivery_normalized)} 条delivery计划")
                 
                 print(f"\n  ✅ Module6 完成 - 生成 {len(m6_delivery_df) if 'm6_delivery_df' in dir() else 0} 条交付计划")
+                if m6_result is not None:
+                    m6_result['simulation_date'] = current_date
                 all_results['module6'].append(m6_result)
             except Exception as e:
                 print(f"❌ Module6 失败: {e}")
@@ -2263,6 +2277,8 @@ def run_integrated_simulation_from_dict(
                     skip_file_output=True  # 数据库模式下跳过写入Excel
                 )
                 print(f"  ✅ Module3 完成")
+                if m3_result is not None:
+                    m3_result['simulation_date'] = current_date
                 all_results['module3'].append(m3_result)
             except Exception as e:
                 print(f"❌ Module3 失败: {e}")

@@ -83,7 +83,7 @@ def apply_grouped_moq_rv(
 
     adjusted_qtys = {}
 
-    for route_key, group in route_groups.items():
+    for route_key, group in sorted(route_groups.items()):
         total_qty = int(group['total_qty'] or 0)
         is_cross_node = group['is_cross_node']
         moq = int(group['moq'] or 0)

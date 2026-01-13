@@ -133,7 +133,7 @@ OUTPUT_TABLE_MAPPING = {
 rows = []
 
 # Config
-for sheet, table in CONFIG_TABLE_MAPPING.items():
+for sheet, table in sorted(CONFIG_TABLE_MAPPING.items()):
     rows.append({
         'Type': 'Input (Config)',
         'Module': 'Global/Input',
@@ -143,8 +143,8 @@ for sheet, table in CONFIG_TABLE_MAPPING.items():
     })
 
 # Output
-for module, mapping in OUTPUT_TABLE_MAPPING.items():
-    for key, table in mapping.items():
+for module, mapping in sorted(OUTPUT_TABLE_MAPPING.items()):
+    for key, table in sorted(mapping.items()):
         rows.append({
             'Type': 'Output',
             'Module': module.upper(),

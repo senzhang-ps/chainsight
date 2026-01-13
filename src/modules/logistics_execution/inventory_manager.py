@@ -57,7 +57,7 @@ def _extract_inventory_from_orchestrator(
     """
     physical_inventory = {}
     
-    for key, qty in orchestrator.unrestricted_inventory.items():
+    for key, qty in sorted(orchestrator.unrestricted_inventory.items()):
         material, location = key
         physical_inventory[key] = float(qty)
     
@@ -75,7 +75,7 @@ def _check_inventory_duplicates(
     """
     location_counts = {}
     
-    for key, qty in inventory.items():
+    for key, qty in sorted(inventory.items()):
         material, location = key
         location_key = f"{material}@{location}"
         
@@ -251,7 +251,7 @@ def get_inventory_summary(
     locations = set()
     materials = set()
     
-    for (material, location), qty in inventory.items():
+    for (material, location), qty in sorted(inventory.items()):
         materials.add(material)
         locations.add(location)
     

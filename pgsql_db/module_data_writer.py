@@ -31,6 +31,7 @@ class ModuleDataWriter:
         module_name: str,
         output_dir: str,
         run_id: str = None,
+        sim_date: str = None,
         if_exists: str = "append"
     ) -> Dict[str, int]:
         """
@@ -40,6 +41,7 @@ class ModuleDataWriter:
             module_name: 模块名称 (module1, module3, module4, module5, module6)
             output_dir: 模块输出目录
             run_id: 运行ID（用于区分不同运行）
+            sim_date: 仿真日期（格式：YYYYMMDD，如 20251006）
             if_exists: 如果表存在的处理方式
         
         Returns:
@@ -62,6 +64,7 @@ class ModuleDataWriter:
                     excel_file, 
                     module_name, 
                     run_id,
+                    sim_date,
                     if_exists
                 )
                 results[excel_file.name] = file_results
@@ -91,6 +94,13 @@ class ModuleDataWriter:
                     else:
                         df['file_date'] = file_date
                 
+                # 添加仿真日期列
+                if sim_date:
+                    if df.empty:
+                        df['sim_date'] = pd.Series(dtype='string')
+                    else:
+                        df['sim_date'] = sim_date
+                
                 if run_id:
                     if df.empty:
                         df['run_id'] = pd.Series(dtype='string')
@@ -115,12 +125,13 @@ class ModuleDataWriter:
         excel_path: Path,
         module_name: str,
         run_id: str = None,
+        sim_date: str = None,
         if_exists: str = "append"
     ) -> Dict[str, int]:
         """写入单个Excel文件的所有sheet
         
         文件名中的日期（如 Module1Output_20251006.xlsx）会被提取为 file_date 列，
-        而不是作为表名的一部分，这样相同结构的数据会追加到同一张表中。
+        sim_date 参数用于标识当前仿真日期。
         """
         import re
         results = {}
@@ -145,6 +156,10 @@ class ModuleDataWriter:
                 # 添加日期列（从文件名提取）
                 if file_date:
                     df['file_date'] = file_date
+                
+                # 添加仿真日期列（从参数传入）
+                if sim_date:
+                    df['sim_date'] = sim_date
                 
                 # 添加run_id列
                 if run_id:
@@ -236,6 +251,7 @@ class ModuleDataWriter:
         self,
         orchestrator_dir: str,
         run_id: str = None,
+        sim_date: str = None,
         if_exists: str = "append"
     ) -> Dict[str, int]:
         """
@@ -244,6 +260,7 @@ class ModuleDataWriter:
         Args:
             orchestrator_dir: Orchestrator输出目录
             run_id: 运行ID
+            sim_date: 仿真日期（格式：YYYYMMDD）
             if_exists: 如果表存在的处理方式
         
         Returns:
@@ -289,10 +306,14 @@ class ModuleDataWriter:
                         
                         if df.empty:
                             df['file_date'] = pd.Series(dtype='string')
+                            df['sim_date'] = pd.Series(dtype='string')
                             if run_id:
                                 df['run_id'] = pd.Series(dtype='string')
                         else:
                             df['file_date'] = date_part
+                            # 对于 Orchestrator 数据，文件名中的日期就是仿真日期
+                            # 如果没有传入 sim_date 参数，使用文件名中的日期
+                            df['sim_date'] = sim_date if sim_date else date_part
                             if run_id:
                                 df['run_id'] = run_id
                         dfs.append(df)
@@ -315,6 +336,7 @@ class ModuleDataWriter:
         self,
         all_results: Dict[str, Any],
         run_id: str = None,
+        sim_date: str = None,
         if_exists: str = "append"
     ) -> Dict[str, int]:
         """
@@ -332,6 +354,7 @@ class ModuleDataWriter:
                     'module6': [{'delivery_plan': df, 'truck_usage': df, ...}, ...]
                 }
             run_id: 运行ID
+            sim_date: 仿真日期（格式：YYYYMMDD）
             if_exists: 如果表存在的处理方式
         
         Returns:
@@ -393,9 +416,26 @@ class ModuleDataWriter:
                 if not isinstance(day_result, dict):
                     continue
                 
+                # 提取当天的仿真日期
+                day_sim_date = None
+                if 'simulation_date' in day_result:
+                    sim_date_obj = day_result['simulation_date']
+                    if hasattr(sim_date_obj, 'strftime'):
+                        day_sim_date = sim_date_obj.strftime('%Y%m%d')
+                
                 for df_key, table_name in df_mapping.items():
                     df = day_result.get(df_key)
                     if df is not None and isinstance(df, pd.DataFrame):
+                        # 为每一天的数据添加 sim_date（包括空 DataFrame）
+                        df = df.copy()  # 避免修改原始数据
+                        if day_sim_date:
+                            if df.empty:
+                                df['sim_date'] = pd.Series(dtype='string')
+                            else:
+                                df['sim_date'] = day_sim_date
+                        else:
+                            # 即使没有日期，也要添加空的 sim_date 列
+                            df['sim_date'] = pd.Series(dtype='string') if df.empty else None
                         table_data[table_name].append(df)
             
             # 写入每个表
@@ -405,6 +445,10 @@ class ModuleDataWriter:
                 
                 # 合并所有天的数据
                 combined_df = pd.concat(dfs, ignore_index=True)
+                
+                # 确保 sim_date 列存在（即使是空表）
+                if 'sim_date' not in combined_df.columns:
+                    combined_df['sim_date'] = pd.Series(dtype='string')
                 
                 # 添加run_id列
                 if run_id:

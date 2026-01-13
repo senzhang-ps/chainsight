@@ -638,7 +638,7 @@ def load_integrated_config(
     _process_date_fields(config)
 
     # 9. 最终格式化
-    for sheet_name, df in config.items():
+    for sheet_name, df in sorted(config.items()):
         if isinstance(df, pd.DataFrame) and not df.empty:
             config[sheet_name] = normalize_identifiers(df)
 

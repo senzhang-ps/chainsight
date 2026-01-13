@@ -265,7 +265,7 @@ class Orchestrator:
         date_obj = pd.to_datetime(date).normalize()
         
         records = []
-        for (material, location), quantity in self.unrestricted_inventory.items():
+        for (material, location), quantity in sorted(self.unrestricted_inventory.items()):
             records.append({
                 'date': date_obj,
                 'material': _normalize_material(material),  # 添加格式化
@@ -287,7 +287,7 @@ class Orchestrator:
             Dict: {(material, location): quantity} with normalized keys
         """
         normalized_inventory = {}
-        for (material, location), quantity in self.unrestricted_inventory.items():
+        for (material, location), quantity in sorted(self.unrestricted_inventory.items()):
             normalized_key = (_normalize_material(material), _normalize_location(location))
             normalized_inventory[normalized_key] = quantity
         return normalized_inventory
@@ -307,7 +307,7 @@ class Orchestrator:
         date_obj = pd.to_datetime(date).normalize()
         
         records = []
-        for uid, transit_record in self.in_transit.items():
+        for uid, transit_record in sorted(self.in_transit.items()):
             records.append({
                 'transit_uid': uid,  # Add UID for restoration
                 'date': date_obj,
@@ -361,7 +361,7 @@ class Orchestrator:
         返回列: [material, sending, receiving, planned_deployment_date, deployed_qty, demand_element, ori_deployment_uid]
         """
         records = []
-        for uid, deployment_record in self.open_deployment.items():
+        for uid, deployment_record in sorted(self.open_deployment.items()):
             records.append({
                 'material': _normalize_material(deployment_record['material']),
                 'sending': _normalize_sending(deployment_record['sending']),
@@ -924,7 +924,7 @@ class Orchestrator:
         date_obj = pd.to_datetime(date).normalize()
         
         completed_transits = []
-        for transit_uid, transit_record in self.in_transit.items():
+        for transit_uid, transit_record in sorted(self.in_transit.items()):
             if pd.to_datetime(transit_record['actual_delivery_date']).normalize() == date_obj:
                 # Add to receiving location inventory
                 receiving_key = (transit_record['material'], transit_record['receiving'])
@@ -1028,7 +1028,7 @@ class Orchestrator:
         # 注意：遍历时不要直接修改字典，先收集再删除
         to_delete = []
 
-        for uid, rec in self.open_deployment.items():
+        for uid, rec in sorted(self.open_deployment.items()):
             pdd = pd.to_datetime(rec.get('planned_deployment_date')).normalize()
             remaining_qty = int(rec.get('deployed_qty', 0))
             # 只清理：计划日早于阈值（严格小于）
@@ -1220,7 +1220,7 @@ class Orchestrator:
             beginning_inventory = self.unrestricted_inventory
         
         records = []
-        for (material, location), quantity in beginning_inventory.items():
+        for (material, location), quantity in sorted(beginning_inventory.items()):
             records.append({
                 'date': date_obj,
                 'material': _normalize_material(material),  # 添加格式化

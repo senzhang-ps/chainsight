@@ -875,6 +875,9 @@ def run_module4_integrated(
         # 去重问题
         issues = module4.dedup_issues(issues)
         
+        # 转换issues为DataFrame
+        issues_df = pd.DataFrame(issues) if issues else pd.DataFrame()
+        
         # 生成输出文件（仅在非数据库模式下写入）
         if not skip_file_output:
             base_output_file = os.path.join(output_dir, "Module4Output.xlsx")
@@ -884,25 +887,36 @@ def run_module4_integrated(
             )
             print(f"Module4 daily output generated: {daily_output_path}")
         
-        # 返回生产计划数据（只返回当日可用的生产）
-        if not plan_log.empty and 'available_date' in plan_log.columns:
-            plan_log['available_date'] = pd.to_datetime(plan_log['available_date'])
-            current_production = plan_log[plan_log['available_date'] >= simulation_date.normalize()]
-            
-            # 确保返回的数据标识符已标准化，与orchestrator期望格式一致
-            if not current_production.empty:
-                current_production = _normalize_identifiers(current_production)
-                
-            return current_production
-        else:
-            return pd.DataFrame()
+        # 返回完整的Module4结果（包含所有输出表）
+        # production_df 用于数据库写入，应包含完整的生产计划
+        production_df = pd.DataFrame()
+        if not plan_log.empty:
+            # 确保 available_date 是日期类型
+            if 'available_date' in plan_log.columns:
+                plan_log['available_date'] = pd.to_datetime(plan_log['available_date'])
+            # 标准化标识符后作为完整的生产计划
+            production_df = _normalize_identifiers(plan_log.copy())
+        
+        # 返回完整结构供数据库写入
+        return {
+            'production_df': production_df,
+            'exceed_log': exceed_log if isinstance(exceed_log, pd.DataFrame) else pd.DataFrame(exceed_log) if exceed_log else pd.DataFrame(),
+            'issues_df': issues_df,
+            'changeover_log': changeover_log if isinstance(changeover_log, pd.DataFrame) else pd.DataFrame(changeover_log) if changeover_log else pd.DataFrame(),
+        }
         
     except Exception as e:
         import traceback
         print(f'[ERROR] Module4 integrated execution failed for {simulation_date.strftime("%Y-%m-%d")}: {str(e)}')
         print("Full traceback:")
         traceback.print_exc()
-        return pd.DataFrame()
+        # 返回空结构
+        return {
+            'production_df': pd.DataFrame(),
+            'exceed_log': pd.DataFrame(),
+            'issues_df': pd.DataFrame(),
+            'changeover_log': pd.DataFrame(),
+        }
 
 # ========== Module4 集成辅助函数（清理后） ==========
 
@@ -1693,13 +1707,16 @@ def run_integrated_simulation(
             print("2️⃣ 运行 Module4 - 生产计划")
             try:
                 # 使用集成模式直接调用 Module4 (改进的解决方案)
-                m4_production = run_module4_integrated(
+                m4_result = run_module4_integrated(
                     config_dict=config_dict,
                     module3_output_dir=str(module_outputs['module3']),
                     simulation_date=current_date,
                     simulation_start=pd.to_datetime(start_date),
                     output_dir=str(module_outputs['module4'])
                 )
+                
+                # 从返回结果中获取 production_df
+                m4_production = m4_result.get('production_df', pd.DataFrame())
                 
                 # 🔄 简化调用：仅持久化“未来 available_date”的生产计划，避免重复当日GR
                 if not m4_production.empty and 'available_date' in m4_production.columns:
@@ -1716,7 +1733,9 @@ def run_integrated_simulation(
                     print("📦M4当日未生成生产计划或缺少 available_date 列")
                 
                 print(f"✅ Module4 完成 - 生成生产计划: {len(m4_production)} 条记录")
-                all_results['module4'].append({'production_df': m4_production, 'simulation_date': current_date})
+                # 存储完整的Module4结果（包含所有输出表）
+                m4_result['simulation_date'] = current_date
+                all_results['module4'].append(m4_result)
             except Exception as e:
                 print(f"❌ Module4 失败: {e}")
                 m4_production = pd.DataFrame()  # 失败时使用空数据
@@ -2161,7 +2180,7 @@ def run_integrated_simulation_from_dict(
             # ========== M4: 生产计划 ==========
             print("2️⃣ 运行 Module4 - 生产计划")
             try:
-                m4_production = run_module4_integrated(
+                m4_result = run_module4_integrated(
                     config_dict=config_dict,
                     module3_output_dir=str(module_outputs['module3']),
                     simulation_date=current_date,
@@ -2169,6 +2188,9 @@ def run_integrated_simulation_from_dict(
                     output_dir=str(module_outputs['module4']),
                     skip_file_output=True  # 数据库模式下跳过写入Excel
                 )
+                
+                # 从返回结果中获取 production_df
+                m4_production = m4_result.get('production_df', pd.DataFrame())
                 
                 if not m4_production.empty and 'available_date' in m4_production.columns:
                     m4_production['available_date'] = pd.to_datetime(m4_production['available_date'])
@@ -2182,7 +2204,9 @@ def run_integrated_simulation_from_dict(
                     print(f"📦M4当日未生成生产计划或缺少 available_date 列")
                 
                 print(f"✅ Module4 完成 - 生成生产计划: {len(m4_production)} 条记录")
-                all_results['module4'].append({'production_df': m4_production, 'simulation_date': current_date})
+                # 存储完整的Module4结果（包含所有输出表）
+                m4_result['simulation_date'] = current_date
+                all_results['module4'].append(m4_result)
             except Exception as e:
                 print(f"❌ Module4 失败: {e}")
                 m4_production = pd.DataFrame()
@@ -2274,7 +2298,7 @@ def run_integrated_simulation_from_dict(
                     start_date=current_date.strftime('%Y-%m-%d'),
                     end_date=current_date.strftime('%Y-%m-%d'),
                     output_dir=str(module_outputs['module3']),
-                    skip_file_output=True  # 数据库模式下跳过写入Excel
+                    skip_file_output=False  # Module3必须写入文件，供下一天Module4读取
                 )
                 print(f"  ✅ Module3 完成")
                 if m3_result is not None:

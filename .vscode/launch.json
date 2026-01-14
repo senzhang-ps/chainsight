@@ -1,31 +1,53 @@
 {
     "version": "0.2.0",
     "configurations": [
+        
         {
             "name": "Run BC_S5 Simulation (2025-10-06)",
-            "type": "debugpy",
+            "type": "python",
             "request": "launch",
             "program": "${workspaceFolder}/run.py",
+            "python": "${workspaceFolder}/.venv/Scripts/python.exe",
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            },
+            "subProcess": true,
             "console": "integratedTerminal",
             "args": [
-                "--config", "test_files/DRP-RV Simulation-RV 6CS for Mar 1 SKU.xlsx",
-                "--start-date", "2026-03-02",
-                "--end-date", "2026-03-03"
+                "--config", "test_files/BC_S5.xlsx",
+                "--start-date", "2025-10-06",
+                "--end-date", "2025-10-10"
             ],
-            "justMyCode": true
+            "justMyCode": false
+        },
+        {
+            "name": "Python: Debug Current File",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "python": "${workspaceFolder}/.venv/Scripts/python.exe",
+            "console": "integratedTerminal",
+            "justMyCode": false
         },
         {
             "name": "Resume BC_S5 Simulation",
-            "type": "debugpy",
+            "type": "python",
             "request": "launch",
             "program": "${workspaceFolder}/run.py",
+            "python": "${workspaceFolder}/.venv/Scripts/python.exe",
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            },
+            "subProcess": true,
             "console": "integratedTerminal",
             "args": [
-                "--config", "test_files/DRP-RV Simulation-RV 6CS for Mar 1 SKU.xlsx",
-                "--end-date", "2026-03-03",
+                "--config", "test_files/BC_S5.xlsx",
+                "--end-date", "2025-10-10",
                 "--resume"
             ],
-            "justMyCode": true
+            "justMyCode": false
         }
     ]
 }

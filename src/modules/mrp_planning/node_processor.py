@@ -151,25 +151,30 @@ class NodeProcessor:
         fc_gap: float,
         ss_gap: float
     ) -> list:
-        """构建记录列表。"""
+        """构建记录列表。
+        
+        修复说明：
+        - 旧逻辑：只在gap > 0时创建记录，导致某些demand_element类型被完全过滤
+        - 新逻辑：总是创建所有三种demand_element的记录，即使gap为0
+        - 原因：保证数据完整性，避免在数据库中丢失某些需求类型
+        """
         records = []
         req_date = self.sim_date + pd.Timedelta(days=1)
 
-        if ao_gap > 0:
-            records.append(self._make_record(
-                material, location, req_date, -ao_gap,
-                DEMAND_ELEMENT_AO, horizon
-            ))
-        if fc_gap > 0:
-            records.append(self._make_record(
-                material, location, req_date, -fc_gap,
-                DEMAND_ELEMENT_FORECAST, horizon
-            ))
-        if ss_gap > 0:
-            records.append(self._make_record(
-                material, location, req_date, -ss_gap,
-                DEMAND_ELEMENT_SAFETY, horizon
-            ))
+        # 修复：总是创建三种demand_element的记录，无论gap是否为0
+        # 这样可以保留完整的需求构成，便于后续分析和审计
+        records.append(self._make_record(
+            material, location, req_date, -ao_gap,
+            DEMAND_ELEMENT_AO, horizon
+        ))
+        records.append(self._make_record(
+            material, location, req_date, -fc_gap,
+            DEMAND_ELEMENT_FORECAST, horizon
+        ))
+        records.append(self._make_record(
+            material, location, req_date, -ss_gap,
+            DEMAND_ELEMENT_SAFETY, horizon
+        ))
 
         return records
 

@@ -142,16 +142,14 @@ class ModuleDataWriter:
         date_match = re.search(r'_(\d{8})(?:\.xlsx)?$', excel_path.stem)
         file_date = date_match.group(1) if date_match else None
         
-        # 构建表名前缀（去除日期部分）
-        stem_without_date = re.sub(r'_\d{8}$', '', excel_path.stem)
-        file_prefix = f"{module_name}_{self._clean_name(stem_without_date)}"
-        
+        # 使用简化的表名格式: {module_name}_output_{sheet_name}
+        # 这样与内存模式的表名保持一致
         for sheet_name in xl.sheet_names:
             try:
                 df = xl.parse(sheet_name)
                 
-                # 构建表名（不包含日期）
-                table_name = f"{file_prefix}_{self._clean_name(sheet_name)}"
+                # 构建表名（简化格式，与内存模式一致）
+                table_name = f"{module_name}_output_{self._clean_name(sheet_name)}"
                 
                 # 添加日期列（从文件名提取）
                 if file_date:
@@ -375,6 +373,7 @@ class ModuleDataWriter:
                 'shipment_df': 'module1_output_shipmentlog',
                 'cut_df': 'module1_output_cutlog',
                 'supply_demand_df': 'module1_output_supplydemandlog',
+                'summary_df': 'module1_output_summary',  # 添加Summary映射
             },
             'module3': {
                 'net_demand_df': 'module3_output_netdemand',
@@ -383,21 +382,21 @@ class ModuleDataWriter:
                 'production_df': 'module4_output_productionplan',
                 'exceed_log': 'module4_output_capacityexceed',
                 'issues_df': 'module4_output_validation',
-                'changeover_log': 'module4_output_changeover',
+                'changeover_log': 'module4_output_changeoverlog',
             },
             'module5': {
                 'deployment_plan': 'module5_output_deploymentplan',
-                'stock_on_hand_log': 'module5_output_stockonhandlog',
                 'unfulfilled_log': 'module5_output_unfulfilledlog',
+                'stock_on_hand_log': 'module5_output_stockonhandlog',
                 'validation_log': 'module5_output_validation',
             },
             'module6': {
                 'delivery_plan': 'module6_output_deliveryplan',
-                'truck_usage': 'module6_output_truckusagelog',
                 'vehicle_log': 'module6_output_vehiclelog',
+                'truck_usage': 'module6_output_truckusagelog',
+                'unsatisfied_log': 'module6_output_unsatisfiedmdqlog',
                 'validation_log': 'module6_output_validationlog',
-                'unsatisfied_log': 'module6_output_unsatisfiedlog',
-                'bypass_log': 'module6_output_bypasslog',
+                'bypass_log': 'module6_output_bypassrulehitlog',
             },
         }
         

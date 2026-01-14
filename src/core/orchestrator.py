@@ -691,6 +691,13 @@ class Orchestrator:
         # if len(deployment_df) > 0:
         #     print(f"    📈 部署计划deployed_qty统计: {deployment_df['deployed_qty'].describe()}")
         
+        # ✅ 确定性排序：确保 UID 生成顺序一致，保证结果可复现
+        if not deployment_df.empty:
+            deployment_df = deployment_df.sort_values(
+                by=['material', 'sending', 'receiving', 'planned_deployment_date', 'demand_element'],
+                ascending=True
+            ).reset_index(drop=True)
+        
         # Add new deployment plans to open deployment
         # Performance optimization: Use itertuples instead of iterrows
         for row in deployment_df.itertuples():

@@ -47,6 +47,67 @@ from .push_allocation import push_softpush_allocation
 from .validation import log_outputs, validate_config_before_run
 
 
+def _validate_deployment_shipment_constraint(
+    deployment_plan_df: pd.DataFrame,
+    config: Dict,
+    orchestrator: Optional[object],
+    sim_date: pd.Timestamp,
+    validation_log: List[Dict]
+) -> None:
+    """
+    验证部署计划约束：deployed_qty 不超过 shipment_qty。
+    
+    Args:
+        deployment_plan_df: 部署计划 DataFrame
+        config: 配置字典
+        orchestrator: Orchestrator 实例
+        sim_date: 仿真日期
+        validation_log: 验证日志
+    """
+    if deployment_plan_df.empty:
+        return
+    
+    # 计算各地点的部署量
+    deployed_qty_by_location = deployment_plan_df.groupby('sending')['deployed_qty'].sum()
+    total_deployed_qty = deployed_qty_by_location.sum()
+    
+    # 计算各地点的订单（shipment）量
+    shipment_log = config.get('ShipmentLog', pd.DataFrame())
+    if shipment_log.empty:
+        return
+    
+    # 过滤当日shipment
+    shipment_log['date'] = pd.to_datetime(shipment_log['date'])
+    today_shipment = shipment_log[shipment_log['date'] == sim_date]
+    
+    if today_shipment.empty:
+        return
+    
+    shipment_qty_by_location = today_shipment.groupby('location')['quantity'].sum()
+    total_shipment_qty = shipment_qty_by_location.sum()
+    
+    # 对比
+    if total_deployed_qty > total_shipment_qty * 1.01:  # 允许1%的浮点数误差
+        print(f"\n⚠️  [Module5] 约束警告: 部署量 > 订单量")
+        print(f"    订单量: {total_shipment_qty:.0f}")
+        print(f"    部署量: {total_deployed_qty:.0f}")
+        print(f"    超出: {total_deployed_qty - total_shipment_qty:.0f}")
+        print(f"    可能原因:")
+        print(f"    1. MOQ/RV 调整导致部署量增加")
+        print(f"    2. Push/SoftPush 分配产生了额外的部署")
+        print(f"    3. 订单去重不当导致重复处理")
+        
+        validation_log.append({
+            'sheet': 'Module5_Constraint',
+            'row': '',
+            'issue': f'Deployment quantity ({total_deployed_qty:.0f}) exceeds shipment quantity ({total_shipment_qty:.0f})',
+            'severity': 'WARNING',
+            'impact': f'Constraint Check - {total_deployed_qty - total_shipment_qty:.0f} units over',
+            'shipment_qty': total_shipment_qty,
+            'deployed_qty': total_deployed_qty
+        })
+
+
 def _initialize_soh_dict(
     config: dict,
     inventory_log: pd.DataFrame,
@@ -359,6 +420,15 @@ def _process_gaps_and_create_plans(
     )
 
     df_gap_pos = df_gap[df_gap['gap_qty'] > 0]
+    
+    # 🔧 修复：确保迭代顺序稳定，避免UnfulfilledLog和DeploymentPlan出现顺序差异
+    if not df_gap_pos.empty:
+        sort_cols = ['plan_deploy_date', 'receiving', 'demand_element']
+        # 只对存在的列排序
+        sort_cols = [c for c in sort_cols if c in df_gap_pos.columns]
+        if sort_cols:
+            df_gap_pos = df_gap_pos.sort_values(by=sort_cols).reset_index(drop=True)
+    
     up_loc = get_upstream(
         loc, mat, network, sim_date,
         active_network_cache=active_network_cache
@@ -688,10 +758,26 @@ def main(
     unfulfilled_rows = []
     stock_on_hand_log = []
     up_gap_buffer = {}
+    
+    # 构建 shipment 索引用于约束检查
+    shipment_log_df = config.get('ShipmentLog', pd.DataFrame())
+    shipment_qty_index = {}  # (material, location, date) -> quantity
+    if not shipment_log_df.empty:
+        shipment_log_df = shipment_log_df.copy()
+        shipment_log_df['date'] = pd.to_datetime(shipment_log_df['date'])
+        for _, row in shipment_log_df.iterrows():
+            key = (str(row['material']), str(row['location']), row['date'])
+            shipment_qty_index[key] = shipment_qty_index.get(key, 0) + int(row.get('quantity', 0))
 
     for sim_date in sim_dates:
         day_start = time.perf_counter()
         beginning_inventory = soh_dict.copy()
+        
+        # 计算当日 shipment 总量上限（用于约束部署量不超过订单量）
+        today_shipment_qty_total = sum(
+            qty for (mat, loc, dt), qty in shipment_qty_index.items()
+            if dt == sim_date
+        )
 
         # 构建生产字典
         today_production_gr, future_production = build_production_dicts(
@@ -802,8 +888,16 @@ def main(
                 for d in demand_rows:
                     d['planned_qty'] = d['demand_qty']
 
-                # 分组MOQ/RV
-                adjusted_qtys = apply_grouped_moq_rv(demand_rows, loc)
+                # 获取当前(material, location)的订单量上限
+                shipment_qty_limit = shipment_qty_index.get(
+                    (str(mat), str(loc), sim_date), None
+                )
+                
+                # 分组MOQ/RV（传入订单量上限约束）
+                adjusted_qtys = apply_grouped_moq_rv(
+                    demand_rows, loc, 
+                    shipment_qty_limit=shipment_qty_limit
+                )
 
                 # 优先级分配
                 current_stock = apply_priority_allocation_vectorized(
@@ -871,6 +965,19 @@ def main(
         deployment_plan_rows, receiving_space, sim_date, demand_priority_map
     )
     unfulfilled_all = pd.DataFrame(unfulfilled_rows + unfulfilled_space)
+    
+    # 🔧 修复：最终排序确保UnfulfilledLog顺序稳定
+    if not unfulfilled_all.empty:
+        sort_cols = ['date', 'sending', 'receiving', 'demand_element']
+        sort_cols = [c for c in sort_cols if c in unfulfilled_all.columns]
+        if sort_cols:
+            unfulfilled_all = unfulfilled_all.sort_values(by=sort_cols).reset_index(drop=True)
+
+    # 🔧 验证约束：deployed_qty 不超过 shipment_qty
+    _validate_deployment_shipment_constraint(
+        deployment_plan_rows_df, config, orchestrator, 
+        actual_sim_start, validation_log
+    )
 
     outputs = {
         'DeploymentPlan': deployment_plan_rows_df,

@@ -78,6 +78,7 @@ OUTPUT_TABLE_MAPPING = {
         "shipment_df": "module1_output_shipmentlog",
         "cut_df": "module1_output_cutlog",
         "supply_demand_df": "module1_output_supplydemandlog",
+        "summary_df": "module1_output_summary",
     },
     
     # Module3 输出
@@ -90,25 +91,25 @@ OUTPUT_TABLE_MAPPING = {
         "production_df": "module4_output_productionplan",
         "exceed_log": "module4_output_capacityexceed",
         "issues_df": "module4_output_validation",
-        "changeover_log": "module4_output_changeover",
+        "changeover_log": "module4_output_changeoverlog",
     },
     
     # Module5 输出
     "module5": {
         "deployment_plan": "module5_output_deploymentplan",
-        "stock_on_hand_log": "module5_output_stockonhandlog",
         "unfulfilled_log": "module5_output_unfulfilledlog",
+        "stock_on_hand_log": "module5_output_stockonhandlog",
         "validation_log": "module5_output_validation",
     },
     
     # Module6 输出
     "module6": {
         "delivery_plan": "module6_output_deliveryplan",
-        "truck_usage": "module6_output_truckusagelog",
         "vehicle_log": "module6_output_vehiclelog",
+        "truck_usage": "module6_output_truckusagelog",
+        "unsatisfied_log": "module6_output_unsatisfiedmdqlog",
         "validation_log": "module6_output_validationlog",
-        "unsatisfied_log": "module6_output_unsatisfiedlog",
-        "bypass_log": "module6_output_bypasslog",
+        "bypass_log": "module6_output_bypassrulehitlog",
     },
     
     # Orchestrator 输出

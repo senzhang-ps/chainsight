@@ -2159,7 +2159,7 @@ def run_integrated_simulation_from_dict(
                     simulation_date=current_date,
                     output_dir=str(module_outputs['module1']),
                     orchestrator=orch,
-                    skip_file_output=True  # 数据库模式下跳过写入Excel
+                    skip_file_output=False  # 保持文件输出以确保数据一致性
                 )
                 m1_shipments = m1_result.get('shipment_df', pd.DataFrame())
                 
@@ -2186,7 +2186,7 @@ def run_integrated_simulation_from_dict(
                     simulation_date=current_date,
                     simulation_start=pd.to_datetime(start_date),
                     output_dir=str(module_outputs['module4']),
-                    skip_file_output=True  # 数据库模式下跳过写入Excel
+                    skip_file_output=False  # 保持文件输出以确保数据一致性
                 )
                 
                 # 从返回结果中获取 production_df
@@ -2216,12 +2216,12 @@ def run_integrated_simulation_from_dict(
             try:
                 m5_result = module5.main(
                     config_dict=config_dict,
-                    module1_output_dir=None,  # 数据库模式下不依赖M1输出文件
+                    module1_output_dir=str(module_outputs['module1']),  # 使用文件以保证数据一致性
                     module4_output_path=None,  # 数据库模式下不依赖M4输出文件
                     orchestrator=orch,
                     current_date=current_date.strftime('%Y-%m-%d'),
-                    output_path=None,  # 数据库模式下不写入输出文件
-                    skip_file_output=True,  # 数据库模式下跳过写入Excel
+                    output_path=str(module_outputs['module5'] / f"Module5Output_{current_date.strftime('%Y%m%d')}.xlsx"),  # 完整文件路径
+                    skip_file_output=False,  # 保持文件输出以确保数据一致性
                     module1_result=m1_result  # 直接传递Module1内存数据
                 )
                 
@@ -2270,7 +2270,7 @@ def run_integrated_simulation_from_dict(
                     output_dir=str(module_outputs['module6']),
                     max_wait_days=30,
                     random_seed=config_dict.get('M6_RandomSeed', 42),
-                    skip_file_output=True  # 数据库模式下跳过写入Excel
+                    skip_file_output=False  # 保持文件输出以确保数据一致性
                 )
                 
                 if m6_result and 'delivery_plan' in m6_result:

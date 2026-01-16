@@ -863,8 +863,8 @@ def main(
             for k, v in node_demands_map.items():
                 global_node_demands_map[k] = v
 
-            # 处理每个节点
-            for mat, loc in all_pairs:
+            # 处理每个节点 - 使用sorted()确保确定性迭代顺序
+            for mat, loc in sorted(all_pairs):
                 node_key = (mat, loc)
                 current_stock = dynamic_soh.get(node_key, 0)
 

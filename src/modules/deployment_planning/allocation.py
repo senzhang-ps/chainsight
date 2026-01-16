@@ -25,7 +25,7 @@ def apply_moq_rv(
         moq: 最小订货量
         rv: 重订量
         is_cross_node: 是否跨节点
-        max_qty: 最大允许数量（用于约束不超过订单量）
+        max_qty: 最大允许数量（保留参数兼容性但不使用，与code_v0一致）
 
     Returns:
         int: 调整后的数量
@@ -35,18 +35,12 @@ def apply_moq_rv(
 
     # 自循环调运不应用MOQ/RV约束
     if not is_cross_node:
-        result = qty
+        return qty
+    
     # 跨节点调运应用MOQ/RV约束
-    elif qty < moq:
-        result = moq
-    else:
-        result = int(np.ceil(qty / rv)) * rv
-    
-    # 应用最大数量约束：确保不超过订单量
-    if max_qty is not None and result > max_qty:
-        result = max_qty
-    
-    return result
+    if qty < moq:
+        return moq
+    return int(np.ceil(qty / rv)) * rv
 
 
 def apply_grouped_moq_rv(
@@ -61,12 +55,12 @@ def apply_grouped_moq_rv(
     仅跨节点（sending != receiving）应用MOQ/RV，自循环不应用。
     组内数量回分使用"最大余数法"。
     
-    重要：调整后的总量不会超过 shipment_qty_limit（如果指定）。
+    注：shipment_qty_limit参数保留接口兼容性但不使用，与code_v0一致。
 
     Args:
         demand_rows: 需求行列表
         location: 当前位置
-        shipment_qty_limit: 订单量上限，用于约束部署量不超过订单量
+        shipment_qty_limit: 保留参数兼容性但不使用
 
     Returns:
         dict: 索引 -> 调整后数量
@@ -101,10 +95,9 @@ def apply_grouped_moq_rv(
         moq = int(group['moq'] or 0)
         rv = int(group['rv'] or 0)
 
-        # 组合后的总量应用MOQ/RV
+        # 组合后的总量应用MOQ/RV（不传max_qty约束，与code_v0一致）
         adjusted_total = apply_moq_rv(
-            total_qty, moq, rv, is_cross_node=is_cross_node,
-            max_qty=shipment_qty_limit
+            total_qty, moq, rv, is_cross_node=is_cross_node
         )
 
         # 组内"最大余数法"保和回分
@@ -494,9 +487,9 @@ def apply_receiving_space_quota(
         g['quota'] = quota
         return g
 
-    # 分组处理 - 🔧 修复：sort=True确保分组顺序稳定
+    # 分组处理（与code_v0一致，使用sort=False）
     allocated = (
-        df_cross.groupby(['receiving', 'date'], sort=True, group_keys=False)
+        df_cross.groupby(['receiving', 'date'], sort=False, group_keys=False)
         .apply(_alloc_group)
     )
 
@@ -509,12 +502,6 @@ def apply_receiving_space_quota(
         allocated['deployed_qty_invCon'] > allocated['deployed_qty']
     ]
     if not gaps.empty:
-        # 🔧 修复：确保迭代顺序稳定
-        sort_cols = ['date', 'sending', 'receiving', 'demand_element']
-        sort_cols = [c for c in sort_cols if c in gaps.columns]
-        if sort_cols:
-            gaps = gaps.sort_values(by=sort_cols).reset_index(drop=True)
-        
         unfulfilled = [
             {
                 'date': row.date,

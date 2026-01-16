@@ -302,20 +302,12 @@ def push_softpush_allocation(
         if qty > 0:
             allocated_inventory[key] = allocated_inventory.get(key, 0) + qty
 
-    # 收集需要处理的组合（使用列表保持顺序稳定）
-    group_keys_set = set()
-    group_keys = []
-    for r in deployment_plan_rows:
-        mat = r.get('material')
-        snd = r.get('sending')
-        if mat and snd:
-            key = (mat, snd)
-            if key not in group_keys_set:
-                group_keys_set.add(key)
-                group_keys.append(key)
-    
-    # 确保顺序稳定：按物料和发送端排序
-    group_keys = sorted(group_keys)
+    # 收集需要处理的组合（使用set，与code_v0行为一致）
+    group_keys = {
+        (r['material'], r['sending'])
+        for r in deployment_plan_rows
+        if r.get('material') and r.get('sending')
+    }
 
     # 获取push levels
     push_levels = config.get('M5_PushLevels', DEFAULT_PUSH_LEVELS)
@@ -388,16 +380,13 @@ def push_softpush_allocation(
         if available_soh <= 0:
             continue
 
-        # 找下游receiving（确保顺序稳定）
+        # 找下游receiving
         recs = net[
             (net['material'] == mat) &
             (net['sourcing'] == sending)
         ]['location'].dropna().unique().tolist()
         if not recs:
             continue
-        
-        # 对接收端进行排序，确保顺序稳定
-        recs = sorted(recs)
 
         # 计算接收端安全库存数据
         receiving_ss_data = _calculate_receiving_ss_data(

@@ -357,6 +357,19 @@ class DatabaseConnection:
             # 检查DataFrame的列是否都在现有表中（允许现有表有额外列）
             missing_cols = df_cols - existing_cols
             if missing_cols:
+                # 如果现有表只有元数据列且是空的，则删除并重建
+                metadata_cols = {'file_date', 'sim_date', 'run_id', 'db_write_time'}
+                if existing_cols.issubset(metadata_cols):
+                    # 检查表是否为空
+                    with self.get_cursor(commit=False) as cursor:
+                        cursor.execute(sql.SQL("SELECT COUNT(*) FROM {}").format(sql.Identifier(table_name)))
+                        row_count = cursor.fetchone()[0]
+                    
+                    if row_count == 0:
+                        print(f"🔧 现有表 {table_name} 只有元数据列且为空，删除并重建...")
+                        self.drop_table(table_name)
+                        return True  # 返回True继续创建表
+                
                 print(f"⚠️DataFrame包含现有表中不存在的列: {missing_cols}")
                 return False
             

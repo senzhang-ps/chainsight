@@ -755,7 +755,8 @@ def _collect_pending_demands(
     """
     pending_rows = []
     
-    for uid, st in agg_status.items():
+    # 使用sorted()确保确定性迭代顺序
+    for uid, st in sorted(agg_status.items()):
         if st['qty'] <= 0:
             continue
         
@@ -805,10 +806,19 @@ def _process_routes(
         inventory_check_enabled: 是否启用库存检查
         results: 结果收集器
     """
-    # 优化：使用 groupby 预分组，避免重复过滤 DataFrame
-    for route_key, route_demands in cross_node_sorted.groupby(
-        ['sending', 'receiving'], sort=False
-    ):
+    # 使用与 code_v0 一致的路线处理顺序：按全局排序逐行遍历并缓存路线
+    processed_routes: set[Tuple[str, str]] = set()
+    for row in cross_node_sorted.itertuples(index=False):
+        route_key = (row.sending, row.receiving)
+        if route_key in processed_routes:
+            continue
+
+        processed_routes.add(route_key)
+        route_demands = cross_node_sorted[
+            (cross_node_sorted['sending'] == row.sending) &
+            (cross_node_sorted['receiving'] == row.receiving)
+        ].copy()
+
         _process_single_route(
             sim_date, route_key, route_demands, agg_status,
             prepared_data, run_params, evaluator, available_inventory,

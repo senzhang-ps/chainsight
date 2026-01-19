@@ -354,9 +354,11 @@ def _prepare_data(run_params: Dict[str, Any]) -> Dict[str, Any]:
     dp = validate_deployment_plan(dp, validation_log)
     truck_con = validate_truck_config(truck_con, validation_log)
     
-    # 去重处理（注意：DemandPriority 允许重复，不做去重）
-    # demand_prio: 仅过滤空值，不去重
-    demand_prio = _filter_empty_demand_element(demand_prio, validation_log)
+    # 去重处理
+    # 🔧 修复：确保demand_prio没有重复的demand_element，与code_vo保持一致
+    demand_prio = check_and_deduplicate(
+        demand_prio, 'demand_element', 'Global_DemandPriority', validation_log
+    )
     material_md = check_and_deduplicate(
         material_md, 'material', 'M6_MaterialMD', validation_log
     )
@@ -449,13 +451,11 @@ def _build_priority_map(demand_prio: pd.DataFrame) -> Dict[str, int]:
     """
     构建优先级映射。
     
-    当 demand_element 有重复时，保留第一条记录的优先级。
+    假设已经通过check_and_deduplicate进行了去重处理，直接构建映射。
     """
     if demand_prio.empty:
         return {}
-    # 如果有重复的 demand_element，使用 drop_duplicates 保留第一条
-    unique_prio = demand_prio.drop_duplicates(subset=['demand_element'], keep='first')
-    return unique_prio.set_index('demand_element')['priority'].to_dict()
+    return demand_prio.set_index('demand_element')['priority'].to_dict()
 
 
 def _build_material_map(material_md: pd.DataFrame) -> Dict[str, Dict[str, float]]:
@@ -556,6 +556,14 @@ def _prepare_deployment_plan(
         return dp
     
     dp['planned_deployment_date'] = pd.to_datetime(dp['planned_deployment_date'])
+    
+    # 为保证在相同配置和随机种子下UID可复现，先对关键字段做稳定排序（与code_vo保持一致）
+    sort_cols = [
+        col for col in ['planned_deployment_date', 'sending', 'receiving', 'material', 'demand_element']
+        if col in dp.columns
+    ]
+    if sort_cols:
+        dp = dp.sort_values(by=sort_cols, kind='mergesort')
     dp = dp.reset_index(drop=True)
     
     # 生成或保留 UID
@@ -755,7 +763,7 @@ def _collect_pending_demands(
     """
     pending_rows = []
     
-    # 使用sorted()确保确定性迭代顺序
+    # 使用sorted()确保确定性迭代顺序（与code_vo保持一致）
     for uid, st in sorted(agg_status.items()):
         if st['qty'] <= 0:
             continue

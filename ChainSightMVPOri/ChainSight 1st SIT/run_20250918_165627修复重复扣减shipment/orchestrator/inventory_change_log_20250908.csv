@@ -1,0 +1,5 @@
+date,material,location,beginning_inventory,production_gr,delivery_gr,shipment,delivery_ship,ending_inventory,calculated_ending,balance_diff
+2025-09-08,80813644,A868,100,0,0,0,0.0,100,100.0,0.0
+2025-09-08,80813608,A868,100,0,0,0,0.0,100,100.0,0.0
+2025-09-08,80813644,0386,813,1213,0,0,437.0,1589,1589.0,0.0
+2025-09-08,80813608,0386,1391,1826,0,0,435.0,2782,2782.0,0.0

@@ -1,0 +1,16 @@
+{
+  "LGDK": {
+    "last_material": "8085806701",
+    "last_location": "A888",
+    "last_production_date": "2025-10-20",
+    "last_activity": "production",
+    "changeover_info": null
+  },
+  "LGDW": {
+    "last_material": "80845595",
+    "last_location": "A888",
+    "last_production_date": "2025-10-23",
+    "last_activity": "production",
+    "changeover_info": null
+  }
+}

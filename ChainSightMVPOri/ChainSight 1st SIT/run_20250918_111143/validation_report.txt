@@ -1,0 +1,74 @@
+================================================================================
+SUPPLY CHAIN INTEGRATION VALIDATION REPORT
+================================================================================
+Validation Start Time: 2025-09-18 11:12:37
+Validation End Time: 2025-09-18 11:12:43
+Duration: 6.63 seconds
+Total Errors: 0
+Total Warnings: 13
+Total Infos: 39
+
+⚠️  VALIDATION PASSED WITH WARNINGS
+Simulation can proceed but please review warnings.
+
+WARNINGS:
+----------------------------------------
+[11:12:37] [WARNING] [InventoryBalance] [DataAccess] No production GR data available from orchestrator for 2025-09-01. Using zero production receipts.
+[11:12:37] [WARNING] [InventoryBalance] [DataAccess] No delivery GR data available from orchestrator for 2025-09-01. Using zero delivery receipts.
+[11:12:37] [WARNING] [InventoryBalance] [DataAccess] No production GR data available from orchestrator for 2025-09-02. Using zero production receipts.
+[11:12:37] [WARNING] [InventoryBalance] [DataAccess] No delivery GR data available from orchestrator for 2025-09-02. Using zero delivery receipts.
+[11:12:37] [WARNING] [InventoryBalance] [DataAccess] No production GR data available from orchestrator for 2025-09-03. Using zero production receipts.
+[11:12:37] [WARNING] [InventoryBalance] [DataAccess] No production GR data available from orchestrator for 2025-09-04. Using zero production receipts.
+[11:12:37] [WARNING] [InventoryBalance] [DataAccess] No delivery GR data available from orchestrator for 2025-09-04. Using zero delivery receipts.
+[11:12:37] [WARNING] [InventoryBalance] [DataAccess] No production GR data available from orchestrator for 2025-09-05. Using zero production receipts.
+[11:12:37] [WARNING] [InventoryBalance] [DataAccess] No delivery GR data available from orchestrator for 2025-09-05. Using zero delivery receipts.
+[11:12:37] [WARNING] [InventoryBalance] [DataAccess] No production GR data available from orchestrator for 2025-09-06. Using zero production receipts.
+[11:12:37] [WARNING] [InventoryBalance] [DataAccess] No delivery GR data available from orchestrator for 2025-09-06. Using zero delivery receipts.
+[11:12:37] [WARNING] [InventoryBalance] [DataAccess] No delivery GR data available from orchestrator for 2025-09-07. Using zero delivery receipts.
+[11:12:37] [WARNING] [InventoryBalance] [DataAccess] No delivery GR data available from orchestrator for 2025-09-08. Using zero delivery receipts.
+
+INFORMATION:
+----------------------------------------
+[11:12:37] [INFO] [InventoryBalance] [ConsistencyCheck] Starting inventory consistency validation from 2025-09-01 to 2025-09-12
+[11:12:37] [INFO] [InventoryBalance] [DailyCheck] Checking inventory balance for 2025-09-01
+[11:12:37] [INFO] [InventoryBalance] [BalanceCheck] [2025-09-01] Inventory balance check passed for all 10 items
+[11:12:37] [INFO] [InventoryBalance] [DailyCheck] Checking inventory balance for 2025-09-02
+[11:12:37] [INFO] [InventoryBalance] [BalanceCheck] [2025-09-02] Inventory balance check passed for all 10 items
+[11:12:37] [INFO] [InventoryBalance] [DailyCheck] Checking inventory balance for 2025-09-03
+[11:12:37] [INFO] [InventoryBalance] [BalanceCheck] [2025-09-03] Inventory balance check passed for all 10 items
+[11:12:37] [INFO] [InventoryBalance] [DailyCheck] Checking inventory balance for 2025-09-04
+[11:12:37] [INFO] [InventoryBalance] [BalanceCheck] [2025-09-04] Inventory balance check passed for all 10 items
+[11:12:37] [INFO] [InventoryBalance] [DailyCheck] Checking inventory balance for 2025-09-05
+[11:12:37] [INFO] [InventoryBalance] [BalanceCheck] [2025-09-05] Inventory balance check passed for all 10 items
+[11:12:37] [INFO] [InventoryBalance] [DailyCheck] Checking inventory balance for 2025-09-06
+[11:12:37] [INFO] [InventoryBalance] [BalanceCheck] [2025-09-06] Inventory balance check passed for all 10 items
+[11:12:37] [INFO] [InventoryBalance] [DailyCheck] Checking inventory balance for 2025-09-07
+[11:12:37] [INFO] [InventoryBalance] [BalanceCheck] [2025-09-07] Inventory balance check passed for all 10 items
+[11:12:37] [INFO] [InventoryBalance] [DailyCheck] Checking inventory balance for 2025-09-08
+[11:12:37] [INFO] [InventoryBalance] [BalanceCheck] [2025-09-08] Inventory balance check passed for all 10 items
+[11:12:37] [INFO] [InventoryBalance] [DailyCheck] Checking inventory balance for 2025-09-09
+[11:12:37] [INFO] [InventoryBalance] [BalanceCheck] [2025-09-09] Inventory balance check passed for all 10 items
+[11:12:37] [INFO] [InventoryBalance] [DailyCheck] Checking inventory balance for 2025-09-10
+[11:12:37] [INFO] [InventoryBalance] [BalanceCheck] [2025-09-10] Inventory balance check passed for all 10 items
+[11:12:37] [INFO] [InventoryBalance] [DailyCheck] Checking inventory balance for 2025-09-11
+[11:12:37] [INFO] [InventoryBalance] [BalanceCheck] [2025-09-11] Inventory balance check passed for all 10 items
+[11:12:37] [INFO] [InventoryBalance] [DailyCheck] Checking inventory balance for 2025-09-12
+[11:12:37] [INFO] [InventoryBalance] [BalanceCheck] [2025-09-12] Inventory balance check passed for all 10 items
+[11:12:37] [INFO] [InventoryBalance] [PeriodSummary] Period 2025-09-01 to 2025-09-12: All 120 inventory transactions balanced
+[11:12:37] [INFO] [InventoryBalance] [NegativeCheck] [2025-09-01] No negative inventory detected
+[11:12:37] [INFO] [InventoryBalance] [NegativeCheck] [2025-09-02] No negative inventory detected
+[11:12:37] [INFO] [InventoryBalance] [NegativeCheck] [2025-09-03] No negative inventory detected
+[11:12:37] [INFO] [InventoryBalance] [NegativeCheck] [2025-09-04] No negative inventory detected
+[11:12:37] [INFO] [InventoryBalance] [NegativeCheck] [2025-09-05] No negative inventory detected
+[11:12:37] [INFO] [InventoryBalance] [NegativeCheck] [2025-09-06] No negative inventory detected
+[11:12:37] [INFO] [InventoryBalance] [NegativeCheck] [2025-09-07] No negative inventory detected
+[11:12:37] [INFO] [InventoryBalance] [NegativeCheck] [2025-09-08] No negative inventory detected
+[11:12:37] [INFO] [InventoryBalance] [NegativeCheck] [2025-09-09] No negative inventory detected
+[11:12:37] [INFO] [InventoryBalance] [NegativeCheck] [2025-09-10] No negative inventory detected
+[11:12:37] [INFO] [InventoryBalance] [NegativeCheck] [2025-09-11] No negative inventory detected
+[11:12:37] [INFO] [InventoryBalance] [NegativeCheck] [2025-09-12] No negative inventory detected
+[11:12:37] [INFO] [InventoryBalance] [ConsistencyResult] Inventory consistency validation passed
+
+================================================================================
+END OF VALIDATION REPORT
+================================================================================

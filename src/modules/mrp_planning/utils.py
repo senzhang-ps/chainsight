@@ -46,7 +46,7 @@ def apply_moq_rv(
         return 0
 
     if not is_cross_node:
-        return int(qty)
+        return qty  # 与code_vo保持一致，直接返回原值不强制转整数
 
     if qty < moq:
         return moq

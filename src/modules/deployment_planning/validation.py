@@ -25,6 +25,8 @@ def validate_config_before_run(config: dict, validation_log: list) -> list:
     - 缺失LeadTime/PushPullModel的必要行会记录校验项
     - DemandPriority自动补齐AO=1、normal=2、其他=9
 
+    与code_vo保持一致：每行都记录（不去重）。
+
     Args:
         config: 配置字典
         validation_log: 校验日志列表
@@ -45,45 +47,38 @@ def validate_config_before_run(config: dict, validation_log: list) -> list:
     )
     multi_sourcing = multi_sourcing[multi_sourcing['sourcing'] > 1]
 
-    for row in multi_sourcing.itertuples(index=False):
+    for _, row in multi_sourcing.iterrows():
         validation_log.append({
             'No': len(validation_log) + 1,
             'Issue': (
-                f"Network配置不合法: material={row.material}, "
-                f"location={row.location} 有多个sourcing"
+                f"Network配置不合法: material={row['material']}, "
+                f"location={row['location']} 有多个sourcing"
             )
         })
 
-    # 校验leadtime - 使用merge检查缺失
-    if not network.empty:
-        network_check = network[['sourcing', 'location', 'material']].drop_duplicates()
-        lt_keys = leadtime_df[['sending', 'receiving']].drop_duplicates()
-        lt_keys = lt_keys.rename(columns={'sending': 'sourcing', 'receiving': 'location'})
-        missing_lt = network_check.merge(
-            lt_keys, on=['sourcing', 'location'], how='left', indicator=True
-        )
-        missing_lt = missing_lt[missing_lt['_merge'] == 'left_only']
-        for row in missing_lt.itertuples(index=False):
+    # 校验leadtime - 与code_vo保持一致，逐行检查
+    for _, row in network.iterrows():
+        if leadtime_df[
+            (leadtime_df['sending'] == row['sourcing']) & 
+            (leadtime_df['receiving'] == row['location'])
+        ].empty:
             validation_log.append({
                 'No': len(validation_log) + 1,
                 'Issue': (
-                    f"Missing leadtime for {row.sourcing}->"
-                    f"{row.location} ({row.material})"
+                    f"Missing leadtime for {row['sourcing']}->"
+                    f"{row['location']} ({row['material']})"
                 )
             })
 
-    # 校验pushpull - 使用merge检查缺失
-    if not deploy_cfg.empty:
-        cfg_check = deploy_cfg[['material', 'sending']].drop_duplicates()
-        pp_keys = pushpull[['material', 'sending']].drop_duplicates()
-        missing_pp = cfg_check.merge(
-            pp_keys, on=['material', 'sending'], how='left', indicator=True
-        )
-        missing_pp = missing_pp[missing_pp['_merge'] == 'left_only']
-        for row in missing_pp.itertuples(index=False):
+    # 校验pushpull - 与code_vo保持一致，逐行检查
+    for _, row in deploy_cfg.iterrows():
+        if pushpull[
+            (pushpull['material'] == row['material']) & 
+            (pushpull['sending'] == row['sending'])
+        ].empty:
             validation_log.append({
                 'No': len(validation_log) + 1,
-                'Issue': f"Missing PushPullModel for {row.material}/{row.sending}"
+                'Issue': f"Missing PushPullModel for {row['material']}/{row['sending']}"
             })
 
     # 校验/补充DemandPriority
@@ -102,34 +97,23 @@ def validate_config_before_run(config: dict, validation_log: list) -> list:
 
     needed = sdl_types | ol_types
 
-    # 补充缺失的优先级
-    new_rows = []
-    existing_elements = (
-        set(dp['demand_element'].unique())
-        if not dp.empty and 'demand_element' in dp.columns else set()
-    )
+    # 缺啥补啥（默认：AO=1，normal=2，其余给个较低优先级 9）
+    # 与code_vo保持一致的补充逻辑
+    def _ensure_priority(elem, default_p):
+        if dp[dp['demand_element'] == elem].empty:
+            dp.loc[len(dp)] = {'demand_element': elem, 'priority': default_p}
+            validation_log.append({
+                'No': len(validation_log) + 1,
+                'Issue': f'Auto add DemandPriority for {elem}={default_p}'
+            })
 
     for elem in needed:
-        if elem in existing_elements:
-            continue
-
         if elem == 'AO':
-            default_p = DEFAULT_AO_PRIORITY
+            _ensure_priority('AO', DEFAULT_AO_PRIORITY)
         elif elem == 'normal':
-            default_p = DEFAULT_NORMAL_PRIORITY
+            _ensure_priority('normal', DEFAULT_NORMAL_PRIORITY)
         else:
-            default_p = DEFAULT_OTHER_PRIORITY
-
-        new_rows.append({'demand_element': elem, 'priority': default_p})
-        validation_log.append({
-            'No': len(validation_log) + 1,
-            'Issue': f'Auto add DemandPriority for {elem}={default_p}'
-        })
-        existing_elements.add(elem)
-
-    if new_rows:
-        new_df = pd.DataFrame(new_rows)
-        dp = pd.concat([dp, new_df], ignore_index=True)
+            _ensure_priority(elem, DEFAULT_OTHER_PRIORITY)
 
     config['DemandPriority'] = dp
     return validation_log
@@ -137,32 +121,22 @@ def validate_config_before_run(config: dict, validation_log: list) -> list:
 
 def log_outputs(output_path: str, outputs: Dict[str, pd.DataFrame]) -> None:
     """
-    将结果表写入Excel。
+    将结果表写入Excel：DeploymentPlan/UnfulfilledLog/StockOnHandLog/Validation。
+    说明：输出前统一标识字段格式，确保后续分析一致性。
+    与code_vo保持一致：不对输出进行排序，保持原始生成顺序。
 
     Args:
         output_path: 输出文件路径
         outputs: 输出表字典
     """
-    # 定义各表的排序键，确保输出顺序一致性
-    sort_keys = {
-        'DeploymentPlan': ['date', 'material', 'sending', 'receiving', 'demand_element', 
-                          'planned_delivery_date', 'demand_qty'],
-        'UnfulfilledLog': ['date', 'material', 'location', 'demand_element'],
-        'StockOnHandLog': ['date', 'material', 'location'],
-        'Validation': ['No']
-    }
-    
     with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
         for sheet, df in outputs.items():
             if df.empty:
+                # 输出空表头
                 pd.DataFrame(columns=df.columns).to_excel(
                     writer, sheet_name=sheet, index=False
                 )
             else:
+                # 确保输出时标识符字段为字符串格式
                 normalized_df = normalize_identifiers(df)
-                # 应用排序以确保输出顺序一致
-                if sheet in sort_keys:
-                    available_keys = [k for k in sort_keys[sheet] if k in normalized_df.columns]
-                    if available_keys:
-                        normalized_df = normalized_df.sort_values(available_keys).reset_index(drop=True)
                 normalized_df.to_excel(writer, sheet_name=sheet, index=False)

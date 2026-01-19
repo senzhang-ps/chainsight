@@ -1,0 +1,129 @@
+====================================================================================================
+性能分析报告: Module3
+生成时间: 2026-01-19 13:14:43
+====================================================================================================
+
+【按累积时间排序 - 前30个最耗时函数】
+----------------------------------------------------------------------------------------------------
+         30456678 function calls (29153230 primitive calls) in 28.483 seconds
+
+   Ordered by: cumulative time
+   List reduced from 1922 to 30 due to restriction <30>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+      883    0.005    0.000  139.561    0.158 C:\Python313\Lib\concurrent\futures\_base.py:199(as_completed)
+      413    0.003    0.000   87.652    0.212 C:\Python313\Lib\threading.py:641(wait)
+     1208    0.005    0.000   86.200    0.071 C:\Python313\Lib\threading.py:327(wait)
+19195/310    0.039    0.000   48.661    0.157 C:\Users\25936\Desktop\test\fix-future-production-in-net-demand\fix-future-production-in-net-demand\.venv\Lib\site-packages\pandas\core\ops\array_ops.py:352(na_logical_op)
+28186/1404    0.036    0.000   45.428    0.032 C:\Users\25936\Desktop\test\fix-future-production-in-net-demand\fix-future-production-in-net-demand\.venv\Lib\site-packages\pandas\core\arraylike.py:38(__eq__)
+       93    0.000    0.000   43.504    0.468 C:\Python313\Lib\threading.py:1056(join)
+       93    0.005    0.000   43.499    0.468 {method 'join' of '_thread._ThreadHandle' objects}
+57463/103    0.150    0.000   33.617    0.326 C:\Users\25936\Desktop\test\fix-future-production-in-net-demand\fix-future-production-in-net-demand\.venv\Lib\site-packages\pandas\core\ops\common.py:62(new_method)
+31058/248    0.110    0.000   33.477    0.135 C:\Users\25936\Desktop\test\fix-future-production-in-net-demand\fix-future-production-in-net-demand\.venv\Lib\site-packages\pandas\core\series.py:6110(_cmp_method)
+19195/112    0.044    0.000   28.954    0.259 C:\Users\25936\Desktop\test\fix-future-production-in-net-demand\fix-future-production-in-net-demand\.venv\Lib\site-packages\pandas\core\arraylike.py:68(__and__)
+19195/112    0.093    0.000   28.920    0.258 C:\Users\25936\Desktop\test\fix-future-production-in-net-demand\fix-future-production-in-net-demand\.venv\Lib\site-packages\pandas\core\series.py:6123(_logical_method)
+        1    0.003    0.003   28.483   28.483 C:\Users\25936\Desktop\test\fix-future-production-in-net-demand\fix-future-production-in-net-demand\module3.py:1264(run_integrated_mode)
+  4560/28    0.032    0.000   28.198    1.007 C:\Users\25936\Desktop\test\fix-future-production-in-net-demand\fix-future-production-in-net-demand\.venv\Lib\site-packages\pandas\core\arraylike.py:50(__le__)
+19195/112    0.091    0.000   27.807    0.248 C:\Users\25936\Desktop\test\fix-future-production-in-net-demand\fix-future-production-in-net-demand\.venv\Lib\site-packages\pandas\core\ops\array_ops.py:393(logical_op)
+  4560/28    0.040    0.000   26.183    0.935 {built-in method _operator.le}
+  4562/43    0.029    0.000   25.567    0.595 C:\Users\25936\Desktop\test\fix-future-production-in-net-demand\fix-future-production-in-net-demand\.venv\Lib\site-packages\pandas\core\arraylike.py:58(__ge__)
+38390/2368    0.038    0.000   24.306    0.010 C:\Users\25936\Desktop\test\fix-future-production-in-net-demand\fix-future-production-in-net-demand\.venv\Lib\site-packages\pandas\core\ops\array_ops.py:410(fill_bool)
+        1    0.003    0.003   21.985   21.985 C:\Users\25936\Desktop\test\fix-future-production-in-net-demand\fix-future-production-in-net-demand\module3.py:839(run_mrp_layered_simulation_daily)
+        3    0.000    0.000   21.858    7.286 C:\Python313\Lib\concurrent\futures\_base.py:646(__exit__)
+        3    0.000    0.000   21.858    7.286 C:\Python313\Lib\concurrent\futures\thread.py:220(shutdown)
+     93/3    0.001    0.000   21.853    7.284 C:\Python313\Lib\threading.py:998(_bootstrap)
+     93/3    0.001    0.000   21.853    7.284 C:\Python313\Lib\threading.py:1025(_bootstrap_inner)
+   178/27    0.004    0.000   21.853    0.809 {method 'get' of '_queue.SimpleQueue' objects}
+     93/3    0.001    0.000   21.853    7.284 C:\Python313\Lib\threading.py:981(run)
+     93/3    0.001    0.000   21.853    7.284 C:\Python313\Lib\concurrent\futures\thread.py:70(_worker)
+    880/3    0.017    0.000   21.287    7.096 C:\Python313\Lib\concurrent\futures\thread.py:54(run)
+    880/3    0.094    0.000   21.286    7.095 C:\Users\25936\Desktop\test\fix-future-production-in-net-demand\fix-future-production-in-net-demand\module3.py:935(_compute_node_net_demand)
+31058/248    0.144    0.000   21.179    0.085 C:\Users\25936\Desktop\test\fix-future-production-in-net-demand\fix-future-production-in-net-demand\.venv\Lib\site-packages\pandas\core\ops\array_ops.py:288(comparison_op)
+5897/4832    0.009    0.000   19.321    0.004 {method 'acquire' of '_thread.lock' objects}
+ 1769/645    0.016    0.000   18.190    0.028 C:\Users\25936\Desktop\test\fix-future-production-in-net-demand\fix-future-production-in-net-demand\.venv\Lib\site-packages\pandas\core\series.py:4620(map)
+
+
+
+
+【按调用次数排序 - 前30个最频繁调用函数】
+----------------------------------------------------------------------------------------------------
+         30456678 function calls (29153230 primitive calls) in 28.483 seconds
+
+   Ordered by: call count
+   List reduced from 1922 to 30 due to restriction <30>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+6019666/5885765    1.110    0.000    1.682    0.000 {built-in method builtins.isinstance}
+1648171/1642859    0.272    0.000    0.286    0.000 {built-in method builtins.getattr}
+1573922/1064283    0.368    0.000    0.519    0.000 {built-in method builtins.len}
+682655/680101    0.207    0.000    0.303    0.000 C:\Users\25936\Desktop\test\fix-future-production-in-net-demand\fix-future-production-in-net-demand\.venv\Lib\site-packages\pandas\core\dtypes\generic.py:37(_check)
+682655/675929    0.243    0.000    0.554    0.000 C:\Users\25936\Desktop\test\fix-future-production-in-net-demand\fix-future-production-in-net-demand\.venv\Lib\site-packages\pandas\core\dtypes\generic.py:42(_instancecheck)
+   440995    0.107    0.000    0.107    0.000 {method 'get' of 'xml.etree.ElementTree.Element' objects}
+   408120    0.073    0.000    0.073    0.000 {method 'popleft' of 'collections.deque' objects}
+   408068    0.254    0.000    0.382    0.000 C:\Python313\Lib\xml\etree\ElementTree.py:1309(read_events)
+407608/407603    0.105    0.000    0.998    0.000 C:\Python313\Lib\xml\etree\ElementTree.py:1233(iterator)
+   387640    0.037    0.000    0.037    0.000 C:\Users\25936\Desktop\test\fix-future-production-in-net-demand\fix-future-production-in-net-demand\module3.py:1116(<genexpr>)
+   365737    0.101    0.000    0.127    0.000 {built-in method builtins.hasattr}
+   365096    0.093    0.000    0.146    0.000 C:\Users\25936\Desktop\test\fix-future-production-in-net-demand\fix-future-production-in-net-demand\.venv\Lib\site-packages\pandas\core\indexes\range.py:999(__len__)
+   342979    0.092    0.000    0.092    0.000 C:\Users\25936\Desktop\test\fix-future-production-in-net-demand\fix-future-production-in-net-demand\.venv\Lib\site-packages\openpyxl\descriptors\base.py:24(__set__)
+   324864    0.035    0.000    0.035    0.000 C:\Users\25936\Desktop\test\fix-future-production-in-net-demand\fix-future-production-in-net-demand\.venv\Lib\site-packages\openpyxl\cell\read_only.py:108(value)
+321322/321132    0.061    0.000    0.062    0.000 {built-in method builtins.hash}
+   280641    0.089    0.000    0.202    0.000 C:\Users\25936\Desktop\test\fix-future-production-in-net-demand\fix-future-production-in-net-demand\.venv\Lib\site-packages\pandas\core\series.py:734(name)
+   271486    0.096    0.000    0.149    0.000 C:\Users\25936\Desktop\test\fix-future-production-in-net-demand\fix-future-production-in-net-demand\.venv\Lib\site-packages\pandas\core\dtypes\inference.py:334(is_hashable)
+   266620    0.040    0.000    0.040    0.000 {built-in method builtins.issubclass}
+   255765    0.074    0.000    0.112    0.000 C:\Users\25936\Desktop\test\fix-future-production-in-net-demand\fix-future-production-in-net-demand\.venv\Lib\site-packages\openpyxl\descriptors\base.py:233(__get__)
+   252262    0.070    0.000    0.133    0.000 C:\Users\25936\Desktop\test\fix-future-production-in-net-demand\fix-future-production-in-net-demand\.venv\Lib\site-packages\pandas\core\dtypes\common.py:1590(<genexpr>)
+245877/236003    1.569    0.000    1.527    0.000 C:\Users\25936\Desktop\test\fix-future-production-in-net-demand\fix-future-production-in-net-demand\.venv\Lib\site-packages\pandas\core\arrays\datetimes.py:645(__iter__)
+204839/204768    0.119    0.000    0.471    0.000 C:\Users\25936\Desktop\test\fix-future-production-in-net-demand\fix-future-production-in-net-demand\.venv\Lib\site-packages\pandas\core\dtypes\missing.py:184(_isna)
+204839/204768    0.065    0.000    0.536    0.000 C:\Users\25936\Desktop\test\fix-future-production-in-net-demand\fix-future-production-in-net-demand\.venv\Lib\site-packages\pandas\core\dtypes\missing.py:101(isna)
+   182930    0.031    0.000    0.031    0.000 C:\Users\25936\Desktop\test\fix-future-production-in-net-demand\fix-future-production-in-net-demand\.venv\Lib\site-packages\pandas\core\arrays\datetimes.py:551(dtype)
+174587/172958    0.267    0.000    0.885    0.000 C:\Users\25936\Desktop\test\fix-future-production-in-net-demand\fix-future-production-in-net-demand\.venv\Lib\site-packages\pandas\core\generic.py:6301(__setattr__)
+   172169    0.178    0.000    0.267    0.000 C:\Users\25936\Desktop\test\fix-future-production-in-net-demand\fix-future-production-in-net-demand\.venv\Lib\site-packages\openpyxl\descriptors\base.py:39(__set__)
+   170795    0.024    0.000    0.025    0.000 C:\Users\25936\Desktop\test\fix-future-production-in-net-demand\fix-future-production-in-net-demand\.venv\Lib\site-packages\openpyxl\descriptors\sequence.py:27(<genexpr>)
+   170606    0.339    0.000    0.431    0.000 C:\Users\25936\Desktop\test\fix-future-production-in-net-demand\fix-future-production-in-net-demand\.venv\Lib\site-packages\openpyxl\descriptors\sequence.py:24(__set__)
+168936/168061    0.055    0.000    0.251    0.000 C:\Users\25936\Desktop\test\fix-future-production-in-net-demand\fix-future-production-in-net-demand\.venv\Lib\site-packages\pandas\core\indexes\base.py:7593(ensure_index)
+   164616    0.025    0.000    0.025    0.000 C:\Users\25936\Desktop\test\fix-future-production-in-net-demand\fix-future-production-in-net-demand\.venv\Lib\site-packages\pandas\core\generic.py:405(flags)
+
+
+
+
+【按总时间排序 - 前30个纯执行时间最长函数】
+----------------------------------------------------------------------------------------------------
+         30456678 function calls (29153230 primitive calls) in 28.483 seconds
+
+   Ordered by: internal time
+   List reduced from 1922 to 30 due to restriction <30>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+23848/23640    4.636    0.000    4.678    0.000 C:\Users\25936\Desktop\test\fix-future-production-in-net-demand\fix-future-production-in-net-demand\.venv\Lib\site-packages\pandas\core\ops\array_ops.py:113(comp_method_OBJECT_ARRAY)
+245877/236003    1.569    0.000    1.527    0.000 C:\Users\25936\Desktop\test\fix-future-production-in-net-demand\fix-future-production-in-net-demand\.venv\Lib\site-packages\pandas\core\arrays\datetimes.py:645(__iter__)
+6019666/5885765    1.110    0.000    1.682    0.000 {built-in method builtins.isinstance}
+75867/68190    0.666    0.000    4.420    0.000 C:\Users\25936\Desktop\test\fix-future-production-in-net-demand\fix-future-production-in-net-demand\.venv\Lib\site-packages\pandas\core\series.py:389(__init__)
+   146994    0.514    0.000    3.219    0.000 C:\Users\25936\Desktop\test\fix-future-production-in-net-demand\fix-future-production-in-net-demand\.venv\Lib\site-packages\openpyxl\worksheet\_reader.py:189(parse_cell)
+85412/85274    0.411    0.000    1.856    0.000 C:\Users\25936\Desktop\test\fix-future-production-in-net-demand\fix-future-production-in-net-demand\.venv\Lib\site-packages\openpyxl\descriptors\serialisable.py:46(from_tree)
+1573922/1064283    0.368    0.000    0.519    0.000 {built-in method builtins.len}
+82306/81792    0.345    0.000    0.480    0.000 C:\Users\25936\Desktop\test\fix-future-production-in-net-demand\fix-future-production-in-net-demand\.venv\Lib\site-packages\pandas\core\generic.py:6236(__finalize__)
+75122/74238    0.341    0.000    0.982    0.000 C:\Users\25936\Desktop\test\fix-future-production-in-net-demand\fix-future-production-in-net-demand\.venv\Lib\site-packages\pandas\core\construction.py:517(sanitize_array)
+   170606    0.339    0.000    0.431    0.000 C:\Users\25936\Desktop\test\fix-future-production-in-net-demand\fix-future-production-in-net-demand\.venv\Lib\site-packages\openpyxl\descriptors\sequence.py:24(__set__)
+54105/48520    0.299    0.000    0.762    0.000 C:\Users\25936\Desktop\test\fix-future-production-in-net-demand\fix-future-production-in-net-demand\.venv\Lib\site-packages\pandas\core\array_algos\take.py:120(_take_nd_ndarray)
+      467    0.287    0.001    0.287    0.001 {method 'feed' of 'xml.etree.ElementTree.XMLParser' objects}
+76351/76213    0.287    0.000    0.343    0.000 C:\Users\25936\Desktop\test\fix-future-production-in-net-demand\fix-future-production-in-net-demand\.venv\Lib\site-packages\pandas\core\dtypes\cast.py:550(maybe_promote)
+73560/21474    0.280    0.000    0.088    0.000 {method 'reduce' of 'numpy.ufunc' objects}
+1648171/1642859    0.272    0.000    0.286    0.000 {built-in method builtins.getattr}
+174587/172958    0.267    0.000    0.885    0.000 C:\Users\25936\Desktop\test\fix-future-production-in-net-demand\fix-future-production-in-net-demand\.venv\Lib\site-packages\pandas\core\generic.py:6301(__setattr__)
+   408068    0.254    0.000    0.382    0.000 C:\Python313\Lib\xml\etree\ElementTree.py:1309(read_events)
+682655/675929    0.243    0.000    0.554    0.000 C:\Users\25936\Desktop\test\fix-future-production-in-net-demand\fix-future-production-in-net-demand\.venv\Lib\site-packages\pandas\core\dtypes\generic.py:42(_instancecheck)
+107002/106818    0.225    0.000    0.276    0.000 C:\Users\25936\Desktop\test\fix-future-production-in-net-demand\fix-future-production-in-net-demand\.venv\Lib\site-packages\pandas\core\generic.py:278(__init__)
+    68810    0.211    0.000    0.639    0.000 C:\Users\25936\Desktop\test\fix-future-production-in-net-demand\fix-future-production-in-net-demand\.venv\Lib\site-packages\pandas\core\internals\managers.py:1863(from_array)
+    28320    0.210    0.000    4.642    0.000 C:\Users\25936\Desktop\test\fix-future-production-in-net-demand\fix-future-production-in-net-demand\.venv\Lib\site-packages\openpyxl\worksheet\_reader.py:125(parse)
+682655/680101    0.207    0.000    0.303    0.000 C:\Users\25936\Desktop\test\fix-future-production-in-net-demand\fix-future-production-in-net-demand\.venv\Lib\site-packages\pandas\core\dtypes\generic.py:37(_check)
+50253/48920    0.203    0.000    3.658    0.000 C:\Users\25936\Desktop\test\fix-future-production-in-net-demand\fix-future-production-in-net-demand\.venv\Lib\site-packages\pandas\core\series.py:6201(_construct_result)
+   146994    0.193    0.000    0.193    0.000 C:\Users\25936\Desktop\test\fix-future-production-in-net-demand\fix-future-production-in-net-demand\.venv\Lib\site-packages\openpyxl\utils\cell.py:206(coordinate_to_tuple)
+      462    0.188    0.000    0.475    0.001 C:\Python313\Lib\xml\etree\ElementTree.py:1285(feed)
+    28317    0.179    0.000    0.268    0.000 C:\Users\25936\Desktop\test\fix-future-production-in-net-demand\fix-future-production-in-net-demand\.venv\Lib\site-packages\openpyxl\worksheet\_read_only.py:105(_get_row)
+   172169    0.178    0.000    0.267    0.000 C:\Users\25936\Desktop\test\fix-future-production-in-net-demand\fix-future-production-in-net-demand\.venv\Lib\site-packages\openpyxl\descriptors\base.py:39(__set__)
+44943/993    0.170    0.000   13.985    0.014 C:\Users\25936\Desktop\test\fix-future-production-in-net-demand\fix-future-production-in-net-demand\.venv\Lib\site-packages\pandas\core\frame.py:4062(__getitem__)
+    85242    0.167    0.000    1.106    0.000 C:\Users\25936\Desktop\test\fix-future-production-in-net-demand\fix-future-production-in-net-demand\.venv\Lib\site-packages\openpyxl\cell\text.py:161(__init__)
+    28317    0.162    0.000    3.389    0.000 C:\Users\25936\Desktop\test\fix-future-production-in-net-demand\fix-future-production-in-net-demand\.venv\Lib\site-packages\openpyxl\worksheet\_reader.py:282(parse_row)
+
+

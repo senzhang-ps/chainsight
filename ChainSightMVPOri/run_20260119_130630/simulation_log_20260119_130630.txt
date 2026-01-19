@@ -1,0 +1,467 @@
+2026-01-19 13:06:30 [INFO] 日志系统已初始化，日志文件: C:\Users\25936\Desktop\test\fix-future-production-in-net-demand\fix-future-production-in-net-demand\BC_S5\run_20260119_130630\simulation_log_20260119_130630.txt
+2026-01-19 13:06:30 [INFO] 🚀 供应链仿真系统启动
+2026-01-19 13:06:30 [INFO] 📂 配置文件: C:\Users\25936\Desktop\test\fix-future-production-in-net-demand\fix-future-production-in-net-demand\BC_S5.xlsx
+2026-01-19 13:06:30 [INFO] 📁 输出目录: C:\Users\25936\Desktop\test\fix-future-production-in-net-demand\fix-future-production-in-net-demand\BC_S5\run_20260119_130630
+2026-01-19 13:06:30 [INFO] 📅 仿真日期范围: 2025-10-06 到 2025-10-10
+2026-01-19 13:06:30 [INFO] 🚀 开始集成仿真: 2025-10-06 到 2025-10-10
+2026-01-19 13:06:30 [INFO] ============================================================
+2026-01-19 13:06:30 [INFO] 🔍 正在运行仿真前配置验证...
+2026-01-19 13:06:32 [INFO] 📝 验证报告已生成: C:\Users\25936\Desktop\test\fix-future-production-in-net-demand\fix-future-production-in-net-demand\BC_S5\run_20260119_130630\validation_report.txt
+2026-01-19 13:06:32 [INFO] ✅ 配置验证通过，开始仿真...
+2026-01-19 13:06:32 [INFO] 🔍 检测中断点...
+2026-01-19 13:06:32 [INFO] 📁 输出目录不存在，将从头开始: C:\Users\25936\Desktop\test\fix-future-production-in-net-demand\fix-future-production-in-net-demand\BC_S5\run_20260119_130630\orchestrator
+2026-01-19 13:06:32 [INFO] 📝 未发现可续跑的状态，将从头开始
+2026-01-19 13:06:32 [INFO] 📋 加载配置文件: C:\Users\25936\Desktop\test\fix-future-production-in-net-demand\fix-future-production-in-net-demand\BC_S5.xlsx
+2026-01-19 13:06:32 [INFO] ✅ 加载配置表: SIT Design (24 行)
+2026-01-19 13:06:32 [INFO] ✅ 加载配置表: Global_seed (6 行)
+2026-01-19 13:06:32 [INFO] ✅ 加载配置表: Config Guide (116 行)
+2026-01-19 13:06:32 [INFO] ✅ 加载配置表: Global_Network (519 行)
+2026-01-19 13:06:32 [INFO] ✅ 加载配置表: Global_SpaceCapacity (0 行)
+2026-01-19 13:06:32 [INFO] ✅ 加载配置表: Global_LeadTime (15 行)
+2026-01-19 13:06:32 [INFO] ✅ 加载配置表: Global_DemandPriority (17 行)
+2026-01-19 13:06:32 [INFO] ✅ 加载配置表: M1_InitialInventory (515 行)
+2026-01-19 13:06:32 [INFO] ✅ 加载配置表: M1_InitialInventory_30D (271 行)
+2026-01-19 13:06:32 [INFO] ✅ 加载配置表: Sheet1 (274 行)
+2026-01-19 13:06:32 [INFO] ✅ 加载配置表: M1_DemandForecast (6838 行)
+2026-01-19 13:06:32 [INFO] ✅ 加载配置表: M1_ForecastError (513 行)
+2026-01-19 13:06:32 [INFO] ✅ 加载配置表: M1_OrderCalendar (265 行)
+2026-01-19 13:06:32 [INFO] ✅ 加载配置表: M1_AOConfig (1140 行)
+2026-01-19 13:06:32 [INFO] ✅ 加载配置表: M1_DPSConfig (51 行)
+2026-01-19 13:06:32 [INFO] ✅ 加载配置表: M1_SupplyChoiceConfig (0 行)
+2026-01-19 13:06:33 [INFO] ✅ 加载配置表: M3_SafetyStock (37940 行)
+2026-01-19 13:06:33 [INFO] ✅ 加载配置表: COValidation (179 行)
+2026-01-19 13:06:33 [INFO] ✅ 加载配置表: M4_MaterialLocationLineCfg (55 行)
+2026-01-19 13:06:33 [INFO] ✅ 加载配置表: M4_LineCapacity (441 行)
+2026-01-19 13:06:33 [INFO] ✅ 加载配置表: M4_ChangeoverMatrix (1573 行)
+2026-01-19 13:06:33 [INFO] ✅ 加载配置表: M4_ChangeoverDefinition (89 行)
+2026-01-19 13:06:33 [INFO] ✅ 加载配置表: M4_ProductionReliability (2 行)
+2026-01-19 13:06:33 [INFO] ✅ 加载配置表: M5_PushPullModel (55 行)
+2026-01-19 13:06:33 [INFO] ✅ 加载配置表: M5_DeployConfig (641 行)
+2026-01-19 13:06:33 [INFO] ✅ 加载配置表: M6_TruckReleaseCon (15 行)
+2026-01-19 13:06:33 [INFO] ✅ 加载配置表: M6_MaterialMD (55 行)
+2026-01-19 13:06:33 [INFO] ✅ 加载配置表: M6_DeliveryDelayDistribution (2 行)
+2026-01-19 13:06:33 [INFO] ✅ 加载配置表: M6_MDQBypassRules (1 行)
+2026-01-19 13:06:33 [INFO] ✅ 加载配置表: M6_TruckTypeSpecs (3 行)
+2026-01-19 13:06:33 [INFO] ✅ 加载配置表: M6_TruckCapacityPlan (0 行)
+2026-01-19 13:06:33 [INFO] 🔧 正在标准化标识符字段...
+2026-01-19 13:06:33 [INFO] 🔧 Global_Network: material(int64→object)
+2026-01-19 13:06:33 [INFO] 🔧 M1_InitialInventory: material(int64→object)
+2026-01-19 13:06:33 [INFO] 🔧 M1_InitialInventory_30D: material(int64→object)
+2026-01-19 13:06:33 [INFO] 🔧 M1_DemandForecast: material(int64→object)
+2026-01-19 13:06:33 [INFO] 🔧 M1_ForecastError: material(int64→object)
+2026-01-19 13:06:33 [INFO] 🔧 M1_AOConfig: material(int64→object)
+2026-01-19 13:06:33 [INFO] 🔧 M1_DPSConfig: material(int64→object)
+2026-01-19 13:06:33 [INFO] 🔧 M3_SafetyStock: material(int64→object)
+2026-01-19 13:06:33 [INFO] 🔧 M4_MaterialLocationLineCfg: material(int64→object)
+2026-01-19 13:06:33 [INFO] 🔧 M4_ChangeoverMatrix: from_material(int64→object), to_material(int64→object)
+2026-01-19 13:06:33 [INFO] 🔧 M5_PushPullModel: material(int64→object)
+2026-01-19 13:06:33 [INFO] 🔧 M5_DeployConfig: material(int64→object)
+2026-01-19 13:06:33 [INFO] 🔧 M6_MaterialMD: material(int64→object)
+2026-01-19 13:06:33 [INFO] ✅ 已标准化 13 个配置表的标识符字段
+2026-01-19 13:06:33 [INFO] 🔧 校验 Changeover Matrix 配置...
+2026-01-19 13:06:33 [INFO] ✅ Changeover Matrix 无重复定义
+2026-01-19 13:06:33 [INFO] 🔧 校验 Changeover Definition 配置...
+2026-01-19 13:06:33 [INFO] ✅ Changeover Definition 无重复定义
+2026-01-19 13:06:33 [INFO] 🔧 正在映射 Module4 配置表...
+2026-01-19 13:06:33 [INFO] 🔧 映射 M4_MaterialLocationLineCfg → MaterialLocationLineCfg
+2026-01-19 13:06:33 [INFO] 🔧 映射 M4_LineCapacity → LineCapacity
+2026-01-19 13:06:33 [INFO] 🔧 映射 M4_ChangeoverMatrix → ChangeoverMatrix
+2026-01-19 13:06:33 [INFO] 🔧 映射 M4_ChangeoverDefinition → ChangeoverDefinition
+2026-01-19 13:06:33 [INFO] 🔧 映射 M4_ProductionReliability → ProductionReliability
+2026-01-19 13:06:33 [INFO] ✅ 已映射 5 个 Module4 配置表
+2026-01-19 13:06:33 [INFO] ⚠️  未找到 Global_Seed 配置，使用默认值: 42
+2026-01-19 13:06:33 [INFO] ✨ 已为所有模块设置统一随机种子: 42
+2026-01-19 13:06:33 [INFO] 🎯 初始化Orchestrator
+2026-01-19 13:06:33 [INFO] ✅ Orchestrator initialized for simulation starting 2025-10-06
+2026-01-19 13:06:33 [INFO] 🆕 全新开始：设置初始状态
+2026-01-19 13:06:33 [INFO] ⚠️  未找到空间容量配置
+2026-01-19 13:06:33 [INFO] 📅 仿真日期范围: 5 天
+2026-01-19 13:06:33 [INFO] ==================== 第 1/5 天: 2025-10-06 ====================
+2026-01-19 13:06:33 [INFO] 🌅 每日开始状态更新
+2026-01-19 13:06:33 [INFO] 💾 保存期初库存快照...
+2026-01-19 13:06:33 [INFO] 💾 已保存 2025-10-06 期初库存: 515 项
+2026-01-19 13:06:33 [INFO] 📦 处理当日delivery GR到达...
+2026-01-19 13:06:33 [INFO] 🏭 处理历史生产当日入库...
+2026-01-19 13:06:33 [INFO] 📦 当日无历史生产入库
+2026-01-19 13:06:33 [INFO] 1️⃣ 运行 Module1 - 订单生成
+2026-01-19 13:06:33 [INFO] [M1] DPS拆分完成，条目: 5943，耗时: 0.010s
+2026-01-19 13:06:33 [INFO] [M1] 周度→日度拆分完成，生成天数: 41601，耗时: 0.013s
+2026-01-19 13:06:33 [INFO] [M1] 周度→日度拆分完成，生成天数: 41601，耗时: 0.013s
+2026-01-19 13:06:33 [INFO] [M1] 平均需求计算完成，ML数: 283，耗时: 0.018s
+2026-01-19 13:06:33 [INFO] [M1] 订单生成完成 (AO耗时: 0.013s, Normal耗时: 0.007s, 总耗时: 0.036s)，订单数: 738
+2026-01-19 13:06:36 [INFO] [M1] AO消耗完成，耗时: 2.652s
+2026-01-19 13:06:38 [INFO] [M1] Normal消耗完成（并行），耗时: 2.664s
+2026-01-19 13:06:38 [INFO] [M1] 当日订单生成完成，订单数: 738，耗时: 5.364s
+2026-01-19 13:06:38 [INFO] [M1] 历史订单读取完成，文件数: 0，合并条目: 0，耗时: 0.000s
+2026-01-19 13:06:38 [INFO] [M1] 历史订单合并前过滤完成，耗时: 0.001s
+2026-01-19 13:06:38 [INFO] [M1] 发货与缺货计算完成，shipment: 282，cut: 282，耗时: 0.020s
+2026-01-19 13:06:42 [INFO] [M1] 供需日志生成完成，条目: 25470，耗时: 3.518s
+2026-01-19 13:06:44 [INFO] 🚚 立即处理M1 shipment，扣减库存...
+2026-01-19 13:06:44 [INFO] ✅ Processed 282 M1 shipments for 2025-10-06
+2026-01-19 13:06:44 [INFO] ✅ 已扣减 282 个shipment的库存
+2026-01-19 13:06:44 [INFO] ✅ Module1 完成 - 生成 738 个订单, 282 个发货
+2026-01-19 13:06:44 [INFO] 2️⃣ 运行 Module4 - 生产计划
+2026-01-19 13:06:44 [INFO] Warning: No NetDemand data for 2025-10-06. Generating empty output.
+2026-01-19 13:06:44 [INFO] 🔄 无前一天产线状态 - 全新开始
+2026-01-19 13:06:44 [INFO] 🔄 无之前已分配产能 - 全新开始
+2026-01-19 13:06:44 [INFO] Module4 daily output generated: C:\Users\25936\Desktop\test\fix-future-production-in-net-demand\fix-future-production-in-net-demand\BC_S5\run_20260119_130630\module4\Module4Output_20251006.xlsx
+2026-01-19 13:06:44 [INFO] 📦 M4当日未生成生产计划或缺少 available_date 列
+2026-01-19 13:06:44 [INFO] ✅ Module4 完成 - 生成生产计划: 0 条记录
+2026-01-19 13:06:44 [INFO] 3️⃣ 运行 Module5 - 部署计划
+2026-01-19 13:06:48 [INFO] ⚠️  Orchestrator当日无历史生产GR数据
+2026-01-19 13:06:48 [INFO] ⚠️  Orchestrator返回空的delivery_gr_view
+2026-01-19 13:06:48 [INFO] ⚠️  Orchestrator返回空的open_deployment_view
+2026-01-19 13:06:48 [INFO] [M5] load_integrated_config 用时: 3.962s
+2026-01-19 13:06:49 [INFO] ✅ 缓存已初始化: PTF/LSK=55 | LeadTime=15 | Network=519
+2026-01-19 13:07:24 [INFO] [M5] Demand collection only 用时: 16.356s
+2026-01-19 13:07:24 [INFO] [M5] Demand collection+allocation 总用时: 34.761s
+2026-01-19 13:07:24 [INFO] [M5] push_softpush_allocation 用时: 0.772s，生成行数: 0
+2026-01-19 13:07:35 [INFO] [M5] Full day total 用时: 46.054s
+2026-01-19 13:07:35 [INFO] 🎯 有效部署计划: 64/10669 条
+2026-01-19 13:07:35 [INFO] 📦 立即处理M5 deployment，更新open deployment...
+2026-01-19 13:07:35 [INFO] ✅ Added 64 M5 deployment plans to open deployment for 2025-10-06
+2026-01-19 13:07:35 [INFO] ✅ 已更新 64 条部署计划到open deployment
+2026-01-19 13:07:35 [INFO] ✅ Module5 完成 - 生成 64 条有效部署计划
+2026-01-19 13:07:35 [INFO] 4️⃣ 运行 Module6 - 物流执行
+2026-01-19 13:07:35 [INFO] ✅ Module6 完成 - 生成 0 条交付计划
+2026-01-19 13:07:35 [INFO] 5️⃣ 运行 Module3 - 净需求计算
+2026-01-19 13:07:35 [INFO] 🔄 Module3 运行于集成模式
+2026-01-19 13:07:39 [INFO] [M3] load_module1_daily_outputs total: 3.519s for 2025-10-06
+2026-01-19 13:07:39 [INFO] [M3] assign_location_layers total: 0.007s, locations=16
+2026-01-19 13:07:55 [INFO] [M3] run_mrp_layered_simulation_daily total: 16.185s, records=559
+2026-01-19 13:07:55 [INFO] ✅ Module3 集成模式处理完成
+2026-01-19 13:07:55 [INFO] [M3] total duration: 20.108s for 1 days, net_demand_records=559
+2026-01-19 13:07:55 [INFO] ✅ Module3 完成
+2026-01-19 13:07:55 [INFO] 💾 每日结束状态保存
+2026-01-19 13:07:55 [INFO] 💾 已保存 2025-10-06 期末库存: 515 项
+2026-01-19 13:07:55 [INFO] 期初库存条目: 515
+2026-01-19 13:07:55 [INFO] 生产入库条目: 0
+2026-01-19 13:07:55 [INFO] 交付入库条目: 0
+2026-01-19 13:07:55 [INFO] 发货出库条目: 282
+2026-01-19 13:07:55 [INFO] 发运出库条目(M6): 0，数量合计: 0
+2026-01-19 13:07:55 [INFO] 期末库存条目: 515
+2026-01-19 13:07:55 [INFO] 📊 从内存获取发运出库 [2025-10-06]: 0 项
+2026-01-19 13:07:55 [INFO] 📊 当日统计: {'date': '2025-10-06', 'total_inventory_items': 515, 'total_inventory_quantity': 335181, 'open_deployment_count': 64, 'in_transit_count': 0, 'production_gr_count': 0, 'delivery_gr_count': 0, 'shipment_count': 282}
+2026-01-19 13:07:55 [INFO] 💾 Orchestrator 状态已保存
+2026-01-19 13:07:55 [INFO] ✅ 第 1 天处理完成
+2026-01-19 13:07:55 [INFO] ==================== 第 2/5 天: 2025-10-07 ====================
+2026-01-19 13:07:55 [INFO] 🌅 每日开始状态更新
+2026-01-19 13:07:55 [INFO] 💾 保存期初库存快照...
+2026-01-19 13:07:55 [INFO] 💾 已保存 2025-10-07 期初库存: 515 项
+2026-01-19 13:07:55 [INFO] 📦 处理当日delivery GR到达...
+2026-01-19 13:07:55 [INFO] 🏭 处理历史生产当日入库...
+2026-01-19 13:07:55 [INFO] 📦 当日无历史生产入库
+2026-01-19 13:07:55 [INFO] 1️⃣ 运行 Module1 - 订单生成
+2026-01-19 13:07:55 [INFO] [M1] DPS拆分完成，条目: 5943，耗时: 0.011s
+2026-01-19 13:07:55 [INFO] [M1] 周度→日度拆分完成，生成天数: 41601，耗时: 0.013s
+2026-01-19 13:07:55 [INFO] [M1] 周度→日度拆分完成，生成天数: 41601，耗时: 0.013s
+2026-01-19 13:07:55 [INFO] [M1] 平均需求计算完成，ML数: 283，耗时: 0.018s
+2026-01-19 13:07:55 [INFO] [M1] 订单生成完成 (AO耗时: 0.013s, Normal耗时: 0.007s, 总耗时: 0.036s)，订单数: 738
+2026-01-19 13:07:58 [INFO] [M1] AO消耗完成，耗时: 2.616s
+2026-01-19 13:08:01 [INFO] [M1] Normal消耗完成（并行），耗时: 2.663s
+2026-01-19 13:08:01 [INFO] [M1] 当日订单生成完成，订单数: 738，耗时: 5.325s
+2026-01-19 13:08:01 [INFO] [M1] 历史订单读取完成，文件数: 1，合并条目: 738，耗时: 0.052s
+2026-01-19 13:08:01 [INFO] [M1] 历史订单合并前过滤完成，耗时: 0.053s
+2026-01-19 13:08:01 [INFO] [M1] 发货与缺货计算完成，shipment: 282，cut: 282，耗时: 0.017s
+2026-01-19 13:08:04 [INFO] [M1] 供需日志生成完成，条目: 25470，耗时: 3.400s
+2026-01-19 13:08:06 [INFO] 🚚 立即处理M1 shipment，扣减库存...
+2026-01-19 13:08:06 [INFO] ✅ Processed 282 M1 shipments for 2025-10-07
+2026-01-19 13:08:06 [INFO] ✅ 已扣减 282 个shipment的库存
+2026-01-19 13:08:06 [INFO] ✅ Module1 完成 - 生成 1194 个订单, 282 个发货
+2026-01-19 13:08:06 [INFO] 2️⃣ 运行 Module4 - 生产计划
+2026-01-19 13:08:07 [INFO] 🔄 无前一天产线状态 - 全新开始
+2026-01-19 13:08:07 [INFO] 🔄 无之前已分配产能 - 全新开始
+2026-01-19 13:08:07 [INFO] 💾 保存当天产线状态: ['LGDK', 'LGDW']
+2026-01-19 13:08:07 [INFO] 💾 保存当天分配产能: 29 个产能分配 (小时单位)
+2026-01-19 13:08:07 [INFO] Module4 daily output generated: C:\Users\25936\Desktop\test\fix-future-production-in-net-demand\fix-future-production-in-net-demand\BC_S5\run_20260119_130630\module4\Module4Output_20251007.xlsx
+2026-01-19 13:08:07 [INFO] 🗂️ 持久化未来生产计划（不触发当日GR）...
+2026-01-19 13:08:07 [INFO] ✅ 已写入未来计划回补: 64 条
+2026-01-19 13:08:07 [INFO] ✅ Module4 完成 - 生成生产计划: 64 条记录
+2026-01-19 13:08:07 [INFO] 3️⃣ 运行 Module5 - 部署计划
+2026-01-19 13:08:11 [INFO] ⚠️  Orchestrator当日无历史生产GR数据
+2026-01-19 13:08:11 [INFO] ⚠️  Orchestrator返回空的delivery_gr_view
+2026-01-19 13:08:11 [INFO] [M5] load_integrated_config 用时: 4.194s
+2026-01-19 13:08:12 [INFO] ✅ 缓存已初始化: PTF/LSK=55 | LeadTime=15 | Network=519
+2026-01-19 13:08:48 [INFO] [M5] Demand collection only 用时: 17.073s
+2026-01-19 13:08:48 [INFO] [M5] Demand collection+allocation 总用时: 36.639s
+2026-01-19 13:08:49 [INFO] [M5] push_softpush_allocation 用时: 0.745s，生成行数: 0
+2026-01-19 13:09:01 [INFO] [M5] Full day total 用时: 48.896s
+2026-01-19 13:09:01 [INFO] 🎯 有效部署计划: 102/11228 条
+2026-01-19 13:09:01 [INFO] 📦 立即处理M5 deployment，更新open deployment...
+2026-01-19 13:09:01 [INFO] ✅ Added 102 M5 deployment plans to open deployment for 2025-10-07
+2026-01-19 13:09:01 [INFO] ✅ 已更新 102 条部署计划到open deployment
+2026-01-19 13:09:01 [INFO] ✅ Module5 完成 - 生成 102 条有效部署计划
+2026-01-19 13:09:01 [INFO] 4️⃣ 运行 Module6 - 物流执行
+2026-01-19 13:09:01 [INFO] 🚛 立即处理M6 delivery，更新库存/open deployment/in-transit...
+2026-01-19 13:09:01 [INFO] [M6->Orch] incoming rows: 103; date=2025-10-07
+2026-01-19 13:09:01 [INFO] ✅ Processed 103 M6 delivery plans for 2025-10-07
+2026-01-19 13:09:01 [INFO] ✅ 已处理 103 条delivery计划，更新相关状态
+2026-01-19 13:09:01 [INFO] ✅ Module6 完成 - 生成 103 条交付计划
+2026-01-19 13:09:01 [INFO] 5️⃣ 运行 Module3 - 净需求计算
+2026-01-19 13:09:01 [INFO] 🔄 Module3 运行于集成模式
+2026-01-19 13:09:06 [INFO] [M3] load_module1_daily_outputs total: 5.027s for 2025-10-07
+2026-01-19 13:09:06 [INFO] C:\Users\25936\Desktop\test\fix-future-production-in-net-demand\fix-future-production-in-net-demand\orchestrator.py:476: FutureWarning: The behavior of DataFrame concatenation with empty or all-NA entries is deprecated. In a future version, this will no longer exclude empty or all-NA columns when determining the result dtypes. To retain the old behavior, exclude the relevant entries before the concat operation.
+  out = pd.concat([today_gr, future], ignore_index=True)
+2026-01-19 13:09:06 [INFO] [M3] assign_location_layers total: 0.006s, locations=16
+2026-01-19 13:09:31 [INFO] [M3] run_mrp_layered_simulation_daily total: 24.176s, records=494
+2026-01-19 13:09:31 [INFO] ✅ Module3 集成模式处理完成
+2026-01-19 13:09:31 [INFO] [M3] total duration: 29.640s for 1 days, net_demand_records=494
+2026-01-19 13:09:31 [INFO] ✅ Module3 完成
+2026-01-19 13:09:31 [INFO] 💾 每日结束状态保存
+2026-01-19 13:09:31 [INFO] 💾 已保存 2025-10-07 期末库存: 515 项
+2026-01-19 13:09:31 [INFO] 期初库存条目: 515
+2026-01-19 13:09:31 [INFO] 生产入库条目: 0
+2026-01-19 13:09:31 [INFO] 交付入库条目: 0
+2026-01-19 13:09:31 [INFO] 发货出库条目: 282
+2026-01-19 13:09:31 [INFO] 发运出库条目(M6): 103，数量合计: 3333
+2026-01-19 13:09:31 [INFO] 期末库存条目: 515
+2026-01-19 13:09:31 [INFO] 📊 从内存获取发运出库 [2025-10-07]: 13 项
+2026-01-19 13:09:31 [INFO] 📊 当日统计: {'date': '2025-10-07', 'total_inventory_items': 515, 'total_inventory_quantity': 318769, 'open_deployment_count': 63, 'in_transit_count': 103, 'production_gr_count': 0, 'delivery_gr_count': 0, 'shipment_count': 282}
+2026-01-19 13:09:31 [INFO] 💾 Orchestrator 状态已保存
+2026-01-19 13:09:31 [INFO] ✅ 第 2 天处理完成
+2026-01-19 13:09:31 [INFO] ==================== 第 3/5 天: 2025-10-08 ====================
+2026-01-19 13:09:31 [INFO] 🌅 每日开始状态更新
+2026-01-19 13:09:31 [INFO] 💾 保存期初库存快照...
+2026-01-19 13:09:31 [INFO] 💾 已保存 2025-10-08 期初库存: 515 项
+2026-01-19 13:09:31 [INFO] 📦 处理当日delivery GR到达...
+2026-01-19 13:09:31 [INFO] 🏭 处理历史生产当日入库...
+2026-01-19 13:09:31 [INFO] 📦 当日需要入库的历史生产: 2 条记录
+2026-01-19 13:09:31 [INFO] ✅ Processed 2 M4 production receipts for 2025-10-08
+2026-01-19 13:09:31 [INFO] 1️⃣ 运行 Module1 - 订单生成
+2026-01-19 13:09:31 [INFO] [M1] DPS拆分完成，条目: 5943，耗时: 0.015s
+2026-01-19 13:09:31 [INFO] [M1] 周度→日度拆分完成，生成天数: 41601，耗时: 0.018s
+2026-01-19 13:09:31 [INFO] [M1] 周度→日度拆分完成，生成天数: 41601，耗时: 0.014s
+2026-01-19 13:09:31 [INFO] [M1] 平均需求计算完成，ML数: 283，耗时: 0.026s
+2026-01-19 13:09:31 [INFO] [M1] 订单生成完成 (AO耗时: 0.017s, Normal耗时: 0.010s, 总耗时: 0.048s)，订单数: 738
+2026-01-19 13:09:34 [INFO] [M1] AO消耗完成，耗时: 2.991s
+2026-01-19 13:09:37 [INFO] [M1] Normal消耗完成（并行），耗时: 2.860s
+2026-01-19 13:09:37 [INFO] [M1] 当日订单生成完成，订单数: 738，耗时: 5.909s
+2026-01-19 13:09:37 [INFO] [M1] 历史订单读取完成，文件数: 2，合并条目: 1932，耗时: 0.171s
+2026-01-19 13:09:37 [INFO] [M1] 历史订单合并前过滤完成，耗时: 0.174s
+2026-01-19 13:09:37 [INFO] [M1] 发货与缺货计算完成，shipment: 282，cut: 282，耗时: 0.025s
+2026-01-19 13:09:41 [INFO] [M1] 供需日志生成完成，条目: 25470，耗时: 4.035s
+2026-01-19 13:09:44 [INFO] 🚚 立即处理M1 shipment，扣减库存...
+2026-01-19 13:09:44 [INFO] ✅ Processed 282 M1 shipments for 2025-10-08
+2026-01-19 13:09:44 [INFO] ✅ 已扣减 282 个shipment的库存
+2026-01-19 13:09:44 [INFO] ✅ Module1 完成 - 生成 1650 个订单, 282 个发货
+2026-01-19 13:09:44 [INFO] 2️⃣ 运行 Module4 - 生产计划
+2026-01-19 13:09:44 [INFO] 🔄 加载前一天产线状态: ['LGDK', 'LGDW']
+2026-01-19 13:09:44 [INFO] 🔄 加载之前已分配产能: 29 个产能分配
+2026-01-19 13:09:44 [INFO] Module4 daily output generated: C:\Users\25936\Desktop\test\fix-future-production-in-net-demand\fix-future-production-in-net-demand\BC_S5\run_20260119_130630\module4\Module4Output_20251008.xlsx
+2026-01-19 13:09:44 [INFO] 📦 M4当日未生成生产计划或缺少 available_date 列
+2026-01-19 13:09:44 [INFO] ✅ Module4 完成 - 生成生产计划: 0 条记录
+2026-01-19 13:09:44 [INFO] 3️⃣ 运行 Module5 - 部署计划
+2026-01-19 13:09:48 [INFO] ⚠️  Orchestrator返回空的delivery_gr_view
+2026-01-19 13:09:48 [INFO] [M5] load_integrated_config 用时: 4.391s
+2026-01-19 13:09:49 [INFO] ✅ 缓存已初始化: PTF/LSK=55 | LeadTime=15 | Network=519
+2026-01-19 13:10:31 [INFO] [M5] Demand collection only 用时: 21.072s
+2026-01-19 13:10:31 [INFO] [M5] Demand collection+allocation 总用时: 42.153s
+2026-01-19 13:10:32 [INFO] [M5] push_softpush_allocation 用时: 0.756s，生成行数: 0
+2026-01-19 13:10:45 [INFO] [M5] Full day total 用时: 55.823s
+2026-01-19 13:10:45 [INFO] 🎯 有效部署计划: 415/11859 条
+2026-01-19 13:10:45 [INFO] 📦 立即处理M5 deployment，更新open deployment...
+2026-01-19 13:10:45 [INFO] ✅ Added 415 M5 deployment plans to open deployment for 2025-10-08
+2026-01-19 13:10:45 [INFO] ✅ 已更新 415 条部署计划到open deployment
+2026-01-19 13:10:45 [INFO] ✅ Module5 完成 - 生成 415 条有效部署计划
+2026-01-19 13:10:45 [INFO] 4️⃣ 运行 Module6 - 物流执行
+2026-01-19 13:10:45 [INFO] 🚛 立即处理M6 delivery，更新库存/open deployment/in-transit...
+2026-01-19 13:10:45 [INFO] [M6->Orch] incoming rows: 52; date=2025-10-08
+2026-01-19 13:10:45 [INFO] ✅ Processed 52 M6 delivery plans for 2025-10-08
+2026-01-19 13:10:45 [INFO] ✅ 已处理 52 条delivery计划，更新相关状态
+2026-01-19 13:10:45 [INFO] ✅ Module6 完成 - 生成 52 条交付计划
+2026-01-19 13:10:45 [INFO] 5️⃣ 运行 Module3 - 净需求计算
+2026-01-19 13:10:45 [INFO] 🔄 Module3 运行于集成模式
+2026-01-19 13:10:49 [INFO] [M3] load_module1_daily_outputs total: 3.862s for 2025-10-08
+2026-01-19 13:10:50 [INFO] [M3] assign_location_layers total: 0.006s, locations=16
+2026-01-19 13:11:15 [INFO] [M3] run_mrp_layered_simulation_daily total: 25.289s, records=511
+2026-01-19 13:11:15 [INFO] ✅ Module3 集成模式处理完成
+2026-01-19 13:11:15 [INFO] [M3] total duration: 29.786s for 1 days, net_demand_records=511
+2026-01-19 13:11:15 [INFO] ✅ Module3 完成
+2026-01-19 13:11:15 [INFO] 💾 每日结束状态保存
+2026-01-19 13:11:15 [INFO] 💾 已保存 2025-10-08 期末库存: 517 项
+2026-01-19 13:11:15 [INFO] 期初库存条目: 515
+2026-01-19 13:11:15 [INFO] 生产入库条目: 2
+2026-01-19 13:11:15 [INFO] 交付入库条目: 0
+2026-01-19 13:11:15 [INFO] 发货出库条目: 282
+2026-01-19 13:11:15 [INFO] 发运出库条目(M6): 52，数量合计: 4976
+2026-01-19 13:11:15 [INFO] 期末库存条目: 517
+2026-01-19 13:11:15 [INFO] 📊 从内存获取发运出库 [2025-10-08]: 1 项
+2026-01-19 13:11:15 [INFO] 📊 当日统计: {'date': '2025-10-08', 'total_inventory_items': 517, 'total_inventory_quantity': 333018, 'open_deployment_count': 427, 'in_transit_count': 155, 'production_gr_count': 2, 'delivery_gr_count': 0, 'shipment_count': 282}
+2026-01-19 13:11:15 [INFO] 💾 Orchestrator 状态已保存
+2026-01-19 13:11:15 [INFO] ✅ 第 3 天处理完成
+2026-01-19 13:11:15 [INFO] ==================== 第 4/5 天: 2025-10-09 ====================
+2026-01-19 13:11:15 [INFO] 🌅 每日开始状态更新
+2026-01-19 13:11:15 [INFO] 💾 保存期初库存快照...
+2026-01-19 13:11:15 [INFO] 💾 已保存 2025-10-09 期初库存: 517 项
+2026-01-19 13:11:15 [INFO] 📦 处理当日delivery GR到达...
+2026-01-19 13:11:15 [INFO] 🏭 处理历史生产当日入库...
+2026-01-19 13:11:15 [INFO] 📦 当日需要入库的历史生产: 2 条记录
+2026-01-19 13:11:15 [INFO] ✅ Processed 2 M4 production receipts for 2025-10-09
+2026-01-19 13:11:15 [INFO] 1️⃣ 运行 Module1 - 订单生成
+2026-01-19 13:11:15 [INFO] [M1] DPS拆分完成，条目: 5943，耗时: 0.012s
+2026-01-19 13:11:16 [INFO] [M1] 周度→日度拆分完成，生成天数: 41601，耗时: 0.019s
+2026-01-19 13:11:16 [INFO] [M1] 周度→日度拆分完成，生成天数: 41601，耗时: 0.017s
+2026-01-19 13:11:16 [INFO] [M1] 平均需求计算完成，ML数: 283，耗时: 0.024s
+2026-01-19 13:11:16 [INFO] [M1] 订单生成完成 (AO耗时: 0.019s, Normal耗时: 0.009s, 总耗时: 0.048s)，订单数: 738
+2026-01-19 13:11:19 [INFO] [M1] AO消耗完成，耗时: 2.909s
+2026-01-19 13:11:21 [INFO] [M1] Normal消耗完成（并行），耗时: 2.883s
+2026-01-19 13:11:21 [INFO] [M1] 当日订单生成完成，订单数: 738，耗时: 5.853s
+2026-01-19 13:11:22 [INFO] [M1] 历史订单读取完成，文件数: 3，合并条目: 3582，耗时: 0.328s
+2026-01-19 13:11:22 [INFO] [M1] 历史订单合并前过滤完成，耗时: 0.330s
+2026-01-19 13:11:22 [INFO] [M1] 发货与缺货计算完成，shipment: 282，cut: 282，耗时: 0.026s
+2026-01-19 13:11:26 [INFO] [M1] 供需日志生成完成，条目: 25470，耗时: 4.601s
+2026-01-19 13:11:30 [INFO] 🚚 立即处理M1 shipment，扣减库存...
+2026-01-19 13:11:30 [INFO] ✅ Processed 282 M1 shipments for 2025-10-09
+2026-01-19 13:11:30 [INFO] ✅ 已扣减 282 个shipment的库存
+2026-01-19 13:11:30 [INFO] ✅ Module1 完成 - 生成 2106 个订单, 282 个发货
+2026-01-19 13:11:30 [INFO] 2️⃣ 运行 Module4 - 生产计划
+2026-01-19 13:11:30 [INFO] 🔄 无前一天产线状态 - 全新开始
+2026-01-19 13:11:30 [INFO] 🔄 加载之前已分配产能: 29 个产能分配
+2026-01-19 13:11:30 [INFO] Module4 daily output generated: C:\Users\25936\Desktop\test\fix-future-production-in-net-demand\fix-future-production-in-net-demand\BC_S5\run_20260119_130630\module4\Module4Output_20251009.xlsx
+2026-01-19 13:11:30 [INFO] 📦 M4当日未生成生产计划或缺少 available_date 列
+2026-01-19 13:11:30 [INFO] ✅ Module4 完成 - 生成生产计划: 0 条记录
+2026-01-19 13:11:30 [INFO] 3️⃣ 运行 Module5 - 部署计划
+2026-01-19 13:11:35 [INFO] ⚠️  Orchestrator返回空的delivery_gr_view
+2026-01-19 13:11:36 [INFO] [M5] load_integrated_config 用时: 5.915s
+2026-01-19 13:11:37 [INFO] ✅ 缓存已初始化: PTF/LSK=55 | LeadTime=15 | Network=519
+2026-01-19 13:12:20 [INFO] [M5] Demand collection only 用时: 20.806s
+2026-01-19 13:12:20 [INFO] [M5] Demand collection+allocation 总用时: 43.471s
+2026-01-19 13:12:21 [INFO] [M5] push_softpush_allocation 用时: 0.786s，生成行数: 0
+2026-01-19 13:12:33 [INFO] [M5] Full day total 用时: 56.741s
+2026-01-19 13:12:34 [INFO] 🎯 有效部署计划: 431/12458 条
+2026-01-19 13:12:34 [INFO] 📦 立即处理M5 deployment，更新open deployment...
+2026-01-19 13:12:34 [INFO] ✅ Added 431 M5 deployment plans to open deployment for 2025-10-09
+2026-01-19 13:12:34 [INFO] ✅ 已更新 431 条部署计划到open deployment
+2026-01-19 13:12:34 [INFO] ✅ Module5 完成 - 生成 431 条有效部署计划
+2026-01-19 13:12:34 [INFO] 4️⃣ 运行 Module6 - 物流执行
+2026-01-19 13:12:35 [INFO] 🚛 立即处理M6 delivery，更新库存/open deployment/in-transit...
+2026-01-19 13:12:35 [INFO] [M6->Orch] incoming rows: 391; date=2025-10-09
+2026-01-19 13:12:35 [INFO] ✅ Processed 391 M6 delivery plans for 2025-10-09
+2026-01-19 13:12:35 [INFO] ✅ 已处理 391 条delivery计划，更新相关状态
+2026-01-19 13:12:35 [INFO] ✅ Module6 完成 - 生成 391 条交付计划
+2026-01-19 13:12:35 [INFO] 5️⃣ 运行 Module3 - 净需求计算
+2026-01-19 13:12:35 [INFO] 🔄 Module3 运行于集成模式
+2026-01-19 13:12:39 [INFO] [M3] load_module1_daily_outputs total: 3.847s for 2025-10-09
+2026-01-19 13:12:39 [INFO] [M3] assign_location_layers total: 0.007s, locations=16
+2026-01-19 13:13:00 [INFO] [M3] run_mrp_layered_simulation_daily total: 21.348s, records=517
+2026-01-19 13:13:01 [INFO] ✅ Module3 集成模式处理完成
+2026-01-19 13:13:01 [INFO] [M3] total duration: 25.871s for 1 days, net_demand_records=517
+2026-01-19 13:13:01 [INFO] ✅ Module3 完成
+2026-01-19 13:13:01 [INFO] 💾 每日结束状态保存
+2026-01-19 13:13:01 [INFO] 💾 已保存 2025-10-09 期末库存: 517 项
+2026-01-19 13:13:01 [INFO] 期初库存条目: 517
+2026-01-19 13:13:01 [INFO] 生产入库条目: 2
+2026-01-19 13:13:01 [INFO] 交付入库条目: 0
+2026-01-19 13:13:01 [INFO] 发货出库条目: 282
+2026-01-19 13:13:01 [INFO] 发运出库条目(M6): 391，数量合计: 36384
+2026-01-19 13:13:01 [INFO] 期末库存条目: 517
+2026-01-19 13:13:01 [INFO] 📊 从内存获取发运出库 [2025-10-09]: 2 项
+2026-01-19 13:13:01 [INFO] 📊 当日统计: {'date': '2025-10-09', 'total_inventory_items': 517, 'total_inventory_quantity': 316345, 'open_deployment_count': 473, 'in_transit_count': 546, 'production_gr_count': 2, 'delivery_gr_count': 0, 'shipment_count': 282}
+2026-01-19 13:13:01 [INFO] 💾 Orchestrator 状态已保存
+2026-01-19 13:13:01 [INFO] ✅ 第 4 天处理完成
+2026-01-19 13:13:01 [INFO] ==================== 第 5/5 天: 2025-10-10 ====================
+2026-01-19 13:13:01 [INFO] 🌅 每日开始状态更新
+2026-01-19 13:13:01 [INFO] 💾 保存期初库存快照...
+2026-01-19 13:13:01 [INFO] 💾 已保存 2025-10-10 期初库存: 517 项
+2026-01-19 13:13:01 [INFO] 📦 处理当日delivery GR到达...
+2026-01-19 13:13:01 [INFO] ✅ Processed 94 delivery arrivals for 2025-10-10
+2026-01-19 13:13:01 [INFO] 🏭 处理历史生产当日入库...
+2026-01-19 13:13:01 [INFO] 📦 当日需要入库的历史生产: 3 条记录
+2026-01-19 13:13:01 [INFO] ✅ Processed 3 M4 production receipts for 2025-10-10
+2026-01-19 13:13:01 [INFO] 1️⃣ 运行 Module1 - 订单生成
+2026-01-19 13:13:01 [INFO] [M1] DPS拆分完成，条目: 5943，耗时: 0.010s
+2026-01-19 13:13:01 [INFO] [M1] 周度→日度拆分完成，生成天数: 41601，耗时: 0.014s
+2026-01-19 13:13:01 [INFO] [M1] 周度→日度拆分完成，生成天数: 41601，耗时: 0.014s
+2026-01-19 13:13:01 [INFO] [M1] 平均需求计算完成，ML数: 283，耗时: 0.018s
+2026-01-19 13:13:01 [INFO] [M1] 订单生成完成 (AO耗时: 0.012s, Normal耗时: 0.006s, 总耗时: 0.035s)，订单数: 738
+2026-01-19 13:13:04 [INFO] [M1] AO消耗完成，耗时: 2.552s
+2026-01-19 13:13:07 [INFO] [M1] Normal消耗完成（并行），耗时: 2.610s
+2026-01-19 13:13:07 [INFO] [M1] 当日订单生成完成，订单数: 738，耗时: 5.208s
+2026-01-19 13:13:07 [INFO] [M1] 历史订单读取完成，文件数: 4，合并条目: 5688，耗时: 0.396s
+2026-01-19 13:13:07 [INFO] [M1] 历史订单合并前过滤完成，耗时: 0.399s
+2026-01-19 13:13:07 [INFO] [M1] 发货与缺货计算完成，shipment: 282，cut: 282，耗时: 0.022s
+2026-01-19 13:13:11 [INFO] [M1] 供需日志生成完成，条目: 25470，耗时: 3.699s
+2026-01-19 13:13:13 [INFO] 🚚 立即处理M1 shipment，扣减库存...
+2026-01-19 13:13:13 [INFO] ✅ Processed 282 M1 shipments for 2025-10-10
+2026-01-19 13:13:13 [INFO] ✅ 已扣减 282 个shipment的库存
+2026-01-19 13:13:13 [INFO] ✅ Module1 完成 - 生成 2562 个订单, 282 个发货
+2026-01-19 13:13:13 [INFO] 2️⃣ 运行 Module4 - 生产计划
+2026-01-19 13:13:13 [INFO] 🔄 无前一天产线状态 - 全新开始
+2026-01-19 13:13:13 [INFO] 🔄 加载之前已分配产能: 29 个产能分配
+2026-01-19 13:13:13 [INFO] Module4 daily output generated: C:\Users\25936\Desktop\test\fix-future-production-in-net-demand\fix-future-production-in-net-demand\BC_S5\run_20260119_130630\module4\Module4Output_20251010.xlsx
+2026-01-19 13:13:13 [INFO] 📦 M4当日未生成生产计划或缺少 available_date 列
+2026-01-19 13:13:13 [INFO] ✅ Module4 完成 - 生成生产计划: 0 条记录
+2026-01-19 13:13:13 [INFO] 3️⃣ 运行 Module5 - 部署计划
+2026-01-19 13:13:18 [INFO] [M5] load_integrated_config 用时: 4.687s
+2026-01-19 13:13:19 [INFO] ✅ 缓存已初始化: PTF/LSK=55 | LeadTime=15 | Network=519
+2026-01-19 13:13:59 [INFO] [M5] Demand collection only 用时: 17.774s
+2026-01-19 13:13:59 [INFO] [M5] Demand collection+allocation 总用时: 40.067s
+2026-01-19 13:14:00 [INFO] [M5] push_softpush_allocation 用时: 0.899s，生成行数: 0
+2026-01-19 13:14:13 [INFO] [M5] Full day total 用时: 54.590s
+2026-01-19 13:14:13 [INFO] 🎯 有效部署计划: 477/12995 条
+2026-01-19 13:14:13 [INFO] 📦 立即处理M5 deployment，更新open deployment...
+2026-01-19 13:14:13 [INFO] ✅ Added 477 M5 deployment plans to open deployment for 2025-10-10
+2026-01-19 13:14:13 [INFO] ✅ 已更新 477 条部署计划到open deployment
+2026-01-19 13:14:13 [INFO] ✅ Module5 完成 - 生成 477 条有效部署计划
+2026-01-19 13:14:13 [INFO] 4️⃣ 运行 Module6 - 物流执行
+2026-01-19 13:14:14 [INFO] 🚛 立即处理M6 delivery，更新库存/open deployment/in-transit...
+2026-01-19 13:14:14 [INFO] [M6->Orch] incoming rows: 91; date=2025-10-10
+2026-01-19 13:14:14 [INFO] ✅ Processed 91 M6 delivery plans for 2025-10-10
+2026-01-19 13:14:14 [INFO] ✅ 已处理 91 条delivery计划，更新相关状态
+2026-01-19 13:14:14 [INFO] ✅ Module6 完成 - 生成 91 条交付计划
+2026-01-19 13:14:14 [INFO] 5️⃣ 运行 Module3 - 净需求计算
+2026-01-19 13:14:14 [INFO] 🔄 Module3 运行于集成模式
+2026-01-19 13:14:20 [INFO] [M3] load_module1_daily_outputs total: 5.591s for 2025-10-10
+2026-01-19 13:14:20 [INFO] [M3] assign_location_layers total: 0.006s, locations=16
+2026-01-19 13:14:42 [INFO] [M3] run_mrp_layered_simulation_daily total: 21.985s, records=535
+2026-01-19 13:14:43 [INFO] ✅ Module3 集成模式处理完成
+2026-01-19 13:14:43 [INFO] [M3] total duration: 28.482s for 1 days, net_demand_records=535
+2026-01-19 13:14:43 [INFO] ✅ Module3 完成
+2026-01-19 13:14:43 [INFO] 💾 每日结束状态保存
+2026-01-19 13:14:43 [INFO] 💾 已保存 2025-10-10 期末库存: 519 项
+2026-01-19 13:14:43 [INFO] 期初库存条目: 517
+2026-01-19 13:14:43 [INFO] 生产入库条目: 3
+2026-01-19 13:14:43 [INFO] 交付入库条目: 94
+2026-01-19 13:14:43 [INFO] 发货出库条目: 282
+2026-01-19 13:14:43 [INFO] 发运出库条目(M6): 91，数量合计: 9046
+2026-01-19 13:14:43 [INFO] 期末库存条目: 519
+2026-01-19 13:14:43 [INFO] 📊 从内存获取发运出库 [2025-10-10]: 4 项
+2026-01-19 13:14:43 [INFO] 📊 当日统计: {'date': '2025-10-10', 'total_inventory_items': 519, 'total_inventory_quantity': 319184, 'open_deployment_count': 861, 'in_transit_count': 543, 'production_gr_count': 3, 'delivery_gr_count': 94, 'shipment_count': 282}
+2026-01-19 13:14:43 [INFO] 💾 Orchestrator 状态已保存
+2026-01-19 13:14:43 [INFO] ✅ 第 5 天处理完成
+2026-01-19 13:14:43 [INFO] 📊 仿真完成报告
+2026-01-19 13:14:43 [INFO] ============================================================
+2026-01-19 13:14:43 [INFO] 仿真期间: 2025-10-06 到 2025-10-10 (5 天)
+2026-01-19 13:14:43 [INFO] 输出目录: C:\Users\25936\Desktop\test\fix-future-production-in-net-demand\fix-future-production-in-net-demand\BC_S5\run_20260119_130630
+2026-01-19 13:14:43 [INFO] MODULE1: 5 天成功处理
+2026-01-19 13:14:43 [INFO] MODULE3: 5 天成功处理
+2026-01-19 13:14:43 [INFO] MODULE4: 5 天成功处理
+2026-01-19 13:14:43 [INFO] MODULE5: 5 天成功处理
+2026-01-19 13:14:43 [INFO] MODULE6: 5 天成功处理
+2026-01-19 13:14:43 [INFO] 🔎 正在进行库存平衡检查...
+2026-01-19 13:14:43 [INFO] ✅ 库存平衡检查通过
+2026-01-19 13:14:43 [INFO] 📊 正在生成汇总报告...
+2026-01-19 13:14:43 [INFO] 📊 开始生成汇总报告 (2025-10-06 到 2025-10-10)
+2026-01-19 13:14:44 [INFO] 📊 OrderLog 去重：原始 8250 条 → 去重后 3690 条（移除了 4560 条重复的 AO 订单）
+2026-01-19 13:14:44 [INFO] 📊 过滤超出日期范围的记录：3690 条 → 1410 条（移除了 2280 条超出 2025-10-10 的记录）
+2026-01-19 13:14:44 [INFO] C:\Users\25936\Desktop\test\fix-future-production-in-net-demand\fix-future-production-in-net-demand\summary_report_generator.py:387: FutureWarning: The behavior of DataFrame concatenation with empty or all-NA entries is deprecated. In a future version, this will no longer exclude empty or all-NA columns when determining the result dtypes. To retain the old behavior, exclude the relevant entries before the concat operation.
+  combined_exceeds = pd.concat(all_exceeds, ignore_index=True)
+2026-01-19 13:15:06 [INFO] C:\Users\25936\Desktop\test\fix-future-production-in-net-demand\fix-future-production-in-net-demand\summary_report_generator.py:507: FutureWarning: The behavior of DataFrame concatenation with empty or all-NA entries is deprecated. In a future version, this will no longer exclude empty or all-NA columns when determining the result dtypes. To retain the old behavior, exclude the relevant entries before the concat operation.
+  combined_productions = pd.concat(all_productions, ignore_index=True)
+2026-01-19 13:15:06 [INFO] 📊 Production Plan 过滤：64 条 → 7 条（移除了 57 条超出日期范围的记录）
+2026-01-19 13:15:06 [INFO] C:\Users\25936\Desktop\test\fix-future-production-in-net-demand\fix-future-production-in-net-demand\summary_report_generator.py:350: FutureWarning: The behavior of DataFrame concatenation with empty or all-NA entries is deprecated. In a future version, this will no longer exclude empty or all-NA columns when determining the result dtypes. To retain the old behavior, exclude the relevant entries before the concat operation.
+  combined_usage = pd.concat(all_usage, ignore_index=True)
+2026-01-19 13:15:14 [INFO] 📊 历史库存记录已生成: C:\Users\25936\Desktop\test\fix-future-production-in-net-demand\fix-future-production-in-net-demand\BC_S5\run_20260119_130630\summary\historical_inventory_record.csv (2840 条记录)
+2026-01-19 13:15:14 [INFO] ✅ 汇总报告生成完成，输出目录: C:\Users\25936\Desktop\test\fix-future-production-in-net-demand\fix-future-production-in-net-demand\BC_S5\run_20260119_130630\summary
+2026-01-19 13:15:14 [INFO] 🎯 最终Orchestrator状态:
+2026-01-19 13:15:14 [INFO] date: 2025-10-10
+2026-01-19 13:15:14 [INFO] total_inventory_items: 519
+2026-01-19 13:15:14 [INFO] total_inventory_quantity: 319184
+2026-01-19 13:15:14 [INFO] open_deployment_count: 861
+2026-01-19 13:15:14 [INFO] in_transit_count: 543
+2026-01-19 13:15:14 [INFO] production_gr_count: 3
+2026-01-19 13:15:14 [INFO] delivery_gr_count: 94
+2026-01-19 13:15:14 [INFO] shipment_count: 282
+2026-01-19 13:15:14 [INFO] 🎉 集成仿真完成!
+2026-01-19 13:15:14 [INFO] 总共处理: 5 天
+2026-01-19 13:15:14 [INFO] ✅ 仿真成功完成

@@ -1,0 +1,35 @@
+================================================================================
+SUPPLY CHAIN INTEGRATION VALIDATION REPORT
+================================================================================
+Validation Start Time: 2025-09-18 22:51:15
+Validation End Time: 2025-09-18 22:51:16
+Duration: 0.92 seconds
+Total Errors: 0
+Total Warnings: 4
+Total Infos: 9
+
+⚠️  VALIDATION PASSED WITH WARNINGS
+Simulation can proceed but please review warnings.
+
+WARNINGS:
+----------------------------------------
+[22:51:15] [WARNING] [InventoryBalance] [DataAccess] No production GR data available from orchestrator for 2025-09-01. Using zero production receipts.
+[22:51:15] [WARNING] [InventoryBalance] [DataAccess] No delivery GR data available from orchestrator for 2025-09-01. Using zero delivery receipts.
+[22:51:15] [WARNING] [InventoryBalance] [DataAccess] No production GR data available from orchestrator for 2025-09-02. Using zero production receipts.
+[22:51:15] [WARNING] [InventoryBalance] [DataAccess] No delivery GR data available from orchestrator for 2025-09-02. Using zero delivery receipts.
+
+INFORMATION:
+----------------------------------------
+[22:51:15] [INFO] [InventoryBalance] [ConsistencyCheck] Starting inventory consistency validation from 2025-09-01 to 2025-09-02
+[22:51:15] [INFO] [InventoryBalance] [DailyCheck] Checking inventory balance for 2025-09-01
+[22:51:15] [INFO] [InventoryBalance] [BalanceCheck] [2025-09-01] Inventory balance check passed for all 10 items
+[22:51:15] [INFO] [InventoryBalance] [DailyCheck] Checking inventory balance for 2025-09-02
+[22:51:15] [INFO] [InventoryBalance] [BalanceCheck] [2025-09-02] Inventory balance check passed for all 10 items
+[22:51:15] [INFO] [InventoryBalance] [PeriodSummary] Period 2025-09-01 to 2025-09-02: All 20 inventory transactions balanced
+[22:51:15] [INFO] [InventoryBalance] [NegativeCheck] [2025-09-01] No negative inventory detected
+[22:51:15] [INFO] [InventoryBalance] [NegativeCheck] [2025-09-02] No negative inventory detected
+[22:51:15] [INFO] [InventoryBalance] [ConsistencyResult] Inventory consistency validation passed
+
+================================================================================
+END OF VALIDATION REPORT
+================================================================================

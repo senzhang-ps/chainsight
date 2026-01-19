@@ -89,7 +89,7 @@ def apply_grouped_moq_rv(
 
     adjusted_qtys = {}
 
-    for route_key, group in sorted(route_groups.items()):
+    for route_key, group in route_groups.items():
         total_qty = int(group['total_qty'] or 0)
         is_cross_node = group['is_cross_node']
         moq = int(group['moq'] or 0)
@@ -163,35 +163,28 @@ def apply_priority_allocation_vectorized(
         return current_stock
 
     n = len(demand_rows)
+    # Build DataFrame with indices（与code_vo保持一致）
     df = pd.DataFrame(demand_rows).copy()
     df['idx'] = np.arange(n)
+    df = df.set_index('idx', drop=False)  # keep idx as column too（与code_vo一致）
     df['priority'] = df['demand_element'].map(
         lambda x: demand_priority_map.get(x, 99)
     )
-
-    # 计算adjusted_qty
-    adjusted_qty_list = []
-    for i in range(n):
-        if i in adjusted_qtys:
-            adjusted_qty_list.append(int(adjusted_qtys[i]))
-        else:
-            adjusted_qty_list.append(int(df.iloc[i]['demand_qty']))
-    df['adjusted_qty'] = adjusted_qty_list
+    # 计算adjusted_qty（与code_vo保持一致的写法）
+    df['adjusted_qty'] = df['idx'].map(
+        lambda i: int(adjusted_qtys.get(i, int(df.loc[df['idx'] == i, 'demand_qty'].iloc[0])))
+    )
     df['deployed_qty_invCon'] = 0
 
     # 早期退出
     if current_stock <= 0:
-        for i in range(n):
-            demand_rows[i]['deployed_qty_invCon'] = 0
+        # leave zeros
+        for i, row in df[['idx', 'deployed_qty_invCon']].itertuples(index=False):
+            demand_rows[i]['deployed_qty_invCon'] = int(row)
         return 0
 
-    # 按优先级处理
-    priorities = sorted(df['priority'].unique())
-    for p in priorities:
-        block = df[df['priority'] == p].copy()
-        if block.empty:
-            continue
-
+    # Process priorities in ascending order; stop when stock depleted（与code_vo一致）
+    for p, block in df.sort_values('priority').groupby('priority', sort=True):
         group_total = int(block['adjusted_qty'].sum())
         if group_total <= 0:
             continue
@@ -200,29 +193,27 @@ def apply_priority_allocation_vectorized(
         adj = block['adjusted_qty'].to_numpy()
 
         if current_stock >= group_total:
-            # 完全满足
-            df.loc[df['idx'].isin(idxs), 'deployed_qty_invCon'] = adj
+            # fully satisfy（与code_vo一致，直接用索引赋值）
+            df.loc[idxs, 'deployed_qty_invCon'] = adj
             current_stock -= group_total
             continue
 
-        # 部分满足：按比例分配
+        # partial: proportional by adjusted_qty, integer floors（与code_vo一致）
         weights = adj.astype(float)
         shares = (
             (current_stock * (weights / float(group_total)))
             if group_total > 0 else np.zeros_like(weights)
         )
         alloc = np.minimum(np.floor(shares).astype(np.int64), adj)
-
-        for j, idx in enumerate(idxs):
-            df.loc[df['idx'] == idx, 'deployed_qty_invCon'] = alloc[j]
-
+        df.loc[idxs, 'deployed_qty_invCon'] = alloc
         current_stock = 0
+        # zero all remaining priorities implicitly
         break
 
-    # 写回
+    # Write back
     for i, val in df[['idx', 'deployed_qty_invCon']].itertuples(index=False):
         demand_rows[int(i)]['deployed_qty_invCon'] = int(val)
-
+    df = df.reset_index(drop=True)
     return current_stock
 
 

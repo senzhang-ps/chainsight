@@ -806,6 +806,7 @@ def run_physical_flow_module(
     if sort_cols:
         dp = dp.sort_values(by=sort_cols, kind='mergesort')
     dp = dp.reset_index(drop=True)
+
     # 如果没有ori_deployment_uid列，才重新生成
     if 'ori_deployment_uid' not in dp.columns or dp['ori_deployment_uid'].isnull().any():
         print(f"  ⚠️  检测到缺失UID，重新生成")

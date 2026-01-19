@@ -763,8 +763,9 @@ def _collect_pending_demands(
     """
     pending_rows = []
     
-    # 使用sorted()确保确定性迭代顺序（与code_vo保持一致）
-    for uid, st in sorted(agg_status.items()):
+    # 保持原始迭代顺序（与 ChainSightMVPOri 版本保持一致）
+    # 注意：不使用 sorted()，因为原始版本使用字典的默认迭代顺序
+    for uid, st in agg_status.items():
         if st['qty'] <= 0:
             continue
         

@@ -1,0 +1,5 @@
+timestamp,date,event_type,message
+2026-01-19T15:14:00.989322,2025-10-06,INIT_INVENTORY,Initialized 515 inventory records
+2026-01-19T15:14:00.993600,2025-10-06,OPEN_DEPLOYMENT_CLEANUP,Removed 0 past-due open deployments (grace_days=100)
+2026-01-19T15:14:11.183064,2025-10-06,M1_SHIPMENTS,Processed 282 shipments
+2026-01-19T15:14:58.881686,2025-10-06,M5_DEPLOYMENT,Added 64 deployment plans

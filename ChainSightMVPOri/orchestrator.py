@@ -690,6 +690,7 @@ class Orchestrator:
         # print(f"    🔍 Orchestrator正在处理Module5部署计划: {len(deployment_df)} 条")
         # if len(deployment_df) > 0:
         #     print(f"    📈 部署计划deployed_qty统计: {deployment_df['deployed_qty'].describe()}")
+        
         # 为保证在相同配置和随机种子下 ori_deployment_uid 可复现，
         # 在生成 UID 之前对部署计划做一次稳定排序
         sort_cols = [
@@ -698,6 +699,7 @@ class Orchestrator:
         ]
         if sort_cols:
             deployment_df = deployment_df.sort_values(by=sort_cols, kind='mergesort')
+
         # Add new deployment plans to open deployment
         # Performance optimization: Use itertuples instead of iterrows
         for row in deployment_df.itertuples():

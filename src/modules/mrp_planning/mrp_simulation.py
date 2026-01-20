@@ -2,6 +2,11 @@
 Module3 MRP模拟核心逻辑模块。
 
 负责MRP每日模拟的主流程控制。
+
+优化历史:
+- v1.0: 基础实现
+- v2.0: 添加 ThreadPoolExecutor 并行处理
+- v2.1: 添加 DataIndexer 预索引优化，将 O(n*m) 过滤降为 O(1) 查找
 """
 
 import threading
@@ -12,6 +17,7 @@ from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 
+from .data_indexer import DataIndexer, create_simulation_indexer
 from .layer_assignment import assign_location_layers
 from .node_processor import NodeProcessor
 from .utils import build_ptf_lsk_cache, normalize_identifiers
@@ -72,6 +78,23 @@ def run_mrp_layered_simulation_daily(
 
     # 准备生产数据
     future_prod_df = _prepare_production_df(all_production_df)
+    
+    # 创建数据索引器（预处理优化）
+    t_index = time.perf_counter()
+    data_indexer = create_simulation_indexer(
+        beginning_inventory_df=beginning_inventory_df,
+        in_transit_df=in_transit_df,
+        delivery_gr_df=delivery_gr_df,
+        future_production_df=future_prod_df,
+        today_shipment_df=daily_shipment_df,
+        open_deployment_df=open_deployment_df,
+        supply_demand_df=daily_supply_demand_df,
+        safety_stock_df=safety_stock_df,
+        order_df=daily_order_df,
+        delivery_shipment_df=delivery_shipment_df,
+    )
+    ctx['data_indexer'] = data_indexer
+    # print(f"[M3] DataIndexer built in {time.perf_counter() - t_index:.3f}s")
 
     # 按层级处理
     all_records = []
@@ -232,7 +255,8 @@ def _process_layer(
     )
 
     try:
-        n_workers = min(32, max(1, len(layer_nodes)))
+        # 增加worker数量以更好利用CPU（16核心 x 4 = 64线程）
+        n_workers = min(64, max(1, len(layer_nodes)))
         with ThreadPoolExecutor(max_workers=n_workers) as executor:
             futures = {
                 executor.submit(processor.process, ml): ml

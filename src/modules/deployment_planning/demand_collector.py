@@ -125,42 +125,37 @@ def _collect_sdl_demands(
 
     sdl['requirement_date'] = pd.to_datetime(sdl['date'])
 
-    # 识别forecast行
-    is_fc = sdl['demand_element'].astype(str).str.lower() == 'forecast'
-
-    # forecast: [sim_date, horizon_end]
-    sdl_fc = sdl[
-        is_fc &
+    # 筛选窗口内数据（forecast和其他类型统一处理）
+    mask = (
         (sdl['requirement_date'] >= sim_date) &
         (sdl['requirement_date'] <= horizon_end)
-    ]
+    )
+    combined = sdl[mask]
 
-    # 其他: [sim_date, horizon_end]
-    sdl_others = sdl[
-        ~is_fc &
-        (sdl['requirement_date'] >= sim_date) &
-        (sdl['requirement_date'] <= horizon_end)
-    ]
+    if combined.empty:
+        return demand_rows
 
-    combined = pd.concat([sdl_fc, sdl_others], ignore_index=True)
-    for row in combined.itertuples():
-        demand_rows.append({
-            'material': material,
-            'location': location,
-            'sending': upstream,
-            'receiving': location,
-            'demand_element': row.demand_element,
-            'demand_qty': int(row.quantity),
-            'planned_qty': int(row.quantity),
-            'moq': DEFAULT_MOQ,
-            'rv': DEFAULT_RV,
-            'leadtime': leadtime_for_row if upstream else 0,
-            'requirement_date': row.requirement_date,
-            'plan_deploy_date': sim_date,
-            'orig_location': location
-        })
-
-    return demand_rows
+    # 使用向量化方式构建结果（避免itertuples循环）
+    leadtime_val = leadtime_for_row if upstream else 0
+    
+    # 向量化：直接构建 DataFrame 然后转换为 records
+    result_df = pd.DataFrame({
+        'material': material,
+        'location': location,
+        'sending': upstream,
+        'receiving': location,
+        'demand_element': combined['demand_element'].values,
+        'demand_qty': combined['quantity'].astype(int).values,
+        'planned_qty': combined['quantity'].astype(int).values,
+        'moq': DEFAULT_MOQ,
+        'rv': DEFAULT_RV,
+        'leadtime': leadtime_val,
+        'requirement_date': combined['requirement_date'].values,
+        'plan_deploy_date': sim_date,
+        'orig_location': location
+    })
+    
+    return result_df.to_dict('records')
 
 
 def _collect_safety_stock_demands(
@@ -296,25 +291,30 @@ def _collect_order_demands(
     )
     orders = orders[mask]
 
-    for row in orders.itertuples():
-        qty = int(row.quantity)
-        demand_rows.append({
-            'material': material,
-            'location': location,
-            'sending': upstream,
-            'receiving': location,
-            'demand_element': str(row.demand_element),
-            'demand_qty': qty,
-            'planned_qty': qty,
-            'moq': DEFAULT_MOQ,
-            'rv': DEFAULT_RV,
-            'leadtime': leadtime_for_row if upstream else 0,
-            'requirement_date': row.requirement_date,
-            'plan_deploy_date': sim_date,
-            'orig_location': location
-        })
+    if orders.empty:
+        return demand_rows
 
-    return demand_rows
+    # 使用向量化方式（避免itertuples循环开销）
+    leadtime_val = leadtime_for_row if upstream else 0
+    
+    # 向量化：直接构建 DataFrame 然后转换为 records
+    result_df = pd.DataFrame({
+        'material': material,
+        'location': location,
+        'sending': upstream,
+        'receiving': location,
+        'demand_element': orders['demand_element'].astype(str).values,
+        'demand_qty': orders['quantity'].astype(int).values,
+        'planned_qty': orders['quantity'].astype(int).values,
+        'moq': DEFAULT_MOQ,
+        'rv': DEFAULT_RV,
+        'leadtime': leadtime_val,
+        'requirement_date': orders['requirement_date'].values,
+        'plan_deploy_date': sim_date,
+        'orig_location': location
+    })
+    
+    return result_df.to_dict('records')
 
 
 def _collect_gap_demands(
@@ -536,6 +536,90 @@ def collect_node_demands(
     # 4. GAP传递需求
     demand_rows.extend(_collect_gap_demands(
         up_gap_buffer, deploy_cfg, material, location, upstream,
+        sim_date, horizon_end, leadtime_for_row
+    ))
+
+    return demand_rows
+
+
+def collect_node_demands_fast(
+    material: str,
+    location: str,
+    sim_date: pd.Timestamp,
+    config: dict,
+    up_gap_buffer: dict,
+    horizon_cache: dict,
+    sdl_index: Optional[Dict[tuple, pd.DataFrame]] = None,
+    ss_index: Optional[Dict[tuple, pd.DataFrame]] = None,
+    order_index: Optional[Dict[tuple, pd.DataFrame]] = None
+) -> List[dict]:
+    """
+    使用预计算horizon缓存的快速需求收集。
+    
+    与collect_node_demands逻辑完全一致，但使用预计算的horizon参数。
+    
+    Args:
+        material: 物料编码
+        location: 位置编码
+        sim_date: 仿真日期
+        config: 配置字典
+        up_gap_buffer: 上游缺口缓冲区
+        horizon_cache: 预计算的horizon缓存
+        sdl_index: SDL预建索引
+        ss_index: SafetyStock预建索引
+        order_index: OrderLog预建索引
+    
+    Returns:
+        list: 需求行列表
+    """
+    mat_str = str(material)
+    loc_str = str(location)
+    
+    # 从预计算缓存获取horizon参数
+    cache_entry = horizon_cache.get((mat_str, loc_str))
+    if cache_entry is None:
+        # 回退到原始方法
+        return collect_node_demands(
+            material, location, sim_date, config, up_gap_buffer,
+            sdl_index=sdl_index, ss_index=ss_index, order_index=order_index
+        )
+    
+    upstream = cache_entry['upstream']
+    horizon_end = cache_entry['horizon_end']
+    leadtime_for_row = cache_entry['leadtime_for_row']
+    
+    supply_demand_log = config['SupplyDemandLog']
+    safety_stock = config['SafetyStock']
+    deploy_cfg = config['DeployConfig']
+    
+    # 收集各类需求
+    demand_rows = []
+
+    # 1. SDL需求
+    demand_rows.extend(_collect_sdl_demands(
+        supply_demand_log, mat_str, loc_str, upstream,
+        sim_date, horizon_end, leadtime_for_row,
+        sdl_index=sdl_index
+    ))
+
+    # 2. 安全库存需求
+    demand_rows.extend(_collect_safety_stock_demands(
+        safety_stock, mat_str, loc_str, upstream,
+        sim_date, horizon_end, leadtime_for_row,
+        ss_index=ss_index
+    ))
+
+    # 3. 订单需求
+    order_df = config.get('OrderLog', pd.DataFrame())
+    demand_rows.extend(_collect_order_demands(
+        order_df, mat_str, loc_str, upstream,
+        sim_date, horizon_end, leadtime_for_row,
+        order_index=order_index
+    ))
+
+    # 4. GAP传递需求
+    demand_rows.extend(_collect_gap_demands(
+        up_gap_buffer, deploy_cfg, mat_str, loc_str, upstream,
         sim_date, horizon_end, leadtime_for_row
     ))
 

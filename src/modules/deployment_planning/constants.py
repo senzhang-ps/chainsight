@@ -3,9 +3,25 @@
 常量定义模块
 
 定义Module 5使用的各类常量，包括默认配置值、列名、优先级等。
+
+优化历史:
+- v3.0: 添加 USE_VECTORIZED_DEMAND_COLLECTION 开关
+- v3.1: 添加 USE_DUCKDB_ACCELERATION 开关，提升并行度
 """
+import os
 from typing import List
 
+# CPU核心数
+CPU_COUNT = os.cpu_count() or 4
+
+# 性能优化开关
+USE_VECTORIZED_DEMAND_COLLECTION: bool = False  # 暂时关闭，需要修复horizon计算问题
+USE_MULTIPROCESS_DEMAND_COLLECTION: bool = False  # 暂时关闭，pickle问题
+USE_HORIZON_CACHE: bool = True  # 启用horizon预计算缓存优化
+USE_DUCKDB_ACCELERATION: bool = True  # 启用DuckDB加速
+
+# 并行工作线程数 - 使用所有CPU核心
+DEFAULT_MAX_WORKERS: int = max(1, int(CPU_COUNT * 0.95))
 
 # 默认仿真日期范围
 DEFAULT_SIM_START: str = '2025-01-01'

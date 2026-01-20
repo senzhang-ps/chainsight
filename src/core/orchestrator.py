@@ -91,7 +91,11 @@ def _normalize_receiving(receiving_str) -> str:
         return str(receiving_str)
 
 def _normalize_identifiers(df: pd.DataFrame) -> pd.DataFrame:
-    """Normalize identifier columns to string format with proper formatting"""
+    """
+    Normalize identifier columns to string format with proper formatting.
+    
+    使用向量化操作提升性能，替代原有的逐行 apply 处理。
+    """
     if df.empty:
         return df
     
@@ -99,25 +103,27 @@ def _normalize_identifiers(df: pd.DataFrame) -> pd.DataFrame:
     identifier_cols = ['material', 'location', 'sending', 'receiving', 'sourcing']
     
     df = df.copy()
-    for col in identifier_cols:
+    
+    # 向量化处理 material 列
+    if 'material' in df.columns:
+        # 转换为字符串
+        df['material'] = df['material'].astype(str)
+        # 处理 NA/None
+        df['material'] = df['material'].replace(['nan', 'None', '<NA>', 'NaN'], '')
+        # 移除数字的 .0 后缀
+        df['material'] = df['material'].str.replace(r'\.0$', '', regex=True)
+    
+    # 向量化处理 location 类列（location, sending, receiving, sourcing）
+    location_cols = ['location', 'sending', 'receiving', 'sourcing']
+    for col in location_cols:
         if col in df.columns:
-            # Convert to string and handle NaN values
-            df[col] = df[col].astype('string')
-            # Apply specific normalization for location
-            if col == 'location':
-                df[col] = df[col].apply(_normalize_location)
-            # Apply specific normalization for material
-            elif col == 'material':
-                df[col] = df[col].apply(_normalize_material)
-            # Apply specific normalization for sending
-            elif col == 'sending':
-                df[col] = df[col].apply(_normalize_sending)
-            # Apply specific normalization for receiving
-            elif col == 'receiving':
-                df[col] = df[col].apply(_normalize_receiving)
-            # For other identifier columns, vectorized string conversion
-            else:
-                df[col] = df[col].fillna('').astype(str)
+            # 转换为字符串并去除空白
+            df[col] = df[col].astype(str).str.strip()
+            # 处理 NA/None
+            df[col] = df[col].replace(['nan', 'None', '<NA>', 'NaN'], '')
+            # 识别纯数字的行并补齐4位
+            is_numeric = df[col].str.match(r'^\d+$', na=False)
+            df.loc[is_numeric, col] = df.loc[is_numeric, col].str.zfill(4)
     
     return df
 

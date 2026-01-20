@@ -13,12 +13,13 @@ from .constants import (
     DEMAND_ELEMENT_FORECAST,
     DEMAND_ELEMENT_SAFETY,
 )
+from .data_indexer import DataIndexer
 from .lead_time import (
     compute_root_horizon,
     determine_lead_time,
     infer_sending_location_type,
 )
-from .net_demand import calculate_daily_net_demand
+from .net_demand import calculate_daily_net_demand, calculate_daily_net_demand_indexed
 from .utils import (
     apply_moq_rv,
     apportion_largest_remainder,
@@ -68,22 +69,37 @@ class NodeProcessor:
 
         upstream, horizon = self._get_upstream_and_horizon(material, location)
         lower_gaps = self._get_downstream_gaps(material, location)
-
-        ao_gap, fc_gap, ss_gap = calculate_daily_net_demand(
-            material, location, self.sim_date,
-            self.data['daily_supply_demand_df'],
-            self.data['safety_stock_df'],
-            self.data['beginning_inventory_df'],
-            self.data['in_transit_df'],
-            self.data['delivery_gr_df'],
-            self.data['future_production_df'],
-            self.data['daily_shipment_df'],
-            self.data['open_deployment_df'],
-            lower_gaps['FC'], lower_gaps['SS'], horizon,
-            delivery_shipment_df=self.data.get('delivery_shipment_df'),
-            order_df=self.data.get('daily_order_df'),
-            downstream_ao_gap=lower_gaps['AO']
-        )
+        
+        # 使用索引版本的净需求计算（如果有索引器）
+        data_indexer = self.ctx.get('data_indexer')
+        if data_indexer is not None:
+            ao_gap, fc_gap, ss_gap = calculate_daily_net_demand_indexed(
+                material, location, self.sim_date,
+                data_indexer,
+                self.data['daily_supply_demand_df'],
+                self.data['safety_stock_df'],
+                self.data['open_deployment_df'],
+                lower_gaps['FC'], lower_gaps['SS'], horizon,
+                order_df=self.data.get('daily_order_df'),
+                delivery_shipment_df=self.data.get('delivery_shipment_df'),
+                downstream_ao_gap=lower_gaps['AO']
+            )
+        else:
+            ao_gap, fc_gap, ss_gap = calculate_daily_net_demand(
+                material, location, self.sim_date,
+                self.data['daily_supply_demand_df'],
+                self.data['safety_stock_df'],
+                self.data['beginning_inventory_df'],
+                self.data['in_transit_df'],
+                self.data['delivery_gr_df'],
+                self.data['future_production_df'],
+                self.data['daily_shipment_df'],
+                self.data['open_deployment_df'],
+                lower_gaps['FC'], lower_gaps['SS'], horizon,
+                delivery_shipment_df=self.data.get('delivery_shipment_df'),
+                order_df=self.data.get('daily_order_df'),
+                downstream_ao_gap=lower_gaps['AO']
+            )
 
         records = self._build_records(
             material, location, horizon, ao_gap, fc_gap, ss_gap

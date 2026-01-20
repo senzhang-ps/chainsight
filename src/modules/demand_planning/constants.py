@@ -21,8 +21,12 @@ DEFAULT_USE_PARALLEL_AO_CONSUME: bool = True
 DEFAULT_USE_PARALLEL_FILE_LOAD: bool = True
 DEFAULT_USE_PARALLEL_NORMAL_CONSUME: Optional[bool] = None
 
+# 使用优化版消耗（向量化+字典索引）
+DEFAULT_USE_OPTIMIZED_CONSUME: bool = True
+
 # 并发工作进程/线程数（None表示自动：CPU核心数）
-DEFAULT_PARALLEL_MAX_WORKERS: Optional[int] = 8
+# 增加并行度以充分利用16核CPU
+DEFAULT_PARALLEL_MAX_WORKERS: Optional[int] = 16
 
 # ----------- 日志参数 -----------
 

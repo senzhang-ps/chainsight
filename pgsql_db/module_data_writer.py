@@ -26,6 +26,127 @@ class ModuleDataWriter:
         self.db = db
         self.written_tables: Dict[str, Dict] = {}
     
+    def write_summary_only(
+        self,
+        output_dir: str,
+        run_id: str = None,
+        if_exists: str = "replace"
+    ) -> Dict[str, int]:
+        """
+        【优化版】只写入Summary文件和Orchestrator数据
+        
+        这个方法专门用于仿真结束后的批量写入，避免每天重复写入模块输出。
+        Summary文件已包含所有模块的完整汇总数据。
+        
+        优化效果：
+        - 减少写入次数：从5天×6模块×多Sheet → 8个Summary文件 + 10个Orchestrator文件
+        - 避免重复数据：不再写入每天的模块输出（summary已包含汇总）
+        - 预计提升：写入时间从~54秒降至~15秒
+        
+        Args:
+            output_dir: 运行输出根目录
+            run_id: 运行ID
+            if_exists: 如果表存在的处理方式 ('replace'推荐，确保干净数据)
+        
+        Returns:
+            dict: 每个表的写入行数
+        """
+        import time
+        start_time = time.time()
+        base_path = Path(output_dir)
+        
+        if not base_path.exists():
+            raise FileNotFoundError(f"输出目录不存在: {output_dir}")
+        
+        if run_id is None:
+            run_id = base_path.name
+        
+        print("\n" + "=" * 60)
+        print("📤 【优化模式】批量写入Summary和Orchestrator数据")
+        print(f"运行目录: {output_dir}")
+        print(f"运行ID: {run_id}")
+        print("=" * 60)
+        
+        results = {}
+        
+        # 1. 写入Summary数据（最重要）
+        summary_dir = base_path / "summary"
+        if summary_dir.exists():
+            print("\n📊 写入Summary汇总数据...")
+            summary_results = self._write_summary_files_fast(str(summary_dir), run_id, if_exists)
+            results.update(summary_results)
+        
+        # 2. 写入Orchestrator状态数据
+        orch_dir = base_path / "orchestrator"
+        if orch_dir.exists():
+            print("\n📁 写入Orchestrator状态数据...")
+            orch_results = self.write_orchestrator_data(str(orch_dir), run_id=run_id, if_exists=if_exists)
+            results.update(orch_results)
+        
+        elapsed = time.time() - start_time
+        total_tables = len([v for v in results.values() if isinstance(v, int) and v >= 0])
+        total_rows = sum(v for v in results.values() if isinstance(v, int) and v > 0)
+        
+        print("\n" + "=" * 60)
+        print(f"✅ 优化写入完成!")
+        print(f"   表数量: {total_tables}")
+        print(f"   总行数: {total_rows:,}")
+        print(f"   耗时: {elapsed:.2f}秒")
+        print("=" * 60)
+        
+        return results
+    
+    def _write_summary_files_fast(
+        self,
+        summary_dir: str,
+        run_id: str = None,
+        if_exists: str = "replace"
+    ) -> Dict[str, int]:
+        """快速写入Summary文件"""
+        summary_path = Path(summary_dir)
+        results = {}
+        
+        # Summary文件到表名的映射
+        file_table_mapping = {
+            "full_changeover_report.xlsx": "summary_output_fullchangeoverlog",
+            "full_delivery_plan_report.xlsx": "summary_output_fulldeliveryplan",
+            "full_deployment_plan_report.xlsx": "summary_output_fulldeploymentplan",
+            "full_exceed_capacity_report.xlsx": "summary_output_fullcapacityexceed",
+            "full_order_shipment_cut_report.xlsx": "summary_output_ordershipmentcutsummary",
+            "full_production_plan_report.xlsx": "summary_output_fullproductionplan",
+            "full_truck_usage_report.xlsx": "summary_output_fulltruckusage",
+            "historical_inventory_record.csv": "summary_historical_inventory_record",
+        }
+        
+        for file_name, table_name in file_table_mapping.items():
+            file_path = summary_path / file_name
+            if file_path.exists():
+                try:
+                    # 读取数据
+                    if file_name.endswith('.xlsx'):
+                        df = pd.read_excel(file_path)
+                    else:
+                        df = pd.read_csv(file_path)
+                    
+                    # 添加run_id列
+                    if run_id and not df.empty:
+                        df['run_id'] = run_id
+                    
+                    # 写入数据库
+                    self.db.create_table_from_df(df, table_name, if_exists)
+                    results[table_name] = len(df)
+                    self.written_tables[table_name] = {
+                        "source": str(file_path),
+                        "module": "summary",
+                        "rows": len(df)
+                    }
+                    print(f"  ✅ {table_name}: {len(df):,} 行")
+                except Exception as e:
+                    print(f"  ❌ {file_name}: {e}")
+                    results[table_name] = -1
+        
+        return results
+    
     def write_module_output(
         self,
         module_name: str,

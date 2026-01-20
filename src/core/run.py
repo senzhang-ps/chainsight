@@ -336,52 +336,27 @@ def _run_with_database(ns: argparse.Namespace) -> int:
         
         # ========== 步骤3: 写入输出到数据库 ==========
         logger.info("\n" + "=" * 60)
-        logger.info("📤 步骤3: 写入输出到数据库")
+        logger.info("📤 步骤3: 写入输出到数据库（优化模式）")
         logger.info("=" * 60)
         
         output_dir = result.get('output_directory')
         writer = ModuleDataWriter(db)
         run_id = f"{config_name}_{ts}"
         
-        # 从文件写入数据库（确保数据一致性）
+        # 【优化】使用批量写入模式 - 只写入Summary和Orchestrator数据
+        # 原因：Summary已包含所有模块的完整汇总，无需重复写入每天的模块输出
+        # 预计提升：写入时间从~54秒降至~15秒
+        db_write_start = time.time()
         if output_dir and Path(output_dir).exists():
-            logger.info("📤 写入模块输出数据（从文件，确保与本地数据一致）...")
-            
-            # 遍历每个模块的输出目录，从文件写入数据库
-            for module_name in ['module1', 'module3', 'module4', 'module5', 'module6']:
-                module_dir = Path(output_dir) / module_name
-                if module_dir.exists():
-                    # 找到所有输出文件，按文件名中的日期分组写入
-                    import re
-                    for xlsx_file in sorted(module_dir.glob("*.xlsx")):
-                        # 从文件名提取sim_date（格式：xxx_YYYYMMDD.xlsx）
-                        date_match = re.search(r'_(\d{8})(?:\.xlsx)?$', xlsx_file.stem)
-                        file_sim_date = date_match.group(1) if date_match else None
-                        
-                        # 写入单个文件到数据库
-                        writer._write_excel_file(
-                            xlsx_file, 
-                            module_name, 
-                            run_id=run_id,
-                            sim_date=file_sim_date,
-                            if_exists='append'
-                        )
-            
-            # 写入orchestrator数据（CSV文件方式）
-            orch_dir = Path(output_dir) / "orchestrator"
-            if orch_dir.exists():
-                writer.write_orchestrator_data(str(orch_dir), run_id=run_id, if_exists='append')
-            
-            # 写入summary数据（从文件）
-            summary_dir = Path(output_dir) / "summary"
-            if summary_dir.exists():
-                writer.write_module_output("summary", str(summary_dir), run_id=run_id, if_exists='append')
-            
-            writer.print_summary()
+            # 使用优化版本的写入方法
+            writer.write_summary_only(str(output_dir), run_id=run_id, if_exists='replace')
             
             # 删除本地数据文件，只保留日志
             logger.info("\n🧹 清理本地数据文件（仅保留日志）...")
             _cleanup_data_files(str(output_dir), log_dir)
+        
+        db_write_time = time.time() - db_write_start
+        logger.info(f"⏱️  数据库写入耗时: {db_write_time:.2f}秒")
         
         total_time = time.time() - total_start
         program_end_datetime = datetime.now()
@@ -403,6 +378,7 @@ def _run_with_database(ns: argparse.Namespace) -> int:
         logger.info(f"   📅 开始时间: {program_start_datetime.strftime('%Y-%m-%d %H:%M:%S')}")
         logger.info(f"   📅 结束时间: {program_end_datetime.strftime('%Y-%m-%d %H:%M:%S')}")
         logger.info(f"   ⏱️  总运行时间: {runtime_str}")
+        logger.info(f"   ⏱️  其中DB写入: {db_write_time:.2f}秒")
         logger.info(f"   📁 日志目录: {log_dir}")
         logger.info("=" * 60)
         

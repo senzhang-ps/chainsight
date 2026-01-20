@@ -231,13 +231,14 @@ def load_orchestrator_open_deployment(
         return pd.DataFrame(columns=required_cols)
 
 
-def _load_static_config(config_dict: dict, config: dict) -> None:
+def _load_static_config(config_dict: dict, config: dict, skip_normalize: bool = False) -> None:
     """
     从配置字典加载静态配置表。
 
     Args:
         config_dict: 原始配置字典
         config: 目标配置字典（会被修改）
+        skip_normalize: 是否跳过规范化（当config_dict来自main_integration时已被规范化）
     """
     static_tables = {
         'SafetyStock': 'M3_SafetyStock',
@@ -251,10 +252,11 @@ def _load_static_config(config_dict: dict, config: dict) -> None:
     for sheet_name, config_key in static_tables.items():
         config[sheet_name] = config_dict.get(config_key, pd.DataFrame())
 
-    # 应用字符串格式化
-    for sheet_name in static_tables.keys():
-        if not config[sheet_name].empty:
-            config[sheet_name] = normalize_identifiers(config[sheet_name])
+    # 只在需要时规范化静态配置表（来自main_integration的数据已被规范化）
+    if not skip_normalize:
+        for sheet_name in static_tables.keys():
+            if not config[sheet_name].empty:
+                config[sheet_name] = normalize_identifiers(config[sheet_name])
 
 
 def _load_module1_data_from_memory(
@@ -577,8 +579,8 @@ def load_integrated_config(
     config: Dict = {}
     validation_log = []
 
-    # 1. 加载静态配置
-    _load_static_config(config_dict, config)
+    # 1. 加载静态配置（来自main_integration的数据已被规范化，跳过重复规范化）
+    _load_static_config(config_dict, config, skip_normalize=True)
 
     # 2. 加载Module1数据
     config['SupplyDemandLog'] = config_dict.get(
@@ -637,9 +639,12 @@ def load_integrated_config(
     # 8. 处理日期字段
     _process_date_fields(config)
 
-    # 9. 最终格式化
+    # 9. 最终格式化（仅对动态数据进行规范化，静态配置已在main_integration中规范化）
+    dynamic_tables = {'OrderLog', 'TodayShipment', 'SupplyDemandLog', 
+                      'ProductionPlan', 'InventoryLog', 'InTransit', 
+                      'DeliveryGR', 'OpenDeployment', 'ReceivingSpace', 'ShipmentLog'}
     for sheet_name, df in sorted(config.items()):
-        if isinstance(df, pd.DataFrame) and not df.empty:
+        if isinstance(df, pd.DataFrame) and not df.empty and sheet_name in dynamic_tables:
             config[sheet_name] = normalize_identifiers(df)
 
     config['ValidationLog'] = validation_log

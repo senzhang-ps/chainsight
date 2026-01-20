@@ -52,6 +52,8 @@ def normalize_identifiers(df: pd.DataFrame) -> pd.DataFrame:
     标识字段统一为字符串（并格式化地点字段）。
 
     作用：确保配置与日志中的标识符可一致匹配。
+    
+    使用向量化操作提升性能。
 
     Args:
         df: 需要规范化的DataFrame
@@ -63,17 +65,27 @@ def normalize_identifiers(df: pd.DataFrame) -> pd.DataFrame:
         return df
 
     df = df.copy()
-    for col in IDENTIFIER_COLUMNS:
-        if col not in df.columns:
-            continue
-
-        df[col] = df[col].astype('string')
-
-        if col in LOCATION_COLUMNS:
-            df[col] = df[col].apply(normalize_location)
-        elif col == 'material':
-            df[col] = df[col].apply(normalize_material)
-        else:
+    
+    # 向量化处理 material 列
+    if 'material' in df.columns:
+        df['material'] = df['material'].astype(str)
+        df['material'] = df['material'].replace(['nan', 'None', '<NA>', 'NaN'], '')
+        # 移除数字的 .0 后缀
+        df['material'] = df['material'].str.replace(r'\.0$', '', regex=True)
+    
+    # 向量化处理 location 类列
+    for col in LOCATION_COLUMNS:
+        if col in df.columns:
+            df[col] = df[col].astype(str).str.strip()
+            df[col] = df[col].replace(['nan', 'None', '<NA>', 'NaN'], '')
+            # 识别纯数字的行并补齐4位
+            is_numeric = df[col].str.match(r'^\d+$', na=False)
+            df.loc[is_numeric, col] = df.loc[is_numeric, col].str.zfill(4)
+    
+    # 其他标识符列
+    other_cols = [c for c in IDENTIFIER_COLUMNS if c not in LOCATION_COLUMNS and c != 'material']
+    for col in other_cols:
+        if col in df.columns:
             df[col] = df[col].fillna('').astype(str)
 
     return df

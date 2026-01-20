@@ -20,6 +20,7 @@ from .constants import (
     DEFAULT_USE_PARALLEL_AO_CONSUME,
     DEFAULT_USE_PARALLEL_NORMAL_CONSUME,
     DEFAULT_PARALLEL_MAX_WORKERS,
+    DEFAULT_USE_OPTIMIZED_CONSUME,
     append_error_log,
 )
 
@@ -41,6 +42,11 @@ def consume_orders(
     返回:
         消耗后的预测DataFrame。
     """
+    # 使用优化版消耗（向量化+字典索引）
+    if DEFAULT_USE_OPTIMIZED_CONSUME:
+        from .consume_optimized import consume_orders_vectorized
+        return consume_orders_vectorized(orders_df, consumed_forecast)
+    
     use_parallel = DEFAULT_USE_PARALLEL_AO_CONSUME
     max_workers = DEFAULT_PARALLEL_MAX_WORKERS
 

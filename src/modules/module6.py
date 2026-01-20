@@ -94,15 +94,6 @@ ALLOWED_EXPRESSION_VARS: List[str] = [
     'sending', 'receiving', 'truck_type', 'demand_element'
 ]
 
-OUTPUT_COLUMNS = {
-    'vehicle_log': [
-        'date', 'sending', 'receiving', 'truck_type', 'vehicle_no',
-        'vehicle_uid', 'total_units', 'total_weight', 'total_volume',
-        'WFR', 'VFR', 'trigger'
-    ],
-    'usage': ['date', 'sending', 'receiving', 'truck_type', 'truck_used']
-}
-
 
 def run_daily_physical_flow(
     config_dict: Dict[str, Any],
@@ -1378,8 +1369,8 @@ def _generate_outputs(
     Returns:
         输出结果字典
     """
-    # 构建 DataFrame
-    delivery_plan_df = pd.DataFrame(results['delivery_plan'])
+    # 构建 DataFrame - 空列表时也要带列名
+    delivery_plan_df = _build_delivery_plan_df(results['delivery_plan'])
     
     # 🔧 强制约束: 出货量 <= 订单量
     # 如果发现超出，则按比例裁剪
@@ -1405,9 +1396,9 @@ def _generate_outputs(
     
     vehicle_df = _build_vehicle_df(results['vehicle_log'])
     usage_df = _build_usage_df(vehicle_df)
-    unsat_df = pd.DataFrame(results['unsat_log'])
-    validation_df = pd.DataFrame(validation_log)
-    bypass_df = pd.DataFrame(results['bypass_log'])
+    unsat_df = _build_unsat_df(results['unsat_log'])
+    validation_df = _build_validation_df(validation_log)
+    bypass_df = _build_bypass_df(results['bypass_log'])
     
     # 写入文件
     if not skip_file_output:
@@ -1436,22 +1427,59 @@ def _generate_outputs(
     }
 
 
+def _build_delivery_plan_df(delivery_plan: List[Dict]) -> pd.DataFrame:
+    """构建交付计划 DataFrame。"""
+    if delivery_plan:
+        return pd.DataFrame(delivery_plan)
+    # 与基线保持一致：空表不带列名
+    return pd.DataFrame()
+
+
 def _build_vehicle_df(vehicle_log: List[Dict]) -> pd.DataFrame:
     """构建车辆日志 DataFrame。"""
     if vehicle_log:
         return pd.DataFrame(vehicle_log)
-    return pd.DataFrame(columns=OUTPUT_COLUMNS['vehicle_log'])
+    # 与基线保持一致：空表带列名
+    return pd.DataFrame(columns=[
+        'date', 'sending', 'receiving', 'truck_type', 'vehicle_no', 'vehicle_uid',
+        'total_units', 'total_weight', 'total_volume', 'WFR', 'VFR', 'trigger'
+    ])
 
 
 def _build_usage_df(vehicle_df: pd.DataFrame) -> pd.DataFrame:
     """构建使用统计 DataFrame。"""
     if vehicle_df.empty:
-        return pd.DataFrame(columns=OUTPUT_COLUMNS['usage'])
+        # 与基线保持一致：空表带列名
+        return pd.DataFrame(columns=['date', 'sending', 'receiving', 'truck_type', 'truck_used'])
     
     return vehicle_df.groupby(
         ['date', 'sending', 'receiving', 'truck_type'],
         as_index=False
     ).agg(truck_used=('vehicle_uid', 'nunique'))
+
+
+def _build_unsat_df(unsat_log: List[Dict]) -> pd.DataFrame:
+    """构建未满足MDQ日志 DataFrame。"""
+    if unsat_log:
+        return pd.DataFrame(unsat_log)
+    # 与基线保持一致：空表不带列名
+    return pd.DataFrame()
+
+
+def _build_validation_df(validation_log: List[Dict]) -> pd.DataFrame:
+    """构建验证日志 DataFrame。"""
+    if validation_log:
+        return pd.DataFrame(validation_log)
+    # 与基线保持一致：空表不带列名
+    return pd.DataFrame()
+
+
+def _build_bypass_df(bypass_log: List[Dict]) -> pd.DataFrame:
+    """构建绕过规则命中日志 DataFrame。"""
+    if bypass_log:
+        return pd.DataFrame(bypass_log)
+    # 与基线保持一致：空表不带列名
+    return pd.DataFrame()
 
 
 def _write_excel_output(

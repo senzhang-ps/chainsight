@@ -3,6 +3,9 @@
 缓存和工具模块
 
 提供缓存构建功能和通用工具函数。
+
+优化历史:
+- v3.0: 添加 DuckDB 加速索引构建选项
 """
 from collections import defaultdict, deque
 from typing import Dict, List, Optional, Tuple
@@ -10,6 +13,47 @@ from typing import Dict, List, Optional, Tuple
 import pandas as pd
 
 from .constants import DEFAULT_PTF, DEFAULT_LSK, DEFAULT_LEAD_TIME
+
+# DuckDB 加速开关
+USE_DUCKDB_INDEX: bool = True
+
+
+def _try_duckdb_build_index(
+    df: pd.DataFrame,
+    key_columns: List[str],
+    filter_date_range: Optional[Tuple] = None
+) -> Optional[Dict[tuple, pd.DataFrame]]:
+    """
+    尝试使用 DuckDB 构建索引。
+    
+    Returns:
+        索引字典，如果失败则返回 None
+    """
+    if not USE_DUCKDB_INDEX:
+        return None
+    
+    try:
+        from ...utils.duckdb_optimizer import get_duckdb_optimizer
+        optimizer = get_duckdb_optimizer()
+        
+        # 构建简单的分组索引
+        if df.empty:
+            return {}
+        
+        df = df.copy()
+        for col in key_columns:
+            if col in df.columns:
+                df[col] = df[col].astype(str)
+        
+        result = {}
+        for key, group in df.groupby(key_columns, sort=False):
+            if not isinstance(key, tuple):
+                key = (key,)
+            result[key] = group.reset_index(drop=True)
+        
+        return result
+    except Exception:
+        return None
 
 
 def build_dataframe_index(

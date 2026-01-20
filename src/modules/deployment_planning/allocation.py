@@ -166,24 +166,23 @@ def apply_priority_allocation_vectorized(
     # Build DataFrame with indices（与code_vo保持一致）
     df = pd.DataFrame(demand_rows).copy()
     df['idx'] = np.arange(n)
-    df = df.set_index('idx', drop=False)  # keep idx as column too（与code_vo一致）
+    df = df.set_index('idx', drop=False)  # keep idx as column too
     df['priority'] = df['demand_element'].map(
         lambda x: demand_priority_map.get(x, 99)
     )
-    # 计算adjusted_qty（与code_vo保持一致的写法）
+    # 与code_vo完全一致的adjusted_qty计算方式
     df['adjusted_qty'] = df['idx'].map(
-        lambda i: int(adjusted_qtys.get(i, int(df.loc[df['idx'] == i, 'demand_qty'].iloc[0])))
+        lambda i: int(adjusted_qtys.get(i, int(df.loc[df['idx']==i, 'demand_qty'].iloc[0])))
     )
     df['deployed_qty_invCon'] = 0
 
     # 早期退出
     if current_stock <= 0:
-        # leave zeros
         for i, row in df[['idx', 'deployed_qty_invCon']].itertuples(index=False):
             demand_rows[i]['deployed_qty_invCon'] = int(row)
         return 0
 
-    # Process priorities in ascending order; stop when stock depleted（与code_vo一致）
+    # Process priorities in ascending order; stop when stock depleted
     for p, block in df.sort_values('priority').groupby('priority', sort=True):
         group_total = int(block['adjusted_qty'].sum())
         if group_total <= 0:
@@ -193,12 +192,12 @@ def apply_priority_allocation_vectorized(
         adj = block['adjusted_qty'].to_numpy()
 
         if current_stock >= group_total:
-            # fully satisfy（与code_vo一致，直接用索引赋值）
+            # fully satisfy
             df.loc[idxs, 'deployed_qty_invCon'] = adj
             current_stock -= group_total
             continue
 
-        # partial: proportional by adjusted_qty, integer floors（与code_vo一致）
+        # partial: proportional by adjusted_qty, integer floors
         weights = adj.astype(float)
         shares = (
             (current_stock * (weights / float(group_total)))
@@ -210,10 +209,11 @@ def apply_priority_allocation_vectorized(
         # zero all remaining priorities implicitly
         break
 
-    # Write back
+    # 写回（与code_vo一致）
     for i, val in df[['idx', 'deployed_qty_invCon']].itertuples(index=False):
         demand_rows[int(i)]['deployed_qty_invCon'] = int(val)
     df = df.reset_index(drop=True)
+    
     return current_stock
 
 

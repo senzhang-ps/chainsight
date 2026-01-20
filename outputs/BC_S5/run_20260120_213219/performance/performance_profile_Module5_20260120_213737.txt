@@ -1,0 +1,129 @@
+====================================================================================================
+性能分析报告: Module5
+生成时间: 2026-01-20 21:37:37
+====================================================================================================
+
+【按累积时间排序 - 前30个最耗时函数】
+----------------------------------------------------------------------------------------------------
+         61410285 function calls (60302736 primitive calls) in 41.461 seconds
+
+   Ordered by: cumulative time
+   List reduced from 1977 to 30 due to restriction <30>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+        1    0.042    0.042   41.461   41.461 C:\Users\25936\Desktop\Code\chainsight\src\modules\deployment_planning\main.py:720(main)
+50422/23162    0.078    0.000   30.350    0.001 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\pandas\core\ops\common.py:62(new_method)
+12461/2516    0.063    0.000   27.986    0.011 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\pandas\core\arraylike.py:68(__and__)
+      114    0.000    0.000   22.995    0.202 C:\Python313\Lib\threading.py:1056(join)
+      114    0.008    0.000   22.994    0.202 {method 'join' of '_thread._ThreadHandle' objects}
+      883    0.002    0.000   22.075    0.025 C:\Python313\Lib\concurrent\futures\_base.py:199(as_completed)
+        5    0.000    0.000   16.500    3.300 C:\Python313\Lib\concurrent\futures\_base.py:646(__exit__)
+        5    0.000    0.000   16.500    3.300 C:\Python313\Lib\concurrent\futures\thread.py:220(shutdown)
+    114/5    0.004    0.000   16.492    3.298 C:\Python313\Lib\threading.py:998(_bootstrap)
+    114/5    0.003    0.000   16.481    3.296 C:\Python313\Lib\threading.py:1025(_bootstrap_inner)
+    114/5    0.002    0.000   16.479    3.296 C:\Python313\Lib\threading.py:981(run)
+    114/5    0.003    0.000   16.479    3.296 C:\Python313\Lib\concurrent\futures\thread.py:70(_worker)
+   888/18    0.040    0.000   16.479    0.915 {method 'get' of '_queue.SimpleQueue' objects}
+12461/2516    0.064    0.000   16.437    0.007 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\pandas\core\series.py:6123(_logical_method)
+      278    0.004    0.000   16.385    0.059 C:\Python313\Lib\threading.py:327(wait)
+  888/198    0.007    0.000   14.806    0.075 C:\Python313\Lib\concurrent\futures\thread.py:54(run)
+        3    0.000    0.000   12.088    4.029 C:\Users\25936\Desktop\Code\chainsight\src\modules\deployment_planning\main.py:176(_process_layer_demands)
+      161    0.001    0.000   11.689    0.073 C:\Python313\Lib\threading.py:641(wait)
+67520/45287    0.267    0.000   10.712    0.000 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\pandas\core\frame.py:4062(__getitem__)
+  880/193    0.022    0.000   10.167    0.053 C:\Users\25936\Desktop\Code\chainsight\src\modules\deployment_planning\demand_collector.py:545(collect_node_demands_fast)
+12461/3250    0.024    0.000    9.974    0.003 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\pandas\core\ops\array_ops.py:352(na_logical_op)
+8239/3089    0.049    0.000    9.635    0.003 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\pandas\core\frame.py:4130(_getitem_bool_array)
+  880/500    0.005    0.000    8.675    0.017 C:\Users\25936\Desktop\Code\chainsight\src\modules\deployment_planning\demand_collector.py:320(_collect_gap_demands)
+        1    0.001    0.001    8.271    8.271 C:\Users\25936\Desktop\Code\chainsight\src\modules\deployment_planning\validation.py:122(log_outputs)
+12461/2516    0.066    0.000    8.267    0.003 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\pandas\core\ops\array_ops.py:393(logical_op)
+24922/5528    0.029    0.000    8.265    0.001 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\pandas\core\ops\array_ops.py:410(fill_bool)
+77306/63065    0.260    0.000    6.953    0.000 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\pandas\core\indexing.py:1176(__getitem__)
+      287    0.036    0.000    6.587    0.023 C:\Users\25936\Desktop\Code\chainsight\src\modules\deployment_planning\allocation.py:142(apply_priority_allocation_vectorized)
+      888    0.001    0.000    6.034    0.007 C:\Python313\Lib\concurrent\futures\_base.py:428(result)
+  571/489    0.001    0.000    5.990    0.012 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\pandas\util\_decorators.py:325(wrapper)
+
+
+
+
+【按调用次数排序 - 前30个最频繁调用函数】
+----------------------------------------------------------------------------------------------------
+         61410285 function calls (60302736 primitive calls) in 41.461 seconds
+
+   Ordered by: call count
+   List reduced from 1977 to 30 due to restriction <30>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+10054660/9951714    1.928    0.000    3.029    0.000 {built-in method builtins.isinstance}
+3155891/3155847    0.476    0.000    0.488    0.000 {built-in method builtins.getattr}
+  2434519    0.364    0.000    0.364    0.000 {method 'get' of 'dict' objects}
+2414009/1775839    0.563    0.000    0.780    0.000 {built-in method builtins.len}
+  1585248    0.410    0.000    0.604    0.000 C:\Users\25936\Desktop\Code\chainsight\src\modules\deployment_planning\push_allocation.py:322(<genexpr>)
+  1284675    0.397    0.000    0.573    0.000 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\pandas\core\dtypes\generic.py:37(_check)
+  1284675    0.457    0.000    1.042    0.000 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\pandas\core\dtypes\generic.py:42(_instancecheck)
+   675071    0.077    0.000    0.077    0.000 {method 'add' of 'set' objects}
+   613368    0.100    0.000    0.100    0.000 {method 'append' of 'list' objects}
+   502394    0.135    0.000    0.183    0.000 {built-in method builtins.hasattr}
+   440982    0.076    0.000    0.076    0.000 {method 'get' of 'xml.etree.ElementTree.Element' objects}
+431336/430762    0.089    0.000    0.091    0.000 {built-in method builtins.hash}
+410185/409960    0.068    0.000    0.069    0.000 {built-in method builtins.issubclass}
+   408160    0.060    0.000    0.060    0.000 {method 'popleft' of 'collections.deque' objects}
+408118/406624    0.201    0.000    0.307    0.000 C:\Python313\Lib\xml\etree\ElementTree.py:1309(read_events)
+407658/343806    0.096    0.000    2.342    0.000 C:\Python313\Lib\xml\etree\ElementTree.py:1233(iterator)
+   380253    0.057    0.000    0.074    0.000 {built-in method builtins.max}
+   377155    0.119    0.000    0.627    0.000 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\pandas\core\dtypes\missing.py:101(isna)
+   377155    0.177    0.000    0.507    0.000 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\pandas\core\dtypes\missing.py:184(_isna)
+   368939    0.057    0.000    0.057    0.000 {built-in method builtins.callable}
+   345560    0.073    0.000    0.073    0.000 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\openpyxl\descriptors\base.py:24(__set__)
+   324864    0.030    0.000    0.030    0.000 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\openpyxl\cell\read_only.py:108(value)
+318896/316205    0.457    0.000    1.110    0.000 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\pandas\core\generic.py:6301(__setattr__)
+   314854    0.178    0.000    1.635    0.000 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\pandas\io\formats\excel.py:888(get_formatted_cells)
+   314850    0.251    0.000    0.879    0.000 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\openpyxl\cell\_writer.py:12(_set_attributes)
+   314850    0.220    0.000    0.457    0.000 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\pandas\io\formats\excel.py:596(_format_value)
+   314850    1.539    0.000    2.722    0.000 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\openpyxl\cell\_writer.py:89(lxml_write_cell)
+   314850    0.252    0.000    0.874    0.000 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\openpyxl\cell\cell.py:176(_bind_value)
+   314850    0.122    0.000    1.144    0.000 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\openpyxl\worksheet\worksheet.py:220(cell)
+   314850    0.281    0.000    0.320    0.000 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\openpyxl\cell\cell.py:108(__init__)
+
+
+
+
+【按总时间排序 - 前30个纯执行时间最长函数】
+----------------------------------------------------------------------------------------------------
+         61410285 function calls (60302736 primitive calls) in 41.461 seconds
+
+   Ordered by: internal time
+   List reduced from 1977 to 30 due to restriction <30>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+10054660/9951714    1.928    0.000    3.029    0.000 {built-in method builtins.isinstance}
+   314850    1.539    0.000    2.722    0.000 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\openpyxl\cell\_writer.py:89(lxml_write_cell)
+67690/63154    0.673    0.000    4.494    0.000 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\pandas\core\series.py:389(__init__)
+2414009/1775839    0.563    0.000    0.780    0.000 {built-in method builtins.len}
+   134554    0.558    0.000    0.780    0.000 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\pandas\core\generic.py:6236(__finalize__)
+18664/18470    0.529    0.000    0.597    0.000 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\pandas\core\ops\array_ops.py:113(comp_method_OBJECT_ARRAY)
+104445/103875    0.525    0.000    1.728    0.000 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\pandas\core\construction.py:517(sanitize_array)
+3155891/3155847    0.476    0.000    0.488    0.000 {built-in method builtins.getattr}
+  1284675    0.457    0.000    1.042    0.000 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\pandas\core\dtypes\generic.py:42(_instancecheck)
+318896/316205    0.457    0.000    1.110    0.000 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\pandas\core\generic.py:6301(__setattr__)
+   314850    0.448    0.000    1.022    0.000 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\openpyxl\worksheet\worksheet.py:251(_get_cell)
+   314817    0.413    0.000    0.909    0.000 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\pandas\io\formats\excel.py:872(_generate_body)
+  1585248    0.410    0.000    0.604    0.000 C:\Users\25936\Desktop\Code\chainsight\src\modules\deployment_planning\push_allocation.py:322(<genexpr>)
+146994/136357    0.407    0.000    2.468    0.000 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\openpyxl\worksheet\_reader.py:189(parse_cell)
+  1284675    0.397    0.000    0.573    0.000 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\pandas\core\dtypes\generic.py:37(_check)
+        4    0.395    0.099    4.497    1.124 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\pandas\io\excel\_openpyxl.py:442(_write_cells)
+245361/245337    0.383    0.000    1.272    0.000 {built-in method builtins.any}
+   314850    0.380    0.000    0.424    0.000 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\pandas\io\formats\excel.py:85(__init__)
+  2434519    0.364    0.000    0.364    0.000 {method 'get' of 'dict' objects}
+152505/151789    0.362    0.000    0.616    0.000 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\pandas\core\generic.py:278(__init__)
+51971/49896    0.343    0.000    0.862    0.000 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\pandas\core\array_algos\take.py:120(_take_nd_ndarray)
+105083/104602    0.322    0.000    0.320    0.000 {method 'reduce' of 'numpy.ufunc' objects}
+85688/81546    0.321    0.000    1.436    0.000 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\openpyxl\descriptors\serialisable.py:46(from_tree)
+    24531    0.294    0.000    3.089    0.000 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\openpyxl\worksheet\_writer.py:130(write_row)
+   314850    0.281    0.000    0.320    0.000 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\openpyxl\cell\cell.py:108(__init__)
+    27939    0.271    0.000    0.565    0.000 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\pandas\core\dtypes\cast.py:1156(maybe_infer_to_datetimelike)
+    37058    0.270    0.000    0.318    0.000 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\openpyxl\utils\datetime.py:81(to_excel)
+170753/169849    0.269    0.000    0.344    0.000 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\openpyxl\descriptors\sequence.py:24(__set__)
+67520/45287    0.267    0.000   10.712    0.000 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\pandas\core\frame.py:4062(__getitem__)
+77306/63065    0.260    0.000    6.953    0.000 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\pandas\core\indexing.py:1176(__getitem__)
+
+

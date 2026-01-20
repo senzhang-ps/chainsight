@@ -57,10 +57,12 @@ def normalize_material(material_str: Any) -> str:
 def normalize_identifiers(df: pd.DataFrame) -> pd.DataFrame:
     """规范化DataFrame中的标识列以确保键一致性。
 
+    使用向量化操作提升性能。
+    
     规范化以下列（如存在）:
-        - material: 转为字符串，NaN填充空字符串
-        - location/dps_location: 零填充为4位
-        - sending/receiving/sourcing: 转为字符串
+        - material: 转为字符串，移除.0后缀，NaN填充空字符串
+        - location/dps_location: 纯数字零填充为4位
+        - sending/receiving/sourcing: 纯数字零填充为4位
 
     参数:
         df: 需要规范化的输入DataFrame。
@@ -71,20 +73,23 @@ def normalize_identifiers(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df
 
-    identifier_cols = [
-        'material', 'location', 'sending',
-        'receiving', 'sourcing', 'dps_location'
-    ]
-
     df = df.copy()
-    for col in identifier_cols:
+    
+    # 向量化处理 material 列
+    if 'material' in df.columns:
+        df['material'] = df['material'].astype(str)
+        df['material'] = df['material'].replace(['nan', 'None', '<NA>', 'NaN'], '')
+        # 移除数字的 .0 后缀
+        df['material'] = df['material'].str.replace(r'\.0$', '', regex=True)
+    
+    # 向量化处理 location 类列
+    location_cols = ['location', 'dps_location', 'sending', 'receiving', 'sourcing']
+    for col in location_cols:
         if col in df.columns:
-            df[col] = df[col].astype('string')
-            if col in ['location', 'dps_location']:
-                df[col] = df[col].str.zfill(4)
-            elif col == 'material':
-                df[col] = df[col].fillna("")
-            else:
-                df[col] = df[col].fillna("")
+            df[col] = df[col].astype(str).str.strip()
+            df[col] = df[col].replace(['nan', 'None', '<NA>', 'NaN'], '')
+            # 识别纯数字的行并补齐4位
+            is_numeric = df[col].str.match(r'^\d+$', na=False)
+            df.loc[is_numeric, col] = df.loc[is_numeric, col].str.zfill(4)
 
     return df

@@ -2,13 +2,21 @@
 Module3 净需求计算模块。
 
 负责计算每日净需求（AO gap、forecast gap和safety gap）。
+
+优化历史:
+- v1.0: 基础实现
+- v2.0: 添加 calculate_daily_net_demand_indexed，使用预构建索引
+        将 O(n) 的 DataFrame 过滤操作降为 O(1) 的字典查找
 """
 
-from typing import Optional, Tuple
+from typing import Optional, Tuple, TYPE_CHECKING
 
 import pandas as pd
 
 from .constants import DEMAND_TYPE_AO
+
+if TYPE_CHECKING:
+    from .data_indexer import DataIndexer
 
 
 def calculate_daily_net_demand(
@@ -434,3 +442,92 @@ def _calculate_gaps(
     ss_gap = max(ss_total - available, 0.0)
 
     return ao_gap, fc_gap, ss_gap
+
+
+# ============================================================================
+# 索引优化版本 - 使用预构建的 DataIndexer 进行 O(1) 查找
+# ============================================================================
+
+def calculate_daily_net_demand_indexed(
+    material: str,
+    location: str,
+    date: pd.Timestamp,
+    indexer: 'DataIndexer',
+    supply_demand_df: pd.DataFrame,
+    safety_stock_df: pd.DataFrame,
+    open_deployment_df: pd.DataFrame,
+    downstream_forecast_gap: float,
+    downstream_safety_gap: float,
+    horizon: int,
+    order_df: Optional[pd.DataFrame] = None,
+    delivery_shipment_df: Optional[pd.DataFrame] = None,
+    downstream_ao_gap: float = 0.0
+) -> Tuple[float, float, float]:
+    """
+    使用索引器计算每日净需求（优化版本）。
+    
+    相比 calculate_daily_net_demand，此函数使用预构建的 DataIndexer
+    进行 O(1) 字典查找，而非 O(n) 的 DataFrame 过滤。
+    
+    Args:
+        material: 物料编码
+        location: 地点编码
+        date: 计算日期
+        indexer: 数据索引器
+        supply_demand_df: 供需数据（用于forecast）
+        safety_stock_df: 安全库存数据
+        open_deployment_df: 开放调拨数据（用于入库计算）
+        downstream_forecast_gap: 下游预测缺口
+        downstream_safety_gap: 下游安全库存缺口
+        horizon: 计算周期天数
+        order_df: 订单数据
+        delivery_shipment_df: 发运记录
+        downstream_ao_gap: 下游AO缺口
+
+    Returns:
+        Tuple[float, float, float]: (ao_gap, fc_gap, ss_gap)
+    """
+    date = _ensure_timestamp(date)
+    horizon = max(1, horizon)
+    horizon_end = date + pd.Timedelta(days=horizon)
+
+    try:
+        # 使用索引器获取过滤后的数据（O(1) 查找）
+        bi_df = indexer.get_ml('bi', material, location)
+        fp_df = indexer.get_ml('fp', material, location)
+        ts_df = indexer.get_ml('ts', material, location)
+        it_df = indexer.get_mr('it', material, location)
+        dgr_df = indexer.get_mr('dgr', material, location)
+        od_out_df = indexer.get_ms('od_out', material, location)
+        
+        filtered = {
+            'bi': bi_df,
+            'fp': fp_df,
+            'ts': ts_df,
+            'it': it_df,
+            'dgr': dgr_df,
+            'od': od_out_df,
+        }
+
+        # 计算供给侧
+        supply = _calculate_supply_side(
+            filtered, date, material, location,
+            delivery_shipment_df, open_deployment_df
+        )
+
+        # 计算需求侧
+        demand = _calculate_demand_side(
+            material, location, date, horizon_end,
+            order_df, supply_demand_df, safety_stock_df
+        )
+
+        # 计算缺口
+        return _calculate_gaps(
+            supply['total_available'],
+            demand['ao_local'], demand['fc_local'], demand['ss_local'],
+            downstream_ao_gap, downstream_forecast_gap, downstream_safety_gap
+        )
+
+    except Exception as e:
+        print(f"Warning: Error in indexed net demand for {material}-{location}: {e}")
+        return 0.0, 0.0, 0.0

@@ -43,8 +43,8 @@ def run_integrated_mode(
     print("🔄 Module3 运行于集成模式")
     t_total = time.perf_counter()
 
-    # 加载配置
-    configs = _load_static_configs(config_dict)
+    # 加载配置（来自main_integration的数据已被规范化，跳过重复规范化）
+    configs = _load_static_configs(config_dict, skip_normalize=True)
 
     # 生成日期范围
     date_range = pd.date_range(start_date, end_date, freq='D')
@@ -72,8 +72,13 @@ def run_integrated_mode(
     return result
 
 
-def _load_static_configs(config_dict: Dict[str, pd.DataFrame]) -> dict:
-    """加载并预处理静态配置。"""
+def _load_static_configs(config_dict: Dict[str, pd.DataFrame], skip_normalize: bool = False) -> dict:
+    """加载并预处理静态配置。
+    
+    Args:
+        config_dict: 配置字典
+        skip_normalize: 是否跳过规范化（当config_dict来自main_integration时已被规范化）
+    """
     safety_stock_df = config_dict.get('M3_SafetyStock', pd.DataFrame())
     network_df = config_dict.get('Global_Network', pd.DataFrame())
     lead_time_df = config_dict.get('Global_LeadTime', pd.DataFrame())
@@ -84,11 +89,12 @@ def _load_static_configs(config_dict: Dict[str, pd.DataFrame]) -> dict:
     safety_stock_df = _convert_dates(safety_stock_df, 'date')
     network_df = _convert_dates(network_df, 'eff_from', 'eff_to')
 
-    # 标识符规范化
-    safety_stock_df = normalize_identifiers(safety_stock_df)
-    network_df = normalize_identifiers(network_df)
-    m4_mlcfg_df = normalize_identifiers(m4_mlcfg_df)
-    deploy_config_df = normalize_identifiers(deploy_config_df)
+    # 标识符规范化（来自main_integration的数据已被规范化，可跳过）
+    if not skip_normalize:
+        safety_stock_df = normalize_identifiers(safety_stock_df)
+        network_df = normalize_identifiers(network_df)
+        m4_mlcfg_df = normalize_identifiers(m4_mlcfg_df)
+        deploy_config_df = normalize_identifiers(deploy_config_df)
 
     return {
         'safety_stock_df': safety_stock_df,

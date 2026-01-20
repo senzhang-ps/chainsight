@@ -533,12 +533,9 @@ class SummaryReportGenerator:
         return str(output_file)
     
     def _extract_date_from_filename(self, file_path: str) -> str:
-        """从文件名中提取日期（提取最后一个8位数字日期）"""
+        """从文件名中提取日期"""
         import re
-        import os
-        # 只从文件名部分提取，避免路径中的日期干扰
-        filename = os.path.basename(file_path)
-        match = re.search(r'(\d{8})', filename)
+        match = re.search(r'(\d{8})', file_path)
         if match:
             date_str = match.group(1)
             return pd.to_datetime(date_str, format='%Y%m%d').strftime('%Y-%m-%d')

@@ -3,6 +3,9 @@
 Module 5 主流程模块
 
 提供多层级部署规划的主入口函数。
+
+优化历史:
+- v3.0: 添加向量化需求收集优化 (demand_collector_vectorized)
 """
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -31,8 +34,12 @@ from .cache_utils import (
     get_sending_location_type,
     get_upstream
 )
+from .constants import USE_VECTORIZED_DEMAND_COLLECTION, USE_MULTIPROCESS_DEMAND_COLLECTION, USE_HORIZON_CACHE
 from .data_loader import load_config, load_integrated_config
-from .demand_collector import collect_node_demands
+from .demand_collector import collect_node_demands, collect_node_demands_fast
+from .demand_collector_vectorized import collect_demands_batch_vectorized
+from .horizon_batch_calculator import build_horizon_cache
+from .multiprocess_optimizer import process_layer_multiprocess
 from .inventory import (
     build_delivery_gr_dict,
     build_intransit_dicts,
@@ -205,17 +212,86 @@ def _process_layer_demands(
     if not all_pairs:
         return node_demands_map
 
+    # 优先使用向量化版本（如果启用）
+    if USE_VECTORIZED_DEMAND_COLLECTION:
+        try:
+            return collect_demands_batch_vectorized(
+                pairs=all_pairs,
+                sim_date=sim_date,
+                config=config,
+                up_gap_buffer=up_gap_buffer,
+                ptf_lsk_cache=ptf_lsk_cache,
+                lead_time_cache=lead_time_cache,
+                active_network_cache=active_network_cache
+            )
+        except Exception as e:
+            print(f"  ⚠️  向量化收集需求失败，回退线程池: {e}")
+    
+    # 其次使用多进程版本（如果启用）
+    if USE_MULTIPROCESS_DEMAND_COLLECTION:
+        try:
+            return process_layer_multiprocess(
+                all_pairs=all_pairs,
+                sim_date=sim_date,
+                config=config,
+                up_gap_buffer=up_gap_buffer,
+                ptf_lsk_cache=ptf_lsk_cache,
+                lead_time_cache=lead_time_cache,
+                active_network_cache=active_network_cache,
+                sdl_index=sdl_index,
+                ss_index=ss_index,
+                order_index=order_index,
+                deploy_config_index=deploy_config_index
+            )
+        except Exception as e:
+            print(f"  ⚠️  多进程收集需求失败，回退线程池: {e}")
+
+    # 回退到 ThreadPoolExecutor 版本
+    # 使用 horizon 预计算缓存（如果启用）
+    horizon_cache = None
+    if USE_HORIZON_CACHE:
+        try:
+            horizon_cache = build_horizon_cache(
+                all_pairs=all_pairs,
+                sim_date=sim_date,
+                network_df=config['Network'],
+                leadtime_df=config['LeadTime'],
+                m4_mlcfg_df=config.get('M4_MaterialLocationLineCfg', pd.DataFrame()),
+                ptf_lsk_cache=ptf_lsk_cache,
+                lead_time_cache=lead_time_cache,
+                active_network_cache=active_network_cache,
+                location_layer_map=config.get('LocationLayerMap', {})
+            )
+        except Exception as e:
+            print(f"  ⚠️  构建horizon缓存失败，回退原始方法: {e}")
+            horizon_cache = None
+
     try:
-        with ThreadPoolExecutor(max_workers=min(32, len(all_pairs))) as ex:
-            futures = {
-                ex.submit(
-                    collect_node_demands,
-                    mat, loc, sim_date, config, up_gap_buffer,
-                    ptf_lsk_cache, lead_time_cache, active_network_cache,
-                    sdl_index, ss_index, order_index, deploy_config_index
-                ): (mat, loc)
-                for (mat, loc) in all_pairs
-            }
+        # 增加worker数量以更好利用CPU（16核心 x 4 = 64线程）
+        n_workers = min(64, len(all_pairs))
+        with ThreadPoolExecutor(max_workers=n_workers) as ex:
+            if horizon_cache:
+                # 使用快速版本
+                futures = {
+                    ex.submit(
+                        collect_node_demands_fast,
+                        mat, loc, sim_date, config, up_gap_buffer,
+                        horizon_cache,
+                        sdl_index, ss_index, order_index
+                    ): (mat, loc)
+                    for (mat, loc) in all_pairs
+                }
+            else:
+                # 原始版本
+                futures = {
+                    ex.submit(
+                        collect_node_demands,
+                        mat, loc, sim_date, config, up_gap_buffer,
+                        ptf_lsk_cache, lead_time_cache, active_network_cache,
+                        sdl_index, ss_index, order_index, deploy_config_index
+                    ): (mat, loc)
+                    for (mat, loc) in all_pairs
+                }
             for fut in as_completed(futures):
                 key = futures[fut]
                 try:

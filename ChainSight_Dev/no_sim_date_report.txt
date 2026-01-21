@@ -1,0 +1,168 @@
+================================================================================
+没有 sim_date 字段的表格汇总
+================================================================================
+
+
+【module1】
+  文件: module1_output_20250901.xlsx
+    表名: OrderLog
+    字段: date, material, location, demand_type, quantity, simulation_date, advance_days
+
+  文件: module1_output_20250901.xlsx
+    表名: ShipmentLog
+    字段: date, material, location, quantity, demand_type, order_id
+
+  文件: module1_output_20250901.xlsx
+    表名: SupplyDemandLog
+    字段: date, material, location, quantity, demand_element
+
+  文件: module1_output_20250901.xlsx
+    表名: Summary
+    字段: Total_Orders, Total_Shipments, Total_SupplyDemand, Date
+
+  文件: module1_output_20250902.xlsx
+    表名: OrderLog
+    字段: date, material, location, demand_type, quantity, simulation_date, advance_days
+
+  文件: module1_output_20250902.xlsx
+    表名: ShipmentLog
+    字段: date, material, location, quantity, demand_type, order_id
+
+  文件: module1_output_20250902.xlsx
+    表名: SupplyDemandLog
+    字段: date, material, location, quantity, demand_element
+
+  文件: module1_output_20250902.xlsx
+    表名: Summary
+    字段: Total_Orders, Total_Shipments, Total_SupplyDemand, Date
+
+
+【module3】
+  文件: Module3Output_20250901.xlsx
+    表名: NetDemand
+    字段: material, location, requirement_date, demand_element, layer, quantity, simulation_date, horizon_days
+
+  文件: Module3Output_20250902.xlsx
+    表名: NetDemand
+    字段: material, location, requirement_date, demand_element, layer, quantity, simulation_date, horizon_days
+
+
+【module4】
+  文件: Module4Output_20250901.xlsx
+    表名: ProductionPlan
+    字段: produced_qty
+
+  文件: Module4Output_20250901.xlsx
+    表名: CapacityExceed
+    字段: 
+
+  文件: Module4Output_20250901.xlsx
+    表名: Validation
+    字段: 
+
+  文件: Module4Output_20250901.xlsx
+    表名: ChangeoverLog
+    字段: date, location, line, changeover_type, count, time, cost, mu_loss
+
+  文件: Module4Output_20250902.xlsx
+    表名: ProductionPlan
+    字段: material, location, line, simulation_date, production_plan_date, available_date, uncon_planned_qty, con_planned_qty, changeover_id, produced_qty
+
+  文件: Module4Output_20250902.xlsx
+    表名: CapacityExceed
+    字段: 
+
+  文件: Module4Output_20250902.xlsx
+    表名: Validation
+    字段: 
+
+  文件: Module4Output_20250902.xlsx
+    表名: ChangeoverLog
+    字段: date, location, line, changeover_type, count, time, cost, mu_loss
+
+
+【module5】
+  文件: Module5Output_20250901.xlsx
+    表名: DeploymentPlan
+    字段: date, material, sending, receiving, demand_qty, demand_element, planned_qty, deployed_qty_invCon, planned_delivery_date, orig_location, leadtime, is_cross_node, deployed_qty, quota
+
+  文件: Module5Output_20250901.xlsx
+    表名: UnfulfilledLog
+    字段: date, sending, receiving, demand_qty, demand_element, unfulfilled_qty, reason
+
+  文件: Module5Output_20250901.xlsx
+    表名: StockOnHandLog
+    字段: material, location, date, beginning_soh, production, in_transit, delivery_gr, today_shipment, deployed_qty, ending_soh
+
+  文件: Module5Output_20250901.xlsx
+    表名: Validation
+    字段: No, Issue
+
+  文件: Module5Output_20250902.xlsx
+    表名: DeploymentPlan
+    字段: date, material, sending, receiving, demand_qty, demand_element, planned_qty, deployed_qty_invCon, planned_delivery_date, orig_location, leadtime, is_cross_node, deployed_qty, quota
+
+  文件: Module5Output_20250902.xlsx
+    表名: UnfulfilledLog
+    字段: date, sending, receiving, demand_qty, demand_element, unfulfilled_qty, reason
+
+  文件: Module5Output_20250902.xlsx
+    表名: StockOnHandLog
+    字段: material, location, date, beginning_soh, production, in_transit, delivery_gr, today_shipment, deployed_qty, ending_soh
+
+  文件: Module5Output_20250902.xlsx
+    表名: Validation
+    字段: No, Issue
+
+
+【module6】
+  文件: Module6Output_20250901.xlsx
+    表名: DeliveryPlan
+    字段: vehicle_uid, ori_deployment_uid, material, sending, receiving, planned_deployment_date, actual_ship_date, actual_delivery_date, delivery_qty, truck_type, truck_load_pct, WFR, VFR
+
+  文件: Module6Output_20250901.xlsx
+    表名: VehicleLog
+    字段: date, sending, receiving, truck_type, vehicle_no, vehicle_uid, total_units, total_weight, total_volume, WFR, VFR, trigger
+
+  文件: Module6Output_20250901.xlsx
+    表名: TruckUsageLog
+    字段: date, sending, receiving, truck_type, truck_used
+
+  文件: Module6Output_20250901.xlsx
+    表名: UnsatisfiedMDQLog
+    字段: 
+
+  文件: Module6Output_20250901.xlsx
+    表名: ValidationLog
+    字段: 
+
+  文件: Module6Output_20250901.xlsx
+    表名: BypassRuleHitLog
+    字段: 
+
+  文件: Module6Output_20250902.xlsx
+    表名: DeliveryPlan
+    字段: 
+
+  文件: Module6Output_20250902.xlsx
+    表名: VehicleLog
+    字段: date, sending, receiving, truck_type, vehicle_no, vehicle_uid, total_units, total_weight, total_volume, WFR, VFR, trigger
+
+  文件: Module6Output_20250902.xlsx
+    表名: TruckUsageLog
+    字段: date, sending, receiving, truck_type, truck_used
+
+  文件: Module6Output_20250902.xlsx
+    表名: UnsatisfiedMDQLog
+    字段: 
+
+  文件: Module6Output_20250902.xlsx
+    表名: ValidationLog
+    字段: 
+
+  文件: Module6Output_20250902.xlsx
+    表名: BypassRuleHitLog
+    字段: 
+
+
+总计: 38 个表没有 sim_date 字段

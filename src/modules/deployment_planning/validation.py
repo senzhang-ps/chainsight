@@ -123,12 +123,24 @@ def log_outputs(output_path: str, outputs: Dict[str, pd.DataFrame]) -> None:
     """
     将结果表写入Excel：DeploymentPlan/UnfulfilledLog/StockOnHandLog/Validation。
     说明：输出前统一标识字段格式，确保后续分析一致性。
-    与code_vo保持一致：不对输出进行排序，保持原始生成顺序。
+    
+    🔧 修复：输出前按确定性排序，确保不同运行产生相同的输出顺序。
+    排序规则与Dev版本对比时使用的排序键一致。
 
     Args:
         output_path: 输出文件路径
         outputs: 输出表字典
     """
+    # 定义各Sheet的排序键
+    SORT_KEYS = {
+        'DeploymentPlan': ['date', 'material', 'sending', 'receiving', 
+                          'demand_element', 'demand_qty', 'planned_qty', 'deployed_qty'],
+        'UnfulfilledLog': ['date', 'sending', 'receiving', 'demand_element', 
+                          'demand_qty', 'unfulfilled_qty'],
+        'StockOnHandLog': ['date', 'material', 'location'],
+        'Validation': ['No'],
+    }
+    
     with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
         for sheet, df in outputs.items():
             if df.empty:
@@ -139,4 +151,13 @@ def log_outputs(output_path: str, outputs: Dict[str, pd.DataFrame]) -> None:
             else:
                 # 确保输出时标识符字段为字符串格式
                 normalized_df = normalize_identifiers(df)
+                
+                # 按确定性排序键排序
+                sort_keys = SORT_KEYS.get(sheet, [])
+                available_keys = [k for k in sort_keys if k in normalized_df.columns]
+                if available_keys:
+                    normalized_df = normalized_df.sort_values(
+                        available_keys, ignore_index=True
+                    )
+                
                 normalized_df.to_excel(writer, sheet_name=sheet, index=False)

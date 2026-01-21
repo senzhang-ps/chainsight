@@ -267,8 +267,11 @@ def _process_layer_demands(
             horizon_cache = None
 
     try:
+        # 排序all_pairs确保遍历顺序一致
+        sorted_pairs = sorted(all_pairs)
+        
         # 增加worker数量以更好利用CPU（16核心 x 4 = 64线程）
-        n_workers = min(64, len(all_pairs))
+        n_workers = min(64, len(sorted_pairs))
         with ThreadPoolExecutor(max_workers=n_workers) as ex:
             if horizon_cache:
                 # 使用快速版本
@@ -279,7 +282,7 @@ def _process_layer_demands(
                         horizon_cache,
                         sdl_index, ss_index, order_index
                     ): (mat, loc)
-                    for (mat, loc) in all_pairs
+                    for (mat, loc) in sorted_pairs
                 }
             else:
                 # 原始版本
@@ -290,7 +293,7 @@ def _process_layer_demands(
                         ptf_lsk_cache, lead_time_cache, active_network_cache,
                         sdl_index, ss_index, order_index, deploy_config_index
                     ): (mat, loc)
-                    for (mat, loc) in all_pairs
+                    for (mat, loc) in sorted_pairs
                 }
             for fut in as_completed(futures):
                 key = futures[fut]
@@ -939,8 +942,9 @@ def main(
             for k, v in node_demands_map.items():
                 global_node_demands_map[k] = v
 
-            # 处理每个节点 - 使用sorted()确保确定性迭代顺序
-            for mat, loc in sorted(all_pairs):
+            # 处理每个节点 - 排序确保遍历顺序一致
+            sorted_pairs = sorted(all_pairs)
+            for mat, loc in sorted_pairs:
                 node_key = (mat, loc)
                 current_stock = dynamic_soh.get(node_key, 0)
 
@@ -1042,12 +1046,7 @@ def main(
     )
     unfulfilled_all = pd.DataFrame(unfulfilled_rows + unfulfilled_space)
     
-    # 🔧 修复：最终排序确保UnfulfilledLog顺序稳定
-    if not unfulfilled_all.empty:
-        sort_cols = ['date', 'sending', 'receiving', 'demand_element']
-        sort_cols = [c for c in sort_cols if c in unfulfilled_all.columns]
-        if sort_cols:
-            unfulfilled_all = unfulfilled_all.sort_values(by=sort_cols).reset_index(drop=True)
+    # 与code_v0保持一致：不对unfulfilled_all排序
 
     # 🔧 验证约束：deployed_qty 不超过 shipment_qty
     _validate_deployment_shipment_constraint(

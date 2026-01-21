@@ -69,7 +69,9 @@ def build_horizon_cache(
     # key: (material, location) -> network_row
     network_index = _build_network_index(network_df, sim_date)
     
-    for mat, loc in all_pairs:
+    # 排序确保遍历顺序一致
+    sorted_pairs = sorted(all_pairs)
+    for mat, loc in sorted_pairs:
         mat_str = str(mat)
         loc_str = str(loc)
         

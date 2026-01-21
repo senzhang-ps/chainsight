@@ -106,8 +106,11 @@ def process_layer_multiprocess(
     if not all_pairs:
         return {}
     
+    # 排序确保遍历顺序一致
+    sorted_pairs = sorted(all_pairs)
+    
     n_workers = max_workers or MAX_WORKERS
-    n_workers = min(n_workers, len(all_pairs))
+    n_workers = min(n_workers, len(sorted_pairs))
     
     # 序列化配置
     config_data = _serialize_config(config)
@@ -117,7 +120,7 @@ def process_layer_multiprocess(
         (mat, loc, sim_date, config_data, up_gap_buffer,
          ptf_lsk_cache, lead_time_cache, active_network_cache,
          sdl_index, ss_index, order_index, deploy_config_index)
-        for (mat, loc) in all_pairs
+        for (mat, loc) in sorted_pairs
     ]
     
     result = {}
@@ -140,7 +143,7 @@ def process_layer_multiprocess(
         print(f"[M5 MultiProcess] Failed: {e}, falling back to serial")
         # 回退到串行处理
         from .demand_collector import collect_node_demands
-        for mat, loc in all_pairs:
+        for mat, loc in sorted_pairs:
             result[(mat, loc)] = collect_node_demands(
                 mat, loc, sim_date, config, up_gap_buffer,
                 ptf_lsk_cache, lead_time_cache, active_network_cache,

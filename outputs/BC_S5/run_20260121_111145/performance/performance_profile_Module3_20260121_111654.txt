@@ -1,0 +1,129 @@
+====================================================================================================
+性能分析报告: Module3
+生成时间: 2026-01-21 11:16:54
+====================================================================================================
+
+【按累积时间排序 - 前30个最耗时函数】
+----------------------------------------------------------------------------------------------------
+         16659624 function calls (15703759 primitive calls) in 17.116 seconds
+
+   Ordered by: cumulative time
+   List reduced from 1715 to 30 due to restriction <30>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+      883    0.002    0.000   92.030    0.104 C:\Python313\Lib\concurrent\futures\_base.py:199(as_completed)
+      267    0.002    0.000   78.821    0.295 C:\Python313\Lib\threading.py:641(wait)
+      761    0.004    0.000   67.267    0.088 C:\Python313\Lib\threading.py:327(wait)
+4234/3044    0.009    0.000   24.107    0.008 {method 'acquire' of '_thread.lock' objects}
+  4560/34    0.024    0.000   21.903    0.644 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\pandas\core\arraylike.py:50(__le__)
+ 39860/83    0.094    0.000   20.258    0.244 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\pandas\core\ops\common.py:62(new_method)
+        1    0.000    0.000   17.116   17.116 C:\Users\25936\Desktop\Code\chainsight\src\modules\mrp_planning\integration.py:17(run_integrated_mode)
+        1    0.000    0.000   17.101   17.101 C:\Users\25936\Desktop\Code\chainsight\src\modules\mrp_planning\integration.py:118(_process_single_day)
+        1    0.004    0.004   16.492   16.492 C:\Users\25936\Desktop\Code\chainsight\src\modules\mrp_planning\integration.py:211(_calculate_net_demand)
+        1    0.001    0.001   16.487   16.487 C:\Users\25936\Desktop\Code\chainsight\src\modules\mrp_planning\mrp_simulation.py:26(run_mrp_layered_simulation_daily)
+        3    0.000    0.000   16.309    5.436 C:\Users\25936\Desktop\Code\chainsight\src\modules\mrp_planning\mrp_simulation.py:228(_process_layer)
+        3    0.000    0.000   16.306    5.435 C:\Python313\Lib\concurrent\futures\_base.py:646(__exit__)
+        3    0.000    0.000   16.306    5.435 C:\Python313\Lib\concurrent\futures\thread.py:220(shutdown)
+      155    0.000    0.000   16.306    0.105 C:\Python313\Lib\threading.py:1056(join)
+      155    0.007    0.000   16.305    0.105 {method 'join' of '_thread._ThreadHandle' objects}
+   541/29    0.010    0.000   16.298    0.562 {method 'get' of '_queue.SimpleQueue' objects}
+    155/3    0.001    0.000   16.298    5.433 C:\Python313\Lib\threading.py:998(_bootstrap)
+    155/3    0.002    0.000   16.298    5.433 C:\Python313\Lib\threading.py:1025(_bootstrap_inner)
+    155/3    0.001    0.000   16.297    5.432 C:\Python313\Lib\threading.py:981(run)
+    155/3    0.001    0.000   16.297    5.432 C:\Python313\Lib\concurrent\futures\thread.py:70(_worker)
+17624/516    0.025    0.000   15.934    0.031 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\pandas\core\arraylike.py:38(__eq__)
+ 13035/92    0.017    0.000   15.548    0.169 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\pandas\core\arraylike.py:68(__and__)
+    880/3    0.009    0.000   15.098    5.033 C:\Python313\Lib\concurrent\futures\thread.py:54(run)
+    880/3    0.014    0.000   15.097    5.032 C:\Users\25936\Desktop\Code\chainsight\src\modules\mrp_planning\node_processor.py:57(process)
+    880/3    0.009    0.000   15.095    5.032 C:\Users\25936\Desktop\Code\chainsight\src\modules\mrp_planning\net_demand.py:451(calculate_daily_net_demand_indexed)
+    880/3    0.010    0.000   15.094    5.031 C:\Users\25936\Desktop\Code\chainsight\src\modules\mrp_planning\net_demand.py:325(_calculate_demand_side)
+ 19617/87    0.070    0.000   14.902    0.171 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\pandas\core\series.py:6110(_cmp_method)
+ 19617/87    0.078    0.000   14.892    0.171 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\pandas\core\ops\array_ops.py:288(comparison_op)
+    880/5    0.015    0.000   14.872    2.974 C:\Users\25936\Desktop\Code\chainsight\src\modules\mrp_planning\net_demand.py:396(_get_safety_stock)
+26070/1090    0.027    0.000   14.315    0.013 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\pandas\core\ops\array_ops.py:410(fill_bool)
+
+
+
+
+【按调用次数排序 - 前30个最频繁调用函数】
+----------------------------------------------------------------------------------------------------
+         16659624 function calls (15703759 primitive calls) in 17.116 seconds
+
+   Ordered by: call count
+   List reduced from 1715 to 30 due to restriction <30>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+3564153/3503247    0.666    0.000    1.082    0.000 {built-in method builtins.isinstance}
+1067137/696446    0.250    0.000    0.358    0.000 {built-in method builtins.len}
+961836/956542    0.163    0.000    0.175    0.000 {built-in method builtins.getattr}
+   473384    0.168    0.000    0.390    0.000 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\pandas\core\dtypes\generic.py:42(_instancecheck)
+   473384    0.146    0.000    0.212    0.000 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\pandas\core\dtypes\generic.py:37(_check)
+   387640    0.037    0.000    0.037    0.000 C:\Users\25936\Desktop\Code\chainsight\src\modules\mrp_planning\mrp_simulation.py:197(<genexpr>)
+239803/168534    1.460    0.000    1.068    0.000 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\pandas\core\arrays\datetimes.py:645(__iter__)
+   235880    0.059    0.000    0.090    0.000 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\pandas\core\indexes\range.py:999(__len__)
+235355/235241    0.044    0.000    0.044    0.000 {built-in method builtins.hash}
+   205296    0.030    0.000    0.030    0.000 {built-in method builtins.issubclass}
+   201999    0.069    0.000    0.108    0.000 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\pandas\core\dtypes\inference.py:334(is_hashable)
+   198077    0.060    0.000    0.145    0.000 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\pandas\core\series.py:734(name)
+   181940    0.050    0.000    0.094    0.000 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\pandas\core\dtypes\common.py:1590(<genexpr>)
+   150884    0.024    0.000    0.024    0.000 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\pandas\core\arrays\datetimes.py:551(dtype)
+   140651    0.044    0.000    0.059    0.000 {built-in method builtins.hasattr}
+   133709    0.042    0.000    0.219    0.000 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\pandas\core\indexes\base.py:7593(ensure_index)
+118670/118653    0.184    0.000    0.632    0.000 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\pandas\core\generic.py:6301(__setattr__)
+   113179    0.016    0.000    0.016    0.000 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\pandas\core\generic.py:405(flags)
+   110048    0.062    0.000    0.164    0.000 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\pandas\core\construction.py:481(ensure_wrapped_if_datetimelike)
+   100038    0.054    0.000    0.080    0.000 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\pandas\core\construction.py:416(extract_array)
+99706/99702    0.068    0.000    0.179    0.000 {built-in method builtins.all}
+    97010    0.060    0.000    0.068    0.000 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\pandas\core\internals\managers.py:2004(internal_values)
+    97010    0.037    0.000    0.106    0.000 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\pandas\core\series.py:831(_values)
+    95019    0.028    0.000    0.042    0.000 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\pandas\core\indexes\base.py:909(__len__)
+    90967    0.060    0.000    0.216    0.000 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\pandas\core\dtypes\common.py:1571(validate_all_hashable)
+    90960    0.100    0.000    0.316    0.000 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\pandas\core\series.py:784(name)
+83891/77190    0.053    0.000    0.226    0.000 {built-in method numpy.asarray}
+    82496    0.029    0.000    0.029    0.000 {method 'get' of 'dict' objects}
+    80396    0.166    0.000    0.201    0.000 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\pandas\core\generic.py:278(__init__)
+    80396    0.036    0.000    0.036    0.000 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\pandas\core\flags.py:51(__init__)
+
+
+
+
+【按总时间排序 - 前30个纯执行时间最长函数】
+----------------------------------------------------------------------------------------------------
+         16659624 function calls (15703759 primitive calls) in 17.116 seconds
+
+   Ordered by: internal time
+   List reduced from 1715 to 30 due to restriction <30>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+    12409    3.745    0.000    3.792    0.000 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\pandas\core\ops\array_ops.py:113(comp_method_OBJECT_ARRAY)
+239803/168534    1.460    0.000    1.068    0.000 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\pandas\core\arrays\datetimes.py:645(__iter__)
+3564153/3503247    0.666    0.000    1.082    0.000 {built-in method builtins.isinstance}
+58263/52452    0.496    0.000    3.462    0.000 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\pandas\core\series.py:389(__init__)
+1067137/696446    0.250    0.000    0.358    0.000 {built-in method builtins.len}
+57504/57278    0.243    0.000    0.707    0.000 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\pandas\core\construction.py:517(sanitize_array)
+    56588    0.235    0.000    0.329    0.000 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\pandas\core\generic.py:6236(__finalize__)
+48537/8933    0.200    0.000    5.240    0.001 {method 'reduce' of 'numpy.ufunc' objects}
+118670/118653    0.184    0.000    0.632    0.000 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\pandas\core\generic.py:6301(__setattr__)
+   473384    0.168    0.000    0.390    0.000 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\pandas\core\dtypes\generic.py:42(_instancecheck)
+    80396    0.166    0.000    0.201    0.000 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\pandas\core\generic.py:278(__init__)
+961836/956542    0.163    0.000    0.175    0.000 {built-in method builtins.getattr}
+    39447    0.153    0.000    0.183    0.000 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\pandas\core\dtypes\cast.py:550(maybe_promote)
+27746/23147    0.152    0.000    0.367    0.000 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\pandas\core\array_algos\take.py:120(_take_nd_ndarray)
+51204/51136    0.149    0.000    0.457    0.000 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\pandas\core\internals\managers.py:1863(from_array)
+   473384    0.146    0.000    0.212    0.000 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\pandas\core\dtypes\generic.py:37(_check)
+32652/32462    0.137    0.000    2.525    0.000 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\pandas\core\series.py:6201(_construct_result)
+30139/1470    0.122    0.000    0.006    0.000 {method 'astype' of 'numpy.ndarray' objects}
+75683/74966    0.121    0.000    0.372    0.000 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\pandas\core\dtypes\common.py:1596(pandas_dtype)
+2282/1525    0.118    0.000    1.105    0.001 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\pandas\core\tools\datetimes.py:149(should_cache)
+28234/1322    0.114    0.000   11.383    0.009 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\pandas\core\frame.py:4062(__getitem__)
+71499/71436    0.113    0.000    0.241    0.000 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\pandas\core\generic.py:6284(__getattr__)
+  7208/36    0.109    0.000    0.002    0.000 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\pandas\core\arrays\datetimelike.py:977(_cmp_method)
+    90960    0.100    0.000    0.316    0.000 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\pandas\core\series.py:784(name)
+    54644    0.097    0.000    0.156    0.000 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\pandas\core\internals\blocks.py:2716(new_block)
+ 39860/83    0.094    0.000   20.258    0.244 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\pandas\core\ops\common.py:62(new_method)
+13035/387    0.091    0.000    0.003    0.000 {built-in method _operator.and_}
+      867    0.087    0.000    0.239    0.000 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\pandas\core\tools\datetimes.py:126(_guess_datetime_format_for_array)
+34483/21999    0.085    0.000    0.767    0.000 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\pandas\core\array_algos\take.py:59(take_nd)
+ 19617/87    0.078    0.000   14.892    0.171 C:\Users\25936\AppData\Roaming\Python\Python313\site-packages\pandas\core\ops\array_ops.py:288(comparison_op)
+
+

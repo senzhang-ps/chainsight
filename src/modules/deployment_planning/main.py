@@ -6,6 +6,7 @@ Module 5 主流程模块
 
 优化历史:
 - v3.0: 添加向量化需求收集优化 (demand_collector_vectorized)
+- v3.1: 动态CPU配置，使用90%CPU资源
 """
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -13,6 +14,8 @@ from typing import Dict, List, Optional
 
 import numpy as np
 import pandas as pd
+
+from ...utils.cpu_config import get_optimal_workers
 
 from .allocation import (
     apply_grouped_moq_rv,
@@ -270,8 +273,8 @@ def _process_layer_demands(
         # 排序all_pairs确保遍历顺序一致
         sorted_pairs = sorted(all_pairs)
         
-        # 增加worker数量以更好利用CPU（16核心 x 4 = 64线程）
-        n_workers = min(64, len(sorted_pairs))
+        # 动态获取worker数量（使用90% CPU资源）
+        n_workers = get_optimal_workers(len(sorted_pairs))
         with ThreadPoolExecutor(max_workers=n_workers) as ex:
             if horizon_cache:
                 # 使用快速版本

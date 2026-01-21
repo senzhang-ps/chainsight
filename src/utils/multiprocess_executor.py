@@ -16,11 +16,8 @@ import pandas as pd
 if os.name == 'nt':
     mp.set_start_method('spawn', force=True)
 
-
-# 获取 CPU 核心数
-CPU_COUNT = os.cpu_count() or 4
-# 使用 90% 的 CPU 核心数来保证高利用率
-DEFAULT_WORKERS = max(1, int(CPU_COUNT * 0.9))
+# 使用统一的 CPU 配置
+from src.utils.cpu_config import CPU_COUNT, MAX_WORKERS as DEFAULT_WORKERS
 
 
 class MultiProcessExecutor:

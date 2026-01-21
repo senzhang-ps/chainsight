@@ -19,10 +19,8 @@ from typing import Callable, Dict, List, Optional, Tuple, Any
 import pandas as pd
 import numpy as np
 
-# 获取 CPU 核心数
-CPU_COUNT = os.cpu_count() or 4
-# 使用 CPU 核心数的 90% 来保证高利用率
-MAX_WORKERS = max(1, int(CPU_COUNT * 0.9))
+# 使用统一的 CPU 配置
+from src.utils.cpu_config import CPU_COUNT, MAX_WORKERS
 
 
 def _worker_init():

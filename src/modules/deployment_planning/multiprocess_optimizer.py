@@ -3,18 +3,20 @@
 M5 多进程优化器
 
 使用多进程突破 GIL 限制，实现层内节点的真正并行处理。
+
+优化历史:
+- v1.0: 基础多进程实现
+- v1.1: 动态CPU配置，使用90%CPU资源
 """
 
-import os
 import pickle
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from functools import partial
 from typing import Dict, List, Optional, Set, Tuple, Any
 import pandas as pd
 
-# 工作进程数
-CPU_COUNT = os.cpu_count() or 4
-MAX_WORKERS = max(1, CPU_COUNT - 2)  # 保留2核给主进程
+# 使用统一的CPU配置
+from ...utils.cpu_config import MAX_WORKERS, get_optimal_workers
 
 
 def _serialize_config(config: dict) -> bytes:

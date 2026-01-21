@@ -11,6 +11,9 @@
 import os
 from typing import Optional
 
+# 导入统一的 CPU 配置
+from src.utils.cpu_config import MAX_WORKERS
+
 # ----------- 性能优化参数 -----------
 
 # 最大AO提前天数（从配置中动态获取，此为后备值）
@@ -24,9 +27,8 @@ DEFAULT_USE_PARALLEL_NORMAL_CONSUME: Optional[bool] = None
 # 使用优化版消耗（向量化+字典索引）
 DEFAULT_USE_OPTIMIZED_CONSUME: bool = True
 
-# 并发工作进程/线程数（None表示自动：CPU核心数）
-# 增加并行度以充分利用16核CPU
-DEFAULT_PARALLEL_MAX_WORKERS: Optional[int] = 16
+# 并发工作进程/线程数（动态配置：使用 90% CPU 核心）
+DEFAULT_PARALLEL_MAX_WORKERS: int = MAX_WORKERS
 
 # ----------- 日志参数 -----------
 

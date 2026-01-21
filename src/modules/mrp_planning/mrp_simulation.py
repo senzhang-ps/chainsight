@@ -7,6 +7,7 @@ Module3 MRP模拟核心逻辑模块。
 - v1.0: 基础实现
 - v2.0: 添加 ThreadPoolExecutor 并行处理
 - v2.1: 添加 DataIndexer 预索引优化，将 O(n*m) 过滤降为 O(1) 查找
+- v2.2: 动态CPU配置，使用90%CPU资源
 """
 
 import threading
@@ -18,6 +19,7 @@ from typing import Dict, List, Optional, Tuple
 import pandas as pd
 
 from .data_indexer import DataIndexer, create_simulation_indexer
+from ...utils.cpu_config import get_optimal_workers
 from .layer_assignment import assign_location_layers
 from .node_processor import NodeProcessor
 from .utils import build_ptf_lsk_cache, normalize_identifiers
@@ -255,8 +257,8 @@ def _process_layer(
     )
 
     try:
-        # 增加worker数量以更好利用CPU（16核心 x 4 = 64线程）
-        n_workers = min(64, max(1, len(layer_nodes)))
+        # 动态获取worker数量（使用90% CPU资源）
+        n_workers = get_optimal_workers(len(layer_nodes))
         with ThreadPoolExecutor(max_workers=n_workers) as executor:
             futures = {
                 executor.submit(processor.process, ml): ml

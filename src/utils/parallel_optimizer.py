@@ -3,23 +3,25 @@
 并行优化器模块
 
 使用 ProcessPoolExecutor + DuckDB 实现高 CPU 利用率的并行计算。
-目标：达到 95% CPU 利用率。
+目标：达到 90% CPU 利用率。
 
 策略:
 1. 使用 ProcessPoolExecutor 突破 GIL 限制
 2. 批量预计算减少重复 DataFrame 过滤
 3. 利用 DuckDB C++ 引擎进行高效数据处理
+
+优化历史:
+- v1.0: 基础实现
+- v1.1: 动态CPU配置，使用90%CPU资源
 """
-import os
 import multiprocessing as mp
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from typing import Dict, List, Tuple, Callable, Any, Optional
 import pandas as pd
 import numpy as np
 
-# 获取 CPU 核心数
-CPU_COUNT = os.cpu_count() or 8
-MAX_WORKERS = min(CPU_COUNT, 16)
+# 使用统一的CPU配置
+from .cpu_config import MAX_WORKERS, get_optimal_workers
 
 
 def parallel_batch_process(

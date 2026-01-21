@@ -1,15 +1,20 @@
 # -*- coding: utf-8 -*-
 """
-高性能并行执行器 v3.0
+高性能并行执行器 v3.1
 
 使用 multiprocessing 和 concurrent.futures 实现真正的 CPU 并行。
-针对 ChainSight 的批量计算优化，目标是 95% CPU 利用率。
+针对 ChainSight 的批量计算优化，目标是 90% CPU 利用率。
 
 关键特性:
 1. 进程池复用减少创建开销
 2. 数据分区减少序列化开销
 3. 异步提交最大化并发
 4. 自适应批量大小
+5. 动态CPU配置，使用90%CPU资源
+
+优化历史:
+- v3.0: 基础高性能实现
+- v3.1: 动态CPU配置，统一使用90%CPU资源
 """
 
 import os
@@ -22,10 +27,11 @@ from functools import partial
 import pandas as pd
 import numpy as np
 
-# CPU 配置
-CPU_COUNT = os.cpu_count() or 4
-# 使用 95% 的 CPU 核心（目标）
-OPTIMAL_WORKERS = max(1, int(CPU_COUNT * 0.95))
+# 使用统一的CPU配置
+from .cpu_config import MAX_WORKERS, get_optimal_workers
+
+# 兼容性：保留原有变量名
+OPTIMAL_WORKERS = MAX_WORKERS
 
 
 class HighPerformanceExecutor:

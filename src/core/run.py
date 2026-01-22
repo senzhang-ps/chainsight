@@ -336,20 +336,19 @@ def _run_with_database(ns: argparse.Namespace) -> int:
         
         # ========== 步骤3: 写入输出到数据库 ==========
         logger.info("\n" + "=" * 60)
-        logger.info("📤 步骤3: 写入输出到数据库（优化模式）")
+        logger.info("📤 步骤3: 写入输出到数据库（完整模式）")
         logger.info("=" * 60)
         
         output_dir = result.get('output_directory')
         writer = ModuleDataWriter(db)
         run_id = f"{config_name}_{ts}"
         
-        # 【优化】使用批量写入模式 - 只写入Summary和Orchestrator数据
-        # 原因：Summary已包含所有模块的完整汇总，无需重复写入每天的模块输出
-        # 预计提升：写入时间从~54秒降至~15秒
+        # 【完整模式】写入所有模块的详细输出数据 + Summary + Orchestrator
+        # 包含: module1, module3, module4, module5, module6 的每日输出sheet
         db_write_start = time.time()
         if output_dir and Path(output_dir).exists():
-            # 使用优化版本的写入方法
-            writer.write_summary_only(str(output_dir), run_id=run_id, if_exists='replace')
+            # 写入所有模块数据（包含每个module的每日输出sheet）
+            writer.write_all_modules(str(output_dir), run_id=run_id, if_exists='replace')
             
             # 删除本地数据文件，只保留日志
             logger.info("\n🧹 清理本地数据文件（仅保留日志）...")

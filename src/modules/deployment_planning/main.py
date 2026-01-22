@@ -502,15 +502,7 @@ def _process_gaps_and_create_plans(
     )
 
     df_gap_pos = df_gap[df_gap['gap_qty'] > 0]
-    
-    # 🔧 修复：确保迭代顺序稳定，避免UnfulfilledLog和DeploymentPlan出现顺序差异
-    if not df_gap_pos.empty:
-        sort_cols = ['plan_deploy_date', 'receiving', 'demand_element']
-        # 只对存在的列排序
-        sort_cols = [c for c in sort_cols if c in df_gap_pos.columns]
-        if sort_cols:
-            df_gap_pos = df_gap_pos.sort_values(by=sort_cols).reset_index(drop=True)
-    
+    # 与 ChainSight_Dev/module5.py 保持一致：不对 df_gap_pos 进行排序
     up_loc = get_upstream(
         loc, mat, network, sim_date,
         active_network_cache=active_network_cache

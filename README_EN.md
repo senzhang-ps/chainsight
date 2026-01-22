@@ -143,8 +143,9 @@ The project follows a standard layered architecture for maintainability and exte
 ```
 chainsight/
 ├── run.py                              # 🚀 Main CLI entry point
+├── run.ps1                             # PowerShell run script
 ├── requirements.txt                    # Dependency declaration
-├── README.md / README_EN.md            # Chinese/English documentation
+├── README_CN.md / README_EN.md         # Chinese/English documentation
 │
 ├── src/                                # 📦 Core source code package
 │   ├── core/                           #    Orchestration engine
@@ -182,31 +183,30 @@ chainsight/
 │   ├── excel_importer.py               #    Excel import
 │   ├── module_data_writer.py           #    Module output writer
 │   ├── table_mapping.py                #    Table name mapping
+│   ├── table_schemas.py                #    Table schema definitions
 │   ├── duckdb_processor.py             #    DuckDB high-performance processing
 │   ├── optimized_processor.py          #    Optimized processor
+│   ├── optimized_simulation.py         #    Optimized simulation engine
 │   ├── data_pipeline.py                #    Data pipeline (DuckDB + PostgreSQL)
-│   ├── run_with_db.py                  #    Database integration run entry
-│   ├── run_with_duckdb.py              #    DuckDB enhanced run (output→outputs/db_duckdb_*)
-│   ├── run_optimized.py                #    Optimized high-performance run (output→outputs/db_optimized_cache)
-│   ├── run_optimized_example.py        #    Optimization example script (output→outputs/db_optimized)
-│   └── test_write_output.py            #    Database output write test (output→outputs/integrated_output)
+│   ├── module_engine.py                #    Module execution engine
+│   ├── module_optimizers.py            #    Module optimizers
+│   ├── incremental_processor.py        #    Incremental processor
+│   └── performance_dashboard.py        #    Performance monitoring dashboard
 │
 ├── tools/                              # 🔧 Utility scripts
-│   ├── init_database.py                #    Database initialization
-│   ├── export_mapping.py               #    Table mapping export
-│   ├── diagnose.py                     #    Diagnostic tool
-│   ├── verify_architecture.py          #    Architecture verification
-│   ├── compare_summary.py              #    Result comparison
-│   └── apply_push_fix.py               #    Push allocation fix
+│   └── init_database.py                #    Database initialization
 │
 ├── tests/                              # 🧪 Test modules
 │   ├── e2e_integration_test.py         #    End-to-end integration test
-│   ├── test_module6_refactored.py      #    M6 unit tests
 │   └── test_logger.py                  #    Logger tests
 │
-├── test_files/                         # 📋 Test data & standards
+├── test_files/                         # 📋 Test data & comparison tools
 │   ├── BC_S5.xlsx                      #    Main test configuration
-│   ├── Python_former.md                #    Coding standards
+│   ├── BC_S9.xlsx                      #    Alternate test configuration
+│   ├── compare_all_outputs.py          #    Output comparison tool
+│   ├── compare_db_vs_local.py          #    Database vs local comparison
+│   ├── TESTING_GUIDE.md                #    Testing guide
+│   ├── DATA_COMPARISON_TOOLS_GUIDE.md  #    Comparison tools guide
 │   └── Data_Type.md                    #    Type specifications
 │
 ├── config/                             # ⚙️ Configuration files
@@ -215,18 +215,15 @@ chainsight/
 │
 ├── docs/                               # 📚 Design documents
 │   ├── ARCHITECTURE.md                 #    Architecture design
-│   ├── MODULE*_DESIGN.md               #    Module designs
+│   ├── MODULE*_DESIGN.md               #    Module design documents
 │   ├── OPTIMIZATION_SUMMARY.md         #    Optimization summary
-│   └── MIGRATION.md                    #    Migration guide
+│   ├── MIGRATION.md                    #    Migration guide
+│   ├── README_REFACTORING_MAP.md       #    Refactoring reference document
+│   └── PERFORMANCE_OPTIMIZATION_REPORT.md  #    Performance optimization report
 │
-└── outputs/                            # 📤 Run outputs (auto-generated)
-    ├── BC_S5/                          #    Local simulation outputs (organized by config name)
-    │   └── run_YYYYMMDD_HHMMSS/
-    ├── db_BC_S5_YYYYMMDD_HHMMSS/      #    Database mode log outputs
-    ├── db_duckdb_*/                    #    DuckDB enhanced mode outputs
-    ├── db_optimized/                   #    Optimized simulation example outputs
-    ├── db_optimized_cache/             #    Optimized processing cache
-    └── integrated_output/              #    Integrated module outputs (DB write tests)
+└── outputs/                            # 📤 Run outputs (auto-generated, in .gitignore)
+    └── {config_name}/                  #    Organized by config name
+        └── run_YYYYMMDD_HHMMSS/        #    Organized by run timestamp
 ```
 
 ### CLI Parameters

@@ -162,8 +162,9 @@ python run.py --config BC_S5 --start-date 2025-10-06 --end-date 2025-10-10 --use
 ```
 chainsight/
 ├── run.py                              # 🚀 主入口 CLI
+├── run.ps1                             # PowerShell 运行脚本
 ├── requirements.txt                    # 依赖声明
-├── README.md / README_EN.md            # 中英文文档
+├── README_CN.md / README_EN.md         # 中英文文档
 │
 ├── src/                                # 📦 核心源代码包
 │   ├── core/                           #    编排引擎
@@ -201,31 +202,30 @@ chainsight/
 │   ├── excel_importer.py               #    Excel 导入
 │   ├── module_data_writer.py           #    模块输出写入
 │   ├── table_mapping.py                #    表名映射
+│   ├── table_schemas.py                #    表结构定义
 │   ├── duckdb_processor.py             #    DuckDB 高性能处理
 │   ├── optimized_processor.py          #    优化处理器
+│   ├── optimized_simulation.py         #    优化仿真引擎
 │   ├── data_pipeline.py                #    数据管道（DuckDB + PostgreSQL）
-│   ├── run_with_db.py                  #    数据库集成运行入口
-│   ├── run_with_duckdb.py              #    DuckDB 增强运行（输出→outputs/db_duckdb_*）
-│   ├── run_optimized.py                #    优化高性能运行（输出→outputs/db_optimized_cache）
-│   ├── run_optimized_example.py        #    优化示例脚本（输出→outputs/db_optimized）
-│   └── test_write_output.py            #    数据库输出写入测试（输出→outputs/integrated_output）
+│   ├── module_engine.py                #    模块执行引擎
+│   ├── module_optimizers.py            #    模块优化器
+│   ├── incremental_processor.py        #    增量处理器
+│   └── performance_dashboard.py        #    性能监控面板
 │
 ├── tools/                              # 🔧 辅助工具脚本
-│   ├── init_database.py                #    数据库初始化
-│   ├── export_mapping.py               #    表映射导出
-│   ├── diagnose.py                     #    诊断工具
-│   ├── verify_architecture.py          #    架构验证
-│   ├── compare_summary.py              #    结果对比
-│   └── apply_push_fix.py               #    推式分配修复
+│   └── init_database.py                #    数据库初始化
 │
 ├── tests/                              # 🧪 测试模块
 │   ├── e2e_integration_test.py         #    端到端集成测试
-│   ├── test_module6_refactored.py      #    M6 单元测试
 │   └── test_logger.py                  #    日志测试
 │
-├── test_files/                         # 📋 测试数据与规范
+├── test_files/                         # 📋 测试数据与对比工具
 │   ├── BC_S5.xlsx                      #    主测试配置
-│   ├── Python_former.md                #    编码规范
+│   ├── BC_S9.xlsx                      #    备用测试配置
+│   ├── compare_all_outputs.py          #    输出对比工具
+│   ├── compare_db_vs_local.py          #    数据库与本地对比
+│   ├── TESTING_GUIDE.md                #    测试指南
+│   ├── DATA_COMPARISON_TOOLS_GUIDE.md  #    对比工具指南
 │   └── Data_Type.md                    #    类型说明
 │
 ├── config/                             # ⚙️ 配置文件
@@ -234,18 +234,15 @@ chainsight/
 │
 ├── docs/                               # 📚 设计文档
 │   ├── ARCHITECTURE.md                 #    架构设计
-│   ├── MODULE*_DESIGN.md               #    模块设计
+│   ├── MODULE*_DESIGN.md               #    模块设计文档
 │   ├── OPTIMIZATION_SUMMARY.md         #    优化总结
-│   └── MIGRATION.md                    #    迁移指南
+│   ├── MIGRATION.md                    #    迁移指南
+│   ├── README_REFACTORING_MAP.md       #    重构对照文档
+│   └── PERFORMANCE_OPTIMIZATION_REPORT.md  #    性能优化报告
 │
-└── outputs/                            # 📤 运行输出（自动生成）
-    ├── BC_S5/                          #    本地仿真输出（按配置名称组织）
-    │   └── run_YYYYMMDD_HHMMSS/
-    ├── db_BC_S5_YYYYMMDD_HHMMSS/      #    数据库模式日志输出
-    ├── db_duckdb_*/                    #    DuckDB 增强测试输出
-    ├── db_optimized/                   #    优化仿真示例输出
-    ├── db_optimized_cache/             #    优化处理缓存
-    └── integrated_output/              #    集成模块输出（DB 写入测试）
+└── outputs/                            # 📤 运行输出（自动生成，已加入 .gitignore）
+    └── {config_name}/                  #    按配置名称组织
+        └── run_YYYYMMDD_HHMMSS/        #    按运行时间戳组织
 ```
 
 ### CLI 参数说明

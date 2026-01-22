@@ -11,6 +11,7 @@ import os
 from datetime import datetime
 
 from .db_connection import DatabaseConnection
+from .table_schemas import MODULE6_OUTPUT_SCHEMAS, get_columns
 
 
 class ModuleDataWriter:
@@ -164,6 +165,8 @@ class ModuleDataWriter:
             run_id: 运行ID（用于区分不同运行）
             sim_date: 仿真日期（格式：YYYYMMDD，如 20251006）
             if_exists: 如果表存在的处理方式
+                - 'replace': 第一个文件替换表，后续文件追加
+                - 'append': 所有文件追加
         
         Returns:
             dict: 每个输出文件的写入行数
@@ -176,8 +179,12 @@ class ModuleDataWriter:
         results = {}
         print(f"\n📁 写入 {module_name} 输出数据...")
         
-        # 查找所有Excel文件
-        excel_files = list(output_path.glob("*.xlsx"))
+        # 跟踪每个表是否已经被写入过（用于 replace 模式）
+        # 第一次写入用 replace，后续用 append
+        tables_written: Dict[str, bool] = {}
+        
+        # 查找所有Excel文件并按日期排序
+        excel_files = sorted(output_path.glob("*.xlsx"))
         
         for excel_file in excel_files:
             try:
@@ -186,15 +193,16 @@ class ModuleDataWriter:
                     module_name, 
                     run_id,
                     sim_date,
-                    if_exists
+                    if_exists,
+                    tables_written  # 传递已写入表的跟踪字典
                 )
                 results[excel_file.name] = file_results
             except Exception as e:
                 print(f"  ❌ 文件写入失败 [{excel_file.name}]: {e}")
                 results[excel_file.name] = {"error": str(e)}
         
-        # 查找所有CSV文件
-        csv_files = list(output_path.glob("*.csv"))
+        # 查找所有CSV文件并按日期排序
+        csv_files = sorted(output_path.glob("*.csv"))
         
         for csv_file in csv_files:
             try:
@@ -215,26 +223,41 @@ class ModuleDataWriter:
                     else:
                         df['file_date'] = file_date
                 
-                # 添加仿真日期列
-                if sim_date:
+                # 添加仿真日期列（从文件名提取）
+                actual_sim_date = sim_date if sim_date else file_date
+                if actual_sim_date:
                     if df.empty:
                         df['sim_date'] = pd.Series(dtype='string')
                     else:
-                        df['sim_date'] = sim_date
+                        df['sim_date'] = actual_sim_date
                 
                 if run_id:
                     if df.empty:
                         df['run_id'] = pd.Series(dtype='string')
                     else:
                         df['run_id'] = run_id
+                
+                # 确定实际的 if_exists 模式
+                # 如果是 replace 模式，第一次写入用 replace，后续用 append
+                actual_if_exists = if_exists
+                if if_exists == 'replace':
+                    if table_name in tables_written:
+                        actual_if_exists = 'append'
+                    else:
+                        tables_written[table_name] = True
                         
-                self.db.create_table_from_df(df, table_name, if_exists)
+                self.db.create_table_from_df(df, table_name, actual_if_exists)
                 results[csv_file.name] = len(df)
-                self.written_tables[table_name] = {
-                    "source": str(csv_file),
-                    "module": module_name,
-                    "rows": len(df)
-                }
+                
+                # 更新或累加行数
+                if table_name in self.written_tables:
+                    self.written_tables[table_name]['rows'] += len(df)
+                else:
+                    self.written_tables[table_name] = {
+                        "source": str(csv_file),
+                        "module": module_name,
+                        "rows": len(df)
+                    }
             except Exception as e:
                 print(f"  ❌ CSV文件写入失败 [{csv_file.name}]: {e}")
                 results[csv_file.name] = {"error": str(e)}
@@ -247,15 +270,24 @@ class ModuleDataWriter:
         module_name: str,
         run_id: str = None,
         sim_date: str = None,
-        if_exists: str = "append"
+        if_exists: str = "append",
+        tables_written: Dict[str, bool] = None
     ) -> Dict[str, int]:
         """写入单个Excel文件的所有sheet
         
         文件名中的日期（如 Module1Output_20251006.xlsx）会被提取为 file_date 列，
         sim_date 参数用于标识当前仿真日期。
+        
+        对于空表，如果有预定义的列名结构则使用，否则保持空表。
+        
+        Args:
+            tables_written: 已写入表的字典，用于跟踪 replace 模式下哪些表已经被写入
         """
         import re
         results = {}
+        
+        if tables_written is None:
+            tables_written = {}
         
         xl = pd.ExcelFile(excel_path)
         
@@ -272,28 +304,55 @@ class ModuleDataWriter:
                 # 构建表名（简化格式，与内存模式一致）
                 table_name = f"{module_name}_output_{self._clean_name(sheet_name)}"
                 
+                # 如果DataFrame为空，尝试使用预定义的列名（如果有的话）
+                if df.empty:
+                    schema_columns = get_columns(module_name, sheet_name)
+                    if schema_columns:  # 只有定义了列名时才使用
+                        df = pd.DataFrame(columns=schema_columns)
+                    # 否则保持空DataFrame（与基线保持一致）
+                
                 # 添加日期列（从文件名提取）
                 if file_date:
-                    df['file_date'] = file_date
+                    if df.empty:
+                        df['file_date'] = pd.Series(dtype='string')
+                    else:
+                        df['file_date'] = file_date
                 
-                # 添加仿真日期列（从参数传入）
-                if sim_date:
-                    df['sim_date'] = sim_date
+                # 添加仿真日期列（从参数传入，如果没有则使用文件日期）
+                actual_sim_date = sim_date if sim_date else file_date
+                if actual_sim_date:
+                    if df.empty:
+                        df['sim_date'] = pd.Series(dtype='string')
+                    else:
+                        df['sim_date'] = actual_sim_date
                 
                 # 添加run_id列
                 if run_id:
                     df['run_id'] = run_id
                 
+                # 确定实际的 if_exists 模式
+                # 如果是 replace 模式，第一次写入用 replace，后续用 append
+                actual_if_exists = if_exists
+                if if_exists == 'replace':
+                    if table_name in tables_written:
+                        actual_if_exists = 'append'
+                    else:
+                        tables_written[table_name] = True
+                
                 # 写入数据库 (即使 df.empty 也会创建表结构)
-                self.db.create_table_from_df(df, table_name, if_exists)
+                self.db.create_table_from_df(df, table_name, actual_if_exists)
                 results[sheet_name] = len(df)
                 
-                self.written_tables[table_name] = {
-                    "source": str(excel_path),
-                    "sheet": sheet_name,
-                    "module": module_name,
-                    "rows": len(df)
-                }
+                # 更新或累加行数
+                if table_name in self.written_tables:
+                    self.written_tables[table_name]['rows'] += len(df)
+                else:
+                    self.written_tables[table_name] = {
+                        "source": str(excel_path),
+                        "sheet": sheet_name,
+                        "module": module_name,
+                        "rows": len(df)
+                    }
                 
             except Exception as e:
                 print(f"    ⚠️ Sheet [{sheet_name}] 写入失败: {e}")
@@ -342,10 +401,11 @@ class ModuleDataWriter:
             module_dir = base_path / module
             if module_dir.exists():
                 results = self.write_module_output(
-                    module, 
-                    str(module_dir), 
-                    run_id,
-                    if_exists
+                    module_name=module, 
+                    output_dir=str(module_dir), 
+                    run_id=run_id,
+                    sim_date=None,  # sim_date 从文件名中提取
+                    if_exists=if_exists
                 )
                 all_results[module] = results
             else:

@@ -11,7 +11,7 @@ import glob
 class SummaryReportGenerator:
     """汇总报告生成器"""
     
-    def __init__(self, output_base_dir: str, config_dict: dict = None):
+    def __init__(self, output_base_dir: str, config_dict: Optional[dict] = None):
         """
         初始化汇总报告生成器
         
@@ -510,29 +510,23 @@ class SummaryReportGenerator:
         if all_productions:
             combined_productions = pd.concat(all_productions, ignore_index=True)
             
-            # 🔧 过滤掉超出模拟日期范围的数据
-            original_count = len(combined_productions)
-            date_cols_to_filter = ['available_date', 'production_plan_date']
-            for col in date_cols_to_filter:
+            # 🔧 确保日期列为datetime类型
+            date_cols_to_convert = ['available_date', 'production_plan_date', 'simulation_date']
+            for col in date_cols_to_convert:
                 if col in combined_productions.columns:
                     combined_productions[col] = pd.to_datetime(combined_productions[col], errors='coerce')
             
-            # 只保留 available_date 在范围内的记录（这是实际产品可用的日期）
-            if 'available_date' in combined_productions.columns:
-                combined_productions = combined_productions[
-                    (combined_productions['available_date'].isna()) | 
-                    (combined_productions['available_date'] <= self.end_date)
-                ]
-                filtered_count = len(combined_productions)
-                if original_count != filtered_count:
-                    print(f"📊 Production Plan 过滤：{original_count} 条 → {filtered_count} 条（移除了 {original_count - filtered_count} 条超出日期范围的记录）")
+            # 注意：生产计划不按 available_date 过滤，因为生产计划是对未来的规划
+            # 例如：在 simulation_date=2025-10-07 时，会规划 available_date=2025-10-15 的生产
+            # 如果按 available_date <= end_date 过滤，会丢失大量有效的生产计划数据
+            # 只需确保 simulation_date 在范围内即可（这已经由文件收集逻辑保证）
             
             with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
                 combined_productions.to_excel(writer, sheet_name='FullProductionPlan', index=False)
         
         return str(output_file)
     
-    def _extract_date_from_filename(self, file_path: str) -> str:
+    def _extract_date_from_filename(self, file_path: str) -> Optional[str]:
         """从文件名中提取日期"""
         import re
         match = re.search(r'(\d{8})', file_path)

@@ -408,16 +408,12 @@ class DatabaseConnection:
             ]
             if any(name == col_name_lower or col_name_lower.endswith('_' + name) or col_name_lower.startswith(name + '_') for name in text_identifiers):
                  return "TEXT"
-                 
-            # 2. 数量/度量类 -> 始终使用 DOUBLE PRECISION (防止 int/float 混淆)
-            float_measures = [
-                'qty', 'quantity', 'amount', 'inventory', 'stock', 'capacity', 
-                'demand', 'supply', 'shipment', 'production', 'weight', 'volume',
-                'price', 'cost', 'ratio', 'percent', 'rate', 'yield',
-                'leadtime', 'duration', 'hours', 'time_needed'
-            ]
-            if any(name in col_name_lower for name in float_measures):
-                return "DOUBLE PRECISION"
+            
+            # 2. 日期/时间类 -> 优先检查，避免被数量类误匹配
+            # 特别是 production_plan_date 等包含 "production" 的日期列
+            # 如果列名以 _date 结尾，且 pandas 类型是 datetime，使用 TIMESTAMP
+            if col_name_lower.endswith('_date') and "datetime" in dtype_str:
+                return "TIMESTAMP"
             
             # 3. 日期类 -> 仅对明确的日期字段使用 DATE 类型
             # 注意：某些包含 "date" 的列可能存储 "ALL" 等特殊值，需要使用 TEXT
@@ -425,13 +421,24 @@ class DatabaseConnection:
             date_specific_names = [
                 'start_date', 'end_date', 'order_date', 'delivery_date', 
                 'ship_date', 'arrival_date', 'due_date', 'created_date',
-                'updated_date', 'forecast_date', 'plan_date'
+                'updated_date', 'forecast_date', 'plan_date', 'production_plan_date'
             ]
             # 只有明确的日期字段才使用 DATE 类型，避免误判
             if any(name == col_name_lower or col_name_lower.endswith('_' + name) for name in date_specific_names):
                 return "DATE"
+                 
+            # 4. 数量/度量类 -> 使用 DOUBLE PRECISION (防止 int/float 混淆)
+            # 注意：排除以 _date 结尾的列，避免误匹配日期列
+            float_measures = [
+                'qty', 'quantity', 'amount', 'inventory', 'stock', 'capacity', 
+                'demand', 'supply', 'shipment', 'production', 'weight', 'volume',
+                'price', 'cost', 'ratio', 'percent', 'rate', 'yield',
+                'leadtime', 'duration', 'hours', 'time_needed'
+            ]
+            if not col_name_lower.endswith('_date') and any(name in col_name_lower for name in float_measures):
+                return "DOUBLE PRECISION"
             
-            # 4. 索引/排序类 -> 始终使用 BIGINT
+            # 5. 索引/排序类 -> 始终使用 BIGINT
             int_indexes = ['day', 'week', 'month', 'year', 'priority', 'sequence', 'order', 'step', 'count', 'seed']
             if any(name == col_name_lower for name in int_indexes):
                 return "BIGINT"

@@ -14,6 +14,16 @@ from functools import lru_cache
 from contextlib import contextmanager
 
 
+# 导入动态资源配置
+try:
+    from src.utils.resource_config import get_optimal_memory, get_optimal_threads
+    _DEFAULT_MEMORY = get_optimal_memory()
+    _DEFAULT_THREADS = get_optimal_threads()
+except ImportError:
+    _DEFAULT_MEMORY = "4GB"
+    _DEFAULT_THREADS = 4
+
+
 class OptimizedDataProcessor:
     """
     优化的数据处理器
@@ -29,8 +39,8 @@ class OptimizedDataProcessor:
         self,
         pg_connection_string: str,
         cache_dir: Optional[str] = None,
-        memory_limit: str = "4GB",
-        threads: int = 4
+        memory_limit: str = None,
+        threads: int = None
     ):
         """
         初始化处理器
@@ -38,9 +48,14 @@ class OptimizedDataProcessor:
         Args:
             pg_connection_string: PostgreSQL连接字符串
             cache_dir: Parquet缓存目录
-            memory_limit: DuckDB内存限制
-            threads: 并行线程数
+            memory_limit: DuckDB内存限制 (默认: 系统90%内存)
+            threads: 并行线程数 (默认: 系统90% CPU)
         """
+        # 使用动态默认值
+        if memory_limit is None:
+            memory_limit = _DEFAULT_MEMORY
+        if threads is None:
+            threads = _DEFAULT_THREADS
         self.pg_conn_str = pg_connection_string
         self.cache_dir = Path(cache_dir) if cache_dir else None
         self.memory_limit = memory_limit

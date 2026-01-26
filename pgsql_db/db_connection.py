@@ -229,12 +229,81 @@ class DatabaseConnection:
             cursor.execute(query)
             print(f"✅已删除表: {table_name}")
     
+    def check_config_exists(self, table_name: str, config_name: str) -> bool:
+        """
+        检查指定配置是否已在表中存在数据
+        
+        Args:
+            table_name: 表名
+            config_name: 配置名称（如 BC_S5, BC_S9）
+        
+        Returns:
+            bool: 配置是否已存在
+        """
+        clean_name = self._clean_name(table_name)
+        if not self.table_exists(clean_name):
+            return False
+        
+        try:
+            with self.get_cursor(commit=False) as cursor:
+                # 先检查表是否有 config_name 列
+                cursor.execute("""
+                    SELECT column_name FROM information_schema.columns
+                    WHERE table_name = %s AND column_name = 'config_name'
+                """, (clean_name,))
+                if not cursor.fetchone():
+                    return False
+                
+                # 检查是否有该配置的数据
+                cursor.execute(
+                    sql.SQL("SELECT 1 FROM {} WHERE config_name = %s LIMIT 1").format(
+                        sql.Identifier(clean_name)
+                    ),
+                    (config_name,)
+                )
+                return cursor.fetchone() is not None
+        except Exception as e:
+            print(f"⚠️检查配置存在性时出错: {e}")
+            return False
+    
+    def delete_config_data(self, table_name: str, config_name: str) -> int:
+        """
+        删除表中指定配置的数据
+        
+        Args:
+            table_name: 表名
+            config_name: 配置名称（如 BC_S5, BC_S9）
+        
+        Returns:
+            int: 删除的行数
+        """
+        clean_name = self._clean_name(table_name)
+        if not self.table_exists(clean_name):
+            return 0
+        
+        try:
+            with self.get_cursor() as cursor:
+                cursor.execute(
+                    sql.SQL("DELETE FROM {} WHERE config_name = %s").format(
+                        sql.Identifier(clean_name)
+                    ),
+                    (config_name,)
+                )
+                deleted_count = cursor.rowcount
+                if deleted_count > 0:
+                    print(f"  🗑️ 已删除 {table_name} 中配置 [{config_name}] 的 {deleted_count} 行数据")
+                return deleted_count
+        except Exception as e:
+            print(f"⚠️删除配置数据时出错: {e}")
+            return 0
+    
     def create_table_from_df(
         self,
         df: pd.DataFrame,
         table_name: str,
         if_exists: str = "replace",
-        add_write_time: bool = True
+        add_write_time: bool = True,
+        config_name: str = None
     ) -> bool:
         """
         根据DataFrame创建表并写入数据
@@ -244,6 +313,7 @@ class DatabaseConnection:
             table_name: 表名
             if_exists: 如果表存在的处理方式 ('replace', 'append', 'fail')
             add_write_time: 是否自动添加写入时间列
+            config_name: 配置文件标识（如 BC_S5, BC_S9），用于区分不同配置的数据
         
         Returns:
             bool: 是否成功
@@ -254,8 +324,17 @@ class DatabaseConnection:
         # 检查是否为空表（只有列定义）
         is_empty_table = df.empty
         
-        # 添加写入时间列
+        # 添加元数据列
         df_to_write = df.copy()
+        
+        # 添加config_name列（用于区分不同配置文件的数据）
+        if config_name:
+            if is_empty_table:
+                df_to_write['config_name'] = pd.Series(dtype='object')
+            else:
+                df_to_write['config_name'] = config_name
+        
+        # 添加写入时间列
         if add_write_time:
             if is_empty_table:
                 # 空表只添加列定义
@@ -357,20 +436,20 @@ class DatabaseConnection:
             # 检查DataFrame的列是否都在现有表中（允许现有表有额外列）
             missing_cols = df_cols - existing_cols
             if missing_cols:
-                # 如果现有表只有元数据列且是空的，则删除并重建
-                metadata_cols = {'file_date', 'sim_date', 'run_id', 'db_write_time'}
-                if existing_cols.issubset(metadata_cols):
-                    # 检查表是否为空
-                    with self.get_cursor(commit=False) as cursor:
-                        cursor.execute(sql.SQL("SELECT COUNT(*) FROM {}").format(sql.Identifier(table_name)))
-                        row_count = cursor.fetchone()[0]
-                    
-                    if row_count == 0:
-                        print(f"🔧 现有表 {table_name} 只有元数据列且为空，删除并重建...")
-                        self.drop_table(table_name)
-                        return True  # 返回True继续创建表
+                # 检查表是否为空
+                with self.get_cursor(commit=False) as cursor:
+                    cursor.execute(sql.SQL("SELECT COUNT(*) FROM {}").format(sql.Identifier(table_name)))
+                    row_count = cursor.fetchone()[0]
                 
+                if row_count == 0:
+                    # 空表且列结构不兼容，删除并重建
+                    print(f"🔧 现有表 {table_name} 为空且列结构不兼容（缺少列: {missing_cols}），删除并重建...")
+                    self.drop_table(table_name)
+                    return True  # 返回True继续创建表
+                
+                # 非空表且列不兼容，打印警告并跳过
                 print(f"⚠️DataFrame包含现有表中不存在的列: {missing_cols}")
+                print(f"⚠️表结构不兼容，跳过追加: {table_name}")
                 return False
             
             return True

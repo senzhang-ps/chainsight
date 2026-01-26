@@ -382,16 +382,26 @@ print(initializer.get_status_report('BC_S5'))
 
 ### Database Table Structure
 
-| Table Type | Naming Format | Example |
-|------------|---------------|---------|
-| Config tables | `{config}_*` | `bc_s5_m1_demandforecast` |
-| Module1 output | `module1_output_*` | `module1_output_orderlog` |
-| Module3 output | `module3_output_*` | `module3_output_netdemand` |
-| Module4 output | `module4_output_*` | `module4_output_productionplan` |
-| Module5 output | `module5_output_*` | `module5_output_deploymentplan` |
-| Module6 output | `module6_output_*` | `module6_output_deliveryplan` |
-| Orchestrator | `orchestrator_*` | `orchestrator_daily_logs` |
-| Summary | `summary_*` | `summary_historical_inventory_record` |
+#### Config Table Naming Rules (Unified Tables)
+
+Config tables use a "same-structure-same-table" rule. All configuration files with the same data structure are stored in the same table, distinguished by the `config_name` field:
+
+| Table Type | Naming Format | Example | Description |
+|------------|---------------|---------|-------------|
+| Config tables | `cfg_*` | `cfg_m1_demandforecast` | Shared by all configs, filtered by config_name |
+| Module1 output | `module1_output_*` | `module1_output_orderlog` | Module output tables |
+| Module3 output | `module3_output_*` | `module3_output_netdemand` | Module output tables |
+| Module4 output | `module4_output_*` | `module4_output_productionplan` | Module output tables |
+| Module5 output | `module5_output_*` | `module5_output_deploymentplan` | Module output tables |
+| Module6 output | `module6_output_*` | `module6_output_deliveryplan` | Module output tables |
+| Orchestrator | `orchestrator_*` | `orchestrator_daily_logs` | Orchestrator log tables |
+| Summary | `summary_*` | `summary_historical_inventory_record` | Summary report tables |
+
+**Config Table Notes:**
+- No longer creates separate tables for each config (e.g., ~~bc_s5_m1_demandforecast~~, ~~bc_s9_m1_demandforecast~~)
+- All config data is written to the same table (e.g., `cfg_m1_demandforecast`)
+- Different configs are distinguished by the `config_name` field (e.g., 'BC_S5', 'BC_S9')
+- This design facilitates cross-config queries and management
 
 ---
 

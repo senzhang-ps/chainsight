@@ -3,6 +3,10 @@
 数据加载模块
 
 提供从各种数据源（文件、Orchestrator、Module1等）加载数据的功能。
+
+优化历史:
+- v1.0: 基础实现
+- v2.0: 添加静态配置缓存，避免每日重复加载
 """
 import os
 import time
@@ -17,6 +21,50 @@ from .constants import (
     REQUIRED_SHEETS,
     SDL_REQUIRED_COLUMNS
 )
+
+
+# ============================================================================
+# 静态配置缓存（跨日共享，避免重复加载）
+# ============================================================================
+
+class StaticConfigCache:
+    """静态配置缓存类，用于缓存不随日期变化的配置数据"""
+    
+    _instance = None
+    _initialized = False
+    
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+    
+    def __init__(self):
+        if not StaticConfigCache._initialized:
+            self._cache: Dict[str, pd.DataFrame] = {}
+            self._config_dict_id: Optional[int] = None
+            StaticConfigCache._initialized = True
+    
+    def is_cached(self, config_dict: dict) -> bool:
+        """检查配置是否已缓存（通过config_dict的id判断是否是同一个字典）"""
+        return self._config_dict_id == id(config_dict) and len(self._cache) > 0
+    
+    def get_cached_static_config(self) -> Dict[str, pd.DataFrame]:
+        """获取缓存的静态配置"""
+        return self._cache.copy()
+    
+    def cache_static_config(self, config_dict: dict, static_config: Dict[str, pd.DataFrame]):
+        """缓存静态配置"""
+        self._config_dict_id = id(config_dict)
+        self._cache = static_config.copy()
+    
+    def clear(self):
+        """清除缓存"""
+        self._cache = {}
+        self._config_dict_id = None
+
+
+# 全局缓存实例
+_static_config_cache = StaticConfigCache()
 
 
 def load_module1_daily_shipment(
@@ -233,13 +281,18 @@ def load_orchestrator_open_deployment(
 
 def _load_static_config(config_dict: dict, config: dict, skip_normalize: bool = False) -> None:
     """
-    从配置字典加载静态配置表。
+    从配置字典加载静态配置表（带缓存优化）。
 
     Args:
         config_dict: 原始配置字典
         config: 目标配置字典（会被修改）
         skip_normalize: 是否跳过规范化（当config_dict来自main_integration时已被规范化）
+    
+    优化说明:
+        静态配置在整个仿真期间不变，使用缓存避免重复加载和规范化处理。
     """
+    global _static_config_cache
+    
     static_tables = {
         'SafetyStock': 'M3_SafetyStock',
         'Network': 'Global_Network',
@@ -248,15 +301,31 @@ def _load_static_config(config_dict: dict, config: dict, skip_normalize: bool = 
         'PushPullModel': 'M5_PushPullModel',
         'DeployConfig': 'M5_DeployConfig',
     }
-
+    
+    # 检查缓存是否可用
+    if _static_config_cache.is_cached(config_dict):
+        # 使用缓存的静态配置
+        cached_config = _static_config_cache.get_cached_static_config()
+        for sheet_name in static_tables.keys():
+            config[sheet_name] = cached_config.get(sheet_name, pd.DataFrame())
+        return
+    
+    # 首次加载：从config_dict加载并缓存
+    static_config_to_cache = {}
     for sheet_name, config_key in static_tables.items():
-        config[sheet_name] = config_dict.get(config_key, pd.DataFrame())
+        df = config_dict.get(config_key, pd.DataFrame())
+        config[sheet_name] = df
+        static_config_to_cache[sheet_name] = df
 
     # 只在需要时规范化静态配置表（来自main_integration的数据已被规范化）
     if not skip_normalize:
         for sheet_name in static_tables.keys():
             if not config[sheet_name].empty:
                 config[sheet_name] = normalize_identifiers(config[sheet_name])
+                static_config_to_cache[sheet_name] = config[sheet_name]
+    
+    # 缓存静态配置
+    _static_config_cache.cache_static_config(config_dict, static_config_to_cache)
 
 
 def _load_module1_data_from_memory(
@@ -701,3 +770,30 @@ def load_config(input_path: str) -> dict:
 
     config['ValidationLog'] = validation_log
     return config
+
+
+def clear_static_config_cache():
+    """
+    清除静态配置缓存。
+    
+    应在仿真开始前或结束后调用，以确保下次仿真使用新的配置。
+    """
+    global _static_config_cache
+    _static_config_cache.clear()
+    print("[M5] 静态配置缓存已清除")
+
+
+def get_static_config_cache_status() -> dict:
+    """
+    获取静态配置缓存状态。
+    
+    Returns:
+        dict: 缓存状态信息
+    """
+    global _static_config_cache
+    return {
+        'is_cached': _static_config_cache._config_dict_id is not None,
+        'cached_tables': list(_static_config_cache._cache.keys()),
+        'config_dict_id': _static_config_cache._config_dict_id
+    }
+

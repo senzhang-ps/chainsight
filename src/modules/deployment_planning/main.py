@@ -322,7 +322,7 @@ def _allocate_pipeline_sources(
     future_production: dict
 ) -> None:
     """
-    用pipeline supply覆盖剩余gap（向量化）。
+    用pipeline supply覆盖剩余gap（向量化优化版）。
 
     Args:
         demand_rows: 需求行列表（会被修改）
@@ -337,100 +337,108 @@ def _allocate_pipeline_sources(
     if not demand_rows:
         return
 
-    ndr_df = pd.DataFrame(demand_rows).copy()
-    ndr_df['idx'] = np.arange(len(demand_rows))
-
-    rec_arr = [
+    n = len(demand_rows)
+    
+    # 优化：使用numpy数组代替DataFrame操作
+    # 提取receiving信息
+    receivings = np.array([
         r.get('from_location', r.get('receiving', loc))
         for r in demand_rows
-    ]
-    ndr_df['receiving'] = rec_arr
-    ndr_df['is_self'] = ndr_df['receiving'] == loc
-    ndr_df['priority'] = ndr_df['demand_element'].map(
-        lambda x: demand_priority_map.get(x, 99)
-    )
-
-    # 优化：向量化生成调整后数量
-    ndr_df['adjusted_qty'] = ndr_df['idx'].map(
-        lambda i: int(adjusted_qtys.get(int(i), int(ndr_df.at[int(i), 'demand_qty'])))
-    )
-
-    ndr_df['allocated_invcon'] = [
-        int(r.get('deployed_qty_invCon', 0) or 0)
-        for r in demand_rows
-    ]
-    ndr_df['plan_order_cover'] = [
-        int(r.get('deploy_qty_with_plan_order', 0) or 0)
-        for r in demand_rows
-    ]
-
-    self_df = ndr_df[ndr_df['is_self']].copy()
-    if self_df.empty:
+    ])
+    is_self = receivings == loc
+    
+    # 早期退出：如果没有self行则返回
+    self_mask = is_self
+    if not np.any(self_mask):
         return
-
-    for col in ['adjusted_qty', 'allocated_invcon', 'plan_order_cover']:
-        if col not in self_df.columns:
-            self_df[col] = 0
-
-    self_df['raw_gap'] = (
-        self_df['adjusted_qty'] -
-        self_df['allocated_invcon'] -
-        self_df['plan_order_cover']
-    )
-    self_df['alloc_intrans'] = 0
-    self_df['alloc_odi'] = 0
-    self_df['alloc_future'] = 0
+    
+    # 提取demand_element并计算priority
+    demand_elements = np.array([d['demand_element'] for d in demand_rows])
+    priorities = np.array([demand_priority_map.get(de, 99) for de in demand_elements], dtype=np.int64)
+    
+    # 计算demand_qty数组
+    demand_qtys = np.array([int(d.get('demand_qty', 0)) for d in demand_rows], dtype=np.int64)
+    
+    # 优化：向量化计算adjusted_qty（避免低效的lambda）
+    adjusted_arr = np.array([
+        int(adjusted_qtys.get(i, demand_qtys[i])) for i in range(n)
+    ], dtype=np.int64)
+    
+    # 提取已分配量
+    allocated_invcon = np.array([
+        int(r.get('deployed_qty_invCon', 0) or 0) for r in demand_rows
+    ], dtype=np.int64)
+    plan_order_cover = np.array([
+        int(r.get('deploy_qty_with_plan_order', 0) or 0) for r in demand_rows
+    ], dtype=np.int64)
+    
+    # 计算raw_gap
+    raw_gap = adjusted_arr - allocated_invcon - plan_order_cover
+    
+    # 初始化分配数组
+    alloc_intrans = np.zeros(n, dtype=np.int64)
+    alloc_odi = np.zeros(n, dtype=np.int64)
+    alloc_future = np.zeros(n, dtype=np.int64)
 
     node_key = (mat, loc)
     pool_in_transit = int(future_intransit.get(node_key, 0) or 0)
     pool_odi = int(open_deployment_inbound.get(node_key, 0) or 0)
     pool_future_production = int(future_production.get(node_key, 0) or 0)
 
-    def _alloc_source(df_src, pool, col_name):
-        if pool <= 0 or df_src.empty:
-            return df_src, 0
-
-        df_rem = df_src[df_src['raw_gap'] > 0].sort_values('priority')
-        if df_rem.empty:
-            return df_src, 0
-
-        total_gap = float(df_rem['raw_gap'].sum())
+    def _alloc_source_numpy(raw_gap_arr, is_self_arr, priorities_arr, pool, alloc_arr):
+        """使用纯numpy操作分配供给"""
+        if pool <= 0:
+            return raw_gap_arr, 0
+        
+        # 找出self行且gap>0的索引
+        valid_mask = is_self_arr & (raw_gap_arr > 0)
+        if not np.any(valid_mask):
+            return raw_gap_arr, 0
+        
+        valid_idxs = np.where(valid_mask)[0]
+        valid_gaps = raw_gap_arr[valid_idxs]
+        valid_priorities = priorities_arr[valid_idxs]
+        
+        # 按优先级排序
+        sort_order = np.argsort(valid_priorities)
+        sorted_idxs = valid_idxs[sort_order]
+        sorted_gaps = valid_gaps[sort_order]
+        
+        total_gap = float(sorted_gaps.sum())
         if total_gap <= 0:
-            return df_src, 0
-
-        weights = df_rem['raw_gap'].to_numpy(dtype=float) / total_gap
+            return raw_gap_arr, 0
+        
+        weights = sorted_gaps.astype(float) / total_gap
         shares = np.floor(pool * weights).astype(np.int64)
-        shares = np.minimum(
-            shares, df_rem['raw_gap'].to_numpy(dtype=np.int64)
-        )
+        shares = np.minimum(shares, sorted_gaps)
+        
+        # 写入分配结果
+        alloc_arr[sorted_idxs] = shares
+        raw_gap_arr[sorted_idxs] = sorted_gaps - shares
+        
+        return raw_gap_arr, int(shares.sum())
 
-        df_src.loc[df_rem.index, col_name] = shares
-        df_src.loc[df_rem.index, 'raw_gap'] = (
-            df_rem['raw_gap'].to_numpy(dtype=np.int64) - shares
-        )
-        return df_src, int(shares.sum())
-
-    self_df, used_intrans = _alloc_source(
-        self_df, pool_in_transit, 'alloc_intrans'
+    # 分配各来源
+    raw_gap, used_intrans = _alloc_source_numpy(
+        raw_gap, self_mask, priorities, pool_in_transit, alloc_intrans
     )
-    self_df, used_odi = _alloc_source(self_df, pool_odi, 'alloc_odi')
-    self_df, used_future = _alloc_source(
-        self_df, pool_future_production, 'alloc_future'
+    raw_gap, used_odi = _alloc_source_numpy(
+        raw_gap, self_mask, priorities, pool_odi, alloc_odi
     )
-
-    self_df['plan_order_cover'] = (
-        self_df['plan_order_cover'] +
-        self_df['alloc_intrans'] +
-        self_df['alloc_odi'] +
-        self_df['alloc_future']
+    raw_gap, used_future = _alloc_source_numpy(
+        raw_gap, self_mask, priorities, pool_future_production, alloc_future
     )
 
-    for row in self_df.itertuples(index=False):
-        i = int(row.idx)
-        demand_rows[i]['deploy_qty_with_plan_order'] = int(row.plan_order_cover)
-        demand_rows[i]['deploy_from_in_transit'] = int(row.alloc_intrans)
-        demand_rows[i]['deploy_from_open_deployment_inbound'] = int(row.alloc_odi)
-        demand_rows[i]['deploy_from_future_production'] = int(row.alloc_future)
+    # 更新plan_order_cover
+    plan_order_cover = plan_order_cover + alloc_intrans + alloc_odi + alloc_future
+
+    # 优化：直接写回self行（避免itertuples）
+    for i in range(n):
+        if self_mask[i]:
+            demand_rows[i]['deploy_qty_with_plan_order'] = int(plan_order_cover[i])
+            demand_rows[i]['deploy_from_in_transit'] = int(alloc_intrans[i])
+            demand_rows[i]['deploy_from_open_deployment_inbound'] = int(alloc_odi[i])
+            demand_rows[i]['deploy_from_future_production'] = int(alloc_future[i])
 
 
 def _process_gaps_and_create_plans(

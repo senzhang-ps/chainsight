@@ -415,15 +415,34 @@ class ModuleCalculationEngine:
 def create_calculation_engine(
     pg_connection_string: str,
     cache_dir: Optional[str] = None,
-    memory_limit: str = "4GB",
-    threads: int = 4
+    memory_limit: str = None,
+    threads: int = None
 ) -> Tuple[OptimizedDataProcessor, ModuleCalculationEngine]:
     """
     创建计算引擎
     
+    Args:
+        pg_connection_string: PostgreSQL连接字符串
+        cache_dir: 缓存目录
+        memory_limit: 内存限制 (默认: 系统90%内存)
+        threads: 线程数 (默认: 系统90% CPU)
+    
     Returns:
         (processor, engine) 元组
     """
+    # 动态获取默认值
+    try:
+        from src.utils.resource_config import get_optimal_memory, get_optimal_threads
+        if memory_limit is None:
+            memory_limit = get_optimal_memory()
+        if threads is None:
+            threads = get_optimal_threads()
+    except ImportError:
+        if memory_limit is None:
+            memory_limit = "4GB"
+        if threads is None:
+            threads = 4
+    
     processor = OptimizedDataProcessor(
         pg_connection_string=pg_connection_string,
         cache_dir=cache_dir,

@@ -33,6 +33,8 @@ from .data_loader import (
     load_module1_daily_orders,
     load_orchestrator_delivery_gr,
     load_orchestrator_open_deployment,
+    clear_static_config_cache,
+    get_static_config_cache_status,
 )
 
 # 库存计算函数
@@ -87,6 +89,8 @@ __all__ = [
     'load_module1_daily_orders',
     'load_orchestrator_delivery_gr',
     'load_orchestrator_open_deployment',
+    'clear_static_config_cache',
+    'get_static_config_cache_status',
     # 库存计算函数
     'build_open_deployment_inbound',
     'calculate_projected_inventory',

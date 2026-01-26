@@ -8,6 +8,7 @@ Module3 MRP模拟核心逻辑模块。
 - v2.0: 添加 ThreadPoolExecutor 并行处理
 - v2.1: 添加 DataIndexer 预索引优化，将 O(n*m) 过滤降为 O(1) 查找
 - v2.2: 动态CPU配置，使用90%CPU资源
+- v2.3: 添加DuckDB批量计算选项，优化大层级节点处理
 """
 
 import threading
@@ -16,13 +17,27 @@ from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Dict, List, Optional, Tuple
 
+import numpy as np
 import pandas as pd
 
 from .data_indexer import DataIndexer, create_simulation_indexer
 from ...utils.cpu_config import get_optimal_workers
 from .layer_assignment import assign_location_layers
 from .node_processor import NodeProcessor
-from .utils import build_ptf_lsk_cache, normalize_identifiers
+from .utils import (
+    build_ptf_lsk_cache,
+    normalize_identifiers,
+    apply_moq_rv,
+    lookup_moq_rv_three_keys,
+    apportion_largest_remainder,
+)
+from .constants import (
+    USE_DUCKDB_BATCH_CALCULATION,
+    BATCH_CALCULATION_THRESHOLD,
+    DEMAND_ELEMENT_AO,
+    DEMAND_ELEMENT_FORECAST,
+    DEMAND_ELEMENT_SAFETY,
+)
 
 
 def run_mrp_layered_simulation_daily(
@@ -234,7 +249,7 @@ def _process_layer(
     sim_date: pd.Timestamp,
     **data_dfs
 ) -> Tuple[list, dict]:
-    """处理单个层级。"""
+    """处理单个层级（支持批量和并行两种模式）。"""
     parent_accum = defaultdict(lambda: {'AO': 0.0, 'FC': 0.0, 'SS': 0.0})
 
     layer_locs = [
@@ -243,6 +258,32 @@ def _process_layer(
     ]
     layer_mask = ctx['material_locations']['location'].isin(layer_locs)
     layer_nodes = ctx['material_locations'][layer_mask]
+    
+    num_nodes = len(layer_nodes)
+    
+    # 根据节点数量选择处理策略
+    if USE_DUCKDB_BATCH_CALCULATION and num_nodes >= BATCH_CALCULATION_THRESHOLD:
+        # 使用批量向量化处理
+        return _process_layer_batch(
+            layer, ctx, downstream_gaps, sim_date, layer_nodes, **data_dfs
+        )
+    else:
+        # 使用原有的并行处理
+        return _process_layer_parallel(
+            layer, ctx, downstream_gaps, sim_date, layer_nodes, **data_dfs
+        )
+
+
+def _process_layer_parallel(
+    layer: int,
+    ctx: dict,
+    downstream_gaps: dict,
+    sim_date: pd.Timestamp,
+    layer_nodes: pd.DataFrame,
+    **data_dfs
+) -> Tuple[list, dict]:
+    """并行处理单个层级（原有逻辑）。"""
+    parent_accum = defaultdict(lambda: {'AO': 0.0, 'FC': 0.0, 'SS': 0.0})
 
     all_records = []
     records_lock = threading.Lock()
@@ -281,6 +322,200 @@ def _process_layer(
         print(f"[M3] parallel failed for layer {layer}: {e}")
 
     return all_records, parent_accum
+
+
+def _process_layer_batch(
+    layer: int,
+    ctx: dict,
+    downstream_gaps: dict,
+    sim_date: pd.Timestamp,
+    layer_nodes: pd.DataFrame,
+    **data_dfs
+) -> Tuple[list, dict]:
+    """批量向量化处理单个层级（优化版本）。"""
+    t0 = time.perf_counter()
+    parent_accum = defaultdict(lambda: {'AO': 0.0, 'FC': 0.0, 'SS': 0.0})
+    
+    try:
+        # 尝试使用 DuckDB 批量计算
+        from .duckdb_batch_calculator import batch_calculate_net_demand_duckdb
+        
+        # 准备节点列表
+        nodes = [(str(row.material), str(row.location)) for row in layer_nodes.itertuples()]
+        
+        # 获取所有节点的 horizon
+        horizons = {}
+        for material, location in nodes:
+            horizons[(material, location)] = _get_node_horizon(
+                ctx, material, location, sim_date, data_dfs
+            )
+        
+        # 调用批量计算
+        gaps = batch_calculate_net_demand_duckdb(
+            nodes=nodes,
+            sim_date=sim_date,
+            beginning_inventory_df=data_dfs.get('beginning_inventory_df', pd.DataFrame()),
+            in_transit_df=data_dfs.get('in_transit_df', pd.DataFrame()),
+            delivery_gr_df=data_dfs.get('delivery_gr_df', pd.DataFrame()),
+            future_production_df=data_dfs.get('future_production_df', pd.DataFrame()),
+            today_shipment_df=data_dfs.get('daily_shipment_df', pd.DataFrame()),
+            open_deployment_df=data_dfs.get('open_deployment_df', pd.DataFrame()),
+            supply_demand_df=data_dfs.get('daily_supply_demand_df', pd.DataFrame()),
+            safety_stock_df=data_dfs.get('safety_stock_df', pd.DataFrame()),
+            order_df=data_dfs.get('daily_order_df'),
+            downstream_gaps=downstream_gaps,
+            horizons=horizons,
+            delivery_shipment_df=data_dfs.get('delivery_shipment_df'),
+        )
+        
+        # 构建记录和父节点累积
+        all_records = []
+        req_date = sim_date + pd.Timedelta(days=1)
+        
+        for (material, location), (ao_gap, fc_gap, ss_gap) in gaps.items():
+            horizon = horizons.get((material, location), 1)
+            
+            # 构建记录（仅在gap > 0时创建）
+            if ao_gap > 0:
+                all_records.append({
+                    'material': material,
+                    'location': location,
+                    'requirement_date': req_date,
+                    'quantity': -ao_gap,
+                    'demand_element': DEMAND_ELEMENT_AO,
+                    'layer': layer,
+                    'simulation_date': sim_date,
+                    'horizon_days': horizon,
+                })
+            if fc_gap > 0:
+                all_records.append({
+                    'material': material,
+                    'location': location,
+                    'requirement_date': req_date,
+                    'quantity': -fc_gap,
+                    'demand_element': DEMAND_ELEMENT_FORECAST,
+                    'layer': layer,
+                    'simulation_date': sim_date,
+                    'horizon_days': horizon,
+                })
+            if ss_gap > 0:
+                all_records.append({
+                    'material': material,
+                    'location': location,
+                    'requirement_date': req_date,
+                    'quantity': -ss_gap,
+                    'demand_element': DEMAND_ELEMENT_SAFETY,
+                    'layer': layer,
+                    'simulation_date': sim_date,
+                    'horizon_days': horizon,
+                })
+            
+            # 计算父节点缺口（应用MOQ/RV和最大余数法分配，与NodeProcessor保持一致）
+            upstream = _get_upstream(ctx, material, location)
+            if upstream:
+                parent_key = (material, upstream)
+                components = [
+                    ('AO', max(0.0, ao_gap)),
+                    ('FC', max(0.0, fc_gap)),
+                    ('SS', max(0.0, ss_gap)),
+                ]
+                total_gap = sum(v for _, v in components)
+                if total_gap > 0:
+                    # 查找MOQ/RV配置
+                    moq, rv = lookup_moq_rv_three_keys(
+                        data_dfs.get('deploy_config_df'),
+                        material, upstream, location
+                    )
+                    # 应用MOQ/RV计算目标值
+                    target = apply_moq_rv(total_gap, moq, rv, is_cross_node=True)
+                    if target > 0:
+                        # 使用最大余数法分配到各类型
+                        base_vals = [v for _, v in components]
+                        apportion = apportion_largest_remainder(base_vals, target)
+                        for (de, _), q in zip(components, apportion):
+                            parent_accum[parent_key][de] += float(q)
+        
+        elapsed = time.perf_counter() - t0
+        print(f"[M3] batch layer {layer}: {len(nodes)} nodes in {elapsed:.3f}s")
+        
+        return all_records, parent_accum
+        
+    except Exception as e:
+        # 批量处理失败，回退到并行处理
+        print(f"[M3] batch processing failed, fallback to parallel: {e}")
+        return _process_layer_parallel(
+            layer, ctx, downstream_gaps, sim_date, layer_nodes, **data_dfs
+        )
+
+
+def _get_node_horizon(ctx: dict, material: str, location: str, 
+                      sim_date: pd.Timestamp, data_dfs: dict) -> int:
+    """获取节点的horizon值。"""
+    from .lead_time import (
+        compute_root_horizon,
+        determine_lead_time,
+        infer_sending_location_type,
+    )
+    
+    network_candidates = ctx['active_network'][
+        (ctx['active_network']['material'] == material) &
+        (ctx['active_network']['location'] == location)
+    ]
+    
+    if not network_candidates.empty:
+        row = network_candidates.iloc[0]
+        upstream = row['sourcing']
+        
+        if pd.isna(upstream) or str(upstream).strip() == '':
+            # 根节点
+            if ctx['location_layer'].get(location, -1) == 0:
+                return compute_root_horizon(
+                    material, location,
+                    data_dfs.get('lead_time_df', pd.DataFrame()),
+                    data_dfs.get('m4_mlcfg_df'),
+                    ctx['ptf_lsk_cache']
+                )
+            return 1
+        
+        location_type = infer_sending_location_type(
+            ctx['active_network'],
+            ctx['location_layer_df'],
+            str(upstream), material, sim_date
+        )
+        horizon, _ = determine_lead_time(
+            str(upstream), location, location_type,
+            data_dfs.get('lead_time_df', pd.DataFrame()),
+            data_dfs.get('m4_mlcfg_df'),
+            material, ctx['ptf_lsk_cache']
+        )
+        return max(1, horizon)
+    
+    # Node not in network - check if it's at a root location (layer 0)
+    # This handles materials at root nodes that aren't explicitly in the network config
+    if ctx['location_layer'].get(location, -1) == 0:
+        return compute_root_horizon(
+            material, location,
+            data_dfs.get('lead_time_df', pd.DataFrame()),
+            data_dfs.get('m4_mlcfg_df'),
+            ctx['ptf_lsk_cache']
+        )
+    
+    return 1
+
+
+def _get_upstream(ctx: dict, material: str, location: str) -> Optional[str]:
+    """获取节点的上游位置。"""
+    network_candidates = ctx['active_network'][
+        (ctx['active_network']['material'] == material) &
+        (ctx['active_network']['location'] == location)
+    ]
+    
+    if not network_candidates.empty:
+        upstream = network_candidates.iloc[0]['sourcing']
+        if pd.notna(upstream) and str(upstream).strip():
+            return str(upstream)
+    
+    return None
 
 
 def _build_result_df(all_records: list) -> pd.DataFrame:

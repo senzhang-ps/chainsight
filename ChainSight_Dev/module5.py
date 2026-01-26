@@ -2360,8 +2360,7 @@ def main(
             for k, v in node_demands_map.items():
                 global_node_demands_map[k] = v
 
-            # 使用sorted()确保确定性迭代顺序
-            for mat, loc in sorted(all_pairs):
+            for mat, loc in all_pairs:
                 node_key = (mat, loc)
                 current_stock = dynamic_soh.get(node_key, 0)
                 # print(f"📍 节点: {mat}@{loc} [可用库存: {current_stock}]")

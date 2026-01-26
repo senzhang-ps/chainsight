@@ -75,9 +75,7 @@ def init_database(
         
         # ========== 步骤3: 检测配置表 ==========
         print("\n📋 步骤3: 检测配置表...")
-        
-        # 获取预期的配置表名
-        prefix = config_name.lower().replace("-", "_").replace(" ", "_")
+        print(f"  📌 配置标识: {config_name} (将通过 config_name 字段区分)")
         
         # 检查Excel文件是否存在
         excel_path = Path(config_excel_path)
@@ -90,10 +88,10 @@ def init_database(
         xl = pd.ExcelFile(config_excel_path)
         sheet_names = xl.sheet_names
         
-        # 获取预期的表名列表
+        # 获取预期的统一配置表名列表（不再按配置前缀分表）
         expected_tables = []
         for sheet_name in sheet_names:
-            table_name = table_mapping.get_config_table_name(sheet_name, config_name)
+            table_name = table_mapping.get_config_table_name(sheet_name)  # 统一表名
             expected_tables.append((sheet_name, table_name))
         
         # 检查哪些表已存在
@@ -101,49 +99,68 @@ def init_database(
         
         tables_to_create = []
         tables_existing = []
+        tables_need_append = []  # 表存在但需要追加当前配置数据
         
         for sheet_name, table_name in expected_tables:
             if table_name in existing_tables:
-                tables_existing.append((sheet_name, table_name))
+                # 检查该配置是否已在表中存在数据
+                config_exists = db.check_config_exists(table_name, config_name)
+                if config_exists:
+                    tables_existing.append((sheet_name, table_name))
+                else:
+                    tables_need_append.append((sheet_name, table_name))
             else:
                 tables_to_create.append((sheet_name, table_name))
         
         print(f"  📊 预期表数量: {len(expected_tables)}")
-        print(f"  ✅ 已存在表数量: {len(tables_existing)}")
-        print(f"  📝 需创建表数量: {len(tables_to_create)}")
+        print(f"  ✅ 已存在且有数据: {len(tables_existing)} 个表")
+        print(f"  📝 需创建新表: {len(tables_to_create)} 个表")
+        print(f"  ➕ 需追加数据: {len(tables_need_append)} 个表")
         
         # 显示详细信息
         if tables_existing and not force_recreate:
-            print("\n  已存在的表:")
+            print("\n  已存在且有该配置数据的表:")
             for sheet_name, table_name in tables_existing[:10]:
                 print(f"    ✅ {sheet_name} -> {table_name}")
             if len(tables_existing) > 10:
                 print(f"    ... 还有 {len(tables_existing) - 10} 个表")
         
         if tables_to_create:
-            print("\n  需要创建的表:")
+            print("\n  需要创建的新表:")
             for sheet_name, table_name in tables_to_create[:10]:
                 print(f"    📝 {sheet_name} -> {table_name}")
             if len(tables_to_create) > 10:
                 print(f"    ... 还有 {len(tables_to_create) - 10} 个表")
         
+        if tables_need_append:
+            print("\n  需要追加数据的表:")
+            for sheet_name, table_name in tables_need_append[:10]:
+                print(f"    ➕ {sheet_name} -> {table_name}")
+            if len(tables_need_append) > 10:
+                print(f"    ... 还有 {len(tables_need_append) - 10} 个表")
+        
         # ========== 步骤4: 导入数据 ==========
-        if tables_to_create or force_recreate:
+        if tables_to_create or tables_need_append or force_recreate:
             print("\n📋 步骤4: 导入配置数据...")
             
             importer = ExcelImporter(db)
             
             if force_recreate:
-                print("  ⚠️ 强制重新创建所有表...")
-                if_exists = "replace"
+                print(f"  ⚠️ 强制重新导入配置 [{config_name}] 的所有数据...")
+                # 先删除该配置的旧数据
+                for sheet_name, table_name in expected_tables:
+                    if table_name in existing_tables:
+                        db.delete_config_data(table_name, config_name)
+                if_exists = "append"  # 追加到现有表
             else:
-                if_exists = "fail"  # 只创建不存在的表
+                if_exists = "append"  # 统一使用追加模式
             
-            # 逐个sheet导入
+            # 导入Excel文件，使用统一表名 + config_name 字段
             results = importer.import_excel_file(
                 config_excel_path,
-                prefix=prefix,
-                if_exists="replace" if force_recreate else "fail"
+                prefix=None,  # 不再使用前缀
+                if_exists=if_exists,
+                config_name=config_name  # 传入配置标识
             )
             
             # 统计结果
@@ -217,6 +234,7 @@ def check_database_status(
         "database_exists": False,
         "connection_ok": False,
         "config_tables": [],
+        "config_tables_with_data": [],  # 包含该配置数据的表
         "output_tables": [],
         "total_tables": 0
     }
@@ -240,12 +258,15 @@ def check_database_status(
         status["total_tables"] = len(all_tables)
         
         # 分类配置表和输出表
-        prefix = config_name.lower().replace("-", "_").replace(" ", "_")
+        # 统一配置表以 cfg_ 开头
         output_table_names = set(table_mapping.get_all_output_tables())
         
         for table in all_tables:
-            if table.startswith(prefix + "_"):
+            if table.startswith("cfg_"):
                 status["config_tables"].append(table)
+                # 检查该表是否包含指定配置的数据
+                if db.check_config_exists(table, config_name):
+                    status["config_tables_with_data"].append(table)
             elif table in output_table_names:
                 status["output_tables"].append(table)
         
@@ -261,15 +282,15 @@ def check_database_status(
 if __name__ == "__main__":
     import argparse
     
-    parser = argparse.ArgumentParser(description="数据库初始化脚本")
+    parser = argparse.ArgumentParser(description="数据库初始化脚本（统一配置表方案）")
     parser.add_argument("--config-file", "-f", help="配置Excel文件路径")
-    parser.add_argument("--config-name", "-n", required=True, help="配置名称（作为表名前缀）")
+    parser.add_argument("--config-name", "-n", required=True, help="配置名称（如 BC_S5），用于区分不同配置数据")
     parser.add_argument("--host", default="localhost", help="数据库主机")
     parser.add_argument("--port", type=int, default=5432, help="数据库端口")
     parser.add_argument("--database", default="test_db", help="数据库名称")
     parser.add_argument("--user", default="postgres", help="数据库用户名")
     parser.add_argument("--password", default="123456", help="数据库密码")
-    parser.add_argument("--force", action="store_true", help="强制重新创建所有表")
+    parser.add_argument("--force", action="store_true", help="强制重新导入该配置的所有数据（先删除旧数据）")
     parser.add_argument("--check-only", action="store_true", help="仅检查状态")
     
     args = parser.parse_args()
@@ -285,12 +306,13 @@ if __name__ == "__main__":
         )
         
         print("\n" + "=" * 50)
-        print("📋 数据库状态检查")
+        print(f"📋 数据库状态检查 (配置: {args.config_name})")
         print("=" * 50)
         print(f"数据库存在: {'✅' if status['database_exists'] else '❌'}")
         print(f"连接正常: {'✅' if status['connection_ok'] else '❌'}")
         print(f"总表数量: {status['total_tables']}")
-        print(f"配置表数量: {len(status['config_tables'])}")
+        print(f"统一配置表数量 (cfg_*): {len(status['config_tables'])}")
+        print(f"包含配置 [{args.config_name}] 数据的表: {len(status.get('config_tables_with_data', []))}")
         print(f"输出表数量: {len(status['output_tables'])}")
         
         if "error" in status:

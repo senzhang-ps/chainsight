@@ -9,6 +9,7 @@ from typing import Dict, List, Optional
 import time
 
 from .db_connection import DatabaseConnection
+from . import table_mapping
 
 
 class ExcelImporter:
@@ -28,7 +29,8 @@ class ExcelImporter:
         self,
         excel_path: str,
         prefix: str = None,
-        if_exists: str = "replace"
+        if_exists: str = "replace",
+        config_name: str = None
     ) -> Dict[str, int]:
         """
         导入单个Excel文件的所有sheet到数据库
@@ -37,6 +39,7 @@ class ExcelImporter:
             excel_path: Excel文件路径
             prefix: 表名前缀（默认使用文件名）
             if_exists: 如果表存在的处理方式
+            config_name: 配置文件标识（如 BC_S5, BC_S9），将添加到每个表中
         
         Returns:
             dict: 每个sheet导入的行数
@@ -49,7 +52,13 @@ class ExcelImporter:
         if prefix is None:
             prefix = self._clean_filename(path.stem)
         
+        # 如果没有提供config_name，使用文件名作为config_name
+        if config_name is None:
+            config_name = path.stem  # 例如: BC_S5.xlsx -> BC_S5
+        
         print(f"\n📂 导入Excel文件: {path.name}")
+        print(f"🏷️  配置标识: {config_name} (将通过 config_name 字段区分)")
+        print(f"📋 表名规则: 统一配置表名 (cfg_xxx)")
         print("-" * 50)
         
         # 读取所有sheet
@@ -62,23 +71,23 @@ class ExcelImporter:
             try:
                 df = xl.parse(sheet_name)
                 
-                # 构建表名: prefix_sheetname
-                table_name = f"{prefix}_{self._clean_name(sheet_name)}"
+                # 构建表名: 使用统一配置表名（同结构同表），通过 config_name 字段区分不同配置
+                table_name = table_mapping.get_config_table_name(sheet_name)
                 
                 # 空表也要创建（只要有列名）
                 if df.empty:
                     # 检查是否有列定义
                     if len(df.columns) > 0:
                         print(f"  📋 Sheet [{sheet_name}] 为空表，创建表结构 ({len(df.columns)} 列)")
-                        self.db.create_table_from_df(df, table_name, if_exists)
+                        self.db.create_table_from_df(df, table_name, if_exists, config_name=config_name)
                         results[sheet_name] = 0
                     else:
                         print(f"  ⚠️ Sheet [{sheet_name}] 无数据且无列定义，跳过")
                         results[sheet_name] = -1
                     continue
                 
-                # 写入数据库
-                self.db.create_table_from_df(df, table_name, if_exists)
+                # 写入数据库，添加config_name字段
+                self.db.create_table_from_df(df, table_name, if_exists, config_name=config_name)
                 results[sheet_name] = len(df)
                 
                 # 记录导入信息
@@ -86,7 +95,8 @@ class ExcelImporter:
                     "source_file": str(path),
                     "sheet_name": sheet_name,
                     "row_count": len(df),
-                    "column_count": len(df.columns)
+                    "column_count": len(df.columns),
+                    "config_name": config_name
                 }
                 
             except Exception as e:

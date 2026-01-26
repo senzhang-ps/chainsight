@@ -383,8 +383,8 @@ def _get_forecast_demand(
         return 0.0
 
     rows = df[
-        (df['material'] == material) &
-        (df['location'] == location) &
+        (df['material'].astype(str) == str(material)) &
+        (df['location'].astype(str) == str(location)) &
         (df['date'] >= date) &
         (df['date'] <= horizon_end)
     ]
@@ -404,8 +404,8 @@ def _get_safety_stock(
         return 0.0
 
     rows = df[
-        (df['material'] == material) &
-        (df['location'] == location) &
+        (df['material'].astype(str) == str(material)) &
+        (df['location'].astype(str) == str(location)) &
         (df['date'] == horizon_end)
     ]
     if rows.empty or 'safety_stock_qty' not in rows.columns:

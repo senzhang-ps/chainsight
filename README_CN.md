@@ -349,16 +349,26 @@ print(initializer.get_status_report('BC_S5'))
 
 ### 数据库表结构
 
-| 表类型 | 命名格式 | 示例 |
-|--------|----------|------|
-| 配置表 | `{config}_*` | `bc_s5_m1_demandforecast` |
-| Module1输出 | `module1_output_*` | `module1_output_orderlog` |
-| Module3输出 | `module3_output_*` | `module3_output_netdemand` |
-| Module4输出 | `module4_output_*` | `module4_output_productionplan` |
-| Module5输出 | `module5_output_*` | `module5_output_deploymentplan` |
-| Module6输出 | `module6_output_*` | `module6_output_deliveryplan` |
-| Orchestrator | `orchestrator_*` | `orchestrator_daily_logs` |
-| 汇总报告 | `summary_*` | `summary_historical_inventory_record` |
+#### 配置表命名规则（统一表名）
+
+配置表采用"同结构同表"规则，所有配置文件的相同类型数据存储在同一张表中，通过 `config_name` 字段区分不同的配置：
+
+| 表类型 | 命名格式 | 示例 | 说明 |
+|--------|----------|------|------|
+| 配置表 | `cfg_*` | `cfg_m1_demandforecast` | 所有配置共用，通过 config_name 区分 |
+| Module1输出 | `module1_output_*` | `module1_output_orderlog` | 模块输出表 |
+| Module3输出 | `module3_output_*` | `module3_output_netdemand` | 模块输出表 |
+| Module4输出 | `module4_output_*` | `module4_output_productionplan` | 模块输出表 |
+| Module5输出 | `module5_output_*` | `module5_output_deploymentplan` | 模块输出表 |
+| Module6输出 | `module6_output_*` | `module6_output_deliveryplan` | 模块输出表 |
+| Orchestrator | `orchestrator_*` | `orchestrator_daily_logs` | 编排器日志表 |
+| 汇总报告 | `summary_*` | `summary_historical_inventory_record` | 汇总报告表 |
+
+**配置表特殊说明：**
+- 不再为每个配置创建独立的表（如 ~~bc_s5_m1_demandforecast~~, ~~bc_s9_m1_demandforecast~~）
+- 所有配置数据写入同一张表（如 `cfg_m1_demandforecast`）
+- 通过 `config_name` 字段（如 'BC_S5', 'BC_S9'）区分不同配置的数据
+- 这种设计便于跨配置查询和管理
 
 ---
 

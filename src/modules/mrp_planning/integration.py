@@ -153,7 +153,7 @@ def _load_module1_data(
     """加载Module1数据。"""
     try:
         if module1_result is not None:
-            return {
+            data = {
                 'supply_demand_df': module1_result.get(
                     'supply_demand_df', pd.DataFrame()
                 ),
@@ -164,7 +164,14 @@ def _load_module1_data(
                     'orders_df', pd.DataFrame()
                 ),
             }
-        return load_module1_daily_outputs(module1_output_dir, current_date)
+        else:
+            data = load_module1_daily_outputs(module1_output_dir, current_date)
+        
+        # 规范化标识符，确保与其他数据源类型一致
+        for key in data:
+            data[key] = normalize_identifiers(data[key])
+        
+        return data
     except Exception as e:
         print(f"  ⚠️ Module1数据加载失败: {e}")
         return {

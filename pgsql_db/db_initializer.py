@@ -1,10 +1,11 @@
 """
 数据库初始化模块
 提供数据库存在性检测、自动创建数据库和配置表的功能
+支持多配置文件管理（BC_S5, BC_S9等），通过config_name字段区分不同配置的数据
 """
 
 from pathlib import Path
-from typing import Optional, Dict, List, Tuple
+from typing import Optional, Dict, List, Tuple, Any
 import os
 
 
@@ -41,8 +42,9 @@ class DatabaseInitializer:
         if config_search_paths is None:
             project_root = Path(__file__).parent.parent
             self.config_search_paths = [
-                project_root / "test_files",
-                project_root,
+                project_root / "config",      # 优先从 config 目录查找
+                project_root / "test_files",  # 其次从 test_files 目录查找
+                project_root,                  # 最后从项目根目录查找
             ]
         else:
             self.config_search_paths = config_search_paths
@@ -107,10 +109,93 @@ class DatabaseInitializer:
         Returns:
             Tuple[bool, int]: (是否存在, 表数量)
         """
-        config_prefix = config_name.lower().replace(' ', '_').replace('-', '_')
+        # 按“同结构同表”规则：不再以配置前缀分表，改为检查是否存在包含该 config_name 的数据
+        exists, rows = self.check_config_data_exists(config_name)
+        return exists, rows
+    
+    def check_config_data_exists(self, config_name: str, table_name: str = None) -> Tuple[bool, int]:
+        """
+        检测数据库中是否存在指定配置的数据
+        
+        通过检查表中的 config_name 字段来确定数据归属
+        
+        Args:
+            config_name: 配置名称（如 BC_S5, BC_S9）
+            table_name: 可选，指定检查的表名，不指定则检查所有配置表
+            
+        Returns:
+            Tuple[bool, int]: (是否存在, 数据行数)
+        """
         existing_tables = self.db.get_all_tables()
-        config_tables = [t for t in existing_tables if t.startswith(config_prefix + '_')]
-        return len(config_tables) > 0, len(config_tables)
+        
+        # 按“同结构同表”规则：配置数据存在于统一表中，通过 config_name 字段过滤
+        config_tables = list(existing_tables)
+        
+        # 如果指定了表名，只检查该表（表名即为统一表名）
+        if table_name:
+            target_table = table_name.lower()
+            if target_table not in config_tables:
+                return False, 0
+            config_tables = [target_table]
+        
+        total_rows = 0
+        for tbl in config_tables:
+            try:
+                # 检查表是否有config_name列
+                cols = self.db._get_column_types(tbl)
+                if 'config_name' in cols:
+                    # 有config_name列，检查数据
+                    result = self.db.execute_query(
+                        f'SELECT COUNT(*) FROM "{tbl}" WHERE config_name = %s',
+                        (config_name,)
+                    )
+                    total_rows += result[0][0] if result else 0
+                else:
+                    # 没有config_name列，计算总行数
+                    result = self.db.execute_query(f'SELECT COUNT(*) FROM "{tbl}"')
+                    total_rows += result[0][0] if result else 0
+            except Exception:
+                continue
+        
+        return total_rows > 0, total_rows
+    
+    def get_available_configs(self) -> List[str]:
+        """
+        获取数据库中所有可用的配置名称
+        
+        按“同结构同表”规则：配置数据都在统一表中，通过列 `config_name` 区分。
+        这里会扫描所有非输出表，收集其中出现过的 config_name。
+        
+        Returns:
+            List[str]: 配置名称列表
+        """
+        existing_tables = self.db.get_all_tables()
+        
+        configs = set()
+        for table in existing_tables:
+            # 排除模块输出表和系统表
+            if table.startswith(('module', 'orchestrator', 'summary', 'analysis', 'pg_')):
+                continue
+            
+            try:
+                cols = self.db._get_column_types(table)
+            except Exception:
+                continue
+            
+            if 'config_name' not in cols:
+                continue
+            
+            try:
+                rows = self.db.execute_query(
+                    f'SELECT DISTINCT config_name FROM "{table}" WHERE config_name IS NOT NULL'
+                )
+                for r in rows or []:
+                    if r and r[0]:
+                        configs.add(str(r[0]))
+            except Exception:
+                continue
+        
+        return sorted(configs)
     
     def find_config_file(self, config_name: str) -> Optional[Path]:
         """
@@ -161,12 +246,12 @@ class DatabaseInitializer:
         if config_file is None:
             return False, {"error": f"未找到配置文件: {config_name}.xlsx"}
         
-        # 导入Excel
-        config_prefix = config_name.lower().replace(' ', '_').replace('-', '_')
+        # 导入Excel：按“同结构同表”规则写入统一表，并添加 config_name 字段以区分不同配置
         results = self.importer.import_excel_file(
             str(config_file), 
-            prefix=config_prefix, 
-            if_exists=if_exists
+            prefix=None,
+            if_exists=if_exists,
+            config_name=config_name
         )
         
         if not results or all(v < 0 for v in results.values()):

@@ -5,6 +5,7 @@
 
 import os
 import sys
+import argparse
 import pandas as pd
 import numpy as np
 from pathlib import Path
@@ -12,6 +13,9 @@ from pathlib import Path
 # 默认输出目录
 CODE_VO_OUTPUT = r"c:\Users\25936\Desktop\Code\chainsight\test_files\BC_S5\run_20260119_195544"
 SRC_OUTPUT = r"c:\Users\25936\Desktop\Code\chainsight\outputs\BC_S5\run_20260119_205030"
+
+# 兼容 CLI 参数：--dir1/--dir2 传入时覆盖默认目录
+# 注意：该脚本用于本地对比输出，为避免 Windows GBK 控制台编码问题，这里不输出 emoji。
 
 # 需要忽略的列（运行时间戳等）
 IGNORE_COLUMNS = {'timestamp', 'generation_time', 'run_timestamp'}
@@ -206,32 +210,39 @@ def compare_directories(dir1, dir2, subdir_name):
 
 def main():
     """主函数"""
-    base_dir = sys.argv[1] if len(sys.argv) > 1 else CODE_VO_OUTPUT
-    target_dir = sys.argv[2] if len(sys.argv) > 2 else SRC_OUTPUT
-    
+    parser = argparse.ArgumentParser(description="ChainSight 输出对比工具")
+    parser.add_argument('--dir1', dest='dir1', default=None, help='基准输出目录（原版）')
+    parser.add_argument('--dir2', dest='dir2', default=None, help='对比输出目录（重构/优化版）')
+    parser.add_argument('pos_dir1', nargs='?', default=None)
+    parser.add_argument('pos_dir2', nargs='?', default=None)
+    args = parser.parse_args()
+
+    base_dir = args.dir1 or args.pos_dir1 or CODE_VO_OUTPUT
+    target_dir = args.dir2 or args.pos_dir2 or SRC_OUTPUT
+
     print("=" * 70)
     print("ChainSight 输出比较")
     print("=" * 70)
     print(f"基准目录: {base_dir}")
-    print(f"优化目录: {target_dir}")
+    print(f"对比目录: {target_dir}")
     print("=" * 70)
-    
+
     total_matched = 0
     total_files = 0
-    
+
     # 比较各模块输出
     modules = ['module1', 'module3', 'module4', 'module5', 'module6', 'orchestrator', 'summary']
-    
+
     for module in modules:
-        print(f"\n📁 {module.upper()}:")
+        print(f"\n[{module.upper()}]")
         matched, total = compare_directories(base_dir, target_dir, module)
         total_matched += matched
         total_files += total
         if total > 0:
             print(f"   小计: {matched}/{total} 文件匹配")
-    
+
     print("\n" + "=" * 70)
-    print(f"📊 总计: {total_matched}/{total_files} 文件匹配 ({100*total_matched/total_files:.1f}%)" if total_files > 0 else "无文件比较")
+    print(f"总计: {total_matched}/{total_files} 文件匹配 ({100*total_matched/total_files:.1f}%)" if total_files > 0 else "无文件比较")
     print("=" * 70)
 
 

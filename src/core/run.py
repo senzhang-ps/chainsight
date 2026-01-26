@@ -318,17 +318,30 @@ def _run_with_database(ns: argparse.Namespace) -> int:
         temp_output = temp_dir / "output"
         temp_output.mkdir(exist_ok=True)
         
-        # 🦆 直接使用DataFrame字典运行仿真（无需创建临时Excel）
-        from .main_integration import run_integrated_simulation_from_dict
-        
-        result = run_integrated_simulation_from_dict(
-            config_data=config_data,
-            config_name=config_name,
-            start_date=start_date,
-            end_date=end_date,
-            output_base_dir=str(temp_output),
-            skip_validation=True  # 数据库数据已验证
-        )
+        # 🦆 使用优化版本运行仿真（如果可用）
+        try:
+            from pgsql_db.optimized_simulation import run_optimized_simulation_from_dict
+            logger.info("🚀 使用高性能引擎运行仿真...")
+            result = run_optimized_simulation_from_dict(
+                config_data=config_data,
+                config_name=config_name,
+                start_date=start_date,
+                end_date=end_date,
+                output_base_dir=str(temp_output),
+                skip_validation=True,
+                enable_high_performance=True
+            )
+        except ImportError:
+            logger.info("⚠️ 高性能引擎不可用，使用标准模式...")
+            from .main_integration import run_integrated_simulation_from_dict
+            result = run_integrated_simulation_from_dict(
+                config_data=config_data,
+                config_name=config_name,
+                start_date=start_date,
+                end_date=end_date,
+                output_base_dir=str(temp_output),
+                skip_validation=True
+            )
         
         if not result or not result.get('simulation_completed'):
             logger.error("❌ 仿真运行失败")
@@ -340,7 +353,7 @@ def _run_with_database(ns: argparse.Namespace) -> int:
         logger.info("=" * 60)
         
         output_dir = result.get('output_directory')
-        writer = ModuleDataWriter(db)
+        writer = ModuleDataWriter(db, config_name=config_name)  # 传入config_name参数
         run_id = f"{config_name}_{ts}"
         
         # 【完整模式】写入所有模块的详细输出数据 + Summary + Orchestrator
@@ -379,6 +392,10 @@ def _run_with_database(ns: argparse.Namespace) -> int:
         logger.info(f"   ⏱️  总运行时间: {runtime_str}")
         logger.info(f"   ⏱️  其中DB写入: {db_write_time:.2f}秒")
         logger.info(f"   📁 日志目录: {log_dir}")
+        logger.info("📊 数据存储:")
+        logger.info(f"   💾 所有输出数据已写入 PostgreSQL 数据库")
+        logger.info(f"   🔗 连接: postgresql://localhost:5432/test_db")
+        logger.info(f"   📋 表前缀: {run_id}")
         logger.info("=" * 60)
         
         return 0
@@ -398,28 +415,58 @@ def _load_config_from_database(db, config_name: str) -> dict:
     """从数据库加载配置表"""
     import pandas as pd
     
-    # 获取所有以config_name为前缀的表
     all_tables = db.get_all_tables()
-    prefix = config_name.lower().replace("-", "_").replace(" ", "_")
-    
-    config_tables = [t for t in all_tables if t.startswith(prefix + "_")]
-    
-    if not config_tables:
-        return None
-    
     config_data = {}
-    for table_name in config_tables:
-        # 提取原始sheet名称
-        sheet_name = table_name[len(prefix) + 1:]  # 去掉前缀和下划线
-        
+    
+    # 计算旧格式的配置前缀（如 bc_s5_）
+    old_prefix = config_name.lower().replace("-", "_").replace(" ", "_") + "_"
+    
+    # 优先尝试新格式（cfg_开头，通过 config_name 字段区分）
+    for table_name in all_tables:
+        if not table_name.startswith('cfg_'):
+            continue
+            
         try:
             df = db.read_table(table_name)
-            config_data[sheet_name] = df
-            print(f"  ✅ 加载配置表: {sheet_name} ({len(df)} 行)")
         except Exception as e:
             print(f"  ⚠️ 加载配置表失败 [{table_name}]: {e}")
+            continue
+        
+        # 只接受包含 config_name 列的表；并按指定配置过滤
+        if 'config_name' not in df.columns:
+            continue
+        
+        filtered = df[df['config_name'] == config_name]
+        if filtered.empty:
+            continue
+        
+        # 去掉 cfg_ 前缀，作为配置数据的 key
+        clean_table_name = table_name[4:]
+        config_data[clean_table_name] = filtered
+        print(f"  ✅ 加载配置表: {table_name} -> {clean_table_name} ({len(filtered)} 行)")
     
-    return config_data
+    # 如果新格式没有数据，回退到旧格式（兼容旧数据）
+    if not config_data:
+        print(f"  ℹ️ 未找到新格式配置表(cfg_*)，尝试旧格式({old_prefix}*)...")
+        for table_name in all_tables:
+            if not table_name.startswith(old_prefix):
+                continue
+                
+            try:
+                df = db.read_table(table_name)
+            except Exception as e:
+                print(f"  ⚠️ 加载配置表失败 [{table_name}]: {e}")
+                continue
+            
+            if df.empty:
+                continue
+            
+            # 去掉旧前缀，作为配置数据的 key
+            clean_table_name = table_name[len(old_prefix):]
+            config_data[clean_table_name] = df
+            print(f"  ✅ 加载配置表(旧格式): {table_name} -> {clean_table_name} ({len(df)} 行)")
+    
+    return config_data if config_data else None
 
 
 def _get_column_mapping() -> dict:
@@ -556,6 +603,8 @@ def _run_simulation_with_db_config(
 def _cleanup_data_files(output_dir: str, log_dir: Path):
     """清理数据文件，只保留日志"""
     import shutil
+    import gc
+    import time
     
     output_path = Path(output_dir)
     
@@ -570,12 +619,38 @@ def _cleanup_data_files(output_dir: str, log_dir: Path):
         shutil.copy2(log_file, dest)
         print(f"  📄 保存日志: {log_file.name}")
     
-    # 删除整个临时输出目录
-    try:
-        shutil.rmtree(output_path.parent)  # 删除临时目录
-        print(f"  🗑️ 已清理临时数据目录")
-    except Exception as e:
-        print(f"  ⚠️ 清理临时目录失败: {e}")
+    # 强制垃圾回收，释放可能被 pandas 持有的文件句柄
+    gc.collect()
+    
+    # 删除整个临时输出目录（带重试机制）
+    temp_dir = output_path.parent
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            shutil.rmtree(temp_dir)
+            print(f"  🗑️ 已清理临时数据目录")
+            break
+        except PermissionError as e:
+            if attempt < max_retries - 1:
+                # 等待一小段时间让文件句柄释放
+                time.sleep(0.5)
+                gc.collect()
+            else:
+                # 最后一次尝试失败，尝试逐个删除文件
+                print(f"  ⚠️ 临时目录清理延迟（文件可能被占用）: {temp_dir}")
+                try:
+                    # 尝试删除可以删除的文件
+                    for file in temp_dir.rglob("*"):
+                        if file.is_file():
+                            try:
+                                file.unlink()
+                            except:
+                                pass
+                except:
+                    pass
+        except Exception as e:
+            print(f"  ⚠️ 清理临时目录失败: {e}")
+            break
 
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:

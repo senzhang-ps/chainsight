@@ -167,20 +167,20 @@ OPTIONAL_CONFIG_TABLES = [
 ]
 
 
-def get_config_table_name(sheet_name: str, prefix: str) -> str:
+def get_config_table_name(sheet_name: str, prefix: str = None) -> str:
     """
     获取配置表的完整数据库表名
     
+    注意：采用"同结构同表"规则，所有配置使用统一表名，通过 config_name 字段区分不同配置。
+    不再为每个配置创建独立的表（如 bc_s5_xxx, bc_s9_xxx）。
+    
     Args:
         sheet_name: Excel Sheet名称
-        prefix: 配置前缀（如 BC_S5）
+        prefix: 配置前缀（已废弃，保留参数兼容性但不再使用）
     
     Returns:
-        str: 数据库表名
+        str: 统一的数据库表名（带 cfg_ 前缀）
     """
-    # 清理前缀
-    clean_prefix = prefix.lower().replace("-", "_").replace(" ", "_")
-    
     # 查找映射
     if sheet_name in CONFIG_TABLE_MAPPING:
         base_name = CONFIG_TABLE_MAPPING[sheet_name]
@@ -188,7 +188,8 @@ def get_config_table_name(sheet_name: str, prefix: str) -> str:
         # 默认转换
         base_name = sheet_name.lower().replace(" ", "_").replace("-", "_")
     
-    return f"{clean_prefix}_{base_name}"
+    # 统一配置表使用 cfg_ 前缀，通过 config_name 字段区分不同配置
+    return f"cfg_{base_name}"
 
 
 def get_output_table_name(module: str, file_pattern: str) -> str:

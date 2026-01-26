@@ -105,14 +105,15 @@ def _batch_get_upstream_horizon(
     active_network_cache: Optional[dict]
 ) -> pd.DataFrame:
     """
-    批量获取所有节点的 upstream 和 horizon。
+    批量获取所有节点的 upstream 和 horizon（优化版）。
+    使用纯向量化操作替代 df.apply()。
     """
     network_df = config.get('Network', pd.DataFrame())
     leadtime_df = config.get('LeadTime', pd.DataFrame())
     m4_mlcfg_df = config.get('M4_MaterialLocationLineCfg', pd.DataFrame())
     
     # 默认值
-    nodes_df['upstream'] = None
+    nodes_df['upstream'] = ''
     nodes_df['horizon'] = 7  # 默认 horizon
     nodes_df['leadtime'] = 0
     
@@ -138,45 +139,54 @@ def _batch_get_upstream_horizon(
         on=['material', 'location'],
         how='left'
     )
-    nodes_df['upstream'] = merged['sourcing'].fillna('')
+    nodes_df['upstream'] = merged['sourcing'].fillna('').astype(str)
     
-    # 计算 horizon（简化版本，使用缓存或默认值）
+    # 优化：使用向量化计算horizon（替代df.apply）
     if lead_time_cache:
-        # 使用缓存快速查找
-        # lead_time_cache 格式: (sending, receiving) -> (PDT, GR, MCT)
-        def get_horizon_cached(row):
-            upstream = row['upstream']
-            location = row['location']
-            if not upstream or pd.isna(upstream) or str(upstream).strip() == '':
-                return 7  # 根节点默认
-            key = (str(upstream), str(location))
-            if key in lead_time_cache:
-                vals = lead_time_cache[key]
-                if isinstance(vals, tuple) and len(vals) >= 3:
-                    pdt, gr, mct = vals[0], vals[1], vals[2]
-                    horizon = max(int(mct), int(pdt) + int(gr))
-                    return max(1, horizon)
-                elif isinstance(vals, (int, float)):
-                    return max(1, int(vals))
-            return 7
+        # 构建查找键
+        n = len(nodes_df)
+        upstreams = nodes_df['upstream'].values
+        locations = nodes_df['location'].values
         
-        nodes_df['horizon'] = nodes_df.apply(get_horizon_cached, axis=1)
+        # 使用列表推导代替apply（更快）
+        horizons = np.array([
+            _get_horizon_from_cache(upstreams[i], locations[i], lead_time_cache)
+            for i in range(n)
+        ], dtype=np.int64)
+        
+        nodes_df['horizon'] = horizons
     else:
         # 无缓存时使用默认值
         nodes_df['horizon'] = 7
     
-    # 计算 leadtime
-    nodes_df['leadtime'] = nodes_df.apply(
-        lambda row: row['horizon'] if row['upstream'] and str(row['upstream']).strip() else 0,
-        axis=1
-    )
+    # 优化：向量化计算leadtime（替代apply）
+    # 有upstream时使用horizon，否则为0
+    has_upstream = (nodes_df['upstream'] != '') & (nodes_df['upstream'].notna())
+    nodes_df['leadtime'] = np.where(has_upstream, nodes_df['horizon'], 0)
     
-    # 计算 horizon_end
-    nodes_df['horizon_end'] = nodes_df['horizon'].apply(
-        lambda h: sim_date + timedelta(days=int(h))
-    )
+    # 优化：向量化计算horizon_end
+    horizon_days = nodes_df['horizon'].values
+    nodes_df['horizon_end'] = pd.to_datetime([
+        sim_date + timedelta(days=int(h)) for h in horizon_days
+    ])
     
     return nodes_df
+
+
+def _get_horizon_from_cache(upstream: str, location: str, lead_time_cache: dict) -> int:
+    """从缓存获取horizon值（辅助函数）。"""
+    if not upstream or str(upstream).strip() == '':
+        return 7  # 根节点默认
+    key = (str(upstream), str(location))
+    if key in lead_time_cache:
+        vals = lead_time_cache[key]
+        if isinstance(vals, tuple) and len(vals) >= 3:
+            pdt, gr, mct = vals[0], vals[1], vals[2]
+            horizon = max(int(mct), int(pdt) + int(gr))
+            return max(1, horizon)
+        elif isinstance(vals, (int, float)):
+            return max(1, int(vals))
+    return 7
 
 
 def _batch_collect_sdl_demands(

@@ -17,14 +17,16 @@ from .table_schemas import MODULE6_OUTPUT_SCHEMAS, get_columns
 class ModuleDataWriter:
     """模块数据写入器"""
     
-    def __init__(self, db: DatabaseConnection):
+    def __init__(self, db: DatabaseConnection, config_name: str = None):
         """
         初始化模块数据写入器
         
         Args:
             db: 数据库连接实例
+            config_name: 配置名称（如 BC_S5, BC_S9），用于区分不同配置的数据
         """
         self.db = db
+        self.config_name = config_name
         self.written_tables: Dict[str, Dict] = {}
     
     def write_summary_only(
@@ -133,8 +135,8 @@ class ModuleDataWriter:
                     if run_id and not df.empty:
                         df['run_id'] = run_id
                     
-                    # 写入数据库
-                    self.db.create_table_from_df(df, table_name, if_exists)
+                    # 写入数据库（传入config_name）
+                    self.db.create_table_from_df(df, table_name, if_exists, config_name=self.config_name)
                     results[table_name] = len(df)
                     self.written_tables[table_name] = {
                         "source": str(file_path),
@@ -246,7 +248,7 @@ class ModuleDataWriter:
                     else:
                         tables_written[table_name] = True
                         
-                self.db.create_table_from_df(df, table_name, actual_if_exists)
+                self.db.create_table_from_df(df, table_name, actual_if_exists, config_name=self.config_name)
                 results[csv_file.name] = len(df)
                 
                 # 更新或累加行数
@@ -339,8 +341,8 @@ class ModuleDataWriter:
                     else:
                         tables_written[table_name] = True
                 
-                # 写入数据库 (即使 df.empty 也会创建表结构)
-                self.db.create_table_from_df(df, table_name, actual_if_exists)
+                # 写入数据库 (即使 df.empty 也会创建表结构，传入config_name)
+                self.db.create_table_from_df(df, table_name, actual_if_exists, config_name=self.config_name)
                 results[sheet_name] = len(df)
                 
                 # 更新或累加行数
@@ -501,7 +503,7 @@ class ModuleDataWriter:
                 
                 if dfs:
                     combined_df = pd.concat(dfs, ignore_index=True)
-                    self.db.create_table_from_df(combined_df, table_name, if_exists)
+                    self.db.create_table_from_df(combined_df, table_name, if_exists, config_name=self.config_name)
                     results[base_table_name] = len(combined_df)
                     self.written_tables[table_name] = {
                         "source": str(orch_path),
@@ -637,9 +639,9 @@ class ModuleDataWriter:
                     else:
                         combined_df['run_id'] = run_id
                 
-                # 写入数据库 (即使 combined_df.empty 也会创建表结构)
+                # 写入数据库 (即使 combined_df.empty 也会创建表结构，传入config_name)
                 try:
-                    self.db.create_table_from_df(combined_df, table_name, if_exists)
+                    self.db.create_table_from_df(combined_df, table_name, if_exists, config_name=self.config_name)
                     results[table_name] = len(combined_df)
                     self.written_tables[table_name] = {
                         "module": module_name,

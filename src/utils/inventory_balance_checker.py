@@ -1,4 +1,4 @@
-# inventory_balance_checker.py
+# inventory_balance_checker.py（库存平衡检查器）
 # 库存平衡检查器 - 验证库存守恒原理
 # 期初库存 + 入库（生产+收货） - 出库（发货+部署） = 期末库存
 

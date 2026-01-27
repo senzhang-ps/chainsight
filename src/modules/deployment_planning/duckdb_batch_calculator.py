@@ -106,7 +106,7 @@ def apply_moq_rv_batch_duckdb(
         calculator.conn.register('config', config_df)
         
         # 执行计算
-        # Step 1: 按路径分组计算组级MOQ/RV调整
+        # 步骤1：按路径分组计算组级 MOQ/RV 调整
         result = calculator.conn.execute("""
             WITH route_groups AS (
                 -- 按路径分组

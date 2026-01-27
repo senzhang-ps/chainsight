@@ -153,17 +153,21 @@ def _calculate_lead_time(
 
 def infer_sending_location_type(
     network_df: pd.DataFrame,
-    location_layer_df: pd.DataFrame,
+    location_layer_map: Dict[Tuple[str, str], int],
     sending: str,
     material: Optional[str],
     sim_date: pd.Timestamp
 ) -> str:
     """
-    推断发送端的location_type。
+    推断发送端的 location_type：
+    1) 若存在 (material, location==sending) 的显式配置，直接使用其 location_type
+    2) 若 sending 是根节点(layer==0)，判为 'Plant'
+    3) 若 sending 只在 sourcing 列出现、从不在 location 列出现，判为 'Plant'
+    4) 其他情况默认为 'DC'
 
     Args:
         network_df: 网络配置DataFrame
-        location_layer_df: 节点层级DataFrame
+        location_layer_map: 节点层级映射 dict[(material, location): layer]
         sending: 发送节点标识
         material: 物料编码
         sim_date: 模拟日期
@@ -171,74 +175,34 @@ def infer_sending_location_type(
     Returns:
         str: 'Plant' 或 'DC'
     """
-    if _is_empty_sending(sending):
+    if sending is None or (isinstance(sending, float) and pd.isna(sending)) or str(sending).strip() == '':
         return LOCATION_TYPE_DC
 
-    # 显式配置
-    loc_type = _get_explicit_location_type(
-        network_df, material, sending, sim_date
-    )
-    if loc_type:
-        return loc_type
+    # ① 显式配置（同物料、有效期内）
+    if material is not None and not network_df.empty:
+        explicit = network_df[
+            (network_df['material'] == material) &
+            (network_df['location'] == sending) &
+            (network_df['eff_from'] <= sim_date) &
+            (network_df['eff_to'] >= sim_date)
+        ]
+        if not explicit.empty:
+            t = explicit.iloc[0].get('location_type', None)
+            if isinstance(t, str) and t.strip():
+                return t
 
-    # 根节点判断
-    if _is_root_node(location_layer_df, sending):
+    # ② 根节点（layer==0）→ Plant
+    if location_layer_map:
+        mat_key = '' if material is None else str(material)
+        if location_layer_map.get((mat_key, str(sending)), None) == 0:
+            return LOCATION_TYPE_PLANT
+
+    # ③ 只在 sourcing 中出现、从不在 location 中出现 → Plant
+    #    （处理"源头 Plant 只维护在 sourcing 列"的常见情况）
+    appears_as_sourcing = network_df['sourcing'].astype(str).eq(str(sending)).any()
+    appears_as_location = network_df['location'].astype(str).eq(str(sending)).any()
+    if appears_as_sourcing and not appears_as_location:
         return LOCATION_TYPE_PLANT
 
-    # 仅在sourcing中出现
-    if _only_appears_as_sourcing(network_df, sending):
-        return LOCATION_TYPE_PLANT
-
+    # ④ 兜底
     return LOCATION_TYPE_DC
-
-
-def _is_empty_sending(sending) -> bool:
-    """检查sending是否为空。"""
-    if sending is None:
-        return True
-    if isinstance(sending, float) and pd.isna(sending):
-        return True
-    return str(sending).strip() == ''
-
-
-def _get_explicit_location_type(
-    network_df: pd.DataFrame,
-    material: Optional[str],
-    sending: str,
-    sim_date: pd.Timestamp
-) -> Optional[str]:
-    """获取显式配置的location_type。"""
-    if material is None or network_df.empty:
-        return None
-
-    explicit = network_df[
-        (network_df['material'] == material) &
-        (network_df['location'] == sending) &
-        (network_df['eff_from'] <= sim_date) &
-        (network_df['eff_to'] >= sim_date)
-    ]
-    if explicit.empty:
-        return None
-
-    loc_type = explicit.iloc[0].get('location_type', None)
-    if isinstance(loc_type, str) and loc_type.strip():
-        return loc_type
-    return None
-
-
-def _is_root_node(location_layer_df: pd.DataFrame, sending: str) -> bool:
-    """判断是否为根节点。"""
-    if location_layer_df.empty:
-        return False
-
-    layer_map = dict(
-        zip(location_layer_df['location'], location_layer_df['layer'])
-    )
-    return layer_map.get(sending, None) == 0
-
-
-def _only_appears_as_sourcing(network_df: pd.DataFrame, sending: str) -> bool:
-    """判断节点是否仅在sourcing列出现。"""
-    as_sourcing = network_df['sourcing'].astype(str).eq(str(sending)).any()
-    as_location = network_df['location'].astype(str).eq(str(sending)).any()
-    return as_sourcing and not as_location

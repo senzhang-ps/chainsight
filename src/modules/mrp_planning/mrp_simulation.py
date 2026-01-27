@@ -170,23 +170,29 @@ def _init_simulation_context(
     ]
 
     location_layer_df = assign_location_layers(active_network)
-    location_layer = dict(
-        zip(location_layer_df['location'], location_layer_df['layer'])
-    )
-    all_layers = sorted(set(location_layer.values()), reverse=True)
+    
+    # Build location_layer_map as {(material, location): layer} - matching baseline
+    location_layer_map: dict[tuple[str, str], int] = {}
+    for row in location_layer_df.itertuples(index=False):
+        mat = getattr(row, 'material', '')  # type: ignore[attr-defined]
+        loc = getattr(row, 'location', '')  # type: ignore[attr-defined]
+        lyr = getattr(row, 'layer', 0)  # type: ignore[attr-defined]
+        location_layer_map[(str(mat), str(loc))] = int(lyr)
+    
+    all_layers = sorted(location_layer_df['layer'].unique(), reverse=True) if not location_layer_df.empty else []
 
     ptf_lsk_cache = {}
     if m4_mlcfg_df is not None and not m4_mlcfg_df.empty:
         ptf_lsk_cache = build_ptf_lsk_cache(m4_mlcfg_df)
 
     material_locations = _build_material_locations(
-        active_network, location_layer, network_df
+        active_network, location_layer_map, network_df
     )
 
     return {
         'active_network': active_network,
         'location_layer_df': location_layer_df,
-        'location_layer': location_layer,
+        'location_layer_map': location_layer_map,
         'all_layers': all_layers,
         'ptf_lsk_cache': ptf_lsk_cache,
         'material_locations': material_locations,
@@ -195,18 +201,19 @@ def _init_simulation_context(
 
 def _build_material_locations(
     active_network: pd.DataFrame,
-    location_layer: dict,
+    location_layer_map: dict[tuple[str, str], int],
     network_df: pd.DataFrame
 ) -> pd.DataFrame:
     """构建material-location组合。"""
-    all_locations = set(location_layer.keys())
+    # Extract unique locations from the (material, location) keys
+    all_locations = set(loc for _, loc in location_layer_map.keys())
     all_materials = set(network_df['material'].unique())
 
     extended = []
-    for row in active_network.itertuples():
+    for row in active_network.itertuples(index=False):
         extended.append({
-            'material': str(row.material),
-            'location': str(row.location)
+            'material': str(getattr(row, 'material', '')),  # type: ignore[attr-defined]
+            'location': str(getattr(row, 'location', ''))  # type: ignore[attr-defined]
         })
 
     for location in all_locations:
@@ -252,10 +259,12 @@ def _process_layer(
     """处理单个层级（支持批量和并行两种模式）。"""
     parent_accum = defaultdict(lambda: {'AO': 0.0, 'FC': 0.0, 'SS': 0.0})
 
-    layer_locs = [
-        loc for loc, lyr in ctx['location_layer'].items()
-        if lyr == layer
-    ]
+    # Get locations for this layer from location_layer_map (keyed by (material, location))
+    layer_locs = set()
+    for (mat, loc), lyr in ctx['location_layer_map'].items():
+        if lyr == layer:
+            layer_locs.add(loc)
+    layer_locs = list(layer_locs)
     layer_mask = ctx['material_locations']['location'].isin(layer_locs)
     layer_nodes = ctx['material_locations'][layer_mask]
     
@@ -467,8 +476,8 @@ def _get_node_horizon(ctx: dict, material: str, location: str,
         upstream = row['sourcing']
         
         if pd.isna(upstream) or str(upstream).strip() == '':
-            # 根节点
-            if ctx['location_layer'].get(location, -1) == 0:
+            # 根节点 - use (material, location) key
+            if ctx['location_layer_map'].get((str(material), str(location)), -1) == 0:
                 return compute_root_horizon(
                     material, location,
                     data_dfs.get('lead_time_df', pd.DataFrame()),
@@ -479,7 +488,7 @@ def _get_node_horizon(ctx: dict, material: str, location: str,
         
         location_type = infer_sending_location_type(
             ctx['active_network'],
-            ctx['location_layer_df'],
+            ctx['location_layer_map'],
             str(upstream), material, sim_date
         )
         horizon, _ = determine_lead_time(
@@ -490,9 +499,9 @@ def _get_node_horizon(ctx: dict, material: str, location: str,
         )
         return max(1, horizon)
     
-    # Node not in network - check if it's at a root location (layer 0)
-    # This handles materials at root nodes that aren't explicitly in the network config
-    if ctx['location_layer'].get(location, -1) == 0:
+    # 节点不在网络中：检查是否为根节点（层级 0）
+    # 处理未在网络配置中显式出现的根节点物料
+    if ctx['location_layer_map'].get((str(material), str(location)), -1) == 0:
         return compute_root_horizon(
             material, location,
             data_dfs.get('lead_time_df', pd.DataFrame()),

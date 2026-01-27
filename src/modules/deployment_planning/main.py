@@ -794,12 +794,15 @@ def main(
     demand_priority = config['DemandPriority']
     receiving_space = config['ReceivingSpace']
 
-    # 构建层级映射
+    # 构建层级映射 - per-material, per-location
     network_layers = assign_location_layers(network)
-    location_to_layer = dict(zip(
-        network_layers['location'], network_layers['layer']
-    ))
-    layer_list = sorted(network_layers['layer'].unique(), reverse=True)
+    location_to_layer: Dict[tuple, int] = {}
+    for row in network_layers.itertuples(index=False):
+        mat = getattr(row, 'material', '')  # type: ignore[attr-defined]
+        loc = getattr(row, 'location', '')  # type: ignore[attr-defined]
+        lyr = getattr(row, 'layer', 0)  # type: ignore[attr-defined]
+        location_to_layer[(str(mat), str(loc))] = int(lyr)
+    layer_list = sorted(set(location_to_layer.values()), reverse=True)
     demand_priority_map = dict(zip(
         demand_priority['demand_element'], demand_priority['priority']
     ))
@@ -908,7 +911,7 @@ def main(
         up_gap_next = {}
         global_node_demands_map: Dict[tuple, list] = {}
 
-        # 预计算materials_union - 移动到循环外部避免重复计算
+        # 预计算materials_union
         materials_union = set(
             config['SupplyDemandLog']['material'].unique()
         )
@@ -919,15 +922,18 @@ def main(
 
         # 按层级处理
         for layer in layer_list:
-            # 计算当前层级的pairs
+            # 计算当前层级的pairs - 与基准版本一致
+            # location_to_layer keys are (material, location) tuples
             base_pairs = set(
-                (mat, loc) for loc, l in location_to_layer.items() 
-                if l == layer for mat in materials_union
+                (mat, loc)
+                for (mat, loc), lyr in location_to_layer.items()
+                if lyr == layer
             )
+            # gap buffer补充
             gap_pairs = set(
                 (mat, loc)
                 for (mat, loc) in up_gap_buffer
-                if location_to_layer.get(loc, None) == layer
+                if location_to_layer.get((mat, loc), None) == layer
             )
             all_pairs = base_pairs | gap_pairs
 

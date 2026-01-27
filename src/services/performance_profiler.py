@@ -1,4 +1,4 @@
-# performance_profiler.py
+# performance_profiler.py（性能分析器）
 # 性能分析工具 - 用于识别代码瓶颈
 
 import cProfile

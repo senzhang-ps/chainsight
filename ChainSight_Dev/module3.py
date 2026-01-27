@@ -248,114 +248,88 @@ def load_module1_daily_outputs(module1_output_dir: str, simulation_date: pd.Time
 
 
 def assign_location_layers(network_df: pd.DataFrame) -> pd.DataFrame:
-    """分配供应链网络中各节点的层级 - 自动识别最上层节点
-    
-    Args:
-        network_df: 网络配置数据，包含sourcing和location字段
-        
-    Returns:
-        DataFrame: 包含location和对应layer的映射关系
-    """
+    """按物料维度分配网络层级（与 Module5 逻辑一致）"""
     _t_func = time.perf_counter()
+    from collections import defaultdict, deque
+
     if network_df.empty:
-        return pd.DataFrame({'location': [], 'layer': []})
-        
-    children = defaultdict(list)
-    parents = defaultdict(list)
-    
-    # 第一步：构建父子关系图
-    # Performance optimization: Use itertuples instead of iterrows
-    for row in network_df.itertuples():
-        sourcing_val = row.sourcing
-        location_val = row.location
-        
-        # Handle null/nan values properly for both scalar and Series cases
-        sourcing_valid = sourcing_val is not None and pd.notna(sourcing_val) and str(sourcing_val).strip() != ''
-        location_valid = location_val is not None and pd.notna(location_val) and str(location_val).strip() != ''
-        
-        if sourcing_valid and location_valid:
-            children[sourcing_val].append(location_val)
-            parents[location_val].append(sourcing_val)
-    
-    # 第二步：收集所有地点
-    all_locations = set(network_df['location'].dropna()).union(set(network_df['sourcing'].dropna()))
-    
-    # 第三步：自动识别最上层节点（没有父节点的节点）
-    # 这些节点可能是真正的根节点，也可能是配置中缺失上游关系的节点
-    potential_roots = [loc for loc in all_locations if not parents[loc]]
-    
-    # 第四步：智能识别真正的根节点
-    # 策略：如果一个地点在sourcing中出现过，说明它有下游，可能是真正的根节点
-    # 如果一个地点只在location中出现，从未在sourcing中出现，说明它可能是叶子节点
-    true_roots = []
-    for loc in potential_roots:
-        if loc in children:  # 该地点有下游节点
-            true_roots.append(loc)
-        else:
-            # 该地点没有下游，可能是叶子节点，需要进一步分析
-            # 检查是否有其他地点指向它
-            has_incoming = any(loc in parents.get(other_loc, []) for other_loc in all_locations)
-            if not has_incoming:
-                # 如果没有任何其他地点指向它，且它也没有下游，可能是孤立的根节点
-                true_roots.append(loc)
-    
-    # 如果没有找到真正的根节点，使用所有potential_roots
-    if not true_roots:
-        true_roots = potential_roots
-    
-    # print(f"🔍 自动识别网络层级:")
-    # print(f"  总地点数: {len(all_locations)}")
-    # print(f"  潜在根节点: {potential_roots}")
-    # print(f"  识别出的根节点: {true_roots}")
-    
-    # 第五步：从根节点开始分配层级
-    layer_dict = {}
-    queue = deque()
-    
-    # 根节点从layer 0开始
-    for root in true_roots:
-        queue.append((root, 0))
-        # print(f"  📍 根节点: {root} -> Layer 0")
-    
-    # 广度优先遍历分配层级
-    while queue:
-        loc, layer = queue.popleft()
-        if loc in layer_dict and layer_dict[loc] <= layer:
+        empty_df = pd.DataFrame({'material': [], 'location': [], 'layer': []})
+        print(f"[M3] assign_location_layers total: {time.perf_counter()-_t_func:.3f}s, locations=0")
+        return empty_df
+
+    layer_rows = []
+    for material, mat_df in network_df.groupby('material', dropna=False):
+        if mat_df.empty:
             continue
-        layer_dict[loc] = layer
-        
-        # 子节点层级 = 父节点层级 + 1
-        for child in children.get(loc, []):
-            queue.append((child, layer + 1))
-            # print(f"  📍 子节点: {child} -> Layer {layer + 1} (父节点: {loc})")
-    
-    # 第六步：处理未连接或孤立的节点
-    unassigned = [loc for loc in all_locations if loc not in layer_dict]
-    if unassigned:
-        max_layer = max(layer_dict.values()) if layer_dict else 0
-        for loc in unassigned:
-            layer_dict[loc] = max_layer + 1
-            # print(f"  📍 孤立节点: {loc} -> Layer {max_layer + 1}")
-    
-    # 第七步：生成层级映射DataFrame
-    layer_df = pd.DataFrame([
-        {'location': loc, 'layer': layer} 
-        for loc, layer in layer_dict.items()
-    ])
-    
-    # 按层级排序
-    layer_df = layer_df.sort_values('layer')
-    
-    # print(f"  ✅ 层级分配完成，共 {len(layer_df)} 个地点")
-    # print(f"  层级范围: {layer_df['layer'].min()} - {layer_df['layer'].max()}")
-    
+
+        children = defaultdict(list)
+        parents = defaultdict(list)
+        for row in mat_df.itertuples():
+            sourcing_val = getattr(row, 'sourcing', None)
+            location_val = getattr(row, 'location', None)
+
+            sourcing_valid = sourcing_val is not None and pd.notna(sourcing_val) and str(sourcing_val).strip() != ''
+            location_valid = location_val is not None and pd.notna(location_val) and str(location_val).strip() != ''
+            if sourcing_valid and location_valid:
+                s_val = str(sourcing_val)
+                l_val = str(location_val)
+                children[s_val].append(l_val)
+                parents[l_val].append(s_val)
+
+        all_locations = set(mat_df['location'].dropna().astype(str)).union(
+            set(mat_df['sourcing'].dropna().astype(str))
+        )
+        if not all_locations:
+            continue
+
+        potential_roots = [loc for loc in all_locations if not parents[loc]]
+        true_roots = []
+        for loc in potential_roots:
+            if loc in children:
+                true_roots.append(loc)
+            else:
+                has_incoming = any(loc in parents.get(other_loc, []) for other_loc in all_locations)
+                if not has_incoming:
+                    true_roots.append(loc)
+        if not true_roots:
+            true_roots = potential_roots if potential_roots else list(all_locations)
+
+        layer_dict = {}
+        queue = deque((root, 0) for root in true_roots)
+        while queue:
+            loc, layer = queue.popleft()
+            if loc in layer_dict and layer_dict[loc] <= layer:
+                continue
+            layer_dict[loc] = layer
+            for child in children.get(loc, []):
+                queue.append((child, layer + 1))
+
+        unassigned = [loc for loc in all_locations if loc not in layer_dict]
+        if unassigned:
+            max_layer = max(layer_dict.values()) if layer_dict else 0
+            for loc in unassigned:
+                layer_dict[loc] = max_layer + 1
+
+        for loc, layer in layer_dict.items():
+            layer_rows.append({
+                'material': '' if pd.isna(material) else str(material),
+                'location': loc,
+                'layer': layer
+            })
+
+    if not layer_rows:
+        empty_df = pd.DataFrame({'material': [], 'location': [], 'layer': []})
+        print(f"[M3] assign_location_layers total: {time.perf_counter()-_t_func:.3f}s, locations=0")
+        return empty_df
+
+    layer_df = pd.DataFrame(layer_rows).sort_values(['material', 'layer', 'location']).reset_index(drop=True)
     print(f"[M3] assign_location_layers total: {time.perf_counter()-_t_func:.3f}s, locations={len(layer_df)}")
     return layer_df
 
 # === 新增：放在 assign_location_layers 之后 ===
 def infer_sending_location_type(
     network_df: pd.DataFrame,
-    location_layer_df: pd.DataFrame,
+    location_layer_map: dict[tuple[str, str], int],
     sending: str,
     material: str | None,
     sim_date: pd.Timestamp
@@ -384,9 +358,9 @@ def infer_sending_location_type(
                 return t
 
     # ② 根节点（layer==0）→ Plant
-    if not location_layer_df.empty:
-        layer_map = dict(zip(location_layer_df['location'], location_layer_df['layer']))
-        if layer_map.get(sending, None) == 0:
+    if location_layer_map:
+        mat_key = '' if material is None else str(material)
+        if location_layer_map.get((mat_key, str(sending)), None) == 0:
             return 'Plant'
 
     # ③ 只在 sourcing 中出现、从不在 location 中出现 → Plant
@@ -923,13 +897,20 @@ def run_mrp_layered_simulation_daily(
     if location_layer_df.empty:
         print(f"Warning: No location layers assigned for date {sim_date}")
         return pd.DataFrame({'material': [], 'location': [], 'requirement_date': [], 'quantity': [], 'demand_element': [], 'layer': []})
-    location_layer = dict(zip(location_layer_df['location'], location_layer_df['layer']))
-    all_layers = sorted(set(location_layer.values()), reverse=True)
+
+    location_layer_map = {
+        (str(row.material), str(row.location)): int(row.layer)
+        for row in location_layer_df.itertuples(index=False)
+    }
+    all_layers = sorted(location_layer_df['layer'].unique(), reverse=True)
     all_net_demand_records = []
 
     # === Caching to reduce repeated lookups ===
     # Cache for PTF/LSK to avoid repeated df filtering
     ptf_lsk_cache = _build_ptf_lsk_cache_m3(m4_mlcfg_df) if m4_mlcfg_df is not None and not m4_mlcfg_df.empty else {}
+
+    def _get_node_layer(material: str, location: str) -> int:
+        return location_layer_map.get((str(material), str(location)), -1)
 
     # Helper to compute one node's net demand; used by threads
     def _compute_node_net_demand(ml_row: tuple) -> tuple:
@@ -949,7 +930,7 @@ def run_mrp_layered_simulation_daily(
             # 命中 network 但 sourcing 为空/空串 → 视为顶层；根节点走 Plant 口径
             if (pd.isna(upstream)) or (upstream is None) or (str(upstream).strip() == ''):
                 upstream = None
-                if location_layer.get(location, -1) == 0:
+                if _get_node_layer(material, location) == 0:
                     location_type = 'Plant'
                     horizon = _compute_root_horizon(
                         material=str(material),
@@ -965,7 +946,7 @@ def run_mrp_layered_simulation_daily(
                 # 有上游：保持原逻辑
                 sending_location_type = infer_sending_location_type(
                     network_df=active_network,
-                    location_layer_df=location_layer_df,
+                    location_layer_map=location_layer_map,
                     sending=str(upstream),
                     material=str(material),
                     sim_date=sim_date
@@ -985,7 +966,7 @@ def run_mrp_layered_simulation_daily(
         else:
             # 根节点（如 plant）：与 Module 5 统一口径
             upstream = None
-            if location_layer.get(location, -1) == 0:
+            if _get_node_layer(material, location) == 0:
                 location_type = 'Plant'
                 horizon = _compute_root_horizon(
                     material=str(material),
@@ -1090,51 +1071,6 @@ def run_mrp_layered_simulation_daily(
 
         return records, parent_key, parent_gaps
 
-    # 🔥 关键修改：扩展material_locations，包含所有层级中的地点
-    # 原来的逻辑：只包含network中明确配置的location
-    # material_locations = network_df[['material', 'location']].drop_duplicates()
-    
-    # 新的逻辑：包含所有层级中的地点，并为缺失的material-location组合添加默认配置
-    all_locations_in_layers = set(location_layer.keys())
-    all_materials_in_network = set(network_df['material'].unique())
-    
-    # 构建完整的material-location组合
-    extended_material_locations = []
-    
-    # 1. 添加network中明确配置的组合
-    # Performance optimization: Use itertuples instead of iterrows
-    for row in active_network.itertuples():
-        extended_material_locations.append({
-            'material': str(row.material),
-            'location': str(row.location)
-        })
-    
-    # 2. 为自动识别的根节点添加缺失的material组合
-    for location in all_locations_in_layers:
-        for material in all_materials_in_network:
-            # 检查这个组合是否已经存在
-            exists = any(
-                ml['material'] == material and ml['location'] == location 
-                for ml in extended_material_locations
-            )
-            
-            if not exists:
-                # 这是一个缺失的组合，需要添加
-                extended_material_locations.append({
-                    'material': str(material),
-                    'location': str(location)
-                })
-    
-    # 去重并转换为DataFrame，确保标识符字段保持字符串类型
-    material_locations = pd.DataFrame(extended_material_locations).drop_duplicates()
-    # 标准化标识符字段，确保类型一致性
-    material_locations = _normalize_identifiers(material_locations)
-    
-    # print(f"🔍 扩展后的material-location组合:")
-    # print(f"  原始network配置: {len(active_network)} 条")
-    # print(f"  扩展后组合: {len(material_locations)} 条")
-    # print(f"  包含的根节点: {[loc for loc in all_locations_in_layers if location_layer.get(loc, -1) == 0]}")
-    
     future_production_df = all_production_df.copy() if not all_production_df.empty and 'available_date' in all_production_df.columns else pd.DataFrame()
     if not future_production_df.empty:
         future_production_df['available_date'] = pd.to_datetime(future_production_df['available_date'])
@@ -1144,15 +1080,34 @@ def run_mrp_layered_simulation_daily(
                 future_production_df[col] = pd.to_numeric(future_production_df[col], errors='coerce').fillna(0)
     # 下游gap分 AO、FC、SS gap
     downstream_gap_dict = defaultdict(lambda: {'AO': 0.0, 'FC': 0.0, 'SS': 0.0})
+    layer_base_nodes = {
+        layer: location_layer_df[location_layer_df['layer'] == layer][['material', 'location']]
+        .drop_duplicates()
+        .reset_index(drop=True)
+        for layer in all_layers
+    }
 
     for layer in all_layers:
         parent_gap_accum = defaultdict(lambda: {'AO': 0.0, 'FC': 0.0, 'SS': 0.0})
 
-        # 获取当前层级的节点
-        material_locations_df = pd.DataFrame(material_locations)
-        layer_locations = [loc for loc, lyr in location_layer.items() if lyr == layer]
-        layer_mask = material_locations_df['location'].isin(layer_locations)
-        layer_nodes = material_locations_df[layer_mask]
+        base_nodes_df = layer_base_nodes.get(layer, pd.DataFrame(columns=['material', 'location']))
+        base_pairs = {
+            (str(row.material), str(row.location))
+            for row in base_nodes_df.itertuples(index=False)
+        }
+        gap_pairs = {
+            (str(mat), str(loc))
+            for (mat, loc) in downstream_gap_dict.keys()
+            if location_layer_map.get((str(mat), str(loc)), None) == layer
+        }
+        all_pairs = base_pairs | gap_pairs
+        if not all_pairs:
+            continue
+        layer_nodes = (
+            pd.DataFrame(list(all_pairs), columns=['material', 'location'])
+            .sort_values(['material', 'location'])
+            .reset_index(drop=True)
+        )
 
         # 当前层号供子函数记录使用
         current_layer = layer

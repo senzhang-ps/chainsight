@@ -191,7 +191,7 @@ def apply_priority_allocation_vectorized(
     unique_priorities = np.unique(priorities)
     unique_priorities.sort()
     
-    # Process priorities in ascending order; stop when stock depleted
+    # 按优先级升序处理；库存耗尽则停止
     for p in unique_priorities:
         # 找出当前优先级的索引
         mask = priorities == p
@@ -203,12 +203,12 @@ def apply_priority_allocation_vectorized(
             continue
 
         if current_stock >= group_total:
-            # fully satisfy
+            # 完全满足
             deployed[idxs] = adj
             current_stock -= group_total
             continue
 
-        # partial: proportional by adjusted_qty, integer floors
+        # 部分满足：按 adjusted_qty 比例分配并取整下取
         weights = adj.astype(float)
         shares = (
             (current_stock * (weights / float(group_total)))
@@ -217,7 +217,7 @@ def apply_priority_allocation_vectorized(
         alloc = np.minimum(np.floor(shares).astype(np.int64), adj)
         deployed[idxs] = alloc
         current_stock = 0
-        # zero all remaining priorities implicitly
+        # 隐式将剩余优先级分配为 0
         break
 
     # 优化: 直接写回（避免itertuples）
@@ -263,7 +263,7 @@ def allocate_pipeline_supply(
     ndr_df = pd.DataFrame(demand_rows).copy()
     ndr_df['idx'] = np.arange(len(demand_rows))
 
-    # receiving解析
+    # receiving 解析
     rec_arr = [
         r.get('from_location', r.get('receiving', location))
         for r in demand_rows
@@ -274,7 +274,7 @@ def allocate_pipeline_supply(
         lambda x: demand_priority_map.get(x, 99)
     )
 
-    # adjusted qty - 优化：向量化生成调整后数量
+    # 调整后数量：向量化生成 adjusted_qty
     ndr_df['adjusted_qty'] = ndr_df['idx'].map(
         lambda i: int(adjusted_qtys.get(int(i), int(ndr_df.at[int(i), 'demand_qty'])))
     )

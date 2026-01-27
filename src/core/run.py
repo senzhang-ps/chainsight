@@ -1,25 +1,25 @@
 #!/usr/bin/env python3
 """
-Production Integration Runner for Supply Chain Planning System
+供应链计划系统的生产集成运行器
 
-Purpose
-- Read a user-provided configuration file path (.xlsx)
-- Create an output directory in the SAME directory as the configuration file
-  whose top-level folder name matches the configuration file's stem
-- Dispatch a full integrated run and write results to that output directory
+用途
+- 读取用户提供的配置文件路径（.xlsx）
+- 在与配置文件相同的目录下创建输出目录
+  其顶层文件夹名称与配置文件的文件名（不含扩展名）一致
+- 触发完整的一体化运行，并将结果写入该输出目录
 
-Notes
-- No test scaffolding, validation stubs, or print statements
-- Quiet by default; relies on exit codes and exceptions for failure signaling
+说明
+- 不包含测试脚手架、校验占位逻辑或 print 语句
+- 默认保持安静；失败信号依赖退出码与异常
 
-CLI
+命令行示例
   production_integrator.py \
     --config /path/to/your_config.xlsx \
     --start-date 2024-01-01 \
     --end-date 2024-01-31
 
-The first invocation requires ``--start-date``. Subsequent runs reuse the
-start date persisted in ``<config_dir>/<config_stem>/simulation_start.txt``.
+首次运行必须提供 ``--start-date``。后续运行会复用
+保存在 ``<config_dir>/<config_stem>/simulation_start.txt`` 中的起始日期。
 """
 from __future__ import annotations
 
@@ -29,10 +29,10 @@ from pathlib import Path
 from datetime import datetime
 from typing import Optional
 
-# Add parent directories to path for imports
+# 将父目录添加到路径中以便导入
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-# External system imports (assumed available in project environment)
+# 外部系统导入（假定在项目环境中可用）
 from .main_integration import run_integrated_simulation, load_configuration, check_resume_capability  # type: ignore
 from ..utils.logger_config import setup_logging  # type: ignore
 
@@ -53,7 +53,7 @@ def _list_existing_runs(root_dir: Path, start_date: str, end_date: str) -> list[
     if not existing_runs:
         return []
     
-    # Sort by name (which includes timestamp)
+    # 按名称排序（名称中包含时间戳）
     existing_runs.sort(reverse=True)
     
     run_infos = []
@@ -66,7 +66,7 @@ def _list_existing_runs(root_dir: Path, start_date: str, end_date: str) -> list[
                 'resume_info': resume_info
             })
         except Exception:
-            # Skip directories that can't be analyzed
+            # 跳过无法分析的目录
             continue
     
     return run_infos
@@ -115,7 +115,7 @@ def _prompt_user_run_selection(run_infos: list[dict]) -> Path:
             sys.exit(0)
         
         if choice in ['n', 'new']:
-            return None  # Signal to create new directory
+            return None  # 用于指示创建新的目录
         
         try:
             idx = int(choice)
@@ -153,12 +153,12 @@ def _ensure_output_dir(config_path: Path, resume_mode: bool = False,
     cfg_stem = config_path.stem
     project_root = Path.cwd()
     
-    # Centralized output directory structure
+    # 集中式输出目录结构
     root_dir = project_root / "outputs" / cfg_stem
-    # Always ensure the top-level directory exists so its name matches the config
+    # 始终确保顶层目录存在，以便其名称与配置文件名保持一致
     root_dir.mkdir(parents=True, exist_ok=True)
 
-    # If specific run directory specified, validate and return it
+    # 如果指定了具体运行目录，则校验后返回
     if resume_from:
         target_dir = root_dir / resume_from
         if not target_dir.exists() or not target_dir.is_dir():
@@ -166,30 +166,30 @@ def _ensure_output_dir(config_path: Path, resume_mode: bool = False,
         print(f"📂 使用指定的运行目录: {resume_from}")
         return target_dir
 
-    # If resume mode enabled, check for existing runs
+    # 如果启用了续跑模式，则检查是否存在历史运行目录
     if resume_mode and start_date and end_date:
         run_infos = _list_existing_runs(root_dir, start_date, end_date)
         
         if run_infos:
-            # Filter out already completed runs for resume
+            # 续跑时过滤掉已完成的运行目录
             resumable_runs = [r for r in run_infos 
                             if r['resume_info']['can_resume'] or 
                                not r['resume_info'].get('already_completed', False)]
             
             if resumable_runs:
                 if interactive and len(resumable_runs) > 1:
-                    # Multiple runs available - let user choose
+                    # 存在多个可用运行目录：让用户选择
                     selected_dir = _prompt_user_run_selection(resumable_runs)
                     if selected_dir:
                         return selected_dir
-                    # User chose 'new' - fall through to create new directory
+                    # 用户选择了“new”：继续往下创建新目录
                 elif resumable_runs:
-                    # Single run or non-interactive - use most recent
+                    # 只有一个可用运行目录或非交互模式：使用最新的目录
                     selected = resumable_runs[0]
                     print(f"📂 自动选择最新的运行目录: {selected['name']}")
                     return selected['path']
 
-    # Create a unique run folder under the top-level directory to avoid collisions
+    # 在顶层目录下创建唯一的运行文件夹以避免冲突
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     run_dir = root_dir / f"run_{ts}"
     run_dir.mkdir(parents=True, exist_ok=False)
@@ -198,13 +198,12 @@ def _ensure_output_dir(config_path: Path, resume_mode: bool = False,
     return run_dir
 
 def get_or_init_simulation_start(output_root: Path, provided_start: Optional[str]) -> str:
-    """Return the persistent simulation start date for this configuration.
+    """返回该配置对应的持久化仿真起始日期。
 
-    ``output_root`` is the directory that contains all run folders. The start
-    date is stored in a ``simulation_start.txt`` file within this directory. If
-    the file exists, its contents are returned. Otherwise ``provided_start`` is
-    written to the file and returned. ``provided_start`` must be supplied on the
-    first run when the file does not yet exist.
+    ``output_root`` 是包含所有运行目录的根目录。起始日期保存在该目录下的
+    ``simulation_start.txt`` 文件中：如果文件已存在则读取并返回其内容；否则
+    将 ``provided_start`` 写入文件后返回。若是首次运行且该文件尚不存在，则
+    必须提供 ``provided_start``。
     """
     start_file = output_root / "simulation_start.txt"
     if start_file.exists():
@@ -760,11 +759,11 @@ def main(argv: list[str] | None = None) -> int:
     if cfg_path.suffix.lower() not in {".xlsx", ".xlsm", ".xls"}:
         raise ValueError("Configuration file must be an Excel file (.xlsx/.xlsm/.xls)")
 
-    # Ensure we can load configuration early to fail fast on schema issues
-    # (This returns an object usable by your run function or validates the file.)
+    # 尽早加载配置以便在出现结构/格式问题时快速失败
+    #（该调用会返回可供运行函数使用的对象，或用于校验配置文件。）
     _ = load_configuration(str(cfg_path))  # noqa: F841
 
-    # Get root directory and dates early for --list-runs
+    # 为 --list-runs 提前获取根目录与日期参数
     cfg_stem = cfg_path.stem
     project_root = Path.cwd()
     root_dir = project_root / "outputs" / cfg_stem
@@ -774,7 +773,7 @@ def main(argv: list[str] | None = None) -> int:
     simulation_start = get_or_init_simulation_start(root_dir, start_arg)
     end_date = str(ns["end_date"]) if isinstance(ns, dict) else ns.end_date
 
-    # Handle --list-runs command
+    # 处理 --list-runs 命令
     if ns.list_runs:
         print("\n" + "="*80)
         print("📋 可用的运行目录列表")
@@ -810,7 +809,7 @@ def main(argv: list[str] | None = None) -> int:
         print("="*80)
         return 0
 
-    # Determine output directory and resume mode
+    # 确定输出目录与续跑模式
     enable_resume = (ns.resume or ns.resume_from) and not ns.force_restart
     output_base_dir = _ensure_output_dir(
         cfg_path, 
@@ -838,7 +837,7 @@ def main(argv: list[str] | None = None) -> int:
     logger.info(f"📅 仿真日期范围: {simulation_start} 到 {end_date}")
     
     try:
-        # Handle resume status check
+        # 处理续跑状态检查
         if ns.check_resume:
             logger.info("🔍 检查续跑状态...")
             resume_info = check_resume_capability(str(output_base_dir), simulation_start, end_date)
@@ -862,7 +861,7 @@ def main(argv: list[str] | None = None) -> int:
             
             return 0
 
-        # Delegate to the integrated simulation with resume capability
+        # 将执行交由支持续跑能力的一体化仿真流程
         _ = run_integrated_simulation(
             config_path=str(cfg_path),
             start_date=simulation_start,
@@ -911,8 +910,8 @@ if __name__ == "__main__":
     except SystemExit as e:
         raise e
     except Exception as exc:
-        # No prints; signal failure via non-zero exit and exception propagation
-        # (Callers can capture stderr/traceback if needed.)
+        # 不使用 print；通过非零退出码与异常传播来表示失败
+        #（调用方如有需要可捕获 stderr/traceback。）
         raise SystemExit(1) from exc
 
 # ================================
@@ -923,14 +922,14 @@ if __name__ == "__main__":
 # 从本地Excel配置文件读取，输出保存到本地文件夹
 
 # 1. 首次运行 (需要提供 --start-date)
-# First run requires --start-date
+# 首次运行需要提供 --start-date
 # python run.py \
 #   --config test_files/BC_S5.xlsx \
 #   --start-date 2025-10-06 \
 #   --end-date 2025-10-06
 
 # 2. 强制从头开始
-# Force restart from beginning
+# 强制从头开始
 # python run.py \
 #   --config test_files/BC_S5.xlsx \
 #   --start-date 2025-10-06 \

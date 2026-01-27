@@ -145,17 +145,17 @@ def run_daily_physical_flow(
 
 
 def run_physical_flow_module(
-    # Standalone mode parameters
+    # 独立模式参数
     input_excel: Optional[str] = None,
     simulation_start: Optional[str] = None,
     simulation_end: Optional[str] = None,
     output_excel: Optional[str] = None,
-    # Integrated mode parameters
+    # 集成模式参数
     config_dict: Optional[Dict[str, Any]] = None,
     orchestrator: Optional[object] = None,
     current_date: Optional[str] = None,
     output_path: Optional[str] = None,
-    # Common parameters
+    # 通用参数
     max_wait_days: int = 30,
     random_seed: Optional[int] = None,
     skip_file_output: bool = False
@@ -1505,9 +1505,9 @@ def _write_excel_output(
 main = run_physical_flow_module
 
 
-# ======================== Example ========================
+# ======================== 示例 ========================
 if __name__ == "__main__":
-    # Standalone mode example
+    # 独立模式示例
     run_physical_flow_module(
         input_excel='Module_6_1_1/config_SC.xlsx',
         simulation_start='2025-08-01',

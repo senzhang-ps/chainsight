@@ -1,16 +1,16 @@
-# orchestrator.py
-# Unified State Management and Coordination Hub for Supply Chain Planning System
+# orchestrator.py（编排器）
+# 供应链计划系统的一体化状态管理与协调枢纽
 #
-# Execution Order: M1 → M4 → M5 → M6 → M3
+# 执行顺序：M1 → M4 → M5 → M6 → M3
 # 
-# Core Responsibilities:
-# 1. Physical inventory tracking (unrestricted inventory)
-# 2. Open deployment management (deployment plans awaiting shipment)
-# 3. In-transit inventory tracking (shipped but not yet delivered)
-# 4. Production GR tracking (production receipts)
-# 5. Delivery GR tracking (delivery receipts)
-# 6. Space capacity management
-# 7. State persistence and audit logging
+# 核心职责：
+# 1. 实物库存跟踪（非限制库存）
+# 2. 开放调拨管理（等待发运的调拨计划）
+# 3. 在途库存跟踪（已发运但尚未交付）
+# 4. 生产 GR 跟踪（生产入库）
+# 5. 交付 GR 跟踪（收货入库）
+# 6. 空间容量管理
+# 7. 状态持久化与审计日志
 
 import pandas as pd
 import numpy as np
@@ -23,8 +23,8 @@ from datetime import datetime
 
 # 在文件开头添加字符串格式化函数
 def _normalize_material(material_str) -> str:
-    """Normalize material string to ensure consistent format - removes .0 suffix from numeric materials"""
-    # Handle None and pandas NA
+    """规范化物料字符串以确保一致格式——移除数值物料的 .0 后缀"""
+    # 处理 None 和 pandas 的 NA
     if material_str is None or pd.isna(material_str):
         return ""
 
@@ -40,7 +40,7 @@ def _normalize_material(material_str) -> str:
         return str(material_str)
 
 def _normalize_location(location_str) -> str:
-    """Normalize location string by padding with leading zeros to 4 digits if numeric"""
+    """规范化地点字符串：若为数字则补齐到 4 位"""
     if pd.isna(location_str) or location_str is None:
         return ""
     
@@ -57,7 +57,7 @@ def _normalize_location(location_str) -> str:
         return str(location_str)
 
 def _normalize_sending(sending_str) -> str:
-    """Normalize sending string by padding with leading zeros to 4 digits if numeric"""
+    """规范化发货地字符串：若为数字则补齐到 4 位"""
     if pd.isna(sending_str) or sending_str is None:
         return ""
     
@@ -74,7 +74,7 @@ def _normalize_sending(sending_str) -> str:
         return str(sending_str)
 
 def _normalize_receiving(receiving_str) -> str:
-    """Normalize receiving string by padding with leading zeros to 4 digits if numeric"""
+    """规范化收货地字符串：若为数字则补齐到 4 位"""
     if pd.isna(receiving_str) or receiving_str is None:
         return ""
     
@@ -92,14 +92,14 @@ def _normalize_receiving(receiving_str) -> str:
 
 def _normalize_identifiers(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Normalize identifier columns to string format with proper formatting.
-    
+    将标识符列规范化为字符串并按规则格式化。
+
     使用向量化操作提升性能，替代原有的逐行 apply 处理。
     """
     if df.empty:
         return df
     
-    # Define identifier columns that need string conversion
+    # 定义需要字符串转换的标识符列
     identifier_cols = ['material', 'location', 'sending', 'receiving', 'sourcing']
     
     df = df.copy()
@@ -129,7 +129,7 @@ def _normalize_identifiers(df: pd.DataFrame) -> pd.DataFrame:
 
 @dataclass
 class DeploymentUID:
-    """Unique identifier for deployment tracking"""
+    """用于部署跟踪的唯一标识符"""
     material: str
     sending: str
     receiving: str
@@ -138,12 +138,12 @@ class DeploymentUID:
     sequence: int  # Auto-incrementing sequence for uniqueness
     
     def to_string(self) -> str:
-        """Convert to string representation for tracking"""
+        """转换为字符串表示以便跟踪"""
         return f"{self.material}|{self.sending}|{self.receiving}|{self.planned_deploy_date}|{self.demand_element}|{self.sequence:06d}"
     
     @classmethod
     def from_string(cls, uid_str: str) -> 'DeploymentUID':
-        """Parse from string representation"""
+        """从字符串表示解析"""
         parts = uid_str.split('|')
         return cls(
             material=parts[0],
@@ -156,23 +156,23 @@ class DeploymentUID:
 
 class Orchestrator:
     """
-    Central state management and coordination hub for supply chain planning
+    供应链计划的中心状态管理与协调枢纽
     """
     
     def __init__(self, start_date: str, output_dir: str = "./orchestrator_output"):
         """
-        Initialize orchestrator
-        
+        初始化编排器
+
         Args:
-            start_date: Simulation start date (YYYY-MM-DD)
-            output_dir: Directory for persistent storage
+            start_date: 仿真开始日期（YYYY-MM-DD）
+            output_dir: 持久化存储目录
         """
         self.start_date = pd.to_datetime(start_date).normalize()
         self.current_date = self.start_date
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         
-        # Core state management
+        # 核心状态管理
         self.unrestricted_inventory: Dict[Tuple[str, str], int] = {}  # (material, location) -> quantity
         self.open_deployment: Dict[str, Dict] = {}  # uid -> deployment record
         self.in_transit: Dict[str, Dict] = {}  # uid -> in-transit record
@@ -180,21 +180,21 @@ class Orchestrator:
         self.delivery_gr: List[Dict] = []  # Daily delivery receipts
         self.shipment_log: List[Dict] = []  # Daily shipments
         self.production_plan_backlog: List[Dict] = []  # 存所有已确认生产(含未来)，供 M3 查询
-        # Space capacity configuration
+        # 空间容量配置
         self.space_capacity: pd.DataFrame = pd.DataFrame()
         
-        # 🚀 Phase 6: Date-indexed lookups for O(1) performance (instead of O(n) list scans)
+        # 🚀 阶段 6：按日期索引实现 O(1) 查询（替代 O(n) 列表扫描）
         self.production_gr_by_date: Dict[str, List[Dict]] = {}  # date_str -> records
         self.delivery_gr_by_date: Dict[str, List[Dict]] = {}  # date_str -> records
         self.shipment_log_by_date: Dict[str, List[Dict]] = {}  # date_str -> records
         self.delivery_shipment_log_by_date: Dict[str, List[Dict]] = {}  # date_str -> records
         
-        # UID sequence counter
+        # UID 序列计数器
         self.uid_sequence = 0
         # 过期清理的全局宽限天数（可运行时修改）
         self.cleanup_grace_days: int = 100
 
-        # Daily logs for audit
+        # 用于审计的每日日志
         self.daily_logs: List[Dict] = []
         
         # 期初和期末库存存储
@@ -214,10 +214,10 @@ class Orchestrator:
     
     def initialize_inventory(self, initial_inventory_df: pd.DataFrame):
         """
-        Initialize physical inventory from M1_InitialInventory configuration
-        
+        从 M1_InitialInventory 配置初始化实物库存
+
         Args:
-            initial_inventory_df: DataFrame with columns [material, location, quantity]
+            initial_inventory_df: 含列 [material, location, quantity] 的 DataFrame
         """
         self.unrestricted_inventory.clear()
         self.initial_inventory.clear()
@@ -225,7 +225,7 @@ class Orchestrator:
         # 确保标识符字段为字符串格式
         normalized_df = _normalize_identifiers(initial_inventory_df)
         
-        # Performance optimization: Use itertuples instead of iterrows
+        # 性能优化：使用 itertuples 替代 iterrows
         for row in normalized_df.itertuples():
             key = (row.material, row.location)
             quantity = int(row.quantity)
@@ -237,10 +237,10 @@ class Orchestrator:
     
     def set_space_capacity(self, space_capacity_df: pd.DataFrame):
         """
-        Set space capacity configuration from Global_SpaceCapacity
-        
+        从 Global_SpaceCapacity 配置设置空间容量
+
         Args:
-            space_capacity_df: DataFrame with columns [location, eff_from, eff_to, capacity]
+            space_capacity_df: 含列 [location, eff_from, eff_to, capacity] 的 DataFrame
         """
         # 确保标识符字段为字符串格式
         self.space_capacity = _normalize_identifiers(space_capacity_df.copy())
@@ -362,7 +362,7 @@ class Orchestrator:
     
     def get_open_deployment_view(self, date: str) -> pd.DataFrame:
         """
-        Get open deployment view for specified date
+        获取指定日期的开放调拨视图
         注意：本函数不再触发过期清理；清理只在 run_daily_processing() 开头执行一次。
         返回列: [material, sending, receiving, planned_deployment_date, deployed_qty, demand_element, ori_deployment_uid]
         """
@@ -388,21 +388,21 @@ class Orchestrator:
     
     def get_space_quota_view(self, date: str) -> pd.DataFrame:
         """
-        Calculate available space quota for specified date
-        Formula: capacity - unrestricted_inventory (at beginning of simulation date)
-        
+        计算指定日期的可用空间额度
+        公式：capacity - unrestricted_inventory（仿真日开始时）
+
         Args:
-            date: Date in YYYY-MM-DD format
-            
+            date: 日期（YYYY-MM-DD）
+
         Returns:
-            DataFrame with columns [receiving, date, max_qty]
+            含列 [receiving, date, max_qty] 的 DataFrame
         """
         date_obj = pd.to_datetime(date).normalize()
         
-        # Get effective space capacity for the date
-        # Check if space_capacity is empty or not configured
+        # 获取指定日期的有效空间容量
+        # 检查 space_capacity 是否为空或未配置
         if self.space_capacity.empty or 'eff_from' not in self.space_capacity.columns:
-            # Return empty DataFrame with correct structure
+            # 返回结构正确的空 DataFrame
             return pd.DataFrame(columns=['receiving', 'date', 'max_qty'])
             
         effective_capacity = self.space_capacity[
@@ -411,18 +411,18 @@ class Orchestrator:
         ]
         
         records = []
-        # Performance optimization: Use itertuples instead of iterrows
+        # 性能优化：使用 itertuples 替代 iterrows
         for capacity_row in effective_capacity.itertuples():
             location = capacity_row.location
             capacity = capacity_row.capacity
             
-            # Calculate total unrestricted inventory at this location
+            # 计算该地点的非限制库存总量
             location_inventory = sum([
                 qty for (material, loc), qty in self.unrestricted_inventory.items()
                 if loc == location
             ])
             
-            # Available quota = capacity - current inventory
+            # 可用额度 = 容量 - 当前库存
             max_qty = max(0, capacity - location_inventory)
             
             records.append({
@@ -439,13 +439,13 @@ class Orchestrator:
     
     def get_production_plan_backlog_view(self, date: str) -> pd.DataFrame:
         """
-        Get production plan backlog (future production) for persistence
-        
+        获取生产计划 backlog（含未来生产），用于持久化
+
         Args:
-            date: Reference date in YYYY-MM-DD format
-            
+            date: 参考日期（YYYY-MM-DD）
+
         Returns:
-            DataFrame with columns [material, location, available_date, quantity]
+            含列 [material, location, available_date, quantity] 的 DataFrame
         """
         if not self.production_plan_backlog:
             return pd.DataFrame(columns=['material', 'location', 'available_date', 'quantity'])
@@ -454,7 +454,7 @@ class Orchestrator:
         if backlog_df.empty:
             return pd.DataFrame(columns=['material', 'location', 'available_date', 'quantity'])
         
-        # Ensure all required columns exist
+        # 确保所有必需列存在
         for col in ['material', 'location', 'available_date', 'quantity']:
             if col not in backlog_df.columns:
                 backlog_df[col] = ''
@@ -488,15 +488,15 @@ class Orchestrator:
 
     def get_production_gr_view(self, date: str) -> pd.DataFrame:
         """
-        Get production GR records for specified date
-        
+        获取指定日期的生产 GR 记录
+
         Args:
-            date: Date in YYYY-MM-DD format
-            
+            date: 日期（YYYY-MM-DD）
+
         Returns:
-            DataFrame with columns [date, material, location, quantity]
+            含列 [date, material, location, quantity] 的 DataFrame
         """
-        # 🚀 Phase 6: O(1) indexed lookup instead of O(n) list scan
+        # 🚀 阶段 6：用 O(1) 索引查询替代 O(n) 列表扫描
         date_str = pd.to_datetime(date).strftime('%Y-%m-%d')
         records = self.production_gr_by_date.get(date_str, [])
         
@@ -508,15 +508,15 @@ class Orchestrator:
     
     def get_delivery_gr_view(self, date: str) -> pd.DataFrame:
         """
-        Get delivery GR records for specified date
-        
+        获取指定日期的交付 GR 记录
+
         Args:
-            date: Date in YYYY-MM-DD format
-            
+            date: 日期（YYYY-MM-DD）
+
         Returns:
-            DataFrame with columns [date, material, receiving, quantity, ori_deployment_uid, vehicle_uid]
+            含列 [date, material, receiving, quantity, ori_deployment_uid, vehicle_uid] 的 DataFrame
         """
-        # 🚀 Phase 6: O(1) indexed lookup instead of O(n) list scan
+        # 🚀 阶段 6：用 O(1) 索引查询替代 O(n) 列表扫描
         date_str = pd.to_datetime(date).strftime('%Y-%m-%d')
         records = self.delivery_gr_by_date.get(date_str, [])
         
@@ -528,15 +528,15 @@ class Orchestrator:
     
     def get_shipment_log_view(self, date: str) -> pd.DataFrame:
         """
-        Get shipment log records for specified date
-        
+        获取指定日期的发货日志记录
+
         Args:
-            date: Date in YYYY-MM-DD format
-            
+            date: 日期（YYYY-MM-DD）
+
         Returns:
-            DataFrame with columns [date, material, location, quantity]
+            含列 [date, material, location, quantity] 的 DataFrame
         """
-        # 🚀 Phase 6: O(1) indexed lookup instead of O(n) list scan
+        # 🚀 阶段 6：用 O(1) 索引查询替代 O(n) 列表扫描
         date_str = pd.to_datetime(date).strftime('%Y-%m-%d')
         records = self.shipment_log_by_date.get(date_str, [])
         
@@ -547,7 +547,7 @@ class Orchestrator:
         return df
     
     def get_delivery_shipment_log_view(self, date: str) -> pd.DataFrame:
-        # 🚀 Phase 6: O(1) indexed lookup instead of O(n) list scan
+        # 🚀 阶段 6：用 O(1) 索引查询替代 O(n) 列表扫描
         date_str = pd.to_datetime(date).strftime('%Y-%m-%d')
         rows = self.delivery_shipment_log_by_date.get(date_str, [])
         df = pd.DataFrame(rows)
@@ -557,28 +557,28 @@ class Orchestrator:
 
     def process_module1_shipments(self, shipment_df: pd.DataFrame, date: str):
         """
-        Process Module1 shipment data for the specified date
-        
+        处理指定日期的 Module1 发货数据
+
         Args:
-            shipment_df: DataFrame with columns [date, material, location, quantity]
-            date: Simulation date in YYYY-MM-DD format
+            shipment_df: 含列 [date, material, location, quantity] 的 DataFrame
+            date: 仿真日期（YYYY-MM-DD）
         """
         date_obj = pd.to_datetime(date).normalize()
         
-        # Filter shipments for current date
+        # 筛选当日发货记录
         daily_shipments = shipment_df[
             pd.to_datetime(shipment_df['date']).dt.normalize() == date_obj
         ]
         
-        # Update unrestricted inventory
-        # Performance optimization: Use itertuples instead of iterrows
+        # 更新非限制库存
+        # 性能优化：使用 itertuples 替代 iterrows
         for row in daily_shipments.itertuples():
             # 🔧 使用标准化函数确保数据一致性
             key = (_normalize_material(row.material), _normalize_location(row.location))
             if key in self.unrestricted_inventory:
                 self.unrestricted_inventory[key] = max(0, self.unrestricted_inventory[key] - int(row.quantity))
             
-            # Log shipment
+            # 记录发货日志
             record = {
                 'date': date_obj,
                 'material': _normalize_material(row.material), # 添加格式化
@@ -587,7 +587,7 @@ class Orchestrator:
                 'type': 'customer_shipment'
             }
             self.shipment_log.append(record)
-            # 🚀 Phase 6: Add to indexed lookup
+            # 🚀 阶段 6：加入索引以便 O(1) 查询
             date_str = date_obj.strftime('%Y-%m-%d')
             if date_str not in self.shipment_log_by_date:
                 self.shipment_log_by_date[date_str] = []
@@ -599,11 +599,11 @@ class Orchestrator:
     
     def process_module4_production(self, production_df: pd.DataFrame, date: str):
         """
-        Process Module4 production data for the specified date
-        
+        处理指定日期的 Module4 生产数据
+
         Args:
-            production_df: DataFrame with columns [available_date, material, location, produced_qty]
-            date: Simulation date in YYYY-MM-DD format
+            production_df: 含列 [available_date, material, location, produced_qty] 的 DataFrame
+            date: 仿真日期（YYYY-MM-DD）
         """
         date_obj = pd.to_datetime(date).normalize()
         # === A) 缓存当日GR的生产计划到 backlog 中，供 M3 查询未来生产计划使用 ===
@@ -650,13 +650,13 @@ class Orchestrator:
             self.production_plan_backlog = aggregated.to_dict('records')
 
         # === B) 原有逻辑：只对“今天到货”的进行 GR 入库 ===
-        # Filter production for current date (available_date = inventory receipt date)
+        # 筛选当日生产记录（available_date = 入库日期）
         daily_production = production_df[
             pd.to_datetime(production_df['available_date']).dt.normalize() == date_obj
         ]
         
-        # Update unrestricted inventory and log production GR
-        # Performance optimization: Use itertuples instead of iterrows
+        # 更新非限制库存并记录生产 GR
+        # 性能优化：使用 itertuples 替代 iterrows
         for row in daily_production.itertuples():
             # 🔧 修复：使用标准化的location格式，确保与其他地方一致
             key = (_normalize_material(row.material), _normalize_location(row.location))
@@ -664,7 +664,7 @@ class Orchestrator:
             
             self.unrestricted_inventory[key] = self.unrestricted_inventory.get(key, 0) + quantity
             
-            # Log production GR
+            # 记录生产 GR
             record = {
                 'date': date_obj,
                 'material': _normalize_material(row.material), # 添加格式化
@@ -672,7 +672,7 @@ class Orchestrator:
                 'quantity': quantity
             }
             self.production_gr.append(record)
-            # 🚀 Phase 6: Add to indexed lookup
+            # 🚀 阶段 6：加入索引以便 O(1) 查询
             date_str = date_obj.strftime('%Y-%m-%d')
             if date_str not in self.production_gr_by_date:
                 self.production_gr_by_date[date_str] = []
@@ -684,12 +684,12 @@ class Orchestrator:
     
     def process_module5_deployment(self, deployment_df: pd.DataFrame, date: str):
         """
-        Process Module5 deployment plans and update open deployment
-        
+        处理 Module5 部署计划并更新开放调拨
+
         Args:
-            deployment_df: DataFrame with columns [material, sending, receiving, planned_deployment_date,
+            deployment_df: 含列 [material, sending, receiving, planned_deployment_date,
                                                  deployed_qty, demand_element]
-            date: Simulation date in YYYY-MM-DD format
+            date: 仿真日期（YYYY-MM-DD）
         """
         date_obj = pd.to_datetime(date).normalize()
         
@@ -704,10 +704,10 @@ class Orchestrator:
         ]
         if sort_cols:
             deployment_df = deployment_df.sort_values(by=sort_cols, kind='mergesort')
-        # Add new deployment plans to open deployment
-        # Performance optimization: Use itertuples instead of iterrows
+        # 将新的部署计划加入开放调拨
+        # 性能优化：使用 itertuples 替代 iterrows
         for row in deployment_df.itertuples():
-            # Generate unique UID
+            # 生成唯一 UID
             self.uid_sequence += 1
             uid_obj = DeploymentUID(
                 material=str(row.material),
@@ -745,12 +745,12 @@ class Orchestrator:
     
     def process_module6_delivery(self, delivery_df: pd.DataFrame, date: str):
         """
-        Process Module6 delivery plans and update states
-        
+        处理 Module6 交付计划并更新状态
+
         Args:
-            delivery_df: DataFrame with columns [ori_deployment_uid, material, sending, receiving,
+            delivery_df: 含列 [ori_deployment_uid, material, sending, receiving,
                                                actual_ship_date, actual_delivery_date, delivery_qty]
-            date: Simulation date in YYYY-MM-DD format
+            date: 仿真日期（YYYY-MM-DD）
         """
         date_obj = pd.to_datetime(date).normalize()
         print(f"[M6->Orch] incoming rows: {len(delivery_df)}; date={date}")
@@ -761,8 +761,8 @@ class Orchestrator:
         #     for idx, row in delivery_df.head(3).iterrows():
         #         # print(f"    Row {idx}: {row['material']}@{row['sending']}->{row['receiving']}, ship:{row['actual_ship_date']}, delivery:{row['actual_delivery_date']}, qty:{row['delivery_qty']}")
         
-        # Process each delivery record
-        # Performance optimization: Use itertuples instead of iterrows
+        # 处理每条交付记录
+        # 性能优化：使用 itertuples 替代 iterrows
         for row in delivery_df.itertuples():
             uid = str(row.ori_deployment_uid)
             vehicle_uid = str(row.vehicle_uid)
@@ -786,13 +786,13 @@ class Orchestrator:
             
             # print(f"    ✅ 处理当天发运: {material}@{sending}->{receiving}, ship:{ship_date.date()}, delivery:{delivery_date.date()}, qty:{quantity}")
             
-            # Reduce open deployment quantity
+            # 减少开放调拨数量
             if uid in self.open_deployment:
                 self.open_deployment[uid]['deployed_qty'] -= quantity
                 if self.open_deployment[uid]['deployed_qty'] <= 0:
                     del self.open_deployment[uid]
             
-            # Reduce unrestricted inventory at sending location  
+            # 减少发货地非限制库存
             # 🔧 使用标准化函数确保数据一致性
             sending_key = (_normalize_material(material), _normalize_location(sending))
             if sending_key in self.unrestricted_inventory:
@@ -812,7 +812,7 @@ class Orchestrator:
                 'type': 'delivery_shipment'
             }
             self.delivery_shipment_log.append(shipment_record)
-            # 🚀 Phase 6: Add to indexed lookup
+            # 🚀 阶段 6：加入索引以便 O(1) 查询
             date_str = date_obj.strftime('%Y-%m-%d')
             if date_str not in self.delivery_shipment_log_by_date:
                 self.delivery_shipment_log_by_date[date_str] = []
@@ -820,8 +820,8 @@ class Orchestrator:
             
             # 判断处理逻辑：基于delivery_date是否为未来日期
             if delivery_date.normalize() > date_obj:
-                # Create in-transit record for future delivery
-                # Use vehicle_uid to ensure uniqueness for multiple deliveries with same ori_deployment_uid
+                # 为未来交付创建在途记录
+                # 使用 vehicle_uid 确保同一 ori_deployment_uid 的多车记录唯一
                 transit_uid = f"{uid}_transit_{vehicle_uid}"
                 self.in_transit[transit_uid] = {
                     'material': _normalize_material(material), # 添加格式化
@@ -834,13 +834,13 @@ class Orchestrator:
                     'vehicle_uid': vehicle_uid
                 }
             elif delivery_date.normalize() == date_obj:
-                # Delivery is today, create delivery GR and update inventory immediately
+                # 当天交付：创建 delivery GR 并立即更新库存
                 # print(f"      📦 同天到达，创建delivery GR: {material}@{receiving}, qty:{quantity}, uid:{uid}")
                 receiving_key = (material, receiving)
                 self.unrestricted_inventory[receiving_key] = (
                     self.unrestricted_inventory.get(receiving_key, 0) + quantity)
                 
-                # Log delivery GR (with deduplication check)
+                # 记录 delivery GR（含去重检查）
                 gr_record = {
                     'date': date_obj,
                     'material': _normalize_material(material), # 添加格式化
@@ -850,7 +850,7 @@ class Orchestrator:
                     'vehicle_uid': vehicle_uid  # 使用vehicle_uid来区分同一deployment的不同车辆
                 }
                 
-                # Check for duplicates based on key fields
+                # 基于关键字段检查重复
                 # 修复：使用ori_deployment_uid + vehicle_uid作为唯一键，完美支持多车情况
                 existing_key = (date_obj, material, receiving, uid, vehicle_uid)
                 is_duplicate = any(
@@ -861,7 +861,7 @@ class Orchestrator:
                 
                 if not is_duplicate:
                     self.delivery_gr.append(gr_record)
-                    # 🚀 Phase 6: Add to indexed lookup
+                    # 🚀 阶段 6：加入索引以便 O(1) 查询
                     date_str = date_obj.strftime('%Y-%m-%d')
                     if date_str not in self.delivery_gr_by_date:
                         self.delivery_gr_by_date[date_str] = []
@@ -906,45 +906,45 @@ class Orchestrator:
             self.cleanup_past_due_open_deployments(date, grace_days=g, write_audit=True)
             self._last_cleanup_date = normalized_date_str
 
-        # Check for delivery arrivals at start of day
+        # 在每日开始时检查到货
         self._process_delivery_arrivals(date)
         
-        # M1: Process shipments
+        # M1：处理发货
         if shipment_df is not None and not shipment_df.empty:
             self.process_module1_shipments(shipment_df, date)
         
-        # M4: Process production
+        # M4：处理生产
         if production_df is not None and not production_df.empty:
             self.process_module4_production(production_df, date)
         
-        # M5: Process deployments
+        # M5：处理部署
         if deployment_df is not None and not deployment_df.empty:
             self.process_module5_deployment(deployment_df, date)
         
-        # M6: Process deliveries
+        # M6：处理交付
         if delivery_df is not None and not delivery_df.empty:
             self.process_module6_delivery(delivery_df, date)
         
-        # Save daily state
+        # 保存每日状态
         self.save_daily_state(date)
         
         print(f"✅ Completed daily processing for {date}")
     
     def _process_delivery_arrivals(self, date: str):
         """
-        Process delivery arrivals for in-transit items that arrive today
+        处理当天到达的在途交付
         """
         date_obj = pd.to_datetime(date).normalize()
         
         completed_transits = []
         for transit_uid, transit_record in self.in_transit.items():
             if pd.to_datetime(transit_record['actual_delivery_date']).normalize() == date_obj:
-                # Add to receiving location inventory
+                # 增加收货地库存
                 receiving_key = (transit_record['material'], transit_record['receiving'])
                 self.unrestricted_inventory[receiving_key] = (
                     self.unrestricted_inventory.get(receiving_key, 0) + transit_record['quantity'])
                 
-                # Log delivery GR (with improved deduplication check)
+                # 记录 delivery GR（改进的去重检查）
                 gr_record = {
                     'date': date_obj,
                     'material': _normalize_material(transit_record['material']), # 添加格式化
@@ -964,7 +964,7 @@ class Orchestrator:
                     for record in self.delivery_gr
                 ):
                     self.delivery_gr.append(gr_record)
-                    # 🚀 Phase 6: Add to indexed lookup
+                    # 🚀 阶段 6：加入索引以便 O(1) 查询
                     date_str = date_obj.strftime('%Y-%m-%d')
                     if date_str not in self.delivery_gr_by_date:
                         self.delivery_gr_by_date[date_str] = []
@@ -1089,43 +1089,43 @@ class Orchestrator:
     
     def save_daily_state(self, date: str):
         """
-        Save daily state to persistent storage
-        
+        将每日状态保存到持久化存储
+
         Args:
-            date: Date in YYYY-MM-DD format
+            date: 日期（YYYY-MM-DD）
         """
         date_str = pd.to_datetime(date).strftime('%Y%m%d')
         
-        # Save unrestricted inventory view
+        # 保存非限制库存视图
         unrestricted_df = self.get_unrestricted_inventory_view(date)
         _normalize_identifiers(unrestricted_df).to_csv(self.output_dir / f"unrestricted_inventory_{date_str}.csv", index=False)
         
-        # Save open deployment view
+        # 保存开放调拨视图
         open_deployment_df = self.get_open_deployment_view(date)
         _normalize_identifiers(open_deployment_df).to_csv(self.output_dir / f"open_deployment_{date_str}.csv", index=False)
         
-        # Save in-transit view
+        # 保存在途视图
         intransit_df = self.get_planning_intransit_view(date)
         _normalize_identifiers(intransit_df).to_csv(self.output_dir / f"planning_intransit_{date_str}.csv", index=False)
         
-        # Save space quota view
+        # 保存空间额度视图
         space_quota_df = self.get_space_quota_view(date)
         _normalize_identifiers(space_quota_df).to_csv(self.output_dir / f"space_quota_{date_str}.csv", index=False)
         
-        # Save production plan backlog (future production)
+        # 保存生产计划 backlog（含未来生产）
         production_backlog_df = self.get_production_plan_backlog_view(date)
         _normalize_identifiers(production_backlog_df).to_csv(self.output_dir / f"production_plan_backlog_{date_str}.csv", index=False)
         
-        # Save daily delivery GR
+        # 保存每日交付 GR
         delivery_gr_df = self.get_delivery_gr_view(date)
         _normalize_identifiers(delivery_gr_df).to_csv(self.output_dir / f"delivery_gr_{date_str}.csv", index=False)
         
-        # Save daily production GR  
+        # 保存每日生产 GR
         production_gr_df = self.get_production_gr_view(date)
         _normalize_identifiers(production_gr_df).to_csv(self.output_dir / f"production_gr_{date_str}.csv", index=False)
         
-        # Save daily shipment log
-        # 🚀 Phase 6: O(1) indexed lookup instead of O(n) list scan
+        # 保存每日发货日志
+        # 🚀 阶段 6：用 O(1) 索引查询替代 O(n) 列表扫描
         date_key = pd.to_datetime(date).strftime('%Y-%m-%d')
         daily_shipments = self.shipment_log_by_date.get(date_key, [])
         shipment_df = pd.DataFrame(daily_shipments)
@@ -1134,7 +1134,7 @@ class Orchestrator:
         _normalize_identifiers(shipment_df).to_csv(self.output_dir / f"shipment_log_{date_str}.csv", index=False)
         
         # 🆕 保存发运出库日志
-        # 🚀 Phase 6: O(1) indexed lookup instead of O(n) list scan
+        # 🚀 阶段 6：用 O(1) 索引查询替代 O(n) 列表扫描
         daily_delivery_shipments = self.delivery_shipment_log_by_date.get(date_key, [])
         delivery_shipment_df = pd.DataFrame(daily_delivery_shipments)
         if delivery_shipment_df.empty:
@@ -1147,7 +1147,7 @@ class Orchestrator:
         _normalize_identifiers(inventory_change_df).to_csv(self.output_dir / f"inventory_change_log_{date_str}.csv", index=False)
         # print(f"  📊 已生成库存变动日志: {len(inventory_change_df)} 条记录")
         
-        # Save daily logs (改为无论是否有事件都输出文件，含表头)
+        # 保存每日日志（改为无论是否有事件都输出文件，含表头）
         logs_file = self.output_dir / f"daily_logs_{date_str}.csv"
         if self.daily_logs:
             logs_df = pd.DataFrame(self.daily_logs)
@@ -1158,11 +1158,11 @@ class Orchestrator:
     
     def _log_event(self, event_type: str, message: str):
         """
-        Log orchestrator events for audit trail
-        
+        记录编排器事件用于审计追踪
+
         Args:
-            event_type: Type of event
-            message: Event message
+            event_type: 事件类型
+            message: 事件消息
         """
         self.daily_logs.append({
             'timestamp': datetime.now().isoformat(),
@@ -1173,15 +1173,15 @@ class Orchestrator:
     
     def get_summary_statistics(self, date: str) -> Dict:
         """
-        Get summary statistics for specified date
-        
+        获取指定日期的汇总统计
+
         Args:
-            date: Date in YYYY-MM-DD format
-            
+            date: 日期（YYYY-MM-DD）
+
         Returns:
-            Dictionary with summary statistics
+            汇总统计字典
         """
-        # 🚀 Phase 6: O(1) indexed lookup instead of O(n) list scan
+        # 🚀 阶段 6：用 O(1) 索引查询替代 O(n) 列表扫描
         date_str = pd.to_datetime(date).strftime('%Y-%m-%d')
         return {
             'date': date,
@@ -1270,7 +1270,7 @@ class Orchestrator:
             all_keys.update(self.daily_ending_inventory[date].keys())
         
         # 从各种变动记录获取
-        # 🚀 Phase 6: O(1) indexed lookup instead of O(n) list scan
+        # 🚀 阶段 6：用 O(1) 索引查询替代 O(n) 列表扫描
         date_str = date_obj.strftime('%Y-%m-%d')
         
         for record in self.production_gr_by_date.get(date_str, []):
@@ -1316,7 +1316,7 @@ class Orchestrator:
                 beginning_qty = self.daily_beginning_inventory[date].get((material, location), 0)
             
             # 生产入库
-            # 🚀 Phase 6: O(1) indexed lookup instead of O(n) list scan
+            # 🚀 阶段 6：用 O(1) 索引查询替代 O(n) 列表扫描
             production_qty = sum(
                 record['quantity'] for record in self.production_gr_by_date.get(date_str, [])
                 if record['material'] == material and record['location'] == location
@@ -1340,7 +1340,7 @@ class Orchestrator:
             #         print(f"    记录{i+1}: uid={rec.get('ori_deployment_uid', 'N/A')}, qty={rec['quantity']}, date={rec['date']}")
             
             # 发货出库
-            # 🚀 Phase 6: O(1) indexed lookup instead of O(n) list scan
+            # 🚀 阶段 6：用 O(1) 索引查询替代 O(n) 列表扫描
             shipment_qty = sum(
                 record['quantity'] for record in self.shipment_log_by_date.get(date_str, [])
                 if record['material'] == material and record['location'] == location
@@ -1400,7 +1400,7 @@ class Orchestrator:
         beginning_inv = self.daily_beginning_inventory.get(date, {})
         ending_inv = self.daily_ending_inventory.get(date, {})
         
-        # 🚀 Phase 6: O(1) indexed lookup instead of O(n) list scan
+        # 🚀 阶段 6：用 O(1) 索引查询替代 O(n) 列表扫描
         date_str = pd.to_datetime(date).strftime('%Y-%m-%d')
         
         # 获取当日各项变动
@@ -1464,39 +1464,39 @@ class Orchestrator:
         # else:
         #     print(f"✅ 一致")
 
-# Convenience functions for module integration
+# 用于模块集成的便捷函数
 def create_orchestrator(start_date: str, output_dir: str = "./orchestrator_output") -> Orchestrator:
     """
-    Create and initialize orchestrator instance
-    
+    创建并初始化编排器实例
+
     Args:
-        start_date: Simulation start date (YYYY-MM-DD)
-        output_dir: Output directory for persistent storage
-        
+        start_date: 仿真开始日期（YYYY-MM-DD）
+        output_dir: 持久化存储输出目录
+
     Returns:
-        Orchestrator instance
+        Orchestrator 实例
     """
     return Orchestrator(start_date, output_dir)
 
-# Example usage and testing
+# 示例用法与测试
 if __name__ == "__main__":
-    # Example initialization
+    # 示例初始化
     orchestrator = create_orchestrator("2024-01-01")
     
-    # Example initial inventory
+    # 示例期初库存
     initial_inventory = pd.DataFrame([
         {'material': 'MAT_A', 'location': 'PLANT_001', 'quantity': 1000},
         {'material': 'MAT_B', 'location': 'DC_001', 'quantity': 500}
     ])
     orchestrator.initialize_inventory(initial_inventory)
     
-    # Example space capacity
+    # 示例空间容量
     space_capacity = pd.DataFrame([
         {'location': 'DC_001', 'eff_from': '2024-01-01', 'eff_to': '2024-12-31', 'capacity': 2000}
     ])
     orchestrator.set_space_capacity(space_capacity)
     
-    # Test views
+    # 视图测试
     inventory_view = orchestrator.get_unrestricted_inventory_view("2024-01-01")
     space_quota = orchestrator.get_space_quota_view("2024-01-01")
     

@@ -432,7 +432,7 @@ def _create_argument_parser() -> argparse.ArgumentParser:
         help='执行模式'
     )
 
-    # Daily mode arguments
+    # 日常模式参数
     parser.add_argument(
         '--module3_output_dir',
         help='Module3每日输出目录（daily模式）'
@@ -450,7 +450,7 @@ def _create_argument_parser() -> argparse.ArgumentParser:
         help='输出目录（daily模式）'
     )
 
-    # Legacy mode arguments
+    # 旧版模式参数
     parser.add_argument(
         '--input',
         help='Legacy: 输入文件路径'

@@ -1,4 +1,4 @@
-# summary_report_generator.py
+# summary_report_generator.py（汇总报告生成器）
 # 汇总报告生成器 - 全周期模拟结束后输出7类full报告
 
 import pandas as pd

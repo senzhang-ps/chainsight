@@ -732,7 +732,8 @@ def get_sending_location_type(
         return str(row.iloc[0].get('location_type', 'DC') or 'DC')
 
     # 未维护但被自动识别为根节点 → Plant
-    if location_layer_map.get(str(sending), None) == 0:
+    layer_key = (str(material), str(sending))
+    if location_layer_map.get(layer_key, None) == 0:
         return 'Plant'
 
     return 'DC'
@@ -740,61 +741,79 @@ def get_sending_location_type(
 # === 用 module3 的版本替换 ===
 def assign_location_layers(network_df: pd.DataFrame) -> pd.DataFrame:
     """
-    根据 `Network` 的 `sourcing→location` 关系，计算每个 `location` 的层级（layer）。
-    影响：主流程按层级从下游到上游推进分配与缺口传递。
+    根据 `Network` 的 `sourcing→location` 关系，**按物料维度**计算层级：
+    - 每个物料单独建图并做 BFS，得到该物料下各 location 的 layer。
+    - 返回包含 `material/location/layer` 的 DataFrame，供后续按 (material, location) 查询。
     """
     from collections import defaultdict, deque
     if network_df.empty:
-        return pd.DataFrame({'location': [], 'layer': []})
-
-    children = defaultdict(list)
-    parents = defaultdict(list)
-    # Performance optimization: Use itertuples instead of iterrows
-    for row in network_df.itertuples():
-        sourcing_val = row.sourcing
-        location_val = row.location
-        sourcing_valid = sourcing_val is not None and pd.notna(sourcing_val) and str(sourcing_val).strip() != ''
-        location_valid = location_val is not None and pd.notna(location_val) and str(location_val).strip() != ''
-        if sourcing_valid and location_valid:
-            children[sourcing_val].append(location_val)
-            parents[location_val].append(sourcing_val)
-
-    all_locations = set(network_df['location'].dropna()).union(set(network_df['sourcing'].dropna()))
-    potential_roots = [loc for loc in all_locations if not parents[loc]]
-
-    true_roots = []
-    for loc in potential_roots:
-        if loc in children:
-            true_roots.append(loc)
-        else:
-            has_incoming = any(loc in parents.get(other_loc, []) for other_loc in all_locations)
-            if not has_incoming:
-                true_roots.append(loc)
-    if not true_roots:
-        true_roots = potential_roots
-
-    layer_dict = {}
-    from collections import deque
-    queue = deque()
-    for root in true_roots:
-        queue.append((root, 0))
-    while queue:
-        loc, layer = queue.popleft()
-        if loc in layer_dict and layer_dict[loc] <= layer:
+        return pd.DataFrame({'material': [], 'location': [], 'layer': []})
+    
+    layer_rows = []
+    # dropna=False 保留 NaN material，尽量与原始数据一致
+    for material, mat_df in network_df.groupby('material', dropna=False):
+        if mat_df.empty:
             continue
-        layer_dict[loc] = layer
-        for child in children.get(loc, []):
-            queue.append((child, layer + 1))
 
-    unassigned = [loc for loc in all_locations if loc not in layer_dict]
-    if unassigned:
-        max_layer = max(layer_dict.values()) if layer_dict else 0
-        for loc in unassigned:
-            layer_dict[loc] = max_layer + 1
+        children = defaultdict(list)
+        parents = defaultdict(list)
+        for row in mat_df.itertuples():
+            sourcing_val = row.sourcing
+            location_val = row.location
+            sourcing_valid = sourcing_val is not None and pd.notna(sourcing_val) and str(sourcing_val).strip() != ''
+            location_valid = location_val is not None and pd.notna(location_val) and str(location_val).strip() != ''
+            if sourcing_valid and location_valid:
+                children[str(sourcing_val)].append(str(location_val))
+                parents[str(location_val)].append(str(sourcing_val))
 
-    layer_df = pd.DataFrame([{'location': loc, 'layer': layer} for loc, layer in layer_dict.items()])
-    layer_df = layer_df.sort_values('layer')
-    return layer_df
+        all_locations = set(mat_df['location'].dropna().astype(str)).union(
+            set(mat_df['sourcing'].dropna().astype(str))
+        )
+        if not all_locations:
+            continue
+
+        potential_roots = [loc for loc in all_locations if not parents[loc]]
+        true_roots = []
+        for loc in potential_roots:
+            if loc in children:
+                true_roots.append(loc)
+            else:
+                has_incoming = any(loc in parents.get(other_loc, []) for other_loc in all_locations)
+                if not has_incoming:
+                    true_roots.append(loc)
+        if not true_roots:
+            true_roots = potential_roots if potential_roots else list(all_locations)
+
+
+        layer_dict = {}
+        queue = deque()
+        queue.extend((root, 0) for root in true_roots)
+        while queue:
+            loc, layer = queue.popleft()
+            if loc in layer_dict and layer_dict[loc] <= layer:
+                continue
+            layer_dict[loc] = layer
+            for child in children.get(loc, []):
+                queue.append((child, layer + 1))
+
+        unassigned = [loc for loc in all_locations if loc not in layer_dict]
+        if unassigned:
+            max_layer = max(layer_dict.values()) if layer_dict else 0
+            for loc in unassigned:
+                layer_dict[loc] = max_layer + 1
+
+        for loc, layer in layer_dict.items():
+            layer_rows.append({
+                'material': _normalize_material(material),
+                'location': loc,
+                'layer': layer
+            })
+
+    if not layer_rows:
+        return pd.DataFrame({'material': [], 'location': [], 'layer': []})
+
+    layer_df = pd.DataFrame(layer_rows)
+    return layer_df.sort_values(['material', 'layer', 'location'])
 
 def _build_active_network_cache(network_df: pd.DataFrame) -> Dict[tuple[str, str, pd.Timestamp, pd.Timestamp], pd.Series]:
     """
@@ -2017,8 +2036,11 @@ def main(
     receiving_space = config['ReceivingSpace']
 
     network_layers = assign_location_layers(network)
-    location_to_layer = dict(zip(network_layers['location'], network_layers['layer']))
-    layer_list = sorted(network_layers['layer'].unique(), reverse=True)  # 从最大层往上游推进
+    location_to_layer = {
+        (row.material, row.location): int(row.layer)
+        for row in network_layers.itertuples(index=False)
+    }
+    layer_list = sorted(set(location_to_layer.values()), reverse=True)  # 从最大层往上游推进
     # Performance optimization: Use dict() with zip instead of iterrows
     demand_priority_map = dict(zip(demand_priority['demand_element'], demand_priority['priority']))
     config['LocationLayerMap'] = location_to_layer
@@ -2311,22 +2333,18 @@ def main(
             # print(f"{'-'*40}")
             
             # 组合所有material-location对（包含 OrderLog和safety stock）
-            materials_union = set(config['SupplyDemandLog']['material'].unique())
-            if 'OrderLog' in config and not config['OrderLog'].empty:
-                materials_union |= set(config['OrderLog']['material'].unique())
-            if not config['SafetyStock'].empty:
-                materials_union |= set(config['SafetyStock']['material'].unique())
-            base_pairs = set(
+
+            base_pairs = {
                 (mat, loc)
-                for loc, l in location_to_layer.items() if l == layer
-                for mat in materials_union
-            )
+                for (mat, loc), lyr in location_to_layer.items()
+                if lyr == layer
+            }
             # gap buffer补充
-            gap_pairs = set(
+            gap_pairs = {
                 (mat, loc)
                 for (mat, loc) in up_gap_buffer
-                if location_to_layer.get(loc, None) == layer
-            )
+                if location_to_layer.get((mat, loc), None) == layer
+            }
             all_pairs = base_pairs | gap_pairs
 
             # 并行收集每个节点的需求（同层之间互不依赖），随后仍按原顺序分配库存

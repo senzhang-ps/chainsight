@@ -1,4 +1,4 @@
-# validation_manager.py
+# validation_manager.py（验证管理器）
 # 统一验证管理器 - 集中处理配置验证和错误报告
 # 在仿真开始前运行，输出 validation.txt 供用户查看
 

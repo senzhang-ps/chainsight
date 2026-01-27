@@ -26,7 +26,7 @@ import logging
 import sys
 from pathlib import Path
 
-# Add parent directories to path for imports
+# 将父目录添加到路径中以便导入
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from . import orchestrator
@@ -217,7 +217,7 @@ def restore_orchestrator_state(orchestrator, restore_date: str, output_base_dir:
         else:
             orchestrator.unrestricted_inventory = {}
         
-        # 2. 恢复在途库存 (MUST rebuild as in_transit dictionary with UID keys)
+        # 2. 恢复在途库存（必须重建为以 UID 为键的 in_transit 字典）
         intransit_file = orchestrator_dir / f"planning_intransit_{date_str}.csv"
         if intransit_file.exists():
             try:
@@ -226,19 +226,19 @@ def restore_orchestrator_state(orchestrator, restore_date: str, output_base_dir:
                 intransit_df = pd.DataFrame()
             if not intransit_df.empty:
                 intransit_df = _normalize_identifiers(intransit_df)
-                # Rebuild in_transit dictionary: transit_uid -> transit_record
+                # 重建 in_transit 字典：transit_uid -> transit_record
                 orchestrator.in_transit = {}
                 for _, row in intransit_df.iterrows():
                     transit_uid = row.get('transit_uid')
                     if transit_uid is not None and str(transit_uid).strip() and str(transit_uid) != 'None':
                         uid_str = str(transit_uid)
-                        # Safely convert quantity to int
+                        # 安全地将 quantity 转为 int
                         try:
                             quantity = int(float(row.get('quantity', 0) or 0))
                         except (ValueError, TypeError):
                             quantity = 0
                         
-                        # Convert date fields to datetime objects (Module6 expects datetime for comparisons)
+                        # 将日期字段转换为 datetime（Module6 需要 datetime 进行比较）
                         try:
                             actual_ship_date = pd.to_datetime(row.get('actual_ship_date')).normalize() if pd.notna(row.get('actual_ship_date')) else None
                         except:
@@ -264,7 +264,7 @@ def restore_orchestrator_state(orchestrator, restore_date: str, output_base_dir:
         else:
             orchestrator.in_transit = {}
         
-        # 3. 恢复开放调拨 (MUST be a dict with UID keys, not a list)
+        # 3. 恢复开放调拨（必须是以 UID 为键的字典，而不是列表）
         deployment_file = orchestrator_dir / f"open_deployment_{date_str}.csv"
         if deployment_file.exists():
             try:
@@ -273,13 +273,13 @@ def restore_orchestrator_state(orchestrator, restore_date: str, output_base_dir:
                 deployment_df = pd.DataFrame()
             if not deployment_df.empty:
                 deployment_df = _normalize_identifiers(deployment_df)
-                # Rebuild as dictionary: uid -> deployment_record
+                # 重建为字典：uid -> deployment_record
                 orchestrator.open_deployment = {}
                 for _, row in deployment_df.iterrows():
                     uid = row.get('ori_deployment_uid')
                     if uid is not None and str(uid).strip() and str(uid) != 'None':
                         uid_str = str(uid)
-                        # Safely convert deployed_qty to int
+                        # 安全地将 deployed_qty 转为 int
                         try:
                             deployed_qty = int(float(row.get('deployed_qty', 0) or 0))
                         except (ValueError, TypeError):
@@ -326,7 +326,7 @@ def restore_orchestrator_state(orchestrator, restore_date: str, output_base_dir:
         else:
             orchestrator.space_quota = {}
         
-        # 5. 恢复生产计划backlog (future production)
+        # 5. 恢复生产计划 backlog（含未来生产）
         production_backlog_file = orchestrator_dir / f"production_plan_backlog_{date_str}.csv"
         if production_backlog_file.exists():
             try:
@@ -335,14 +335,14 @@ def restore_orchestrator_state(orchestrator, restore_date: str, output_base_dir:
                 backlog_df = pd.DataFrame()
             if not backlog_df.empty:
                 backlog_df = _normalize_identifiers(backlog_df)
-                # Convert quantity to int
+                # 将 quantity 转为 int
                 if 'quantity' in backlog_df.columns:
                     backlog_df['quantity'] = pd.to_numeric(backlog_df['quantity'], errors='coerce').fillna(0).astype(int)
-                # Convert available_date to datetime to match original structure
+                # 将 available_date 转为 datetime 以匹配原有结构
                 if 'available_date' in backlog_df.columns:
                     backlog_df['available_date'] = pd.to_datetime(backlog_df['available_date']).dt.normalize()
                 
-                # Convert to list of dictionaries with proper types (efficient, no iterrows)
+                # 转为字典列表并保持类型（高效，无需 iterrows）
                 orchestrator.production_plan_backlog = backlog_df.to_dict('records')
             else:
                 orchestrator.production_plan_backlog = []
@@ -441,35 +441,35 @@ def restore_orchestrator_state(orchestrator, restore_date: str, output_base_dir:
         print(f"  ✅ 恢复库存变动日志: {len(orchestrator.inventory_change_log)} 条")
         print(f"  ✅ 恢复daily_logs: {len(orchestrator.daily_logs)} 条")
         
-        # 6. 重建date-indexed dictionaries for Phase 6 optimization
+        # 6. 重建按日期索引的字典（用于阶段 6 优化）
         print(f"  🔧 重建日期索引字典...")
         orchestrator.production_gr_by_date = {}
         orchestrator.delivery_gr_by_date = {}
         orchestrator.shipment_log_by_date = {}
         orchestrator.delivery_shipment_log_by_date = {}
         
-        # Index production_gr
+        # 索引 production_gr
         for record in orchestrator.production_gr:
             date_key = record.get('date', '')
             if date_key not in orchestrator.production_gr_by_date:
                 orchestrator.production_gr_by_date[date_key] = []
             orchestrator.production_gr_by_date[date_key].append(record)
         
-        # Index delivery_gr
+        # 索引 delivery_gr
         for record in orchestrator.delivery_gr:
             date_key = record.get('date', '')
             if date_key not in orchestrator.delivery_gr_by_date:
                 orchestrator.delivery_gr_by_date[date_key] = []
             orchestrator.delivery_gr_by_date[date_key].append(record)
         
-        # Index shipment_log
+        # 索引 shipment_log
         for record in orchestrator.shipment_log:
             date_key = record.get('date', '')
             if date_key not in orchestrator.shipment_log_by_date:
                 orchestrator.shipment_log_by_date[date_key] = []
             orchestrator.shipment_log_by_date[date_key].append(record)
         
-        # Index delivery_shipment_log
+        # 索引 delivery_shipment_log
         for record in orchestrator.delivery_shipment_log:
             date_key = record.get('date', '')
             if date_key not in orchestrator.delivery_shipment_log_by_date:
@@ -668,7 +668,7 @@ def _normalize_identifiers(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df
     
-    # Define identifier columns that need string conversion
+    # 定义需要字符串转换的标识符列
     identifier_cols = ['material', 'location', 'sending', 'receiving', 'sourcing', 'dps_location', 'from_material', 'to_material', 'line', 'delegate_line', 'changeover_id']
     
     df = df.copy()
@@ -677,19 +677,19 @@ def _normalize_identifiers(df: pd.DataFrame) -> pd.DataFrame:
             # 🔧 关键修复：使用 object dtype (Python str) 而不是 pandas StringDtype
             # 这样可以确保与后续 astype(str) 的一致性
             df[col] = df[col].astype(str)
-            # Apply specific normalization for location-type fields
+            # 对地点类字段应用专用规范化
             if col in ['location', 'dps_location']:
                 df[col] = df[col].apply(_normalize_location)
             elif col == 'sending':
                 df[col] = df[col].apply(_normalize_sending)
             elif col == 'receiving':
                 df[col] = df[col].apply(_normalize_receiving)
-            # Apply specific normalization for material-type fields
+            # 对物料类字段应用专用规范化
             elif col in ['material', 'from_material', 'to_material']:
                 df[col] = df[col].apply(_normalize_material)
             # changeover_id 和 line 只需要转换为字符串，不需要特殊格式化
             # (已在 astype('string') 时处理)
-            # For other identifier columns (line, delegate_line, etc), ensure they are properly formatted strings
+            # 其他标识符列（line、delegate_line 等）确保为正确的字符串格式
             elif col in ['changeover_id', 'line', 'delegate_line']:
                 # 这些字段只需要保持为字符串，不需要额外处理
                 pass
@@ -811,7 +811,7 @@ def run_module4_integrated(
         # print(f"  转换后前5条记录:")
         # print(co_mat_df.head())
         
-        # Note: Changeover 去重已在 load_configuration 中完成
+        # 注意：Changeover 去重已在 load_configuration 中完成
         
         co_mat = co_mat_df.set_index(['from_material', 'to_material'])['changeover_id']
         # 对MultiIndex进行排序以避免性能警告

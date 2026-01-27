@@ -349,8 +349,10 @@ class DatabaseConnection:
             if if_exists == "fail":
                 raise ValueError(f"表 {clean_table_name} 已存在")
             elif if_exists == "replace":
-                self.drop_table(clean_table_name)
-                print(f"✅已删除表: {clean_table_name}")
+                # 为避免丢失历史数据，replace模式改为追加写入
+                if not self._check_table_compatible(clean_table_name, df_to_write):
+                    print(f"⚠️表结构不兼容，跳过追加: {clean_table_name}")
+                    return False
             elif if_exists == "append":
                 # append模式：检查表结构是否兼容
                 if not self._check_table_compatible(clean_table_name, df_to_write):
@@ -423,6 +425,10 @@ class DatabaseConnection:
             
             # 获取DataFrame的列（清理后）
             df_cols = set(self._clean_name(str(col)) for col in df.columns)
+            df_col_types = {
+                self._clean_name(str(col)): df[col].dtype
+                for col in df.columns
+            }
             
             # 如果现有表缺少db_write_time列，自动添加
             if 'db_write_time' not in existing_cols and 'db_write_time' in df_cols:
@@ -436,21 +442,24 @@ class DatabaseConnection:
             # 检查DataFrame的列是否都在现有表中（允许现有表有额外列）
             missing_cols = df_cols - existing_cols
             if missing_cols:
-                # 检查表是否为空
-                with self.get_cursor(commit=False) as cursor:
-                    cursor.execute(sql.SQL("SELECT COUNT(*) FROM {}").format(sql.Identifier(table_name)))
-                    row_count = cursor.fetchone()[0]
-                
-                if row_count == 0:
-                    # 空表且列结构不兼容，删除并重建
-                    print(f"🔧 现有表 {table_name} 为空且列结构不兼容（缺少列: {missing_cols}），删除并重建...")
-                    self.drop_table(table_name)
-                    return True  # 返回True继续创建表
-                
-                # 非空表且列不兼容，打印警告并跳过
-                print(f"⚠️DataFrame包含现有表中不存在的列: {missing_cols}")
-                print(f"⚠️表结构不兼容，跳过追加: {table_name}")
-                return False
+                # 自动为缺失列补齐表结构
+                print(f"🔧 表 {table_name} 缺少列: {missing_cols}，自动补齐...")
+                for col_name in missing_cols:
+                    dtype = df_col_types.get(col_name)
+                    if dtype is None:
+                        print(f"⚠️无法确定列类型，跳过补齐列: {col_name}")
+                        continue
+                    pg_type = self._pandas_to_pg_type(dtype, col_name=col_name)
+                    with self.get_cursor() as cursor:
+                        cursor.execute(sql.SQL("""
+                            ALTER TABLE {} ADD COLUMN {} {}
+                        """).format(
+                            sql.Identifier(table_name),
+                            sql.Identifier(col_name),
+                            sql.SQL(pg_type)
+                        ))
+                    existing_cols.add(col_name)
+                return True
             
             return True
         except Exception as e:

@@ -66,7 +66,7 @@ def build_horizon_cache(
     horizon_cache = {}
     
     # 预构建 Network 快速查找索引
-    # key: (material, location) -> network_row
+    # 键：(material, location) -> network_row
     network_index = _build_network_index(network_df, sim_date)
     
     # 排序确保遍历顺序一致
@@ -241,7 +241,8 @@ def _infer_location_type(
         return str(row.get('location_type', 'DC') or 'DC')
     
     # 未维护但被识别为根节点 → Plant
-    if location_layer_map.get(str(sending), None) == 0:
+    # Use (material, location) tuple key to match baseline
+    if location_layer_map.get((str(material), str(sending)), None) == 0:
         return 'Plant'
     
     return 'DC'

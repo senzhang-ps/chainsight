@@ -417,82 +417,89 @@ def get_upstream(
 
 def assign_location_layers(network_df: pd.DataFrame) -> pd.DataFrame:
     """
-    根据Network的sourcing→location关系，计算每个location的层级。
+    根据Network的sourcing→location关系，**按物料维度**计算层级。
+
+    每个物料单独建图并做BFS，得到该物料下各location的layer。
+    返回包含material/location/layer的DataFrame，供后续按(material, location)查询。
 
     Args:
         network_df: Network DataFrame
 
     Returns:
-        pd.DataFrame: 包含location和layer的DataFrame
+        pd.DataFrame: 包含material, location和layer的DataFrame
     """
     if network_df.empty:
-        return pd.DataFrame({'location': [], 'layer': []})
+        return pd.DataFrame({'material': [], 'location': [], 'layer': []})
 
-    children = defaultdict(list)
-    parents = defaultdict(list)
-
-    for row in network_df.itertuples():
-        sourcing_val = row.sourcing
-        location_val = row.location
-        sourcing_valid = (
-            sourcing_val is not None and
-            pd.notna(sourcing_val) and
-            str(sourcing_val).strip() != ''
-        )
-        location_valid = (
-            location_val is not None and
-            pd.notna(location_val) and
-            str(location_val).strip() != ''
-        )
-        if sourcing_valid and location_valid:
-            children[sourcing_val].append(location_val)
-            parents[location_val].append(sourcing_val)
-
-    all_locations = (
-        set(network_df['location'].dropna()) |
-        set(network_df['sourcing'].dropna())
-    )
-    potential_roots = [loc for loc in all_locations if not parents[loc]]
-
-    true_roots = []
-    for loc in potential_roots:
-        if loc in children:
-            true_roots.append(loc)
-        else:
-            has_incoming = any(
-                loc in parents.get(other_loc, [])
-                for other_loc in all_locations
-            )
-            if not has_incoming:
-                true_roots.append(loc)
-
-    if not true_roots:
-        true_roots = potential_roots
-
-    layer_dict = {}
-    queue = deque()
-    for root in true_roots:
-        queue.append((root, 0))
-
-    while queue:
-        loc, layer = queue.popleft()
-        if loc in layer_dict and layer_dict[loc] <= layer:
+    layer_rows = []
+    # dropna=False 保留 NaN material，尽量与原始数据一致
+    for material, mat_df in network_df.groupby('material', dropna=False):
+        if mat_df.empty:
             continue
-        layer_dict[loc] = layer
-        for child in children.get(loc, []):
-            queue.append((child, layer + 1))
 
-    unassigned = [loc for loc in all_locations if loc not in layer_dict]
-    if unassigned:
-        max_layer = max(layer_dict.values()) if layer_dict else 0
-        for loc in unassigned:
-            layer_dict[loc] = max_layer + 1
+        children = defaultdict(list)
+        parents = defaultdict(list)
+        for row in mat_df.itertuples(index=False):
+            sourcing_val = getattr(row, 'sourcing', None)  # type: ignore[attr-defined]
+            location_val = getattr(row, 'location', None)  # type: ignore[attr-defined]
+            sourcing_valid = sourcing_val is not None and pd.notna(sourcing_val) and str(sourcing_val).strip() != ''
+            location_valid = location_val is not None and pd.notna(location_val) and str(location_val).strip() != ''
+            if sourcing_valid and location_valid:
+                children[str(sourcing_val)].append(str(location_val))
+                parents[str(location_val)].append(str(sourcing_val))
 
-    layer_df = pd.DataFrame([
-        {'location': loc, 'layer': layer}
-        for loc, layer in layer_dict.items()
-    ])
-    layer_df = layer_df.sort_values('layer')
+        all_locations = set(mat_df['location'].dropna().astype(str)).union(
+            set(mat_df['sourcing'].dropna().astype(str))
+        )
+        if not all_locations:
+            continue
+
+        potential_roots = [loc for loc in all_locations if not parents[loc]]
+        true_roots = []
+        for loc in potential_roots:
+            if loc in children:
+                true_roots.append(loc)
+            else:
+                has_incoming = any(loc in parents.get(other_loc, []) for other_loc in all_locations)
+                if not has_incoming:
+                    true_roots.append(loc)
+        if not true_roots:
+            true_roots = potential_roots if potential_roots else list(all_locations)
+
+        layer_dict = {}
+        queue = deque()
+        queue.extend((root, 0) for root in true_roots)
+        while queue:
+            loc, layer = queue.popleft()
+            if loc in layer_dict and layer_dict[loc] <= layer:
+                continue
+            layer_dict[loc] = layer
+            for child in children.get(loc, []):
+                queue.append((child, layer + 1))
+
+        unassigned = [loc for loc in all_locations if loc not in layer_dict]
+        if unassigned:
+            max_layer = max(layer_dict.values()) if layer_dict else 0
+            for loc in unassigned:
+                layer_dict[loc] = max_layer + 1
+
+        for loc, layer in layer_dict.items():
+            # Handle NaN material from groupby
+            try:
+                is_na = material is None or pd.isna(material)  # type: ignore[arg-type]
+            except (ValueError, TypeError):
+                is_na = False
+            material_str = '' if is_na else str(material)
+            layer_rows.append({
+                'material': material_str,
+                'location': loc,
+                'layer': layer
+            })
+
+    if not layer_rows:
+        return pd.DataFrame({'material': [], 'location': [], 'layer': []})
+
+    layer_df = pd.DataFrame(layer_rows).sort_values(['material', 'layer', 'location']).reset_index(drop=True)
     return layer_df
 
 
@@ -575,17 +582,21 @@ def get_sending_location_type(
     sending: str,
     sim_date: pd.Timestamp,
     network_df: pd.DataFrame,
-    location_layer_map: dict
+    location_layer_map: Dict[Tuple[str, str], int]
 ) -> str:
     """
     识别发送端类型（与Module3一致）。
+
+    1) Network有活动行则使用其location_type
+    2) 若为根层（layer=0），视为Plant
+    3) 否则默认DC
 
     Args:
         material: 物料编码
         sending: 发送端编码
         sim_date: 仿真日期
         network_df: Network DataFrame
-        location_layer_map: 位置层级映射
+        location_layer_map: 位置层级映射 dict[(material, location): layer]
 
     Returns:
         str: 'Plant' 或 'DC'
@@ -598,7 +609,9 @@ def get_sending_location_type(
         return str(row.iloc[0].get('location_type', 'DC') or 'DC')
 
     # 未维护但被识别为根节点 → Plant
-    if location_layer_map.get(str(sending), None) == 0:
+    # Use (material, sending) key - matching baseline
+    layer_key = (str(material), str(sending))
+    if location_layer_map.get(layer_key, None) == 0:
         return 'Plant'
 
     return 'DC'

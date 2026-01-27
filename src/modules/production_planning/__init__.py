@@ -60,51 +60,51 @@ from .output_writer import write_output, generate_consolidated_output
 from .main import run_daily_production_planning, main
 
 __all__ = [
-    # Constants
+    # 常量
     'IDENTIFIER_COLS',
     'DEFAULT_CHANGEOVER_TIME',
     'PLAN_COLUMNS',
     'EXCEED_COLUMNS',
     'VALIDATION_COLUMNS',
     'CHANGEOVER_LOG_COLUMNS',
-    # Types
+    # 类型
     'LineState',
     'ChangeoverInfo',
     'PlanRecord',
     'ExceedRecord',
-    # Utils
+    # 工具函数
     'normalize_location',
     'cast_identifiers_to_str',
     'validate_merge_keys',
     'compute_planning_window',
     'is_review_day',
     'dedup_issues',
-    # State Manager
+    # 状态管理
     'get_or_init_simulation_start',
     'save_line_state',
     'load_line_state',
     'save_allocated_capacity',
     'load_allocated_capacity',
     'load_all_previous_capacity',
-    # Config
+    # 配置
     'load_config',
     'validate_config',
-    # Demand
+    # 需求
     'load_daily_net_demand',
-    # Plan Builder
+    # 计划构建
     'build_unconstrained_plan_for_single_day',
     'optimal_changeover_sequence',
-    # Capacity Allocator
+    # 产能分配
     'centralized_capacity_allocation_with_changeover',
     'extract_allocated_capacity_from_plan',
     'validate_capacity_allocation',
     'extract_line_states_from_plan',
     'calculate_changeover_metrics',
     'simulate_production',
-    # Output
+    # 输出
     'write_output',
     'generate_consolidated_output',
-    # Main
+    # 主入口
     'run_daily_production_planning',
     'main',
 ]

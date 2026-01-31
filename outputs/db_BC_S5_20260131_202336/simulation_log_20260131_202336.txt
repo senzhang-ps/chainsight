@@ -1,0 +1,876 @@
+2026-01-31 20:23:36 [INFO] 日志系统已初始化，日志文件: D:\PG\Code\chainsight\outputs\db_BC_S5_20260131_202336\simulation_log_20260131_202336.txt
+2026-01-31 20:23:36 [INFO] 
+============================================================
+2026-01-31 20:23:36 [INFO] 🕐 程序时间信息
+2026-01-31 20:23:36 [INFO] ============================================================
+2026-01-31 20:23:36 [INFO] 📅 程序开始时间: 2026-01-31 20:23:36
+2026-01-31 20:23:36 [INFO] 
+============================================================
+2026-01-31 20:23:36 [INFO] 📥 步骤1: 从数据库加载配置
+2026-01-31 20:23:36 [INFO] ============================================================
+2026-01-31 20:23:36 [INFO] ✅ 加载配置表: cfg_config_guide -> config_guide (116 行)
+2026-01-31 20:23:36 [INFO] ✅ 加载配置表: cfg_covalidation -> covalidation (179 行)
+2026-01-31 20:23:36 [INFO] ✅ 加载配置表: cfg_global_demandpriority -> global_demandpriority (17 行)
+2026-01-31 20:23:36 [INFO] ✅ 加载配置表: cfg_global_leadtime -> global_leadtime (15 行)
+2026-01-31 20:23:37 [INFO] ✅ 加载配置表: cfg_global_network -> global_network (519 行)
+2026-01-31 20:23:37 [INFO] ✅ 加载配置表: cfg_global_seed -> global_seed (6 行)
+2026-01-31 20:23:37 [INFO] ✅ 加载配置表: cfg_m1_aoconfig -> m1_aoconfig (1140 行)
+2026-01-31 20:23:37 [INFO] ✅ 加载配置表: cfg_m1_demandforecast -> m1_demandforecast (6838 行)
+2026-01-31 20:23:37 [INFO] ✅ 加载配置表: cfg_m1_dpsconfig -> m1_dpsconfig (51 行)
+2026-01-31 20:23:37 [INFO] ✅ 加载配置表: cfg_m1_forecasterror -> m1_forecasterror (513 行)
+2026-01-31 20:23:37 [INFO] ✅ 加载配置表: cfg_m1_initialinventory -> m1_initialinventory (515 行)
+2026-01-31 20:23:37 [INFO] ✅ 加载配置表: cfg_m1_initialinventory_30d -> m1_initialinventory_30d (271 行)
+2026-01-31 20:23:37 [INFO] ✅ 加载配置表: cfg_m1_ordercalendar -> m1_ordercalendar (265 行)
+2026-01-31 20:23:37 [INFO] ✅ 加载配置表: cfg_m3_safetystock -> m3_safetystock (37940 行)
+2026-01-31 20:23:37 [INFO] ✅ 加载配置表: cfg_m4_changeoverdefinition -> m4_changeoverdefinition (89 行)
+2026-01-31 20:23:38 [INFO] ✅ 加载配置表: cfg_m4_changeovermatrix -> m4_changeovermatrix (1573 行)
+2026-01-31 20:23:38 [INFO] ✅ 加载配置表: cfg_m4_linecapacity -> m4_linecapacity (441 行)
+2026-01-31 20:23:38 [INFO] ✅ 加载配置表: cfg_m4_materiallocationlinecfg -> m4_materiallocationlinecfg (55 行)
+2026-01-31 20:23:38 [INFO] ✅ 加载配置表: cfg_m4_productionreliability -> m4_productionreliability (2 行)
+2026-01-31 20:23:38 [INFO] ✅ 加载配置表: cfg_m5_deployconfig -> m5_deployconfig (641 行)
+2026-01-31 20:23:38 [INFO] ✅ 加载配置表: cfg_m5_pushpullmodel -> m5_pushpullmodel (55 行)
+2026-01-31 20:23:38 [INFO] ✅ 加载配置表: cfg_m6_deliverydelaydistribution -> m6_deliverydelaydistribution (2 行)
+2026-01-31 20:23:38 [INFO] ✅ 加载配置表: cfg_m6_materialmd -> m6_materialmd (55 行)
+2026-01-31 20:23:38 [INFO] ✅ 加载配置表: cfg_m6_mdqbypassrules -> m6_mdqbypassrules (1 行)
+2026-01-31 20:23:38 [INFO] ✅ 加载配置表: cfg_m6_truckreleasecon -> m6_truckreleasecon (15 行)
+2026-01-31 20:23:38 [INFO] ✅ 加载配置表: cfg_m6_trucktypespecs -> m6_trucktypespecs (3 行)
+2026-01-31 20:23:38 [INFO] ✅ 加载配置表: cfg_sheet1 -> sheet1 (274 行)
+2026-01-31 20:23:38 [INFO] ✅ 加载配置表: cfg_sit_design -> sit_design (24 行)
+2026-01-31 20:23:38 [INFO] ✅ 已加载 28 个配置表
+2026-01-31 20:23:38 [INFO] 
+============================================================
+2026-01-31 20:23:38 [INFO] 🦆 步骤2: DuckDB处理配置并运行仿真
+2026-01-31 20:23:38 [INFO] ============================================================
+2026-01-31 20:23:38 [INFO] 🚀 使用高性能引擎运行仿真...
+2026-01-31 20:23:38 [INFO] ============================================================
+2026-01-31 20:23:38 [INFO] 🚀 高性能引擎仿真模式
+2026-01-31 20:23:38 [INFO] ============================================================
+2026-01-31 20:23:38 [INFO] 配置: BC_S5
+2026-01-31 20:23:38 [INFO] 日期: 2025-10-06 到 2025-10-10
+2026-01-31 20:23:38 [INFO] 高性能引擎: 启用
+2026-01-31 20:23:38 [INFO] ============================================================
+2026-01-31 20:23:38 [INFO] 🚀 初始化DuckDB优化引擎...
+2026-01-31 20:23:38 [INFO] 📊 预构建配置数据索引...
+2026-01-31 20:23:38 [INFO] ✅ 配置索引预建完成: 0 个索引, 耗时 0.0ms
+2026-01-31 20:23:38 [INFO] ✅ 优化引擎初始化完成，耗时: 0.00秒
+2026-01-31 20:23:38 [INFO] ============================================================
+2026-01-31 20:23:38 [INFO] 🕐 程序时间信息
+2026-01-31 20:23:38 [INFO] ============================================================
+2026-01-31 20:23:38 [INFO] 📅 程序开始时间: 2026-01-31 20:23:38
+2026-01-31 20:23:38 [INFO] 🚀 开始集成仿真 (数据库模式): 2025-10-06 到 2025-10-10
+2026-01-31 20:23:38 [INFO] 📋 配置: BC_S5
+2026-01-31 20:23:38 [INFO] ============================================================
+2026-01-31 20:23:38 [INFO] ✅ DuckDB内存模式已启用 (threads=14, memory=4GB)
+2026-01-31 20:23:38 [INFO] 🦆 DuckDB内存模式已启用（4GB限制）
+2026-01-31 20:23:38 [INFO] ✅ 跳过预验证（数据库模式）
+2026-01-31 20:23:38 [INFO] 🦆 DuckDB处理配置数据...
+2026-01-31 20:23:38 [INFO] 📋 处理配置数据: BC_S5 (共 28 个表)
+2026-01-31 20:23:38 [INFO] ✅ 加载配置表: Config Guide (116 行)
+2026-01-31 20:23:38 [INFO] ✅ 加载配置表: COValidation (179 行)
+2026-01-31 20:23:38 [INFO] ✅ 加载配置表: Global_DemandPriority (17 行)
+2026-01-31 20:23:38 [INFO] ✅ 加载配置表: Global_LeadTime (15 行)
+2026-01-31 20:23:38 [INFO] ✅ 加载配置表: Global_Network (519 行)
+2026-01-31 20:23:38 [INFO] ✅ 加载配置表: Global_seed (6 行)
+2026-01-31 20:23:38 [INFO] ✅ 加载配置表: M1_AOConfig (1140 行)
+2026-01-31 20:23:38 [INFO] ✅ 加载配置表: M1_DemandForecast (6838 行)
+2026-01-31 20:23:38 [INFO] ✅ 加载配置表: M1_DPSConfig (51 行)
+2026-01-31 20:23:38 [INFO] ✅ 加载配置表: M1_ForecastError (513 行)
+2026-01-31 20:23:38 [INFO] ✅ 加载配置表: M1_InitialInventory (515 行)
+2026-01-31 20:23:38 [INFO] ✅ 加载配置表: M1_InitialInventory_30D (271 行)
+2026-01-31 20:23:38 [INFO] ✅ 加载配置表: M1_OrderCalendar (265 行)
+2026-01-31 20:23:38 [INFO] ✅ 加载配置表: M3_SafetyStock (37940 行)
+2026-01-31 20:23:38 [INFO] ✅ 加载配置表: M4_ChangeoverDefinition (89 行)
+2026-01-31 20:23:38 [INFO] ✅ 加载配置表: M4_ChangeoverMatrix (1573 行)
+2026-01-31 20:23:38 [INFO] ✅ 加载配置表: M4_LineCapacity (441 行)
+2026-01-31 20:23:38 [INFO] ✅ 加载配置表: M4_MaterialLocationLineCfg (55 行)
+2026-01-31 20:23:38 [INFO] ✅ 加载配置表: M4_ProductionReliability (2 行)
+2026-01-31 20:23:38 [INFO] ✅ 加载配置表: M5_DeployConfig (641 行)
+2026-01-31 20:23:38 [INFO] ✅ 加载配置表: M5_PushPullModel (55 行)
+2026-01-31 20:23:38 [INFO] ✅ 加载配置表: M6_DeliveryDelayDistribution (2 行)
+2026-01-31 20:23:38 [INFO] ✅ 加载配置表: M6_MaterialMD (55 行)
+2026-01-31 20:23:38 [INFO] ✅ 加载配置表: M6_MDQBypassRules (1 行)
+2026-01-31 20:23:38 [INFO] ✅ 加载配置表: M6_TruckReleaseCon (15 行)
+2026-01-31 20:23:38 [INFO] ✅ 加载配置表: M6_TruckTypeSpecs (3 行)
+2026-01-31 20:23:38 [INFO] ✅ 加载配置表: Sheet1 (274 行)
+2026-01-31 20:23:38 [INFO] ✅ 加载配置表: SIT Design (24 行)
+2026-01-31 20:23:38 [INFO] ⚠️  缺少必要配置表: ['Global_SpaceCapacity']
+2026-01-31 20:23:38 [INFO] 🔧 正在标准化标识符字段...
+2026-01-31 20:23:38 [INFO] 🔧 校验 Changeover Matrix 配置...
+2026-01-31 20:23:38 [INFO] ✅ Changeover Matrix 无重复定义
+2026-01-31 20:23:38 [INFO] 🔧 校验 Changeover Definition 配置...
+2026-01-31 20:23:38 [INFO] ✅ Changeover Definition 无重复定义
+2026-01-31 20:23:38 [INFO] 🔧 正在映射 Module4 配置表...
+2026-01-31 20:23:38 [INFO] 🔧 映射 M4_MaterialLocationLineCfg → MaterialLocationLineCfg
+2026-01-31 20:23:38 [INFO] 🔧 映射 M4_LineCapacity → LineCapacity
+2026-01-31 20:23:38 [INFO] 🔧 映射 M4_ChangeoverMatrix → ChangeoverMatrix
+2026-01-31 20:23:38 [INFO] 🔧 映射 M4_ChangeoverDefinition → ChangeoverDefinition
+2026-01-31 20:23:38 [INFO] 🔧 映射 M4_ProductionReliability → ProductionReliability
+2026-01-31 20:23:38 [INFO] ✅ 已映射 5 个 Module4 配置表
+2026-01-31 20:23:38 [INFO] ⚠️未找到 Global_Seed 配置，使用默认值: 42
+2026-01-31 20:23:38 [INFO] ✨已为所有模块设置统一随机种子: 42
+2026-01-31 20:23:38 [INFO] 🎯 初始化Orchestrator
+2026-01-31 20:23:38 [INFO] ✅ Orchestrator initialized for simulation starting 2025-10-06
+2026-01-31 20:23:38 [INFO] 🆕全新开始：设置初始状态
+2026-01-31 20:23:38 [INFO] ⚠️未找到空间容量配置
+2026-01-31 20:23:38 [INFO] 📅 仿真日期范围: 5 天
+2026-01-31 20:23:38 [INFO] ==================== 第 1/5 天: 2025-10-06 ====================
+2026-01-31 20:23:38 [INFO] 🌅 每日开始状态更新
+2026-01-31 20:23:38 [INFO] 💾保存期初库存快照...
+2026-01-31 20:23:38 [INFO] 💾已保存 2025-10-06 期初库存: 515 项
+2026-01-31 20:23:38 [INFO] 📦处理当日delivery GR到达...
+2026-01-31 20:23:38 [INFO] 🏭处理历史生产当日入库...
+2026-01-31 20:23:38 [INFO] 📦当日无历史生产入库
+2026-01-31 20:23:38 [INFO] 1️⃣ 运行 Module1 - 订单生成
+2026-01-31 20:23:38 [INFO] [M1] DPS拆分完成，条目: 5943，耗时: 0.011s
+2026-01-31 20:23:38 [INFO] [M1] 周度→日度拆分完成，生成天数: 41601，耗时: 0.010s
+2026-01-31 20:23:38 [INFO] [M1] 周度→日度拆分完成，生成天数: 41601，耗时: 0.010s
+2026-01-31 20:23:38 [INFO] [M1] 平均需求计算完成，ML数: 283，耗时: 0.012s
+2026-01-31 20:23:38 [INFO] [M1] 订单生成完成 (AO耗时: 0.008s, Normal耗时: 0.013s, 总耗时: 0.033s)，订单数: 738
+2026-01-31 20:23:39 [INFO] [M1] AO消耗完成(向量化)，耗时: 0.017s
+2026-01-31 20:23:39 [INFO] [M1] Normal消耗完成(向量化)，耗时: 0.014s
+2026-01-31 20:23:39 [INFO] [M1] 当日订单生成完成，订单数: 738，耗时: 1.190s
+2026-01-31 20:23:39 [INFO] [M1] 历史订单读取完成，文件数: 0，合并条目: 0
+2026-01-31 20:23:39 [INFO] [M1] 历史订单合并前过滤完成，耗时: 0.001s
+2026-01-31 20:23:39 [INFO] [M1] 发货与缺货计算完成，shipment: 282，cut: 282，耗时: 0.021s
+2026-01-31 20:23:39 [INFO] [M1] 供需日志生成完成，条目: 25470，耗时: 0.233s
+2026-01-31 20:23:39 [INFO] 🚚立即处理M1 shipment，扣减库存...
+2026-01-31 20:23:39 [INFO] ✅ Processed 282 M1 shipments for 2025-10-06
+2026-01-31 20:23:39 [INFO] ✅ 已扣减 282 个shipment的库存
+2026-01-31 20:23:39 [INFO] 🦆 累积历史订单更新完成，当前总条目: 738
+2026-01-31 20:23:39 [INFO] ✅ Module1 完成 - 生成 738 个订单, 282 个发货
+2026-01-31 20:23:39 [INFO] 2️⃣ 运行 Module4 - 生产计划
+2026-01-31 20:23:39 [INFO] Warning: No NetDemand data for 2025-10-06. Generating empty output.
+2026-01-31 20:23:39 [INFO] 🔄无前一天产线状态 - 全新开始
+2026-01-31 20:23:39 [INFO] 🔄无之前已分配产能 - 全新开始
+2026-01-31 20:23:39 [INFO] 📦M4当日未生成生产计划或缺少 available_date 列
+2026-01-31 20:23:39 [INFO] ✅ Module4 完成 - 生成生产计划: 0 条记录
+2026-01-31 20:23:39 [INFO] 3️⃣ 运行 Module5 - 部署计划
+2026-01-31 20:23:39 [INFO] ⚠️Orchestrator当日无历史生产GR数据
+2026-01-31 20:23:39 [INFO] [M5] load_integrated_config 用时: 0.066s
+2026-01-31 20:23:40 [INFO] ✅缓存已初始化: PTF/LSK=55 | LeadTime=15 | Network=519
+2026-01-31 20:23:40 [INFO] ✅索引已构建: SDL=283 | SS=271 | Order=282 | DeployCfg=114
+2026-01-31 20:23:46 [INFO] [M5] Demand collection only 用时: 4.175s
+2026-01-31 20:23:46 [INFO] [M5] Demand collection+allocation 总用时: 5.887s
+2026-01-31 20:23:46 [INFO] [M5] push_softpush_allocation 用时: 0.116s，生成行数: 0
+2026-01-31 20:23:46 [INFO] [M5] Full day total 用时: 6.146s
+2026-01-31 20:23:46 [INFO] 🎯 有效部署计划: 64/10636 条
+2026-01-31 20:23:46 [INFO] 📦 立即处理M5 deployment，更新open deployment...
+2026-01-31 20:23:46 [INFO] ✅ Added 64 M5 deployment plans to open deployment for 2025-10-06
+2026-01-31 20:23:46 [INFO] ✅ 已更新 64 条部署计划到open deployment
+2026-01-31 20:23:46 [INFO] ✅ Module5 完成 - 生成 64 条有效部署计划
+2026-01-31 20:23:46 [INFO] 4️⃣ 运行 Module6 - 物流执行
+2026-01-31 20:23:46 [INFO] ✅ Module6 完成 - 生成 0 条交付计划
+2026-01-31 20:23:46 [INFO] 5️⃣ 运行 Module3 - 净需求计算
+2026-01-31 20:23:46 [INFO] 🔄 Module3 运行于集成模式
+2026-01-31 20:23:46 [INFO] [M3] assign_location_layers total: 0.041s, locations=574
+2026-01-31 20:23:47 [INFO] [M3-DuckDB] 批量计算 342 节点净需求: 179.1ms, input=342, output=342
+2026-01-31 20:23:47 [INFO] [M3] batch layer 2: 342 nodes in 0.729s
+2026-01-31 20:23:47 [INFO] [M3-DuckDB] 批量计算 177 节点净需求: 109.7ms, input=177, output=177
+2026-01-31 20:23:47 [INFO] [M3] batch layer 1: 177 nodes in 0.420s
+2026-01-31 20:23:47 [INFO] [M3-DuckDB] 批量计算 55 节点净需求: 103.9ms, input=55, output=55
+2026-01-31 20:23:47 [INFO] [M3] batch layer 0: 55 nodes in 0.160s
+2026-01-31 20:23:47 [INFO] [M3] mrp_simulation: 1.406s, records=559
+2026-01-31 20:23:47 [INFO] ✅ Module3 集成模式完成
+2026-01-31 20:23:47 [INFO] [M3] total: 1.480s, days=1, records=559
+2026-01-31 20:23:47 [INFO] ✅ Module3 完成
+2026-01-31 20:23:47 [INFO] 💾 每日结束状态保存
+2026-01-31 20:23:47 [INFO] 💾已保存 2025-10-06 期末库存: 515 项
+2026-01-31 20:23:47 [INFO] 期初库存条目: 515
+2026-01-31 20:23:47 [INFO] 生产入库条目: 0
+2026-01-31 20:23:47 [INFO] 交付入库条目: 0
+2026-01-31 20:23:47 [INFO] 发货出库条目: 282
+2026-01-31 20:23:47 [INFO] 发运出库条目(M6): 0，数量合计: 0
+2026-01-31 20:23:47 [INFO] 期末库存条目: 515
+2026-01-31 20:23:47 [INFO] 📊 从内存获取发运出库 [2025-10-06]: 0 项
+2026-01-31 20:23:47 [INFO] 📊 当日统计: {'date': '2025-10-06', 'total_inventory_items': 515, 'total_inventory_quantity': 335181, 'open_deployment_count': 64, 'in_transit_count': 0, 'production_gr_count': 0, 'delivery_gr_count': 0, 'shipment_count': 282}
+2026-01-31 20:23:47 [INFO] ✅ 第 1 天处理完成
+2026-01-31 20:23:47 [INFO] ==================== 第 2/5 天: 2025-10-07 ====================
+2026-01-31 20:23:47 [INFO] 🌅 每日开始状态更新
+2026-01-31 20:23:47 [INFO] 💾保存期初库存快照...
+2026-01-31 20:23:47 [INFO] 💾已保存 2025-10-07 期初库存: 515 项
+2026-01-31 20:23:47 [INFO] 📦处理当日delivery GR到达...
+2026-01-31 20:23:47 [INFO] 🏭处理历史生产当日入库...
+2026-01-31 20:23:47 [INFO] 📦当日无历史生产入库
+2026-01-31 20:23:47 [INFO] 1️⃣ 运行 Module1 - 订单生成
+2026-01-31 20:23:47 [INFO] [M1] DPS拆分完成，条目: 5943，耗时: 0.012s
+2026-01-31 20:23:48 [INFO] [M1] 周度→日度拆分完成，生成天数: 41601，耗时: 0.013s
+2026-01-31 20:23:48 [INFO] [M1] 周度→日度拆分完成，生成天数: 41601，耗时: 0.011s
+2026-01-31 20:23:48 [INFO] [M1] 平均需求计算完成，ML数: 283，耗时: 0.013s
+2026-01-31 20:23:48 [INFO] [M1] 订单生成完成 (AO耗时: 0.007s, Normal耗时: 0.013s, 总耗时: 0.033s)，订单数: 738
+2026-01-31 20:23:49 [INFO] [M1] AO消耗完成(向量化)，耗时: 0.017s
+2026-01-31 20:23:49 [INFO] [M1] Normal消耗完成(向量化)，耗时: 0.013s
+2026-01-31 20:23:49 [INFO] [M1] 当日订单生成完成，订单数: 738，耗时: 1.179s
+2026-01-31 20:23:49 [INFO] [M1] 使用内存历史订单数据，条目: 738，耗时: 0.000s
+2026-01-31 20:23:49 [INFO] [M1] 发货与缺货计算完成，shipment: 282，cut: 282，耗时: 0.023s
+2026-01-31 20:23:49 [INFO] [M1] 供需日志生成完成，条目: 25470，耗时: 0.239s
+2026-01-31 20:23:49 [INFO] 🚚立即处理M1 shipment，扣减库存...
+2026-01-31 20:23:49 [INFO] ✅ Processed 282 M1 shipments for 2025-10-07
+2026-01-31 20:23:49 [INFO] ✅ 已扣减 282 个shipment的库存
+2026-01-31 20:23:49 [INFO] 🦆 累积历史订单更新完成，当前总条目: 1194
+2026-01-31 20:23:49 [INFO] ✅ Module1 完成 - 生成 738 个订单, 282 个发货
+2026-01-31 20:23:49 [INFO] 2️⃣ 运行 Module4 - 生产计划
+2026-01-31 20:23:49 [INFO] 🔄无前一天产线状态 - 全新开始
+2026-01-31 20:23:49 [INFO] 🔄无之前已分配产能 - 全新开始
+2026-01-31 20:23:49 [INFO] [M4-Pandas] Production simulation 64 records: 2.1ms
+2026-01-31 20:23:49 [INFO] 💾保存当天产线状态: ['LGDK', 'LGDW']
+2026-01-31 20:23:49 [INFO] 💾保存当天分配产能: 29 个产能分配 (小时单位)
+2026-01-31 20:23:49 [INFO] 🗂️ 持久化未来生产计划...
+2026-01-31 20:23:49 [INFO] ✅已写入未来计划: 64 条
+2026-01-31 20:23:49 [INFO] ✅ Module4 完成 - 生成生产计划: 64 条记录
+2026-01-31 20:23:49 [INFO] 🦆 累积历史M4生产计划更新完成，当前总条目: 64
+2026-01-31 20:23:49 [INFO] 3️⃣ 运行 Module5 - 部署计划
+2026-01-31 20:23:50 [INFO] [M5] load_integrated_config 用时: 0.099s
+2026-01-31 20:23:50 [INFO] ✅缓存已初始化: PTF/LSK=55 | LeadTime=15 | Network=519
+2026-01-31 20:23:50 [INFO] ✅索引已构建: SDL=283 | SS=271 | Order=282 | DeployCfg=114
+2026-01-31 20:23:56 [INFO] [M5] Demand collection only 用时: 4.346s
+2026-01-31 20:23:56 [INFO] [M5] Demand collection+allocation 总用时: 6.110s
+2026-01-31 20:23:56 [INFO] [M5] push_softpush_allocation 用时: 0.124s，生成行数: 0
+2026-01-31 20:23:56 [INFO] [M5] Full day total 用时: 6.385s
+2026-01-31 20:23:56 [INFO] 🎯 有效部署计划: 102/11195 条
+2026-01-31 20:23:56 [INFO] 📦 立即处理M5 deployment，更新open deployment...
+2026-01-31 20:23:56 [INFO] ✅ Added 102 M5 deployment plans to open deployment for 2025-10-07
+2026-01-31 20:23:56 [INFO] ✅ 已更新 102 条部署计划到open deployment
+2026-01-31 20:23:56 [INFO] ✅ Module5 完成 - 生成 102 条有效部署计划
+2026-01-31 20:23:56 [INFO] 4️⃣ 运行 Module6 - 物流执行
+2026-01-31 20:23:57 [INFO] [M6-Pandas] Batch delay sampling 103 routes: 93.2ms
+2026-01-31 20:23:57 [INFO] [M6->Orch] incoming rows: 103; date=2025-10-07
+2026-01-31 20:23:57 [INFO] ✅ Processed 103 M6 delivery plans for 2025-10-07
+2026-01-31 20:23:57 [INFO] ✅ 已处理 103 条delivery计划
+2026-01-31 20:23:57 [INFO] ✅ Module6 完成 - 生成 103 条交付计划
+2026-01-31 20:23:57 [INFO] 5️⃣ 运行 Module3 - 净需求计算
+2026-01-31 20:23:57 [INFO] 🔄 Module3 运行于集成模式
+2026-01-31 20:23:57 [INFO] D:\PG/Code/chainsight\src\core\orchestrator.py:482: FutureWarning: The behavior of DataFrame concatenation with empty or all-NA entries is deprecated. In a future version, this will no longer exclude empty or all-NA columns when determining the result dtypes. To retain the old behavior, exclude the relevant entries before the concat operation.
+  out = pd.concat([today_gr, future], ignore_index=True)
+2026-01-31 20:23:57 [INFO] [M3] assign_location_layers total: 0.043s, locations=574
+2026-01-31 20:23:57 [INFO] [M3-DuckDB] 批量计算 342 节点净需求: 125.5ms, input=342, output=342
+2026-01-31 20:23:57 [INFO] [M3] batch layer 2: 342 nodes in 0.672s
+2026-01-31 20:23:58 [INFO] [M3-DuckDB] 批量计算 177 节点净需求: 114.4ms, input=177, output=177
+2026-01-31 20:23:58 [INFO] [M3] batch layer 1: 177 nodes in 0.428s
+2026-01-31 20:23:58 [INFO] [M3-DuckDB] 批量计算 55 节点净需求: 107.9ms, input=55, output=55
+2026-01-31 20:23:58 [INFO] [M3] batch layer 0: 55 nodes in 0.163s
+2026-01-31 20:23:58 [INFO] [M3] mrp_simulation: 1.409s, records=494
+2026-01-31 20:23:58 [INFO] ✅ Module3 集成模式完成
+2026-01-31 20:23:58 [INFO] [M3] total: 1.499s, days=1, records=494
+2026-01-31 20:23:58 [INFO] ✅ Module3 完成
+2026-01-31 20:23:58 [INFO] 💾 每日结束状态保存
+2026-01-31 20:23:58 [INFO] 💾已保存 2025-10-07 期末库存: 515 项
+2026-01-31 20:23:58 [INFO] 期初库存条目: 515
+2026-01-31 20:23:58 [INFO] 生产入库条目: 0
+2026-01-31 20:23:58 [INFO] 交付入库条目: 0
+2026-01-31 20:23:58 [INFO] 发货出库条目: 282
+2026-01-31 20:23:58 [INFO] 发运出库条目(M6): 103，数量合计: 3333
+2026-01-31 20:23:58 [INFO] 期末库存条目: 515
+2026-01-31 20:23:58 [INFO] 📊 从内存获取发运出库 [2025-10-07]: 13 项
+2026-01-31 20:23:58 [INFO] 📊 当日统计: {'date': '2025-10-07', 'total_inventory_items': 515, 'total_inventory_quantity': 318769, 'open_deployment_count': 63, 'in_transit_count': 103, 'production_gr_count': 0, 'delivery_gr_count': 0, 'shipment_count': 282}
+2026-01-31 20:23:58 [INFO] ✅ 第 2 天处理完成
+2026-01-31 20:23:58 [INFO] ==================== 第 3/5 天: 2025-10-08 ====================
+2026-01-31 20:23:58 [INFO] 🌅 每日开始状态更新
+2026-01-31 20:23:58 [INFO] 💾保存期初库存快照...
+2026-01-31 20:23:58 [INFO] 💾已保存 2025-10-08 期初库存: 515 项
+2026-01-31 20:23:58 [INFO] 📦处理当日delivery GR到达...
+2026-01-31 20:23:58 [INFO] 🏭处理历史生产当日入库...
+2026-01-31 20:23:58 [INFO] 📦当日需要入库的历史生产: 2 条记录
+2026-01-31 20:23:58 [INFO] ✅ Processed 2 M4 production receipts for 2025-10-08
+2026-01-31 20:23:58 [INFO] 1️⃣ 运行 Module1 - 订单生成
+2026-01-31 20:23:58 [INFO] [M1] DPS拆分完成，条目: 5943，耗时: 0.010s
+2026-01-31 20:23:58 [INFO] [M1] 周度→日度拆分完成，生成天数: 41601，耗时: 0.011s
+2026-01-31 20:23:58 [INFO] [M1] 周度→日度拆分完成，生成天数: 41601，耗时: 0.009s
+2026-01-31 20:23:58 [INFO] [M1] 平均需求计算完成，ML数: 283，耗时: 0.013s
+2026-01-31 20:23:58 [INFO] [M1] 订单生成完成 (AO耗时: 0.007s, Normal耗时: 0.012s, 总耗时: 0.033s)，订单数: 738
+2026-01-31 20:23:59 [INFO] [M1] AO消耗完成(向量化)，耗时: 0.016s
+2026-01-31 20:23:59 [INFO] [M1] Normal消耗完成(向量化)，耗时: 0.013s
+2026-01-31 20:23:59 [INFO] [M1] 当日订单生成完成，订单数: 738，耗时: 1.173s
+2026-01-31 20:23:59 [INFO] [M1] 使用内存历史订单数据，条目: 1194，耗时: 0.000s
+2026-01-31 20:24:00 [INFO] [M1] 发货与缺货计算完成，shipment: 282，cut: 282，耗时: 0.025s
+2026-01-31 20:24:00 [INFO] [M1] 供需日志生成完成，条目: 25470，耗时: 0.238s
+2026-01-31 20:24:00 [INFO] 🚚立即处理M1 shipment，扣减库存...
+2026-01-31 20:24:00 [INFO] ✅ Processed 282 M1 shipments for 2025-10-08
+2026-01-31 20:24:00 [INFO] ✅ 已扣减 282 个shipment的库存
+2026-01-31 20:24:00 [INFO] 🦆 累积历史订单更新完成，当前总条目: 1650
+2026-01-31 20:24:00 [INFO] ✅ Module1 完成 - 生成 738 个订单, 282 个发货
+2026-01-31 20:24:00 [INFO] 2️⃣ 运行 Module4 - 生产计划
+2026-01-31 20:24:00 [INFO] 🔄加载前一天产线状态: ['LGDK', 'LGDW']
+2026-01-31 20:24:00 [INFO] 🔄加载之前已分配产能: 29 个产能分配
+2026-01-31 20:24:00 [INFO] 📦M4当日未生成生产计划或缺少 available_date 列
+2026-01-31 20:24:00 [INFO] ✅ Module4 完成 - 生成生产计划: 0 条记录
+2026-01-31 20:24:00 [INFO] 3️⃣ 运行 Module5 - 部署计划
+2026-01-31 20:24:00 [INFO] [M5] load_integrated_config 用时: 0.091s
+2026-01-31 20:24:00 [INFO] ✅缓存已初始化: PTF/LSK=55 | LeadTime=15 | Network=519
+2026-01-31 20:24:00 [INFO] ✅索引已构建: SDL=283 | SS=271 | Order=282 | DeployCfg=114
+2026-01-31 20:24:07 [INFO] [M5] Demand collection only 用时: 4.488s
+2026-01-31 20:24:07 [INFO] [M5] Demand collection+allocation 总用时: 6.257s
+2026-01-31 20:24:07 [INFO] [M5] push_softpush_allocation 用时: 0.122s，生成行数: 0
+2026-01-31 20:24:07 [INFO] [M5] Full day total 用时: 6.547s
+2026-01-31 20:24:07 [INFO] 🎯 有效部署计划: 415/11826 条
+2026-01-31 20:24:07 [INFO] 📦 立即处理M5 deployment，更新open deployment...
+2026-01-31 20:24:07 [INFO] ✅ Added 415 M5 deployment plans to open deployment for 2025-10-08
+2026-01-31 20:24:07 [INFO] ✅ 已更新 415 条部署计划到open deployment
+2026-01-31 20:24:07 [INFO] ✅ Module5 完成 - 生成 415 条有效部署计划
+2026-01-31 20:24:07 [INFO] 4️⃣ 运行 Module6 - 物流执行
+2026-01-31 20:24:07 [INFO] [M6-Pandas] Batch delay sampling 52 routes: 45.3ms
+2026-01-31 20:24:07 [INFO] [M6->Orch] incoming rows: 52; date=2025-10-08
+2026-01-31 20:24:07 [INFO] ✅ Processed 52 M6 delivery plans for 2025-10-08
+2026-01-31 20:24:07 [INFO] ✅ 已处理 52 条delivery计划
+2026-01-31 20:24:07 [INFO] ✅ Module6 完成 - 生成 52 条交付计划
+2026-01-31 20:24:07 [INFO] 5️⃣ 运行 Module3 - 净需求计算
+2026-01-31 20:24:07 [INFO] 🔄 Module3 运行于集成模式
+2026-01-31 20:24:07 [INFO] [M3] assign_location_layers total: 0.043s, locations=574
+2026-01-31 20:24:08 [INFO] [M3-DuckDB] 批量计算 342 节点净需求: 132.2ms, input=342, output=342
+2026-01-31 20:24:08 [INFO] [M3] batch layer 2: 342 nodes in 0.682s
+2026-01-31 20:24:08 [INFO] [M3-DuckDB] 批量计算 177 节点净需求: 116.9ms, input=177, output=177
+2026-01-31 20:24:08 [INFO] [M3] batch layer 1: 177 nodes in 0.434s
+2026-01-31 20:24:09 [INFO] [M3-DuckDB] 批量计算 55 节点净需求: 114.1ms, input=55, output=55
+2026-01-31 20:24:09 [INFO] [M3] batch layer 0: 55 nodes in 0.172s
+2026-01-31 20:24:09 [INFO] [M3] mrp_simulation: 1.433s, records=511
+2026-01-31 20:24:09 [INFO] ✅ Module3 集成模式完成
+2026-01-31 20:24:09 [INFO] [M3] total: 1.600s, days=1, records=511
+2026-01-31 20:24:09 [INFO] ✅ Module3 完成
+2026-01-31 20:24:09 [INFO] 💾 每日结束状态保存
+2026-01-31 20:24:09 [INFO] 💾已保存 2025-10-08 期末库存: 517 项
+2026-01-31 20:24:09 [INFO] 期初库存条目: 515
+2026-01-31 20:24:09 [INFO] 生产入库条目: 2
+2026-01-31 20:24:09 [INFO] 交付入库条目: 0
+2026-01-31 20:24:09 [INFO] 发货出库条目: 282
+2026-01-31 20:24:09 [INFO] 发运出库条目(M6): 52，数量合计: 4976
+2026-01-31 20:24:09 [INFO] 期末库存条目: 517
+2026-01-31 20:24:09 [INFO] 📊 从内存获取发运出库 [2025-10-08]: 1 项
+2026-01-31 20:24:09 [INFO] 📊 当日统计: {'date': '2025-10-08', 'total_inventory_items': 517, 'total_inventory_quantity': 333018, 'open_deployment_count': 427, 'in_transit_count': 155, 'production_gr_count': 2, 'delivery_gr_count': 0, 'shipment_count': 282}
+2026-01-31 20:24:09 [INFO] ✅ 第 3 天处理完成
+2026-01-31 20:24:09 [INFO] ==================== 第 4/5 天: 2025-10-09 ====================
+2026-01-31 20:24:09 [INFO] 🌅 每日开始状态更新
+2026-01-31 20:24:09 [INFO] 💾保存期初库存快照...
+2026-01-31 20:24:09 [INFO] 💾已保存 2025-10-09 期初库存: 517 项
+2026-01-31 20:24:09 [INFO] 📦处理当日delivery GR到达...
+2026-01-31 20:24:09 [INFO] 🏭处理历史生产当日入库...
+2026-01-31 20:24:09 [INFO] 📦当日需要入库的历史生产: 2 条记录
+2026-01-31 20:24:09 [INFO] ✅ Processed 2 M4 production receipts for 2025-10-09
+2026-01-31 20:24:09 [INFO] 1️⃣ 运行 Module1 - 订单生成
+2026-01-31 20:24:09 [INFO] [M1] DPS拆分完成，条目: 5943，耗时: 0.011s
+2026-01-31 20:24:09 [INFO] [M1] 周度→日度拆分完成，生成天数: 41601，耗时: 0.010s
+2026-01-31 20:24:09 [INFO] [M1] 周度→日度拆分完成，生成天数: 41601，耗时: 0.009s
+2026-01-31 20:24:09 [INFO] [M1] 平均需求计算完成，ML数: 283，耗时: 0.013s
+2026-01-31 20:24:09 [INFO] [M1] 订单生成完成 (AO耗时: 0.006s, Normal耗时: 0.012s, 总耗时: 0.032s)，订单数: 738
+2026-01-31 20:24:10 [INFO] [M1] AO消耗完成(向量化)，耗时: 0.016s
+2026-01-31 20:24:10 [INFO] [M1] Normal消耗完成(向量化)，耗时: 0.013s
+2026-01-31 20:24:10 [INFO] [M1] 当日订单生成完成，订单数: 738，耗时: 1.189s
+2026-01-31 20:24:10 [INFO] [M1] 使用内存历史订单数据，条目: 1650，耗时: 0.000s
+2026-01-31 20:24:10 [INFO] [M1] 发货与缺货计算完成，shipment: 282，cut: 282，耗时: 0.023s
+2026-01-31 20:24:11 [INFO] [M1] 供需日志生成完成，条目: 25470，耗时: 0.234s
+2026-01-31 20:24:11 [INFO] 🚚立即处理M1 shipment，扣减库存...
+2026-01-31 20:24:11 [INFO] ✅ Processed 282 M1 shipments for 2025-10-09
+2026-01-31 20:24:11 [INFO] ✅ 已扣减 282 个shipment的库存
+2026-01-31 20:24:11 [INFO] 🦆 累积历史订单更新完成，当前总条目: 2106
+2026-01-31 20:24:11 [INFO] ✅ Module1 完成 - 生成 738 个订单, 282 个发货
+2026-01-31 20:24:11 [INFO] 2️⃣ 运行 Module4 - 生产计划
+2026-01-31 20:24:11 [INFO] 🔄无前一天产线状态 - 全新开始
+2026-01-31 20:24:11 [INFO] 🔄加载之前已分配产能: 29 个产能分配
+2026-01-31 20:24:11 [INFO] 📦M4当日未生成生产计划或缺少 available_date 列
+2026-01-31 20:24:11 [INFO] ✅ Module4 完成 - 生成生产计划: 0 条记录
+2026-01-31 20:24:11 [INFO] 3️⃣ 运行 Module5 - 部署计划
+2026-01-31 20:24:11 [INFO] [M5] load_integrated_config 用时: 0.173s
+2026-01-31 20:24:11 [INFO] ✅缓存已初始化: PTF/LSK=55 | LeadTime=15 | Network=519
+2026-01-31 20:24:11 [INFO] ✅索引已构建: SDL=283 | SS=271 | Order=282 | DeployCfg=114
+2026-01-31 20:24:18 [INFO] [M5] Demand collection only 用时: 4.594s
+2026-01-31 20:24:18 [INFO] [M5] Demand collection+allocation 总用时: 6.396s
+2026-01-31 20:24:18 [INFO] [M5] push_softpush_allocation 用时: 0.131s，生成行数: 0
+2026-01-31 20:24:18 [INFO] [M5] Full day total 用时: 6.700s
+2026-01-31 20:24:18 [INFO] 🎯 有效部署计划: 431/12425 条
+2026-01-31 20:24:18 [INFO] 📦 立即处理M5 deployment，更新open deployment...
+2026-01-31 20:24:18 [INFO] ✅ Added 431 M5 deployment plans to open deployment for 2025-10-09
+2026-01-31 20:24:18 [INFO] ✅ 已更新 431 条部署计划到open deployment
+2026-01-31 20:24:18 [INFO] ✅ Module5 完成 - 生成 431 条有效部署计划
+2026-01-31 20:24:18 [INFO] 4️⃣ 运行 Module6 - 物流执行
+2026-01-31 20:24:18 [INFO] [M6-Pandas] Batch delay sampling 76 routes: 65.0ms
+2026-01-31 20:24:18 [INFO] [M6-Pandas] Batch delay sampling 56 routes: 49.4ms
+2026-01-31 20:24:18 [INFO] [M6-Pandas] Batch delay sampling 30 routes: 66.7ms
+2026-01-31 20:24:18 [INFO] [M6-Pandas] Batch delay sampling 78 routes: 67.5ms
+2026-01-31 20:24:18 [INFO] [M6-Pandas] Batch delay sampling 13 routes: 12.1ms
+2026-01-31 20:24:19 [INFO] [M6-Pandas] Batch delay sampling 50 routes: 43.1ms
+2026-01-31 20:24:19 [INFO] [M6-Pandas] Batch delay sampling 88 routes: 78.6ms
+2026-01-31 20:24:19 [INFO] [M6->Orch] incoming rows: 391; date=2025-10-09
+2026-01-31 20:24:19 [INFO] ✅ Processed 391 M6 delivery plans for 2025-10-09
+2026-01-31 20:24:19 [INFO] ✅ 已处理 391 条delivery计划
+2026-01-31 20:24:19 [INFO] ✅ Module6 完成 - 生成 391 条交付计划
+2026-01-31 20:24:19 [INFO] 5️⃣ 运行 Module3 - 净需求计算
+2026-01-31 20:24:19 [INFO] 🔄 Module3 运行于集成模式
+2026-01-31 20:24:19 [INFO] [M3] assign_location_layers total: 0.042s, locations=574
+2026-01-31 20:24:20 [INFO] [M3-DuckDB] 批量计算 342 节点净需求: 128.1ms, input=342, output=342
+2026-01-31 20:24:20 [INFO] [M3] batch layer 2: 342 nodes in 0.677s
+2026-01-31 20:24:20 [INFO] [M3-DuckDB] 批量计算 177 节点净需求: 117.9ms, input=177, output=177
+2026-01-31 20:24:20 [INFO] [M3] batch layer 1: 177 nodes in 0.434s
+2026-01-31 20:24:20 [INFO] [M3-DuckDB] 批量计算 55 节点净需求: 108.3ms, input=55, output=55
+2026-01-31 20:24:20 [INFO] [M3] batch layer 0: 55 nodes in 0.165s
+2026-01-31 20:24:20 [INFO] [M3] mrp_simulation: 1.377s, records=517
+2026-01-31 20:24:20 [INFO] ✅ Module3 集成模式完成
+2026-01-31 20:24:20 [INFO] [M3] total: 1.552s, days=1, records=517
+2026-01-31 20:24:20 [INFO] ✅ Module3 完成
+2026-01-31 20:24:20 [INFO] 💾 每日结束状态保存
+2026-01-31 20:24:20 [INFO] 💾已保存 2025-10-09 期末库存: 517 项
+2026-01-31 20:24:20 [INFO] 期初库存条目: 517
+2026-01-31 20:24:20 [INFO] 生产入库条目: 2
+2026-01-31 20:24:20 [INFO] 交付入库条目: 0
+2026-01-31 20:24:20 [INFO] 发货出库条目: 282
+2026-01-31 20:24:20 [INFO] 发运出库条目(M6): 391，数量合计: 36384
+2026-01-31 20:24:20 [INFO] 期末库存条目: 517
+2026-01-31 20:24:20 [INFO] 📊 从内存获取发运出库 [2025-10-09]: 2 项
+2026-01-31 20:24:20 [INFO] 📊 当日统计: {'date': '2025-10-09', 'total_inventory_items': 517, 'total_inventory_quantity': 316345, 'open_deployment_count': 473, 'in_transit_count': 546, 'production_gr_count': 2, 'delivery_gr_count': 0, 'shipment_count': 282}
+2026-01-31 20:24:20 [INFO] ✅ 第 4 天处理完成
+2026-01-31 20:24:20 [INFO] ==================== 第 5/5 天: 2025-10-10 ====================
+2026-01-31 20:24:20 [INFO] 🌅 每日开始状态更新
+2026-01-31 20:24:20 [INFO] 💾保存期初库存快照...
+2026-01-31 20:24:20 [INFO] 💾已保存 2025-10-10 期初库存: 517 项
+2026-01-31 20:24:21 [INFO] 📦处理当日delivery GR到达...
+2026-01-31 20:24:21 [INFO] ✅ Processed 94 delivery arrivals for 2025-10-10
+2026-01-31 20:24:21 [INFO] 🏭处理历史生产当日入库...
+2026-01-31 20:24:21 [INFO] 📦当日需要入库的历史生产: 3 条记录
+2026-01-31 20:24:21 [INFO] ✅ Processed 3 M4 production receipts for 2025-10-10
+2026-01-31 20:24:21 [INFO] 1️⃣ 运行 Module1 - 订单生成
+2026-01-31 20:24:21 [INFO] [M1] DPS拆分完成，条目: 5943，耗时: 0.011s
+2026-01-31 20:24:21 [INFO] [M1] 周度→日度拆分完成，生成天数: 41601，耗时: 0.010s
+2026-01-31 20:24:21 [INFO] [M1] 周度→日度拆分完成，生成天数: 41601，耗时: 0.008s
+2026-01-31 20:24:21 [INFO] [M1] 平均需求计算完成，ML数: 283，耗时: 0.013s
+2026-01-31 20:24:21 [INFO] [M1] 订单生成完成 (AO耗时: 0.007s, Normal耗时: 0.014s, 总耗时: 0.034s)，订单数: 738
+2026-01-31 20:24:22 [INFO] [M1] AO消耗完成(向量化)，耗时: 0.017s
+2026-01-31 20:24:22 [INFO] [M1] Normal消耗完成(向量化)，耗时: 0.013s
+2026-01-31 20:24:22 [INFO] [M1] 当日订单生成完成，订单数: 738，耗时: 1.248s
+2026-01-31 20:24:22 [INFO] [M1] 使用内存历史订单数据，条目: 2106，耗时: 0.000s
+2026-01-31 20:24:22 [INFO] [M1] 发货与缺货计算完成，shipment: 282，cut: 282，耗时: 0.026s
+2026-01-31 20:24:22 [INFO] [M1] 供需日志生成完成，条目: 25470，耗时: 0.201s
+2026-01-31 20:24:22 [INFO] 🚚立即处理M1 shipment，扣减库存...
+2026-01-31 20:24:22 [INFO] ✅ Processed 282 M1 shipments for 2025-10-10
+2026-01-31 20:24:22 [INFO] ✅ 已扣减 282 个shipment的库存
+2026-01-31 20:24:22 [INFO] 🦆 累积历史订单更新完成，当前总条目: 2562
+2026-01-31 20:24:22 [INFO] ✅ Module1 完成 - 生成 738 个订单, 282 个发货
+2026-01-31 20:24:22 [INFO] 2️⃣ 运行 Module4 - 生产计划
+2026-01-31 20:24:22 [INFO] 🔄无前一天产线状态 - 全新开始
+2026-01-31 20:24:22 [INFO] 🔄加载之前已分配产能: 29 个产能分配
+2026-01-31 20:24:22 [INFO] 📦M4当日未生成生产计划或缺少 available_date 列
+2026-01-31 20:24:22 [INFO] ✅ Module4 完成 - 生成生产计划: 0 条记录
+2026-01-31 20:24:22 [INFO] 3️⃣ 运行 Module5 - 部署计划
+2026-01-31 20:24:22 [INFO] [M5] load_integrated_config 用时: 0.188s
+2026-01-31 20:24:23 [INFO] ✅缓存已初始化: PTF/LSK=55 | LeadTime=15 | Network=519
+2026-01-31 20:24:23 [INFO] ✅索引已构建: SDL=283 | SS=271 | Order=282 | DeployCfg=114
+2026-01-31 20:24:29 [INFO] [M5] Demand collection only 用时: 4.671s
+2026-01-31 20:24:29 [INFO] [M5] Demand collection+allocation 总用时: 6.446s
+2026-01-31 20:24:29 [INFO] [M5] push_softpush_allocation 用时: 0.139s，生成行数: 0
+2026-01-31 20:24:30 [INFO] [M5] Full day total 用时: 6.768s
+2026-01-31 20:24:30 [INFO] 🎯 有效部署计划: 477/12962 条
+2026-01-31 20:24:30 [INFO] 📦 立即处理M5 deployment，更新open deployment...
+2026-01-31 20:24:30 [INFO] ✅ Added 477 M5 deployment plans to open deployment for 2025-10-10
+2026-01-31 20:24:30 [INFO] ✅ 已更新 477 条部署计划到open deployment
+2026-01-31 20:24:30 [INFO] ✅ Module5 完成 - 生成 477 条有效部署计划
+2026-01-31 20:24:30 [INFO] 4️⃣ 运行 Module6 - 物流执行
+2026-01-31 20:24:30 [INFO] [M6-Pandas] Batch delay sampling 22 routes: 19.4ms
+2026-01-31 20:24:30 [INFO] [M6-Pandas] Batch delay sampling 69 routes: 59.0ms
+2026-01-31 20:24:30 [INFO] [M6->Orch] incoming rows: 91; date=2025-10-10
+2026-01-31 20:24:30 [INFO] ✅ Processed 91 M6 delivery plans for 2025-10-10
+2026-01-31 20:24:30 [INFO] ✅ 已处理 91 条delivery计划
+2026-01-31 20:24:30 [INFO] ✅ Module6 完成 - 生成 91 条交付计划
+2026-01-31 20:24:30 [INFO] 5️⃣ 运行 Module3 - 净需求计算
+2026-01-31 20:24:30 [INFO] 🔄 Module3 运行于集成模式
+2026-01-31 20:24:30 [INFO] [M3] assign_location_layers total: 0.043s, locations=574
+2026-01-31 20:24:31 [INFO] [M3-DuckDB] 批量计算 342 节点净需求: 124.3ms, input=342, output=342
+2026-01-31 20:24:31 [INFO] [M3] batch layer 2: 342 nodes in 0.676s
+2026-01-31 20:24:32 [INFO] [M3-DuckDB] 批量计算 177 节点净需求: 114.1ms, input=177, output=177
+2026-01-31 20:24:32 [INFO] [M3] batch layer 1: 177 nodes in 0.426s
+2026-01-31 20:24:32 [INFO] [M3-DuckDB] 批量计算 55 节点净需求: 110.2ms, input=55, output=55
+2026-01-31 20:24:32 [INFO] [M3] batch layer 0: 55 nodes in 0.168s
+2026-01-31 20:24:32 [INFO] [M3] mrp_simulation: 1.418s, records=534
+2026-01-31 20:24:32 [INFO] ✅ Module3 集成模式完成
+2026-01-31 20:24:32 [INFO] [M3] total: 1.703s, days=1, records=534
+2026-01-31 20:24:32 [INFO] ✅ Module3 完成
+2026-01-31 20:24:32 [INFO] 💾 每日结束状态保存
+2026-01-31 20:24:32 [INFO] 💾已保存 2025-10-10 期末库存: 519 项
+2026-01-31 20:24:32 [INFO] 期初库存条目: 517
+2026-01-31 20:24:32 [INFO] 生产入库条目: 3
+2026-01-31 20:24:32 [INFO] 交付入库条目: 94
+2026-01-31 20:24:32 [INFO] 发货出库条目: 282
+2026-01-31 20:24:32 [INFO] 发运出库条目(M6): 91，数量合计: 9046
+2026-01-31 20:24:32 [INFO] 期末库存条目: 519
+2026-01-31 20:24:32 [INFO] 📊 从内存获取发运出库 [2025-10-10]: 4 项
+2026-01-31 20:24:32 [INFO] 📊 当日统计: {'date': '2025-10-10', 'total_inventory_items': 519, 'total_inventory_quantity': 319539, 'open_deployment_count': 861, 'in_transit_count': 543, 'production_gr_count': 3, 'delivery_gr_count': 94, 'shipment_count': 282}
+2026-01-31 20:24:32 [INFO] ✅ 第 5 天处理完成
+2026-01-31 20:24:32 [INFO] 📊 正在生成汇总报告...
+2026-01-31 20:24:32 [INFO] 📊 开始生成汇总报告 (2025-10-06 到 2025-10-10)
+2026-01-31 20:24:32 [INFO] 📊 历史库存记录已生成: C:\Users\25936\AppData\Local\Temp\tmp00cpid_3\output\summary\historical_inventory_record.csv (2840 条记录)
+2026-01-31 20:24:32 [INFO] ✅ 汇总报告生成完成（将写入数据库）
+2026-01-31 20:24:32 [INFO] ✅ 汇总报告生成完成，输出目录: C:\Users\25936\AppData\Local\Temp\tmp00cpid_3\output\summary
+2026-01-31 20:24:32 [INFO] 🎯 最终Orchestrator状态:
+2026-01-31 20:24:32 [INFO] date: 2025-10-10
+2026-01-31 20:24:32 [INFO] total_inventory_items: 519
+2026-01-31 20:24:32 [INFO] total_inventory_quantity: 319539
+2026-01-31 20:24:32 [INFO] open_deployment_count: 861
+2026-01-31 20:24:32 [INFO] in_transit_count: 543
+2026-01-31 20:24:32 [INFO] production_gr_count: 3
+2026-01-31 20:24:32 [INFO] delivery_gr_count: 94
+2026-01-31 20:24:32 [INFO] shipment_count: 282
+2026-01-31 20:24:32 [INFO] 🎉 集成仿真完成!
+2026-01-31 20:24:32 [INFO] 总共处理: 5 天
+2026-01-31 20:24:32 [INFO] ============================================================
+2026-01-31 20:24:32 [INFO] 🦆 DuckDB内存模式统计
+2026-01-31 20:24:32 [INFO] ============================================================
+2026-01-31 20:24:32 [INFO] 📊 DuckDB内存存储统计:
+2026-01-31 20:24:32 [INFO] 状态: ✅ 启用
+2026-01-31 20:24:32 [INFO] 表数量: 5
+2026-01-31 20:24:32 [INFO] 写入次数: 5 (2615 行)
+2026-01-31 20:24:32 [INFO] 读取次数: 0 (0 行)
+2026-01-31 20:24:32 [INFO] 平均写入耗时: 5.37ms
+2026-01-31 20:24:32 [INFO] 平均读取耗时: 0.00ms
+2026-01-31 20:24:32 [INFO] 🔒 DuckDB内存模式已禁用
+2026-01-31 20:24:32 [INFO] 🦆 DuckDB内存模式已禁用
+2026-01-31 20:24:32 [INFO] ============================================================
+2026-01-31 20:24:32 [INFO] 🕐 程序时间统计
+2026-01-31 20:24:32 [INFO] ============================================================
+2026-01-31 20:24:32 [INFO] 📅 开始时间: 2026-01-31 20:23:38
+2026-01-31 20:24:32 [INFO] 📅 结束时间: 2026-01-31 20:24:32
+2026-01-31 20:24:32 [INFO] ⏱️  总运行时间: 54.52秒
+2026-01-31 20:24:32 [INFO] 📊 平均每天耗时: 10.90秒
+2026-01-31 20:24:32 [INFO] ============================================================
+2026-01-31 20:24:32 [INFO] ============================================================
+2026-01-31 20:24:32 [INFO] 📊 DuckDB优化性能报告
+2026-01-31 20:24:32 [INFO] ============================================================
+2026-01-31 20:24:32 [INFO] 优化状态: 已启用
+2026-01-31 20:24:32 [INFO] 总计算次数: 0
+2026-01-31 20:24:32 [INFO] 初始化时间: 0.00秒
+2026-01-31 20:24:32 [INFO] 模块计算时间:
+2026-01-31 20:24:32 [INFO] 数据处理统计:
+2026-01-31 20:24:32 [INFO] 查询执行次数: 0
+2026-01-31 20:24:32 [INFO] 缓存命中率: 0.0%
+2026-01-31 20:24:32 [INFO] 处理行数: 0
+2026-01-31 20:24:32 [INFO] 总查询时间: 0.00秒
+2026-01-31 20:24:32 [INFO] ============================================================
+2026-01-31 20:24:32 [INFO] 
+============================================================
+2026-01-31 20:24:32 [INFO] 📤 步骤3: 写入输出到数据库（完整模式）
+2026-01-31 20:24:32 [INFO] ============================================================
+2026-01-31 20:24:32 [INFO] ============================================================
+2026-01-31 20:24:32 [INFO] 🔍 DEBUG: 检查 all_results 结构
+2026-01-31 20:24:32 [INFO] ============================================================
+2026-01-31 20:24:32 [INFO] all_results 类型: <class 'dict'>
+2026-01-31 20:24:32 [INFO] all_results 键: ['module1', 'module3', 'module4', 'module5', 'module6']
+2026-01-31 20:24:32 [INFO]   module1: 5 天的结果
+2026-01-31 20:24:32 [INFO]     第一天的键: ['orders_df', 'shipment_df', 'cut_df', 'supply_demand_df', 'summary_df', 'output_file', 'all_orders_for_next_day', 'simulation_date']
+2026-01-31 20:24:32 [INFO]       orders_df: DataFrame shape=(738, 7)
+2026-01-31 20:24:32 [INFO]       shipment_df: DataFrame shape=(282, 6)
+2026-01-31 20:24:32 [INFO]       cut_df: DataFrame shape=(282, 4)
+2026-01-31 20:24:32 [INFO]       supply_demand_df: DataFrame shape=(25470, 5)
+2026-01-31 20:24:32 [INFO]       summary_df: DataFrame shape=(1, 5)
+2026-01-31 20:24:32 [INFO]       output_file: type=NoneType
+2026-01-31 20:24:32 [INFO]       all_orders_for_next_day: DataFrame shape=(738, 7)
+2026-01-31 20:24:32 [INFO]       simulation_date: type=Timestamp
+2026-01-31 20:24:32 [INFO]   module3: 5 天的结果
+2026-01-31 20:24:32 [INFO]     第一天的键: ['net_demand_df', 'net_demand_count', 'processed_dates', 'output_files', 'simulation_date']
+2026-01-31 20:24:32 [INFO]       net_demand_df: DataFrame shape=(559, 8)
+2026-01-31 20:24:32 [INFO]       net_demand_count: type=int
+2026-01-31 20:24:32 [INFO]       processed_dates: type=int
+2026-01-31 20:24:32 [INFO]       output_files: type=list, len=1
+2026-01-31 20:24:32 [INFO]       simulation_date: type=Timestamp
+2026-01-31 20:24:32 [INFO]   module4: 5 天的结果
+2026-01-31 20:24:32 [INFO]     第一天的键: ['production_df', 'exceed_log', 'issues_df', 'changeover_log', 'simulation_date']
+2026-01-31 20:24:32 [INFO]       production_df: DataFrame shape=(0, 0)
+2026-01-31 20:24:32 [INFO]       exceed_log: DataFrame shape=(0, 0)
+2026-01-31 20:24:32 [INFO]       issues_df: DataFrame shape=(0, 0)
+2026-01-31 20:24:32 [INFO]       changeover_log: DataFrame shape=(0, 8)
+2026-01-31 20:24:32 [INFO]       simulation_date: type=Timestamp
+2026-01-31 20:24:32 [INFO]   module5: 5 天的结果
+2026-01-31 20:24:32 [INFO]     第一天的键: ['deployment_plan', 'unfulfilled_log', 'stock_on_hand_log', 'validation_log', 'statistics', 'simulation_date']
+2026-01-31 20:24:32 [INFO]       deployment_plan: DataFrame shape=(10636, 18)
+2026-01-31 20:24:32 [INFO]       unfulfilled_log: DataFrame shape=(9128, 7)
+2026-01-31 20:24:32 [INFO]       stock_on_hand_log: DataFrame shape=(833, 10)
+2026-01-31 20:24:32 [INFO]       validation_log: DataFrame shape=(464, 2)
+2026-01-31 20:24:32 [INFO]       statistics: type=dict, len=3
+2026-01-31 20:24:32 [INFO]       simulation_date: type=Timestamp
+2026-01-31 20:24:32 [INFO]   module6: 5 天的结果
+2026-01-31 20:24:32 [INFO]     第一天的键: ['daily_output_file', 'delivery_plan', 'vehicle_log', 'truck_usage', 'unsatisfied_log', 'validation_log', 'bypass_log', 'statistics', 'simulation_date']
+2026-01-31 20:24:32 [INFO]       daily_output_file: type=str, len=88
+2026-01-31 20:24:32 [INFO]       delivery_plan: DataFrame shape=(0, 0)
+2026-01-31 20:24:32 [INFO]       vehicle_log: DataFrame shape=(0, 12)
+2026-01-31 20:24:32 [INFO]       truck_usage: DataFrame shape=(0, 5)
+2026-01-31 20:24:32 [INFO]       unsatisfied_log: DataFrame shape=(0, 0)
+2026-01-31 20:24:32 [INFO]       validation_log: DataFrame shape=(1, 3)
+2026-01-31 20:24:32 [INFO]       bypass_log: DataFrame shape=(0, 0)
+2026-01-31 20:24:32 [INFO]       statistics: type=dict, len=4
+2026-01-31 20:24:32 [INFO]       simulation_date: type=Timestamp
+2026-01-31 20:24:32 [INFO] ============================================================
+2026-01-31 20:24:32 [INFO] 📤 从内存直接写入模块输出到数据库...
+2026-01-31 20:24:32 [INFO] ============================================================
+2026-01-31 20:24:32 [INFO] 🗑️  清空数据库输出表
+2026-01-31 20:24:32 [INFO] ============================================================
+2026-01-31 20:24:32 [INFO] ✓ 已清空: module1_output_orderlog
+2026-01-31 20:24:32 [INFO] ✓ 已清空: module1_output_shipmentlog
+2026-01-31 20:24:32 [INFO] ✓ 已清空: module1_output_cutlog
+2026-01-31 20:24:32 [INFO] ✓ 已清空: module1_output_supplydemandlog
+2026-01-31 20:24:32 [INFO] ✓ 已清空: module1_output_summary
+2026-01-31 20:24:32 [INFO] ✓ 已清空: module3_output_netdemand
+2026-01-31 20:24:32 [INFO] ✓ 已清空: module4_output_productionplan
+2026-01-31 20:24:32 [INFO] ✓ 已清空: module4_output_capacityexceed
+2026-01-31 20:24:32 [INFO] ✓ 已清空: module4_output_validation
+2026-01-31 20:24:32 [INFO] ✓ 已清空: module4_output_changeoverlog
+2026-01-31 20:24:32 [INFO] ✓ 已清空: module5_output_deploymentplan
+2026-01-31 20:24:32 [INFO] ✓ 已清空: module5_output_unfulfilledlog
+2026-01-31 20:24:32 [INFO] ✓ 已清空: module5_output_stockonhandlog
+2026-01-31 20:24:32 [INFO] ✓ 已清空: module5_output_validation
+2026-01-31 20:24:32 [INFO] ✓ 已清空: module6_output_deliveryplan
+2026-01-31 20:24:32 [INFO] ✓ 已清空: module6_output_vehiclelog
+2026-01-31 20:24:32 [INFO] ✓ 已清空: module6_output_truckusagelog
+2026-01-31 20:24:32 [INFO] ✓ 已清空: module6_output_unsatisfiedmdqlog
+2026-01-31 20:24:32 [INFO] ✓ 已清空: module6_output_validationlog
+2026-01-31 20:24:32 [INFO] ✓ 已清空: module6_output_bypassrulehitlog
+2026-01-31 20:24:32 [INFO] ✓ 已清空: summary_output_ordershipmentcutsummary
+2026-01-31 20:24:32 [INFO] ✓ 已清空: summary_output_fullchangeoverlog
+2026-01-31 20:24:32 [INFO] ✓ 已清空: summary_output_fullcapacityexceed
+2026-01-31 20:24:32 [INFO] ✓ 已清空: summary_output_fullproductionplan
+2026-01-31 20:24:32 [INFO] ✓ 已清空: summary_output_fulldeploymentplan
+2026-01-31 20:24:32 [INFO] ✓ 已清空: summary_output_fulldeliveryplan
+2026-01-31 20:24:32 [INFO] ✓ 已清空: summary_output_fulltruckusage
+2026-01-31 20:24:32 [INFO] ✓ 已清空: orchestrator_unrestricted_inventory
+2026-01-31 20:24:32 [INFO] ✓ 已清空: orchestrator_open_deployment
+2026-01-31 20:24:32 [INFO] ✓ 已清空: orchestrator_open_deployment_pastdue_cleanup
+2026-01-31 20:24:32 [INFO] ✓ 已清空: orchestrator_planning_intransit
+2026-01-31 20:24:32 [INFO] ✓ 已清空: orchestrator_space_quota
+2026-01-31 20:24:32 [INFO] ✓ 已清空: orchestrator_delivery_gr
+2026-01-31 20:24:32 [INFO] ✓ 已清空: orchestrator_production_gr
+2026-01-31 20:24:32 [INFO] ✓ 已清空: orchestrator_production_plan_backlog
+2026-01-31 20:24:32 [INFO] ✓ 已清空: orchestrator_shipment_log
+2026-01-31 20:24:32 [INFO] ✓ 已清空: orchestrator_delivery_shipment_log
+2026-01-31 20:24:32 [INFO] ✓ 已清空: orchestrator_inventory_change_log
+2026-01-31 20:24:32 [INFO] ✓ 已清空: orchestrator_daily_logs
+2026-01-31 20:24:32 [INFO] ✅ 共清空 39 个表
+2026-01-31 20:24:32 [INFO] ============================================================
+2026-01-31 20:24:32 [INFO] 📤 从内存写入模块输出到数据库
+2026-01-31 20:24:32 [INFO] 运行ID: BC_S5_20260131_202336
+2026-01-31 20:24:32 [INFO] ============================================================
+2026-01-31 20:24:32 [INFO] 🔍 DEBUG: module1 结果检查:
+2026-01-31 20:24:32 [INFO] module_results 类型: <class 'list'>
+2026-01-31 20:24:32 [INFO] module_results 长度: 5
+2026-01-31 20:24:32 [INFO] 第一天结果的键: ['orders_df', 'shipment_df', 'cut_df', 'supply_demand_df', 'summary_df', 'output_file', 'all_orders_for_next_day', 'simulation_date']
+2026-01-31 20:24:32 [INFO] 期望的键 (df_mapping): ['all_orders_for_next_day', 'shipment_df', 'cut_df', 'supply_demand_df', 'summary_df']
+2026-01-31 20:24:32 [INFO] 匹配的键: {'cut_df', 'all_orders_for_next_day', 'summary_df', 'shipment_df', 'supply_demand_df'}
+2026-01-31 20:24:32 [INFO] 额外的键: {'output_file', 'simulation_date', 'orders_df'}
+2026-01-31 20:24:32 [INFO] 📁 写入 module1 输出...
+2026-01-31 20:24:32 [INFO] ✓ all_orders_for_next_day -> module1_output_orderlog: DataFrame shape=(738, 7)
+2026-01-31 20:24:32 [INFO] ✓ shipment_df -> module1_output_shipmentlog: DataFrame shape=(282, 6)
+2026-01-31 20:24:32 [INFO] ✓ cut_df -> module1_output_cutlog: DataFrame shape=(282, 4)
+2026-01-31 20:24:32 [INFO] ✓ supply_demand_df -> module1_output_supplydemandlog: DataFrame shape=(25470, 5)
+2026-01-31 20:24:32 [INFO] ✓ summary_df -> module1_output_summary: DataFrame shape=(1, 5)
+2026-01-31 20:24:32 [INFO] ✓ all_orders_for_next_day -> module1_output_orderlog: DataFrame shape=(1194, 7)
+2026-01-31 20:24:32 [INFO] ✓ shipment_df -> module1_output_shipmentlog: DataFrame shape=(282, 6)
+2026-01-31 20:24:32 [INFO] ✓ cut_df -> module1_output_cutlog: DataFrame shape=(282, 4)
+2026-01-31 20:24:32 [INFO] ✓ supply_demand_df -> module1_output_supplydemandlog: DataFrame shape=(25470, 5)
+2026-01-31 20:24:32 [INFO] ✓ summary_df -> module1_output_summary: DataFrame shape=(1, 5)
+2026-01-31 20:24:32 [INFO] ✓ all_orders_for_next_day -> module1_output_orderlog: DataFrame shape=(1650, 7)
+2026-01-31 20:24:32 [INFO] ✓ shipment_df -> module1_output_shipmentlog: DataFrame shape=(282, 6)
+2026-01-31 20:24:32 [INFO] ✓ cut_df -> module1_output_cutlog: DataFrame shape=(282, 4)
+2026-01-31 20:24:32 [INFO] ✓ supply_demand_df -> module1_output_supplydemandlog: DataFrame shape=(25470, 5)
+2026-01-31 20:24:32 [INFO] ✓ summary_df -> module1_output_summary: DataFrame shape=(1, 5)
+2026-01-31 20:24:32 [INFO] ✓ all_orders_for_next_day -> module1_output_orderlog: DataFrame shape=(2106, 7)
+2026-01-31 20:24:32 [INFO] ✓ shipment_df -> module1_output_shipmentlog: DataFrame shape=(282, 6)
+2026-01-31 20:24:32 [INFO] ✓ cut_df -> module1_output_cutlog: DataFrame shape=(282, 4)
+2026-01-31 20:24:32 [INFO] ✓ supply_demand_df -> module1_output_supplydemandlog: DataFrame shape=(25470, 5)
+2026-01-31 20:24:32 [INFO] ✓ summary_df -> module1_output_summary: DataFrame shape=(1, 5)
+2026-01-31 20:24:32 [INFO] ✓ all_orders_for_next_day -> module1_output_orderlog: DataFrame shape=(2562, 7)
+2026-01-31 20:24:32 [INFO] ✓ shipment_df -> module1_output_shipmentlog: DataFrame shape=(282, 6)
+2026-01-31 20:24:32 [INFO] ✓ cut_df -> module1_output_cutlog: DataFrame shape=(282, 4)
+2026-01-31 20:24:32 [INFO] ✓ supply_demand_df -> module1_output_supplydemandlog: DataFrame shape=(25470, 5)
+2026-01-31 20:24:32 [INFO] ✓ summary_df -> module1_output_summary: DataFrame shape=(1, 5)
+2026-01-31 20:24:32 [INFO] ✅追加数据到表: module1_output_orderlog (+8250 行)
+2026-01-31 20:24:33 [INFO] ✅追加数据到表: module1_output_shipmentlog (+1410 行)
+2026-01-31 20:24:33 [INFO] ✅追加数据到表: module1_output_cutlog (+1410 行)
+2026-01-31 20:24:33 [INFO] ✅追加数据到表: module1_output_supplydemandlog (+127350 行)
+2026-01-31 20:24:34 [INFO] 📊 写入完成: 127350 行数据
+2026-01-31 20:24:34 [INFO] ⚡ 性能优化：单次事务提交
+2026-01-31 20:24:34 [INFO] ✅追加数据到表: module1_output_summary (+5 行)
+2026-01-31 20:24:34 [INFO] 🔍 DEBUG: module3 结果检查:
+2026-01-31 20:24:34 [INFO] module_results 类型: <class 'list'>
+2026-01-31 20:24:34 [INFO] module_results 长度: 5
+2026-01-31 20:24:34 [INFO] 第一天结果的键: ['net_demand_df', 'net_demand_count', 'processed_dates', 'output_files', 'simulation_date']
+2026-01-31 20:24:34 [INFO] 期望的键 (df_mapping): ['net_demand_df']
+2026-01-31 20:24:34 [INFO] 匹配的键: {'net_demand_df'}
+2026-01-31 20:24:34 [INFO] 额外的键: {'net_demand_count', 'simulation_date', 'output_files', 'processed_dates'}
+2026-01-31 20:24:34 [INFO] 📁 写入 module3 输出...
+2026-01-31 20:24:34 [INFO] ✓ net_demand_df -> module3_output_netdemand: DataFrame shape=(559, 8)
+2026-01-31 20:24:34 [INFO] ✓ net_demand_df -> module3_output_netdemand: DataFrame shape=(494, 8)
+2026-01-31 20:24:34 [INFO] ✓ net_demand_df -> module3_output_netdemand: DataFrame shape=(511, 8)
+2026-01-31 20:24:34 [INFO] ✓ net_demand_df -> module3_output_netdemand: DataFrame shape=(517, 8)
+2026-01-31 20:24:34 [INFO] ✓ net_demand_df -> module3_output_netdemand: DataFrame shape=(534, 8)
+2026-01-31 20:24:34 [INFO] ✅追加数据到表: module3_output_netdemand (+2615 行)
+2026-01-31 20:24:34 [INFO] 🔍 DEBUG: module4 结果检查:
+2026-01-31 20:24:34 [INFO] module_results 类型: <class 'list'>
+2026-01-31 20:24:34 [INFO] module_results 长度: 5
+2026-01-31 20:24:34 [INFO] 第一天结果的键: ['production_df', 'exceed_log', 'issues_df', 'changeover_log', 'simulation_date']
+2026-01-31 20:24:34 [INFO] 期望的键 (df_mapping): ['production_df', 'exceed_log', 'issues_df', 'changeover_log']
+2026-01-31 20:24:34 [INFO] 匹配的键: {'issues_df', 'production_df', 'changeover_log', 'exceed_log'}
+2026-01-31 20:24:34 [INFO] 额外的键: {'simulation_date'}
+2026-01-31 20:24:34 [INFO] 📁 写入 module4 输出...
+2026-01-31 20:24:34 [INFO] ✓ production_df -> module4_output_productionplan: DataFrame shape=(0, 0)
+2026-01-31 20:24:34 [INFO] ✓ exceed_log -> module4_output_capacityexceed: DataFrame shape=(0, 0)
+2026-01-31 20:24:34 [INFO] ✓ issues_df -> module4_output_validation: DataFrame shape=(0, 0)
+2026-01-31 20:24:34 [INFO] ✓ changeover_log -> module4_output_changeoverlog: DataFrame shape=(0, 8)
+2026-01-31 20:24:34 [INFO] ✓ production_df -> module4_output_productionplan: DataFrame shape=(64, 10)
+2026-01-31 20:24:34 [INFO] ✓ exceed_log -> module4_output_capacityexceed: DataFrame shape=(15, 6)
+2026-01-31 20:24:34 [INFO] ✓ issues_df -> module4_output_validation: DataFrame shape=(0, 0)
+2026-01-31 20:24:34 [INFO] ✓ changeover_log -> module4_output_changeoverlog: DataFrame shape=(26, 8)
+2026-01-31 20:24:34 [INFO] ✓ production_df -> module4_output_productionplan: DataFrame shape=(0, 0)
+2026-01-31 20:24:34 [INFO] ✓ exceed_log -> module4_output_capacityexceed: DataFrame shape=(0, 0)
+2026-01-31 20:24:34 [INFO] ✓ issues_df -> module4_output_validation: DataFrame shape=(0, 0)
+2026-01-31 20:24:34 [INFO] ✓ changeover_log -> module4_output_changeoverlog: DataFrame shape=(0, 8)
+2026-01-31 20:24:34 [INFO] ✓ production_df -> module4_output_productionplan: DataFrame shape=(0, 0)
+2026-01-31 20:24:34 [INFO] ✓ exceed_log -> module4_output_capacityexceed: DataFrame shape=(0, 0)
+2026-01-31 20:24:34 [INFO] ✓ issues_df -> module4_output_validation: DataFrame shape=(0, 0)
+2026-01-31 20:24:34 [INFO] ✓ changeover_log -> module4_output_changeoverlog: DataFrame shape=(0, 8)
+2026-01-31 20:24:34 [INFO] ✓ production_df -> module4_output_productionplan: DataFrame shape=(0, 0)
+2026-01-31 20:24:34 [INFO] ✓ exceed_log -> module4_output_capacityexceed: DataFrame shape=(0, 0)
+2026-01-31 20:24:34 [INFO] ✓ issues_df -> module4_output_validation: DataFrame shape=(0, 0)
+2026-01-31 20:24:34 [INFO] ✓ changeover_log -> module4_output_changeoverlog: DataFrame shape=(0, 8)
+2026-01-31 20:24:34 [INFO] ✅追加数据到表: module4_output_productionplan (+64 行)
+2026-01-31 20:24:34 [INFO] ✅追加数据到表: module4_output_capacityexceed (+15 行)
+2026-01-31 20:24:34 [INFO] ✅表已存在（空表）: module4_output_validation
+2026-01-31 20:24:34 [INFO] D:\PG/Code/chainsight\pgsql_db\module_data_writer.py:781: FutureWarning: The behavior of DataFrame concatenation with empty or all-NA entries is deprecated. In a future version, this will no longer exclude empty or all-NA columns when determining the result dtypes. To retain the old behavior, exclude the relevant entries before the concat operation.
+  combined_df = pd.concat(dfs, ignore_index=True)
+2026-01-31 20:24:34 [INFO] ✅追加数据到表: module4_output_changeoverlog (+26 行)
+2026-01-31 20:24:34 [INFO] 🔍 DEBUG: module5 结果检查:
+2026-01-31 20:24:34 [INFO] module_results 类型: <class 'list'>
+2026-01-31 20:24:34 [INFO] module_results 长度: 5
+2026-01-31 20:24:34 [INFO] 第一天结果的键: ['deployment_plan', 'unfulfilled_log', 'stock_on_hand_log', 'validation_log', 'statistics', 'simulation_date']
+2026-01-31 20:24:34 [INFO] 期望的键 (df_mapping): ['deployment_plan', 'unfulfilled_log', 'stock_on_hand_log', 'validation_log']
+2026-01-31 20:24:34 [INFO] 匹配的键: {'deployment_plan', 'stock_on_hand_log', 'unfulfilled_log', 'validation_log'}
+2026-01-31 20:24:34 [INFO] 额外的键: {'statistics', 'simulation_date'}
+2026-01-31 20:24:34 [INFO] 📁 写入 module5 输出...
+2026-01-31 20:24:34 [INFO] ✓ deployment_plan -> module5_output_deploymentplan: DataFrame shape=(10636, 18)
+2026-01-31 20:24:34 [INFO] ✓ unfulfilled_log -> module5_output_unfulfilledlog: DataFrame shape=(9128, 7)
+2026-01-31 20:24:34 [INFO] ✓ stock_on_hand_log -> module5_output_stockonhandlog: DataFrame shape=(833, 10)
+2026-01-31 20:24:34 [INFO] ✓ validation_log -> module5_output_validation: DataFrame shape=(464, 2)
+2026-01-31 20:24:34 [INFO] ✓ deployment_plan -> module5_output_deploymentplan: DataFrame shape=(11195, 18)
+2026-01-31 20:24:34 [INFO] ✓ unfulfilled_log -> module5_output_unfulfilledlog: DataFrame shape=(8300, 7)
+2026-01-31 20:24:34 [INFO] ✓ stock_on_hand_log -> module5_output_stockonhandlog: DataFrame shape=(833, 10)
+2026-01-31 20:24:34 [INFO] ✓ validation_log -> module5_output_validation: DataFrame shape=(464, 2)
+2026-01-31 20:24:34 [INFO] ✓ deployment_plan -> module5_output_deploymentplan: DataFrame shape=(11826, 18)
+2026-01-31 20:24:34 [INFO] ✓ unfulfilled_log -> module5_output_unfulfilledlog: DataFrame shape=(9716, 7)
+2026-01-31 20:24:34 [INFO] ✓ stock_on_hand_log -> module5_output_stockonhandlog: DataFrame shape=(833, 10)
+2026-01-31 20:24:34 [INFO] ✓ validation_log -> module5_output_validation: DataFrame shape=(464, 2)
+2026-01-31 20:24:34 [INFO] ✓ deployment_plan -> module5_output_deploymentplan: DataFrame shape=(12425, 18)
+2026-01-31 20:24:34 [INFO] ✓ unfulfilled_log -> module5_output_unfulfilledlog: DataFrame shape=(10039, 7)
+2026-01-31 20:24:34 [INFO] ✓ stock_on_hand_log -> module5_output_stockonhandlog: DataFrame shape=(833, 10)
+2026-01-31 20:24:34 [INFO] ✓ validation_log -> module5_output_validation: DataFrame shape=(464, 2)
+2026-01-31 20:24:34 [INFO] ✓ deployment_plan -> module5_output_deploymentplan: DataFrame shape=(12962, 18)
+2026-01-31 20:24:34 [INFO] ✓ unfulfilled_log -> module5_output_unfulfilledlog: DataFrame shape=(10202, 7)
+2026-01-31 20:24:34 [INFO] ✓ stock_on_hand_log -> module5_output_stockonhandlog: DataFrame shape=(833, 10)
+2026-01-31 20:24:34 [INFO] ✓ validation_log -> module5_output_validation: DataFrame shape=(464, 2)
+2026-01-31 20:24:34 [INFO] ✅追加数据到表: module5_output_deploymentplan (+59044 行)
+2026-01-31 20:24:35 [INFO] 📊 写入完成: 59044 行数据
+2026-01-31 20:24:35 [INFO] ⚡ 性能优化：单次事务提交
+2026-01-31 20:24:35 [INFO] ✅追加数据到表: module5_output_unfulfilledlog (+47385 行)
+2026-01-31 20:24:35 [INFO] 📊 写入完成: 47385 行数据
+2026-01-31 20:24:35 [INFO] ⚡ 性能优化：单次事务提交
+2026-01-31 20:24:35 [INFO] ✅追加数据到表: module5_output_stockonhandlog (+4165 行)
+2026-01-31 20:24:35 [INFO] ✅追加数据到表: module5_output_validation (+2320 行)
+2026-01-31 20:24:35 [INFO] 🔍 DEBUG: module6 结果检查:
+2026-01-31 20:24:35 [INFO] module_results 类型: <class 'list'>
+2026-01-31 20:24:35 [INFO] module_results 长度: 5
+2026-01-31 20:24:35 [INFO] 第一天结果的键: ['daily_output_file', 'delivery_plan', 'vehicle_log', 'truck_usage', 'unsatisfied_log', 'validation_log', 'bypass_log', 'statistics', 'simulation_date']
+2026-01-31 20:24:35 [INFO] 期望的键 (df_mapping): ['delivery_plan', 'vehicle_log', 'truck_usage', 'unsatisfied_log', 'validation_log', 'bypass_log']
+2026-01-31 20:24:35 [INFO] 匹配的键: {'unsatisfied_log', 'vehicle_log', 'delivery_plan', 'validation_log', 'truck_usage', 'bypass_log'}
+2026-01-31 20:24:35 [INFO] 额外的键: {'statistics', 'simulation_date', 'daily_output_file'}
+2026-01-31 20:24:35 [INFO] 📁 写入 module6 输出...
+2026-01-31 20:24:35 [INFO] ✓ delivery_plan -> module6_output_deliveryplan: DataFrame shape=(0, 0)
+2026-01-31 20:24:35 [INFO] ✓ vehicle_log -> module6_output_vehiclelog: DataFrame shape=(0, 12)
+2026-01-31 20:24:35 [INFO] ✓ truck_usage -> module6_output_truckusagelog: DataFrame shape=(0, 5)
+2026-01-31 20:24:35 [INFO] ✓ unsatisfied_log -> module6_output_unsatisfiedmdqlog: DataFrame shape=(0, 0)
+2026-01-31 20:24:35 [INFO] ✓ validation_log -> module6_output_validationlog: DataFrame shape=(1, 3)
+2026-01-31 20:24:35 [INFO] ✓ bypass_log -> module6_output_bypassrulehitlog: DataFrame shape=(0, 0)
+2026-01-31 20:24:35 [INFO] ✓ delivery_plan -> module6_output_deliveryplan: DataFrame shape=(103, 13)
+2026-01-31 20:24:35 [INFO] ✓ vehicle_log -> module6_output_vehiclelog: DataFrame shape=(1, 12)
+2026-01-31 20:24:35 [INFO] ✓ truck_usage -> module6_output_truckusagelog: DataFrame shape=(1, 5)
+2026-01-31 20:24:35 [INFO] ✓ unsatisfied_log -> module6_output_unsatisfiedmdqlog: DataFrame shape=(0, 0)
+2026-01-31 20:24:35 [INFO] ✓ validation_log -> module6_output_validationlog: DataFrame shape=(1, 3)
+2026-01-31 20:24:35 [INFO] ✓ bypass_log -> module6_output_bypassrulehitlog: DataFrame shape=(0, 0)
+2026-01-31 20:24:35 [INFO] ✓ delivery_plan -> module6_output_deliveryplan: DataFrame shape=(52, 13)
+2026-01-31 20:24:35 [INFO] ✓ vehicle_log -> module6_output_vehiclelog: DataFrame shape=(1, 12)
+2026-01-31 20:24:35 [INFO] ✓ truck_usage -> module6_output_truckusagelog: DataFrame shape=(1, 5)
+2026-01-31 20:24:35 [INFO] ✓ unsatisfied_log -> module6_output_unsatisfiedmdqlog: DataFrame shape=(0, 0)
+2026-01-31 20:24:35 [INFO] ✓ validation_log -> module6_output_validationlog: DataFrame shape=(1, 3)
+2026-01-31 20:24:35 [INFO] ✓ bypass_log -> module6_output_bypassrulehitlog: DataFrame shape=(0, 0)
+2026-01-31 20:24:35 [INFO] ✓ delivery_plan -> module6_output_deliveryplan: DataFrame shape=(391, 13)
+2026-01-31 20:24:35 [INFO] ✓ vehicle_log -> module6_output_vehiclelog: DataFrame shape=(7, 12)
+2026-01-31 20:24:35 [INFO] ✓ truck_usage -> module6_output_truckusagelog: DataFrame shape=(5, 5)
+2026-01-31 20:24:35 [INFO] ✓ unsatisfied_log -> module6_output_unsatisfiedmdqlog: DataFrame shape=(0, 0)
+2026-01-31 20:24:35 [INFO] ✓ validation_log -> module6_output_validationlog: DataFrame shape=(1, 3)
+2026-01-31 20:24:35 [INFO] ✓ bypass_log -> module6_output_bypassrulehitlog: DataFrame shape=(0, 0)
+2026-01-31 20:24:35 [INFO] ✓ delivery_plan -> module6_output_deliveryplan: DataFrame shape=(91, 13)
+2026-01-31 20:24:35 [INFO] ✓ vehicle_log -> module6_output_vehiclelog: DataFrame shape=(2, 12)
+2026-01-31 20:24:35 [INFO] ✓ truck_usage -> module6_output_truckusagelog: DataFrame shape=(2, 5)
+2026-01-31 20:24:35 [INFO] ✓ unsatisfied_log -> module6_output_unsatisfiedmdqlog: DataFrame shape=(0, 0)
+2026-01-31 20:24:35 [INFO] ✓ validation_log -> module6_output_validationlog: DataFrame shape=(1, 3)
+2026-01-31 20:24:35 [INFO] ✓ bypass_log -> module6_output_bypassrulehitlog: DataFrame shape=(0, 0)
+2026-01-31 20:24:35 [INFO] ✅追加数据到表: module6_output_deliveryplan (+637 行)
+2026-01-31 20:24:35 [INFO] D:\PG/Code/chainsight\pgsql_db\module_data_writer.py:781: FutureWarning: The behavior of DataFrame concatenation with empty or all-NA entries is deprecated. In a future version, this will no longer exclude empty or all-NA columns when determining the result dtypes. To retain the old behavior, exclude the relevant entries before the concat operation.
+  combined_df = pd.concat(dfs, ignore_index=True)
+2026-01-31 20:24:35 [INFO] ✅追加数据到表: module6_output_vehiclelog (+11 行)
+2026-01-31 20:24:35 [INFO] D:\PG/Code/chainsight\pgsql_db\module_data_writer.py:781: FutureWarning: The behavior of DataFrame concatenation with empty or all-NA entries is deprecated. In a future version, this will no longer exclude empty or all-NA columns when determining the result dtypes. To retain the old behavior, exclude the relevant entries before the concat operation.
+  combined_df = pd.concat(dfs, ignore_index=True)
+2026-01-31 20:24:35 [INFO] ✅追加数据到表: module6_output_truckusagelog (+9 行)
+2026-01-31 20:24:35 [INFO] ✅表已存在（空表）: module6_output_unsatisfiedmdqlog
+2026-01-31 20:24:35 [INFO] ✅追加数据到表: module6_output_validationlog (+5 行)
+2026-01-31 20:24:35 [INFO] ✅表已存在（空表）: module6_output_bypassrulehitlog
+2026-01-31 20:24:35 [INFO] ✅ 模块输出写入完成:
+2026-01-31 20:24:35 [INFO] 表数量: 17
+2026-01-31 20:24:35 [INFO] 总行数: 254721
+2026-01-31 20:24:35 [INFO] 📤 写入 Orchestrator 状态数据到数据库...
+2026-01-31 20:24:35 [INFO] 📁 写入Orchestrator数据...
+2026-01-31 20:24:35 [INFO] ✅追加数据到表: orchestrator_unrestricted_inventory (+2583 行)
+2026-01-31 20:24:36 [INFO] ✅追加数据到表: orchestrator_open_deployment (+1888 行)
+2026-01-31 20:24:36 [INFO] ✅表已存在（空表）: orchestrator_open_deployment_pastdue_cleanup
+2026-01-31 20:24:36 [INFO] ✅追加数据到表: orchestrator_planning_intransit (+1347 行)
+2026-01-31 20:24:36 [INFO] ✅表已存在（空表）: orchestrator_space_quota
+2026-01-31 20:24:36 [INFO] ✅追加数据到表: orchestrator_delivery_gr (+94 行)
+2026-01-31 20:24:36 [INFO] ✅追加数据到表: orchestrator_production_gr (+7 行)
+2026-01-31 20:24:36 [INFO] ✅追加数据到表: orchestrator_production_plan_backlog (+256 行)
+2026-01-31 20:24:36 [INFO] ✅追加数据到表: orchestrator_shipment_log (+1410 行)
+2026-01-31 20:24:36 [INFO] ✅追加数据到表: orchestrator_delivery_shipment_log (+637 行)
+2026-01-31 20:24:36 [INFO] ✅追加数据到表: orchestrator_inventory_change_log (+1000 行)
+2026-01-31 20:24:36 [INFO] ✅追加数据到表: orchestrator_daily_logs (+67 行)
+2026-01-31 20:24:36 [INFO] 📊 从数据库生成 Summary 汇总报告...
+2026-01-31 20:24:36 [INFO] ============================================================
+2026-01-31 20:24:36 [INFO] 📊 从数据库生成Summary汇总报告
+2026-01-31 20:24:36 [INFO] 运行ID: BC_S5_20260131_202336
+2026-01-31 20:24:36 [INFO] 日期范围: 2025-10-06 到 2025-10-10
+2026-01-31 20:24:36 [INFO] ============================================================
+2026-01-31 20:24:36 [INFO] ✅追加数据到表: summary_output_ordershipmentcutsummary (+1410 行)
+2026-01-31 20:24:36 [INFO] ✅ summary_output_ordershipmentcutsummary: 1,410 行
+2026-01-31 20:24:36 [INFO] ✅追加数据到表: summary_output_fullchangeoverlog (+2 行)
+2026-01-31 20:24:36 [INFO] ✅ summary_output_fullchangeoverlog: 2 行
+2026-01-31 20:24:36 [INFO] ✅追加数据到表: summary_output_fullcapacityexceed (+15 行)
+2026-01-31 20:24:36 [INFO] ✅ summary_output_fullcapacityexceed: 15 行
+2026-01-31 20:24:36 [INFO] ✅追加数据到表: summary_output_fullproductionplan (+7 行)
+2026-01-31 20:24:36 [INFO] ✅ summary_output_fullproductionplan: 7 行
+2026-01-31 20:24:36 [INFO] ✅追加数据到表: summary_output_fulldeploymentplan (+59044 行)
+2026-01-31 20:24:37 [INFO] 📊 写入完成: 59044 行数据
+2026-01-31 20:24:37 [INFO] ⚡ 性能优化：单次事务提交
+2026-01-31 20:24:37 [INFO] ✅ summary_output_fulldeploymentplan: 59,044 行
+2026-01-31 20:24:37 [INFO] ✅追加数据到表: summary_output_fulldeliveryplan (+637 行)
+2026-01-31 20:24:37 [INFO] ✅ summary_output_fulldeliveryplan: 637 行
+2026-01-31 20:24:37 [INFO] ✅追加数据到表: summary_output_fulltruckusage (+9 行)
+2026-01-31 20:24:37 [INFO] ✅ summary_output_fulltruckusage: 9 行
+2026-01-31 20:24:37 [INFO] ============================================================
+2026-01-31 20:24:37 [INFO] ✅ Summary汇总报告生成完成!
+2026-01-31 20:24:37 [INFO] 表数量: 7
+2026-01-31 20:24:37 [INFO] 总行数: 61,124
+2026-01-31 20:24:37 [INFO] 耗时: 1.62秒
+2026-01-31 20:24:37 [INFO] ============================================================
+2026-01-31 20:24:37 [INFO] ⏱️  数据库写入耗时: 5.12秒
+2026-01-31 20:24:37 [INFO] 
+============================================================
+2026-01-31 20:24:37 [INFO] ✅ 数据库模式运行完成 (DuckDB)
+2026-01-31 20:24:37 [INFO] ============================================================
+2026-01-31 20:24:37 [INFO] 🕐 程序时间统计:
+2026-01-31 20:24:37 [INFO]    📅 开始时间: 2026-01-31 20:23:36
+2026-01-31 20:24:37 [INFO]    📅 结束时间: 2026-01-31 20:24:37
+2026-01-31 20:24:37 [INFO]    ⏱️  总运行时间: 1分钟 0.88秒
+2026-01-31 20:24:37 [INFO]    ⏱️  其中DB写入: 5.12秒
+2026-01-31 20:24:37 [INFO]    📁 日志目录: D:\PG\Code\chainsight\outputs\db_BC_S5_20260131_202336
+2026-01-31 20:24:37 [INFO] 📊 数据存储:
+2026-01-31 20:24:37 [INFO]    💾 所有输出数据已写入 PostgreSQL 数据库
+2026-01-31 20:24:37 [INFO]    🔗 连接: postgresql://localhost:5432/test_db
+2026-01-31 20:24:37 [INFO]    📋 表前缀: BC_S5_20260131_202336
+2026-01-31 20:24:37 [INFO] ============================================================
+2026-01-31 20:24:37 [INFO] 🔌 数据库连接已关闭

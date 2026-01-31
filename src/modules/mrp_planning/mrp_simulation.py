@@ -185,51 +185,13 @@ def _init_simulation_context(
     if m4_mlcfg_df is not None and not m4_mlcfg_df.empty:
         ptf_lsk_cache = build_ptf_lsk_cache(m4_mlcfg_df)
 
-    material_locations = _build_material_locations(
-        active_network, location_layer_map, network_df
-    )
-
     return {
         'active_network': active_network,
         'location_layer_df': location_layer_df,
         'location_layer_map': location_layer_map,
         'all_layers': all_layers,
         'ptf_lsk_cache': ptf_lsk_cache,
-        'material_locations': material_locations,
     }
-
-
-def _build_material_locations(
-    active_network: pd.DataFrame,
-    location_layer_map: dict[tuple[str, str], int],
-    network_df: pd.DataFrame
-) -> pd.DataFrame:
-    """构建material-location组合。"""
-    # Extract unique locations from the (material, location) keys
-    all_locations = set(loc for _, loc in location_layer_map.keys())
-    all_materials = set(network_df['material'].unique())
-
-    extended = []
-    for row in active_network.itertuples(index=False):
-        extended.append({
-            'material': str(getattr(row, 'material', '')),  # type: ignore[attr-defined]
-            'location': str(getattr(row, 'location', ''))  # type: ignore[attr-defined]
-        })
-
-    for location in all_locations:
-        for material in all_materials:
-            exists = any(
-                ml['material'] == material and ml['location'] == location
-                for ml in extended
-            )
-            if not exists:
-                extended.append({
-                    'material': str(material),
-                    'location': str(location)
-                })
-
-    df = pd.DataFrame(extended).drop_duplicates()
-    return normalize_identifiers(df)
 
 
 def _prepare_production_df(all_production_df: pd.DataFrame) -> pd.DataFrame:
@@ -259,14 +221,33 @@ def _process_layer(
     """处理单个层级（支持批量和并行两种模式）。"""
     parent_accum = defaultdict(lambda: {'AO': 0.0, 'FC': 0.0, 'SS': 0.0})
 
-    # Get locations for this layer from location_layer_map (keyed by (material, location))
-    layer_locs = set()
-    for (mat, loc), lyr in ctx['location_layer_map'].items():
-        if lyr == layer:
-            layer_locs.add(loc)
-    layer_locs = list(layer_locs)
-    layer_mask = ctx['material_locations']['location'].isin(layer_locs)
-    layer_nodes = ctx['material_locations'][layer_mask]
+    # Build layer nodes using original logic:
+    # 1. Base nodes from location_layer_df at this layer
+    # 2. Gap nodes from downstream_gaps at this layer
+    location_layer_df = ctx['location_layer_df']
+    location_layer_map = ctx['location_layer_map']
+    
+    base_nodes_df = location_layer_df[location_layer_df['layer'] == layer][['material', 'location']]
+    base_pairs = {
+        (str(row.material), str(row.location))
+        for row in base_nodes_df.itertuples(index=False)
+    }
+    
+    gap_pairs = {
+        (str(mat), str(loc))
+        for (mat, loc) in downstream_gaps.keys()
+        if location_layer_map.get((str(mat), str(loc)), None) == layer
+    }
+    
+    all_pairs = base_pairs | gap_pairs
+    if not all_pairs:
+        return [], parent_accum
+    
+    layer_nodes = (
+        pd.DataFrame(list(all_pairs), columns=['material', 'location'])
+        .sort_values(['material', 'location'])
+        .reset_index(drop=True)
+    )
     
     num_nodes = len(layer_nodes)
     

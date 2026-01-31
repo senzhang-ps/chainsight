@@ -452,7 +452,7 @@ def push_softpush_allocation(
                     else 'soft push replenishment'
                 ),
                 'planned_qty': int(qty),
-                'deployed_qty_invCon_push': int(qty),
+                # 注意: 移除deployed_qty_invCon_push以与Dev版保持一致
                 'deployed_qty_invCon': int(qty),
                 'planned_delivery_date': x['planned_delivery_date'],
                 'orig_location': x['receiving'],

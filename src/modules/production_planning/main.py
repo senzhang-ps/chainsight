@@ -172,10 +172,16 @@ class DailyProductionPlanner:
         mlcfg = cfg['MaterialLocationLineCfg']
 
         try:
-            from orchestrator import _normalize_identifiers
+            # 使用正确的导入路径
+            from src.core.orchestrator import _normalize_identifiers
             mlcfg = _normalize_identifiers(mlcfg)
         except ImportError:
-            pass
+            try:
+                # 备用导入路径
+                from orchestrator import _normalize_identifiers
+                mlcfg = _normalize_identifiers(mlcfg)
+            except ImportError:
+                pass
 
         return mlcfg
 
@@ -194,10 +200,16 @@ class DailyProductionPlanner:
             pd.DataFrame: 无约束计划
         """
         try:
-            from orchestrator import _normalize_identifiers
+            # 使用正确的导入路径
+            from src.core.orchestrator import _normalize_identifiers
             net_demand = _normalize_identifiers(net_demand)
         except ImportError:
-            pass
+            try:
+                # 备用导入路径
+                from orchestrator import _normalize_identifiers
+                net_demand = _normalize_identifiers(net_demand)
+            except ImportError:
+                pass
 
         return build_unconstrained_plan_for_single_day(
             net_demand, mlcfg,

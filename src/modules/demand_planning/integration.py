@@ -31,7 +31,8 @@ def run_daily_order_generation(
     simulation_date: pd.Timestamp,
     output_dir: str,
     orchestrator: object = None,
-    skip_file_output: bool = False
+    skip_file_output: bool = False,
+    previous_orders_df: Optional[pd.DataFrame] = None
 ) -> dict:
     """集成模式主入口：生成指定日期的订单与发货。
 
@@ -41,6 +42,7 @@ def run_daily_order_generation(
         output_dir: 输出目录。
         orchestrator: 编排器对象。
         skip_file_output: 是否跳过文件输出。
+        previous_orders_df: 历史订单数据（可选，用于DB模式跳过文件读取）。
 
     返回:
         包含订单、发货、缺货、供需日志的字典。
@@ -64,14 +66,15 @@ def run_daily_order_generation(
         elapsed = time.perf_counter() - t0
         print(f"[M1] 当日订单生成完成，订单数: {len(today_orders_df)}，耗时: {elapsed:.3f}s")
 
-        # 4) 合并历史订单
-        orders_df = _merge_with_history(
-            output_dir, simulation_date, today_orders_df, ao_config
+        # 4) 合并历史订单（用于内部计算，如发货检查）
+        all_orders_df = _merge_with_history(
+            output_dir, simulation_date, today_orders_df, ao_config,
+            previous_orders_df=previous_orders_df
         )
 
-        # 5) 生成发货
+        # 5) 生成发货（使用累积订单）
         shipment_df, cut_df = _generate_shipments(
-            orders_df, simulation_date, orchestrator, daily_for_orders
+            all_orders_df, simulation_date, orchestrator, daily_for_orders
         )
 
         # 6) 生成供需日志
@@ -83,18 +86,25 @@ def run_daily_order_generation(
         elapsed = time.perf_counter() - t3
         print(f"[M1] 供需日志生成完成，条目: {len(supply_demand_df)}，耗时: {elapsed:.3f}s")
 
-        # 7) 保存输出
+        # 7) 保存输出（使用累积订单，与Dev版本兼容）
         output_file = _save_output(
-            orders_df, shipment_df, cut_df, supply_demand_df,
+            all_orders_df, shipment_df, cut_df, supply_demand_df,
             output_dir, simulation_date, skip_file_output
         )
 
+        # 8) 生成Summary（供数据库模式使用）
+        summary_df = _build_summary_df(today_orders_df, shipment_df, cut_df, supply_demand_df)
+
+        # 🔧 重要：输出结果应该只包含当日新生成的订单，而不是累积的历史订单
+        # 这样才能与Dev版本保持一致：每天只输出当日的738个订单
         return {
-            'orders_df': orders_df,
+            'orders_df': today_orders_df,  # ✅ 修改：只返回当日订单，而不是累积订单
             'shipment_df': shipment_df,
             'cut_df': cut_df,
             'supply_demand_df': supply_demand_df,
-            'output_file': output_file
+            'summary_df': summary_df,
+            'output_file': output_file,
+            'all_orders_for_next_day': all_orders_df  # ✅ 新增：保留累积订单供下一天使用
         }
 
     except Exception as e:
@@ -111,8 +121,36 @@ def _empty_result() -> dict:
         'shipment_df': pd.DataFrame(),
         'cut_df': pd.DataFrame(),
         'supply_demand_df': pd.DataFrame(),
+        'summary_df': pd.DataFrame(),
         'output_file': None
     }
+
+
+def _build_summary_df(
+    orders_df: pd.DataFrame,
+    shipment_df: pd.DataFrame,
+    cut_df: pd.DataFrame,
+    supply_demand_df: pd.DataFrame
+) -> pd.DataFrame:
+    """构建汇总DataFrame（供数据库模式使用）。
+
+    参数:
+        orders_df: 订单数据。
+        shipment_df: 发货数据。
+        cut_df: 缺货数据。
+        supply_demand_df: 供需日志数据。
+
+    返回:
+        汇总DataFrame。
+    """
+    date_val = orders_df['date'].iloc[0] if not orders_df.empty else None
+    return pd.DataFrame([{
+        'Total_Orders': len(orders_df),
+        'Total_Shipments': len(shipment_df),
+        'Total_Cuts': len(cut_df),
+        'Total_SupplyDemand': len(supply_demand_df),
+        'Date': date_val
+    }])
 
 
 def _validate_config(config_dict: dict) -> tuple:
@@ -182,14 +220,29 @@ def _merge_with_history(
     output_dir: str,
     simulation_date: pd.Timestamp,
     today_orders_df: pd.DataFrame,
-    ao_config: pd.DataFrame
+    ao_config: pd.DataFrame,
+    previous_orders_df: Optional[pd.DataFrame] = None
 ) -> pd.DataFrame:
-    """合并历史订单与当日订单。"""
+    """合并历史订单与当日订单。
+    
+    参数:
+        output_dir: 输出目录。
+        simulation_date: 仿真日期。
+        today_orders_df: 当日订单。
+        ao_config: AO配置。
+        previous_orders_df: 历史订单数据（可选，用于DB模式跳过文件读取）。
+    """
     max_advance = _get_max_advance_days(ao_config)
 
     t1 = time.perf_counter()
-    previous_orders = load_previous_orders(output_dir, simulation_date, max_advance)
-    print(f"[M1] 历史订单合并前过滤完成，耗时: {time.perf_counter()-t1:.3f}s")
+    
+    # 🦆 如果提供了内存中的历史订单数据（DB模式），则直接使用，跳过文件读取
+    if previous_orders_df is not None and not previous_orders_df.empty:
+        previous_orders = previous_orders_df.copy()
+        print(f"[M1] 使用内存历史订单数据，条目: {len(previous_orders)}，耗时: {time.perf_counter()-t1:.3f}s")
+    else:
+        previous_orders = load_previous_orders(output_dir, simulation_date, max_advance)
+        print(f"[M1] 历史订单合并前过滤完成，耗时: {time.perf_counter()-t1:.3f}s")
 
     previous_orders = _filter_future_orders(previous_orders, simulation_date)
     previous_orders = _deduplicate_orders(previous_orders)
@@ -295,7 +348,7 @@ def _apply_orders_consumption(
     forecast_df: pd.DataFrame,
     orders_df: pd.DataFrame
 ) -> pd.DataFrame:
-    """应用订单消耗到预测。"""
+    """应用订单消耗到预测（优化版：使用字典索引替代DataFrame遍历）。"""
     if forecast_df is None or forecast_df.empty:
         return pd.DataFrame(columns=['material', 'location', 'date', 'quantity'])
 
@@ -309,7 +362,16 @@ def _apply_orders_consumption(
 
     consumed = normalize_identifiers(consumed)
     orders_df = normalize_identifiers(orders_df.copy())
-    offsets = np.array([0, -1, -2, 1, 2, 3], dtype=int)
+    offsets = [0, -1, -2, 1, 2, 3]
+
+    # 构建 (material, location, date) -> row_index 的字典映射
+    # 同时构建可变的 quantities 数组用于快速更新
+    idx_map = {}
+    for idx, row in enumerate(consumed.itertuples()):
+        key = (row.material, row.location, row.date)
+        idx_map[key] = idx
+    
+    quantities = consumed['quantity'].values.copy().astype(float)
 
     # AO消耗
     ao_orders = orders_df[orders_df['demand_type'] == 'AO'].copy()
@@ -317,7 +379,7 @@ def _apply_orders_consumption(
         ao_orders = ao_orders.sort_values(
             by=['date', 'advance_days', 'quantity', 'simulation_date']
         )
-        consumed = _apply_serial_consumption(consumed, ao_orders, offsets)
+        _apply_fast_consumption(ao_orders, quantities, idx_map, offsets)
 
     # Normal消耗
     normal_orders = orders_df[orders_df['demand_type'] == 'normal'].copy()
@@ -325,54 +387,44 @@ def _apply_orders_consumption(
         normal_orders = normal_orders.sort_values(
             by=['date', 'quantity', 'simulation_date']
         )
-        consumed = _apply_serial_consumption(consumed, normal_orders, offsets)
+        _apply_fast_consumption(normal_orders, quantities, idx_map, offsets)
 
-    consumed['quantity'] = pd.to_numeric(
-        consumed['quantity'], errors='coerce'
-    ).fillna(0).astype(int)
+    consumed['quantity'] = quantities.astype(int)
 
     return normalize_identifiers(consumed)
 
 
-def _apply_serial_consumption(
-    consumed: pd.DataFrame,
+def _apply_fast_consumption(
     orders: pd.DataFrame,
-    offsets: np.ndarray
-) -> pd.DataFrame:
-    """串行应用订单消耗。"""
+    quantities: np.ndarray,
+    idx_map: dict,
+    offsets: list
+) -> None:
+    """快速应用订单消耗（直接修改quantities数组）。
+    
+    使用字典索引实现O(1)查找，避免DataFrame mask操作的O(n)开销。
+    """
     for r in orders.itertuples():
         if r.quantity <= 0:
             continue
-        target_dates = pd.to_datetime(r.date) + pd.to_timedelta(offsets, unit='D')
-        ml_mask = (
-            (consumed['material'] == r.material) &
-            (consumed['location'] == r.location)
-        )
-        window_mask = ml_mask & consumed['date'].isin(target_dates)
-        window = consumed.loc[window_mask, ['date', 'quantity']].copy()
+        
+        mat = r.material
+        loc = r.location
+        order_date = pd.to_datetime(r.date)
         remaining = int(r.quantity)
 
-        for od in offsets:
+        for offset in offsets:
             if remaining <= 0:
                 break
-            d = pd.to_datetime(r.date) + pd.to_timedelta(int(od), unit='D')
-            idxs = window.index[window['date'] == d]
-            if len(idxs) == 0:
-                continue
-            idx = idxs[0]
-            avail = int(window.at[idx, 'quantity'])
-            take = min(avail, remaining)
-            window.at[idx, 'quantity'] = avail - take
-            remaining -= take
-
-        # 优化：使用 itertuples() 替代 iterrows()
-        for w in window.itertuples():
-            consumed.loc[
-                ml_mask & (consumed['date'] == w.date),
-                'quantity'
-            ] = int(w.quantity)
-
-    return consumed
+            target_date = order_date + pd.Timedelta(days=offset)
+            key = (mat, loc, target_date)
+            
+            if key in idx_map:
+                idx = idx_map[key]
+                avail = int(quantities[idx])
+                take = min(avail, remaining)
+                quantities[idx] = avail - take
+                remaining -= take
 
 
 def generate_supply_demand_log_for_integration(

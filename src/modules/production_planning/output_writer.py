@@ -2,6 +2,7 @@
 输出管理模块
 
 负责生成和写出Module4的输出文件。
+支持DuckDB内存模式，可跳过磁盘IO直接写入内存表。
 """
 
 import os
@@ -17,6 +18,28 @@ from .constants import (
 )
 from .utils import ensure_dataframe_columns
 
+# 延迟导入内存存储模块（避免循环导入）
+_memory_store_imported = False
+_is_memory_mode_enabled = None
+_write_module4_output = None
+
+
+def _ensure_memory_store_imported():
+    """延迟导入内存存储模块"""
+    global _memory_store_imported, _is_memory_mode_enabled, _write_module4_output
+    if not _memory_store_imported:
+        try:
+            from src.utils.memory_data_store import (
+                is_memory_mode_enabled,
+                write_module4_output,
+            )
+            _is_memory_mode_enabled = is_memory_mode_enabled
+            _write_module4_output = write_module4_output
+        except ImportError:
+            _is_memory_mode_enabled = lambda: False
+            _write_module4_output = lambda *args, **kwargs: False
+        _memory_store_imported = True
+
 
 def write_output(
     plan: pd.DataFrame,
@@ -24,7 +47,8 @@ def write_output(
     issues: List[Dict[str, Any]],
     changeover_log: pd.DataFrame,
     out_path: str,
-    simulation_date: Optional[pd.Timestamp] = None
+    simulation_date: Optional[pd.Timestamp] = None,
+    skip_file_output: bool = False
 ) -> str:
     """写出每日或汇总输出文件。
 
@@ -35,9 +59,10 @@ def write_output(
         changeover_log: 换产日志DataFrame
         out_path: 基础输出路径
         simulation_date: 仿真日期（提供则写每日版本）
+        skip_file_output: 是否跳过文件输出（使用DuckDB内存模式时为True）
 
     Returns:
-        str: 实际写出的文件路径
+        str: 实际写出的文件路径（或内存模式下的虚拟路径）
     """
     plan = ensure_dataframe_columns(plan, PLAN_COLUMNS)
     exc = ensure_dataframe_columns(exc, EXCEED_COLUMNS)
@@ -48,7 +73,24 @@ def write_output(
     issues_df = _prepare_issues_df(issues)
 
     final_path = _get_output_path(out_path, simulation_date)
+    
+    # 尝试写入DuckDB内存存储
+    if simulation_date is not None:
+        _ensure_memory_store_imported()
+        if _is_memory_mode_enabled and _is_memory_mode_enabled():
+            date_str = simulation_date.strftime('%Y%m%d')
+            _write_module4_output(
+                date_str=date_str,
+                production_plan=plan,
+                capacity_exceed=exc,
+                validation=issues_df,
+                changeover_log=changeover_log
+            )
+            # 如果跳过文件输出，直接返回
+            if skip_file_output:
+                return final_path
 
+    # 写入Excel文件（默认行为或fallback）
     _write_excel_file(final_path, plan, exc, issues_df, changeover_log)
 
     return final_path

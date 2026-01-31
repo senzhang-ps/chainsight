@@ -19,8 +19,11 @@ DB_CONFIG = {
     'password': '123456'
 }
 
-# 本地输出目录
-LOCAL_OUTPUT_DIR = Path(r"C:\Users\25936\Desktop\Code\chainsight\ChainSight_Dev\BC_S5\run_20260121_195229")
+# 本地输出目录 (with seed reset fix)
+LOCAL_OUTPUT_DIR = Path(r"C:\Users\25936\Desktop\Code\chainsight\outputs\BC_S5\run_20260130_113019")
+
+# DB run_id for new test
+RUN_ID = "BC_S5_20260130_114318"
 
 # 日期范围
 SIM_DATES = ['2025-10-06', '2025-10-07', '2025-10-08', '2025-10-09', '2025-10-10']
@@ -32,33 +35,51 @@ def connect_db():
     return psycopg.connect(conn_str)
 
 
-def load_db_data(table_name: str, sim_dates: list = None) -> pd.DataFrame:
+def load_db_data(table_name: str, sim_dates: list = None, run_id: str = None) -> pd.DataFrame:
     """从数据库加载数据"""
     with connect_db() as conn:
+        # 构建WHERE条件
+        conditions = []
+        params = []
+        
+        # 如果指定了run_id，添加过滤条件
+        if run_id:
+            conditions.append("run_id = %s")
+            params.append(run_id)
+        
         if sim_dates:
             # 尝试不同的日期列名
             date_cols = ['sim_date', 'date', 'plan_deploy_date', 'available_date']
             for date_col in date_cols:
                 try:
-                    query = f"SELECT * FROM {table_name} WHERE {date_col} IN ({','.join(['%s']*len(sim_dates))})"
-                    df = pd.read_sql(query, conn, params=sim_dates)
+                    date_condition = f"{date_col} IN ({','.join(['%s']*len(sim_dates))})"
+                    full_conditions = conditions + [date_condition]
+                    full_params = params + sim_dates
+                    
+                    where_clause = " AND ".join(full_conditions) if full_conditions else "1=1"
+                    query = f"SELECT * FROM {table_name} WHERE {where_clause}"
+                    df = pd.read_sql(query, conn, params=full_params)
                     if not df.empty:
                         print(f"  ✅ {table_name}: {len(df)} rows (filtered by {date_col})")
                         return df
                 except Exception:
                     continue
             
-            # 如果没有日期列，加载全部数据
+            # 如果没有日期列，尝试只用run_id过滤
             try:
-                df = pd.read_sql(f"SELECT * FROM {table_name}", conn)
-                print(f"  ✅ {table_name}: {len(df)} rows (no date filter)")
+                where_clause = " AND ".join(conditions) if conditions else "1=1"
+                query = f"SELECT * FROM {table_name} WHERE {where_clause}"
+                df = pd.read_sql(query, conn, params=params)
+                print(f"  ✅ {table_name}: {len(df)} rows (filtered by run_id only)")
                 return df
             except Exception as e:
                 print(f"  ❌ {table_name}: {e}")
                 return pd.DataFrame()
         else:
             try:
-                df = pd.read_sql(f"SELECT * FROM {table_name}", conn)
+                where_clause = " AND ".join(conditions) if conditions else "1=1"
+                query = f"SELECT * FROM {table_name} WHERE {where_clause}"
+                df = pd.read_sql(query, conn, params=params)
                 print(f"  ✅ {table_name}: {len(df)} rows")
                 return df
             except Exception as e:
@@ -220,6 +241,12 @@ def main():
     print(f"📂 本地输出目录: {LOCAL_OUTPUT_DIR}")
     print()
     
+    # 指定要比较的run_id（使用最新的5天运行）
+    # 如果要比较最新运行，可以设置为 None 并手动查询最新run_id
+    RUN_ID = "BC_S5_20260130_114318"  # 5天完整运行的run_id (with M4 accumulation fix)
+    print(f"🔗 使用数据库 run_id: {RUN_ID}")
+    print()
+    
     # 1. 加载本地数据
     print("📥 加载本地数据...")
     local_data = load_local_module5_data()
@@ -235,7 +262,7 @@ def main():
     
     db_data = {}
     for key, table in db_tables.items():
-        db_data[key] = load_db_data(table, SIM_DATES)
+        db_data[key] = load_db_data(table, SIM_DATES, run_id=RUN_ID)
     print()
     
     # 3. 比较数据

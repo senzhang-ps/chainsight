@@ -65,6 +65,16 @@ from .logistics_execution.delivery_processor import (
     sample_delivery_delay,
     should_bypass_mdq,
 )
+
+# DuckDB batch optimization
+try:
+    from .logistics_execution.duckdb_batch_calculator import (
+        batch_sample_delivery_delays_duckdb,
+        is_duckdb_available as m6_is_duckdb_available,
+    )
+    M6_DUCKDB_AVAILABLE = True
+except ImportError:
+    M6_DUCKDB_AVAILABLE = False
 from .logistics_execution.expression_evaluator import SafeExpressionEvaluator
 from .logistics_execution.inventory_manager import (
     calculate_inventory_limit,
@@ -965,7 +975,8 @@ def _process_truck_type(
                 sim_date, sending, receiving, truck_type, vehicle_no,
                 packer, trigger_cause, rule_id, bypass, context,
                 prepared_data, agg_status, available_inventory,
-                inventory_check_enabled, results, remaining_demands
+                inventory_check_enabled, results, remaining_demands,
+                random_seed=run_params.get('random_seed')
             )
             
             # 更新剩余需求
@@ -1095,13 +1106,15 @@ def _generate_shipment_records(
     available_inventory: Dict[Tuple[str, str], float],
     inventory_check_enabled: bool,
     results: Dict[str, List],
-    remaining_demands: pd.DataFrame
+    remaining_demands: pd.DataFrame,
+    random_seed: Optional[int] = None
 ) -> None:
     """
     生成发运记录。
     
     Args:
         各种参数
+        random_seed: 随机种子，用于批量延迟采样的可复现性
     """
     wfr, vfr = packer.get_load_ratios()
     
@@ -1113,8 +1126,21 @@ def _generate_shipment_records(
     results['vehicle_log'].append(vehicle_log_entry)
     vehicle_uid = vehicle_log_entry['vehicle_uid']
     
+    # 批量采样延迟（DuckDB优化）
+    if M6_DUCKDB_AVAILABLE and m6_is_duckdb_available() and len(packer.load_records) >= 10:
+        try:
+            routes = [(sending, receiving)] * len(packer.load_records)
+            delays = batch_sample_delivery_delays_duckdb(
+                routes, prepared_data['delay_dist'], seed=random_seed
+            )
+        except Exception as e:
+            print(f"[M6] Batch delay sampling failed, using single-record mode: {e}")
+            delays = None
+    else:
+        delays = None
+    
     # 生成发货明细
-    for rec in packer.load_records:
+    for i, rec in enumerate(packer.load_records):
         sub = rec['demand_row']
         uid = sub['ori_deployment_uid']
         
@@ -1126,9 +1152,13 @@ def _generate_shipment_records(
         except ValueError as e:
             raise ValueError(f"缺少路线 {sending}->{receiving} 的 LeadTime 行") from e
         
-        delay = sample_delivery_delay(
-            sending, receiving, prepared_data['delay_dist']
-        )
+        # 使用批量采样结果或单个采样
+        if delays is not None:
+            delay = int(delays[i])
+        else:
+            delay = sample_delivery_delay(
+                sending, receiving, prepared_data['delay_dist']
+            )
         
         ship_date = sim_date
         eta = calculate_actual_delivery_date(
@@ -1373,12 +1403,12 @@ def _generate_outputs(
     delivery_plan_df = _build_delivery_plan_df(results['delivery_plan'])
     
     # 🔧 强制约束: 出货量 <= 订单量
-    # 如果发现超出，则按比例裁剪
-    delivery_plan_df = _enforce_shipment_constraint(
-        delivery_plan_df,
-        run_params.get('orchestrator'),
-        validation_log
-    )
+    # 注意: 禁用该约束以与Dev版保持一致 (Dev版没有这个裁剪逻辑)
+    # delivery_plan_df = _enforce_shipment_constraint(
+    #     delivery_plan_df,
+    #     run_params.get('orchestrator'),
+    #     validation_log
+    # )
     
     # 验证约束: 出货量 <= 订单量
     constraint_passed, shipment_qty, delivery_qty = _validate_shipment_delivery_constraint(

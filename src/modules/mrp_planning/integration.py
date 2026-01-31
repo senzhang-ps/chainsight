@@ -2,6 +2,7 @@
 Module3 集成模式模块。
 
 提供与Orchestrator集成运行的入口函数。
+支持DuckDB内存模式，可跳过磁盘IO直接写入内存表。
 """
 
 import time
@@ -12,6 +13,28 @@ import pandas as pd
 from .config_loader import load_module1_daily_outputs
 from .mrp_simulation import run_mrp_layered_simulation_daily
 from .utils import normalize_identifiers
+
+# 延迟导入内存存储模块（避免循环导入）
+_memory_store_imported = False
+_is_memory_mode_enabled = None
+_write_module3_output = None
+
+
+def _ensure_memory_store_imported():
+    """延迟导入内存存储模块"""
+    global _memory_store_imported, _is_memory_mode_enabled, _write_module3_output
+    if not _memory_store_imported:
+        try:
+            from src.utils.memory_data_store import (
+                is_memory_mode_enabled,
+                write_module3_output,
+            )
+            _is_memory_mode_enabled = is_memory_mode_enabled
+            _write_module3_output = write_module3_output
+        except ImportError:
+            _is_memory_mode_enabled = lambda: False
+            _write_module3_output = lambda *args, **kwargs: False
+        _memory_store_imported = True
 
 
 def run_integrated_mode(
@@ -138,7 +161,13 @@ def _process_single_day(
         current_date, m1_data, orch_data, configs
     )
 
-    # 保存输出
+    # 写入DuckDB内存表（如果内存模式已启用）
+    _ensure_memory_store_imported()
+    if _is_memory_mode_enabled and _is_memory_mode_enabled():
+        date_str = current_date.strftime('%Y%m%d')
+        _write_module3_output(date_str=date_str, net_demand=net_demand_df)
+
+    # 保存Excel文件输出
     if not skip_file_output:
         _save_daily_output(net_demand_df, output_dir, current_date)
 
@@ -153,6 +182,14 @@ def _load_module1_data(
     """加载Module1数据。"""
     try:
         if module1_result is not None:
+            # 🔧 修复：使用累积订单(all_orders_for_next_day)而非仅当日订单(orders_df)
+            # AO gap计算需要包含历史订单（与Dev版本一致）
+            # Dev版本的OrderLog包含所有历史生成但未来到期的订单
+            order_df = module1_result.get('all_orders_for_next_day')
+            if order_df is None or (hasattr(order_df, 'empty') and order_df.empty):
+                # 回退到orders_df（兼容旧接口）
+                order_df = module1_result.get('orders_df', pd.DataFrame())
+            
             data = {
                 'supply_demand_df': module1_result.get(
                     'supply_demand_df', pd.DataFrame()
@@ -160,9 +197,7 @@ def _load_module1_data(
                 'shipment_df': module1_result.get(
                     'shipment_df', pd.DataFrame()
                 ),
-                'order_df': module1_result.get(
-                    'orders_df', pd.DataFrame()
-                ),
+                'order_df': order_df,
             }
         else:
             data = load_module1_daily_outputs(module1_output_dir, current_date)

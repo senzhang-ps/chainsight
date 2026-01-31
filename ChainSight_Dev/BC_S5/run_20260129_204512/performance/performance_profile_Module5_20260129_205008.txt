@@ -1,0 +1,129 @@
+====================================================================================================
+性能分析报告: Module5
+生成时间: 2026-01-29 20:50:08
+====================================================================================================
+
+【按累积时间排序 - 前30个最耗时函数】
+----------------------------------------------------------------------------------------------------
+         97662468 function calls (95228570 primitive calls) in 60.543 seconds
+
+   Ordered by: cumulative time
+   List reduced from 1987 to 30 due to restriction <30>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+82602/39330    0.164    0.000   69.565    0.002 C:\Users\25936\Desktop\Code\chainsight\.venv\Lib\site-packages\pandas\core\arraylike.py:40(__eq__)
+        1    0.306    0.306   60.548   60.548 C:\Users\25936\Desktop\Code\chainsight\ChainSight_Dev\module5.py:1988(main)
+4758/3880    0.028    0.000   56.918    0.015 {method 'acquire' of '_thread.lock' objects}
+      102    0.000    0.000   56.799    0.557 D:\Python312\Lib\threading.py:1117(join)
+      102    0.000    0.000   56.797    0.557 D:\Python312\Lib\threading.py:1155(_wait_for_tstate_lock)
+107951/44032    0.229    0.000   55.076    0.001 C:\Users\25936\Desktop\Code\chainsight\.venv\Lib\site-packages\pandas\core\ops\common.py:67(new_method)
+      577    0.004    0.000   45.743    0.079 D:\Python312\Lib\concurrent\futures\_base.py:199(as_completed)
+62637/40212    0.227    0.000   38.932    0.001 C:\Users\25936\Desktop\Code\chainsight\.venv\Lib\site-packages\pandas\core\series.py:6726(_cmp_method)
+16496/2857    0.026    0.000   32.238    0.011 C:\Users\25936\Desktop\Code\chainsight\.venv\Lib\site-packages\pandas\core\arraylike.py:70(__and__)
+62637/40212    0.249    0.000   30.877    0.001 C:\Users\25936\Desktop\Code\chainsight\.venv\Lib\site-packages\pandas\core\ops\array_ops.py:294(comparison_op)
+      946    0.005    0.000   28.143    0.030 D:\Python312\Lib\threading.py:323(wait)
+16496/2857    0.067    0.000   24.702    0.009 C:\Users\25936\Desktop\Code\chainsight\.venv\Lib\site-packages\pandas\core\series.py:6739(_logical_method)
+      407    0.004    0.000   24.465    0.060 D:\Python312\Lib\threading.py:637(wait)
+16496/2857    0.072    0.000   24.324    0.009 C:\Users\25936\Desktop\Code\chainsight\.venv\Lib\site-packages\pandas\core\ops\array_ops.py:400(logical_op)
+        5    0.000    0.000   22.588    4.518 D:\Python312\Lib\concurrent\futures\_base.py:646(__exit__)
+        5    0.000    0.000   22.588    4.518 D:\Python312\Lib\concurrent\futures\thread.py:220(shutdown)
+    102/5    0.004    0.000   22.582    4.516 D:\Python312\Lib\threading.py:1018(_bootstrap)
+    102/5    0.002    0.000   22.580    4.516 D:\Python312\Lib\threading.py:1058(_bootstrap_inner)
+    582/7    0.055    0.000   22.217    3.174 D:\Python312\Lib\concurrent\futures\thread.py:54(run)
+23289/11519    0.139    0.000   19.952    0.002 C:\Users\25936\Desktop\Code\chainsight\.venv\Lib\site-packages\pandas\core\arrays\masked.py:512(to_numpy)
+   148/24    0.007    0.000   18.962    0.790 {method 'get' of '_queue.SimpleQueue' objects}
+    102/5    0.001    0.000   18.955    3.791 D:\Python312\Lib\threading.py:1001(run)
+    102/5    0.002    0.000   18.955    3.791 D:\Python312\Lib\concurrent\futures\thread.py:70(_worker)
+82602/39330    1.238    0.000   17.999    0.000 {built-in method _operator.eq}
+     1772    0.006    0.000   14.938    0.008 C:\Users\25936\Desktop\Code\chainsight\.venv\Lib\site-packages\pandas\core\base.py:996(_map_values)
+     1772    0.140    0.000   14.928    0.008 C:\Users\25936\Desktop\Code\chainsight\.venv\Lib\site-packages\pandas\core\algorithms.py:1632(map_array)
+     1716    0.013    0.000   14.596    0.009 C:\Users\25936\Desktop\Code\chainsight\.venv\Lib\site-packages\pandas\core\series.py:4506(map)
+23289/11519    0.026    0.000   14.052    0.001 C:\Users\25936\Desktop\Code\chainsight\.venv\Lib\site-packages\pandas\core\arrays\masked.py:807(_hasna)
+141811/106222    0.361    0.000   13.294    0.000 C:\Users\25936\Desktop\Code\chainsight\.venv\Lib\site-packages\pandas\core\indexing.py:1192(__getitem__)
+  4598/15    0.115    0.000   12.815    0.854 C:\Users\25936\Desktop\Code\chainsight\ChainSight_Dev\module5.py:388(_lookup_moq_rv)
+
+
+
+
+【按调用次数排序 - 前30个最频繁调用函数】
+----------------------------------------------------------------------------------------------------
+         97662468 function calls (95228570 primitive calls) in 60.543 seconds
+
+   Ordered by: call count
+   List reduced from 1987 to 30 due to restriction <30>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+17641513/17432448    2.839    0.000    4.325    0.000 {built-in method builtins.isinstance}
+4190228/4190204    0.608    0.000    0.631    0.000 {built-in method builtins.getattr}
+4059695/3037016    0.799    0.000    1.076    0.000 {built-in method builtins.len}
+  2749388    0.476    0.000    0.477    0.000 {method 'write' of '_io.TextIOWrapper' objects}
+  2196535    0.292    0.000    0.292    0.000 {method 'get' of 'dict' objects}
+2028795/2027560    0.638    0.000    1.479    0.000 C:\Users\25936\Desktop\Code\chainsight\.venv\Lib\site-packages\pandas\core\dtypes\generic.py:43(_instancecheck)
+2028795/2027560    0.566    0.000    0.815    0.000 C:\Users\25936\Desktop\Code\chainsight\.venv\Lib\site-packages\pandas\core\dtypes\generic.py:38(_check)
+  1431829    0.368    0.000    0.522    0.000 C:\Users\25936\Desktop\Code\chainsight\ChainSight_Dev\module5.py:1618(<genexpr>)
+  1245051    0.190    0.000    0.190    0.000 {method 'append' of 'list' objects}
+   926277    0.111    0.000    0.111    0.000 C:\Users\25936\Desktop\Code\chainsight\.venv\Lib\site-packages\pandas\core\generic.py:360(flags)
+   829718    0.209    0.000    0.288    0.000 {built-in method builtins.hasattr}
+737529/712354    0.288    0.000    2.874    0.000 C:\Users\25936\Desktop\Code\chainsight\.venv\Lib\site-packages\pandas\core\dtypes\missing.py:180(_isna)
+737529/712076    0.192    0.000    3.058    0.000 C:\Users\25936\Desktop\Code\chainsight\.venv\Lib\site-packages\pandas\core\dtypes\missing.py:97(isna)
+   731583    0.171    0.000    0.258    0.000 C:\Users\25936\Desktop\Code\chainsight\.venv\Lib\site-packages\pandas\core\indexes\range.py:1266(__len__)
+   715224    1.435    0.000    3.013    0.000 C:\Users\25936\Desktop\Code\chainsight\.venv\Lib\site-packages\et_xmlfile\incremental_tree.py:372(write_elem_start)
+692373/290195    0.686    0.000    3.676    0.000 C:\Users\25936\Desktop\Code\chainsight\.venv\Lib\site-packages\et_xmlfile\incremental_tree.py:566(_serialize_ns_xml)
+   655926    0.073    0.000    0.073    0.000 {method 'add' of 'set' objects}
+646252/645918    0.114    0.000    0.115    0.000 {built-in method builtins.hash}
+   637647    0.140    0.000    0.140    0.000 D:\Python312\Lib\xml\etree\ElementTree.py:1024(_escape_attrib)
+   617518    0.072    0.000    0.072    0.000 C:\Users\25936\Desktop\Code\chainsight\.venv\Lib\site-packages\pandas\core\flags.py:67(allows_duplicate_labels)
+   559288    0.075    0.000    0.075    0.000 {built-in method builtins.callable}
+   549169    0.081    0.000    0.081    0.000 {built-in method builtins.issubclass}
+   536344    0.275    0.000    0.490    0.000 D:\Python312\Lib\re\__init__.py:280(_compile)
+   536138    0.186    0.000    0.186    0.000 {method 'search' of 're.Pattern' objects}
+535988/535904    0.216    0.000    0.891    0.000 D:\Python312\Lib\re\__init__.py:174(search)
+   523704    0.147    0.000    0.147    0.000 {built-in method __new__ of type object at 0x00007FFBB26E38F0}
+   501175    0.734    0.000    1.600    0.000 C:\Users\25936\Desktop\Code\chainsight\.venv\Lib\site-packages\pandas\core\generic.py:6208(__setattr__)
+   495958    0.114    0.000    0.167    0.000 D:\Python312\Lib\enum.py:202(__get__)
+   495958    0.053    0.000    0.053    0.000 D:\Python312\Lib\enum.py:1286(value)
+   488223    0.340    0.000    0.474    0.000 C:\Users\25936\Desktop\Code\chainsight\.venv\Lib\site-packages\pandas\core\arrays\_mixins.py:287(__getitem__)
+
+
+
+
+【按总时间排序 - 前30个纯执行时间最长函数】
+----------------------------------------------------------------------------------------------------
+         97662468 function calls (95228570 primitive calls) in 60.543 seconds
+
+   Ordered by: internal time
+   List reduced from 1987 to 30 due to restriction <30>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+17641513/17432448    2.839    0.000    4.325    0.000 {built-in method builtins.isinstance}
+23745/23383    2.321    0.000    2.270    0.000 C:\Users\25936\Desktop\Code\chainsight\.venv\Lib\site-packages\pandas\core\dtypes\missing.py:260(_isna_string_dtype)
+   715224    1.435    0.000    3.013    0.000 C:\Users\25936\Desktop\Code\chainsight\.venv\Lib\site-packages\et_xmlfile\incremental_tree.py:372(write_elem_start)
+82602/39330    1.238    0.000   17.999    0.000 {built-in method _operator.eq}
+371395/371088    1.165    0.000    1.662    0.000 C:\Users\25936\Desktop\Code\chainsight\.venv\Lib\site-packages\pandas\core\generic.py:6131(__finalize__)
+23289/3847    1.013    0.000    0.301    0.000 C:\Users\25936\Desktop\Code\chainsight\.venv\Lib\site-packages\pandas\core\arrays\string_.py:1155(_cmp_method)
+327721/254203    0.921    0.000    0.656    0.000 {method 'reduce' of 'numpy.ufunc' objects}
+4059695/3037016    0.799    0.000    1.076    0.000 {built-in method builtins.len}
+   501175    0.734    0.000    1.600    0.000 C:\Users\25936\Desktop\Code\chainsight\.venv\Lib\site-packages\pandas\core\generic.py:6208(__setattr__)
+    98912    0.699    0.000    5.018    0.000 C:\Users\25936\Desktop\Code\chainsight\.venv\Lib\site-packages\pandas\core\series.py:369(__init__)
+   128599    0.694    0.000    1.965    0.000 C:\Users\25936\Desktop\Code\chainsight\.venv\Lib\site-packages\pandas\core\construction.py:531(sanitize_array)
+692373/290195    0.686    0.000    3.676    0.000 C:\Users\25936\Desktop\Code\chainsight\.venv\Lib\site-packages\et_xmlfile\incremental_tree.py:566(_serialize_ns_xml)
+2028795/2027560    0.638    0.000    1.479    0.000 C:\Users\25936\Desktop\Code\chainsight\.venv\Lib\site-packages\pandas\core\dtypes\generic.py:43(_instancecheck)
+131503/131448    0.636    0.000    1.464    0.000 C:\Users\25936\Desktop\Code\chainsight\.venv\Lib\site-packages\pandas\core\internals\managers.py:1188(iget)
+4190228/4190204    0.608    0.000    0.631    0.000 {built-in method builtins.getattr}
+2028795/2027560    0.566    0.000    0.815    0.000 C:\Users\25936\Desktop\Code\chainsight\.venv\Lib\site-packages\pandas\core\dtypes\generic.py:38(_check)
+   290175    0.521    0.000    5.664    0.000 C:\Users\25936\Desktop\Code\chainsight\.venv\Lib\site-packages\openpyxl\cell\_writer.py:45(etree_write_cell)
+   313046    0.502    0.000    0.808    0.000 C:\Users\25936\Desktop\Code\chainsight\.venv\Lib\site-packages\et_xmlfile\incremental_tree.py:279(process_attribs)
+86485/85921    0.481    0.000    1.378    0.000 C:\Users\25936\Desktop\Code\chainsight\.venv\Lib\site-packages\pandas\core\array_algos\take.py:118(_take_nd_ndarray)
+  2749388    0.476    0.000    0.477    0.000 {method 'write' of '_io.TextIOWrapper' objects}
+296239/296209    0.461    0.000    0.627    0.000 C:\Users\25936\Desktop\Code\chainsight\.venv\Lib\site-packages\pandas\core\generic.py:258(__init__)
+59582/59568    0.398    0.000    9.553    0.000 C:\Users\25936\Desktop\Code\chainsight\.venv\Lib\site-packages\pandas\core\indexing.py:1058(_getitem_lowerdim)
+117814/88628    0.393    0.000    9.806    0.000 C:\Users\25936\Desktop\Code\chainsight\.venv\Lib\site-packages\pandas\core\frame.py:4337(__getitem__)
+46083/45915    0.390    0.000    6.623    0.000 C:\Users\25936\Desktop\Code\chainsight\.venv\Lib\site-packages\pandas\core\generic.py:4010(take)
+    95607    0.379    0.000    0.415    0.000 C:\Users\25936\Desktop\Code\chainsight\.venv\Lib\site-packages\pandas\core\dtypes\cast.py:451(maybe_promote)
+  1431829    0.368    0.000    0.522    0.000 C:\Users\25936\Desktop\Code\chainsight\ChainSight_Dev\module5.py:1618(<genexpr>)
+   290175    0.363    0.000    0.767    0.000 C:\Users\25936\Desktop\Code\chainsight\.venv\Lib\site-packages\openpyxl\worksheet\worksheet.py:251(_get_cell)
+307341/307288    0.362    0.000    1.172    0.000 {built-in method builtins.any}
+141811/106222    0.361    0.000   13.294    0.000 C:\Users\25936\Desktop\Code\chainsight\.venv\Lib\site-packages\pandas\core\indexing.py:1192(__getitem__)
+   290142    0.359    0.000    1.080    0.000 C:\Users\25936\Desktop\Code\chainsight\.venv\Lib\site-packages\pandas\io\formats\excel.py:857(_generate_body)
+
+

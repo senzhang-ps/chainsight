@@ -339,7 +339,10 @@ def _load_module1_data_from_memory(
         module1_result: Module1运行结果
         config: 目标配置字典（会被修改）
     """
-    orders_df = module1_result.get('orders_df', pd.DataFrame())
+    # 🔧 修复：使用 all_orders_for_next_day（累积订单）而不是 orders_df（仅当日新订单）
+    # all_orders_for_next_day 包含当天及之后的所有未履行订单，与文件模式中的 OrderLog 一致
+    # 回退到 orders_df 以兼容旧版本
+    orders_df = module1_result.get('all_orders_for_next_day', module1_result.get('orders_df', pd.DataFrame()))
     supply_demand_df = module1_result.get('supply_demand_df', pd.DataFrame())
     shipment_df = module1_result.get('shipment_df', pd.DataFrame())
 
@@ -628,7 +631,8 @@ def load_integrated_config(
     module4_output_path: str,
     orchestrator: object,
     current_date: pd.Timestamp,
-    module1_result: Optional[dict] = None
+    module1_result: Optional[dict] = None,
+    module4_result: Optional[dict] = None
 ) -> dict:
     """
     加载集成配置数据（替代load_config）。
@@ -636,10 +640,11 @@ def load_integrated_config(
     Args:
         config_dict: 配置字典
         module1_output_dir: Module1输出目录
-        module4_output_path: Module4输出文件路径
+        module4_output_path: Module4输出文件路径（当module4_result为None时使用）
         orchestrator: Orchestrator实例
         current_date: 当前日期
         module1_result: Module1运行结果（可选，用于数据库模式）
+        module4_result: Module4运行结果（可选，优先从内存获取生产计划）
 
     Returns:
         dict: 完整的配置字典
@@ -664,11 +669,20 @@ def load_integrated_config(
         config['OrderLog'] = pd.DataFrame()
         config['TodayShipment'] = pd.DataFrame()
 
-    # 3. 加载生产计划
+    # 3. 🦆 加载生产计划（优先从内存获取）
     config['ProductionPlan'] = pd.DataFrame()
-    if orchestrator and current_date:
+    
+    # 3.1 优先从module4_result内存获取
+    if module4_result is not None and 'production_df' in module4_result:
+        production_df = module4_result['production_df']
+        if isinstance(production_df, pd.DataFrame) and not production_df.empty:
+            config['ProductionPlan'] = production_df.copy()
+    
+    # 3.2 如果内存没有，尝试从orchestrator获取
+    if config['ProductionPlan'].empty and orchestrator and current_date:
         _load_production_from_orchestrator(orchestrator, current_date, config)
 
+    # 3.3 最后从文件获取
     if config['ProductionPlan'].empty:
         _load_production_from_module4(module4_output_path, config)
 

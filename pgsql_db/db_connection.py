@@ -92,6 +92,7 @@ class DatabaseConnection:
         Returns:
             bool: 数据库是否存在
         """
+        temp_conn = None
         try:
             # 连接到postgres数据库检查目标数据库是否存在
             temp_conn = psycopg.connect(
@@ -108,11 +109,13 @@ class DatabaseConnection:
                     (self.database,)
                 )
                 exists = cursor.fetchone() is not None
-            temp_conn.close()
             return exists
         except Exception as e:
             print(f"检测数据库存在性时出错: {e}")
             return False
+        finally:
+            if temp_conn and not temp_conn.closed:
+                temp_conn.close()
     
     def create_database_if_not_exists(self) -> bool:
         """
@@ -125,6 +128,7 @@ class DatabaseConnection:
             print(f"✅ 数据库已存在: {self.database}")
             return True
         
+        temp_conn = None
         try:
             # 连接到postgres数据库创建新数据库
             temp_conn = psycopg.connect(
@@ -141,12 +145,14 @@ class DatabaseConnection:
                 cursor.execute(
                     sql.SQL("CREATE DATABASE {}").format(sql.Identifier(self.database))
                 )
-            temp_conn.close()
             print(f"✅ 已创建数据库: {self.database}")
             return True
         except Exception as e:
             print(f"❌ 创建数据库失败: {e}")
             return False
+        finally:
+            if temp_conn and not temp_conn.closed:
+                temp_conn.close()
     
     def check_tables_exist(self, table_names: List[str]) -> Dict[str, bool]:
         """

@@ -29,6 +29,15 @@ from pathlib import Path
 from datetime import datetime
 from typing import Optional
 
+# Windows UTF-8 编码设置 - 解决emoji和中文输出问题
+if sys.platform == 'win32':
+    import io
+    # 设置stdout/stderr为UTF-8编码
+    if hasattr(sys.stdout, 'buffer'):
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    if hasattr(sys.stderr, 'buffer'):
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+
 # 将父目录添加到路径中以便导入
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -133,12 +142,14 @@ def _ensure_output_dir(config_path: Path, resume_mode: bool = False,
                       resume_from: Optional[str] = None, 
                       start_date: Optional[str] = None,
                       end_date: Optional[str] = None,
-                      interactive: bool = True) -> Path:
+                      interactive: bool = True,
+                      run_suffix: str = "") -> Path:
     """Create the output directory rooted in centralized outputs/ folder.
 
     Structure:
       outputs/<config_stem>/
         └─ run_YYYYMMDD_HHMMSS/  (actual write target to avoid overwrites)
+        └─ run_YYYYMMDD_HHMMSS_suffix/  (if run_suffix is provided)
 
     Args:
         config_path: Path to the configuration file
@@ -147,6 +158,7 @@ def _ensure_output_dir(config_path: Path, resume_mode: bool = False,
         start_date: Simulation start date (required for resume validation)
         end_date: Simulation end date (required for resume validation)
         interactive: If True, prompt user to select run directory when multiple exist
+        run_suffix: Optional suffix to append to run directory name
 
     Returns the leaf path to be used as `output_base_dir`.
     """
@@ -196,6 +208,66 @@ def _ensure_output_dir(config_path: Path, resume_mode: bool = False,
     print(f"📂 创建新的运行目录: run_{ts}")
 
     return run_dir
+
+
+def _write_results_to_local(all_results: dict, output_dir: Path, logger) -> None:
+    """将内存中的仿真结果写入本地Excel文件（--also-local 模式使用）
+    
+    Args:
+        all_results: 仿真结果字典 {module_name: [day1_result, day2_result, ...]}
+        output_dir: 输出目录
+        logger: 日志记录器
+    """
+    import pandas as pd
+    
+    # 模块名到输出文件名的映射
+    module_output_map = {
+        'module1': ('order_log', 'Module1_OrderLog.xlsx'),
+        'module3': ('net_demand', 'Module3_NetDemand.xlsx'),
+        'module4': ('production_plan', 'Module4_ProductionPlan.xlsx'),
+        'module5': ('deployment_plan', 'Module5_DeploymentPlan.xlsx'),
+        'module6': ('delivery_plan', 'Module6_DeliveryPlan.xlsx'),
+    }
+    
+    for module_name, (data_key, file_name) in module_output_map.items():
+        if module_name not in all_results:
+            logger.warning(f"  ⚠️ {module_name} 不在结果中")
+            continue
+        
+        module_days = all_results[module_name]
+        if not module_days:
+            logger.warning(f"  ⚠️ {module_name} 无数据")
+            continue
+        
+        # 合并所有天的数据
+        all_dfs = []
+        for day_result in module_days:
+            if isinstance(day_result, dict):
+                # 尝试多种键名
+                df = None
+                for key in [data_key, f'{module_name}_{data_key}', 'output', 'result']:
+                    if key in day_result and isinstance(day_result[key], pd.DataFrame):
+                        df = day_result[key]
+                        break
+                # 如果找不到特定键，尝试找第一个DataFrame
+                if df is None:
+                    for v in day_result.values():
+                        if isinstance(v, pd.DataFrame) and not v.empty:
+                            df = v
+                            break
+                if df is not None and not df.empty:
+                    all_dfs.append(df)
+            elif isinstance(day_result, pd.DataFrame) and not day_result.empty:
+                all_dfs.append(day_result)
+        
+        if all_dfs:
+            combined_df = pd.concat(all_dfs, ignore_index=True)
+            excel_path = output_dir / file_name
+            combined_df.to_excel(excel_path, index=False)
+            logger.info(f"  ✅ {file_name}: {len(combined_df)} 行")
+        else:
+            logger.warning(f"  ⚠️ {module_name} 无有效数据可写入")
+
 
 def get_or_init_simulation_start(output_root: Path, provided_start: Optional[str]) -> str:
     """返回该配置对应的持久化仿真起始日期。
@@ -358,13 +430,76 @@ def _run_with_database(ns: argparse.Namespace) -> int:
         # 【完整模式】写入所有模块的详细输出数据 + Summary + Orchestrator
         # 包含: module1, module3, module4, module5, module6 的每日输出sheet
         db_write_start = time.time()
-        if output_dir and Path(output_dir).exists():
-            # 写入所有模块数据（包含每个module的每日输出sheet）
-            writer.write_all_modules(str(output_dir), run_id=run_id, if_exists='replace')
+        
+        # 🔧 关键修复：从内存结果直接写入数据库（而非从文件读取）
+        # 仿真使用 skip_file_output=True，因此模块输出仅存在于内存中
+        all_results = result.get('results')
+        
+        # 🔍 DEBUG: 详细打印 all_results 结构
+        logger.info("=" * 60)
+        logger.info("🔍 DEBUG: 检查 all_results 结构")
+        logger.info("=" * 60)
+        if all_results:
+            logger.info(f"all_results 类型: {type(all_results)}")
+            logger.info(f"all_results 键: {list(all_results.keys()) if isinstance(all_results, dict) else 'N/A'}")
+            for module_name, module_results in all_results.items():
+                logger.info(f"  {module_name}: {len(module_results) if isinstance(module_results, list) else 'N/A'} 天的结果")
+                if isinstance(module_results, list) and len(module_results) > 0:
+                    first_day = module_results[0]
+                    if isinstance(first_day, dict):
+                        logger.info(f"    第一天的键: {list(first_day.keys())}")
+                        for key, value in first_day.items():
+                            if hasattr(value, 'shape'):
+                                logger.info(f"      {key}: DataFrame shape={value.shape}")
+                            elif hasattr(value, '__len__'):
+                                logger.info(f"      {key}: type={type(value).__name__}, len={len(value)}")
+                            else:
+                                logger.info(f"      {key}: type={type(value).__name__}")
+        else:
+            logger.warning("⚠️ all_results 为空或 None!")
+            logger.info(f"result 的键: {list(result.keys()) if isinstance(result, dict) else 'N/A'}")
+        logger.info("=" * 60)
+        
+        if all_results:
+            logger.info("📤 从内存直接写入模块输出到数据库...")
+            writer.write_module_results_from_dict(all_results, run_id=run_id, if_exists='replace')
             
-            # 删除本地数据文件，只保留日志
-            logger.info("\n🧹 清理本地数据文件（仅保留日志）...")
-            _cleanup_data_files(str(output_dir), log_dir)
+            # ========== --also-local: 同时输出到本地Excel文件 ==========
+            if getattr(ns, 'also_local', False):
+                logger.info("\n" + "=" * 60)
+                logger.info("📁 --also-local: 同时输出到本地Excel文件")
+                logger.info("=" * 60)
+                local_output_dir = project_root / "outputs" / config_name / f"run_{ts}"
+                local_output_dir.mkdir(parents=True, exist_ok=True)
+                _write_results_to_local(all_results, local_output_dir, logger)
+                logger.info(f"✅ 本地输出目录: {local_output_dir}")
+                
+        elif output_dir and Path(output_dir).exists():
+            # 回退：如果有文件输出，则从文件读取（兼容旧模式）
+            logger.info("📤 从文件读取并写入模块输出到数据库...")
+            writer.write_all_modules(str(output_dir), run_id=run_id, if_exists='replace')
+        else:
+            logger.warning("⚠️ 无可用的模块输出数据写入数据库")
+        
+        # 📁 写入 Orchestrator 状态数据（从临时目录读取）
+        if output_dir:
+            orch_dir = Path(output_dir) / "orchestrator"
+            if orch_dir.exists():
+                logger.info("📤 写入 Orchestrator 状态数据到数据库...")
+                writer.write_orchestrator_data(str(orch_dir), run_id=run_id, if_exists='replace')
+            else:
+                logger.warning("⚠️ Orchestrator 目录不存在，跳过写入")
+        
+        # 📊 生成 Summary 汇总报告（从数据库已写入的模块输出表直接聚合）
+        # 注意：在DB模式下，模块不输出xlsx文件，因此无法使用SummaryReportGenerator
+        # 此方法直接从数据库的module1/4/5/6输出表中聚合生成7个Summary报告表
+        logger.info("📊 从数据库生成 Summary 汇总报告...")
+        writer.generate_summary_reports_from_db(
+            run_id=run_id,
+            start_date=start_date,
+            end_date=end_date,
+            if_exists='replace'
+        )
         
         db_write_time = time.time() - db_write_start
         logger.info(f"⏱️  数据库写入耗时: {db_write_time:.2f}秒")
@@ -405,7 +540,9 @@ def _run_with_database(ns: argparse.Namespace) -> int:
         logger.error(traceback.format_exc())
         return 1
     finally:
+        # 关闭数据库连接
         db.close()
+        logger.info("🔌 数据库连接已关闭")
         if redirector:
             redirector.stop_redirect()
 
@@ -741,6 +878,17 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         type=str,
         default="123456",
         help="数据库密码 (默认: 123456)",
+    )
+    parser.add_argument(
+        "--run-suffix",
+        type=str,
+        default="",
+        help="运行目录后缀，用于区分不同运行 (例如: --run-suffix test 生成 run_YYYYMMDD_HHMMSS_test)",
+    )
+    parser.add_argument(
+        "--also-local",
+        action="store_true",
+        help="数据库模式下同时输出到本地Excel文件（用于验证DB输出与本地一致）",
     )
     return parser.parse_args(argv)
 

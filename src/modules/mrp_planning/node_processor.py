@@ -130,7 +130,7 @@ class NodeProcessor:
 
             location_type = infer_sending_location_type(
                 self.ctx['active_network'],
-                self.ctx['location_layer_df'],
+                self.ctx['location_layer_map'],
                 str(upstream), material, self.sim_date
             )
             horizon, _ = determine_lead_time(
@@ -145,7 +145,7 @@ class NodeProcessor:
 
     def _get_root_horizon(self, material: str, location: str) -> int:
         """获取根节点horizon。"""
-        if self.ctx['location_layer'].get(location, -1) == 0:
+        if self.ctx['location_layer_map'].get((str(material), str(location)), -1) == 0:
             return compute_root_horizon(
                 material, location,
                 self.data['lead_time_df'],

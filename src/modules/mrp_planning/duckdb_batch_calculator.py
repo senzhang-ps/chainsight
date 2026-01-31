@@ -14,21 +14,31 @@ import numpy as np
 
 # 尝试导入 DuckDB 集成模块
 try:
-    import sys
-    import os
-    # 添加 pgsql_db 到路径
-    pgsql_db_path = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'pgsql_db')
-    if pgsql_db_path not in sys.path:
-        sys.path.insert(0, pgsql_db_path)
-    
-    from duckdb_integration import (
+    # 使用包路径导入，确保使用同一个模块实例（避免 singleton 问题）
+    from pgsql_db.duckdb_integration import (
         get_duckdb_calculator,
         DuckDBConfig,
         get_perf_stats,
     )
     DUCKDB_INTEGRATION_AVAILABLE = True
 except ImportError:
-    DUCKDB_INTEGRATION_AVAILABLE = False
+    # 回退到路径导入（兼容性）
+    try:
+        import sys
+        import os
+        # 添加 pgsql_db 到路径
+        pgsql_db_path = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'pgsql_db')
+        if pgsql_db_path not in sys.path:
+            sys.path.insert(0, pgsql_db_path)
+        
+        from duckdb_integration import (
+            get_duckdb_calculator,
+            DuckDBConfig,
+            get_perf_stats,
+        )
+        DUCKDB_INTEGRATION_AVAILABLE = True
+    except ImportError:
+        DUCKDB_INTEGRATION_AVAILABLE = False
 
 
 def batch_calculate_net_demand_duckdb(
@@ -160,8 +170,36 @@ def batch_calculate_net_demand_duckdb(
         calculator.conn.register('ss', ss_agg)
         
         # 执行批量计算 SQL
+        # 注意：AO 和 FC 需要按各节点的 horizon_end 进行过滤
+        # ao 和 fc 表现在保留了 date 维度，需要在 SQL 中进行聚合和过滤
+        # 使用 CAST 确保日期类型一致性，避免 datetime64 vs Timestamp 比较问题
         result = calculator.conn.execute("""
-            WITH supply_calc AS (
+            WITH 
+            -- 先按 horizon_end 聚合 AO 需求
+            ao_filtered AS (
+                SELECT 
+                    n.material,
+                    n.location,
+                    COALESCE(SUM(ao.qty), 0) as qty
+                FROM nodes n
+                LEFT JOIN ao ON n.material = ao.material 
+                    AND n.location = ao.location 
+                    AND CAST(ao.date AS TIMESTAMP) <= CAST(n.horizon_end AS TIMESTAMP)
+                GROUP BY n.material, n.location
+            ),
+            -- 先按 horizon_end 聚合 FC 需求
+            fc_filtered AS (
+                SELECT 
+                    n.material,
+                    n.location,
+                    COALESCE(SUM(fc.qty), 0) as qty
+                FROM nodes n
+                LEFT JOIN fc ON n.material = fc.material 
+                    AND n.location = fc.location 
+                    AND CAST(fc.date AS TIMESTAMP) <= CAST(n.horizon_end AS TIMESTAMP)
+                GROUP BY n.material, n.location
+            ),
+            supply_calc AS (
                 SELECT 
                     n.material,
                     n.location,
@@ -196,13 +234,13 @@ def batch_calculate_net_demand_duckdb(
                     s.begin_inv + s.in_transit + s.delivery_gr + 
                     s.prod_today + s.prod_future + s.od_in -
                     s.shipment - s.od_out - s.del_ship as total_supply,
-                    -- 获取需求（需要按horizon_end过滤）
-                    COALESCE(ao.qty, 0) as ao_local,
-                    COALESCE(fc.qty, 0) as fc_local,
+                    -- 获取需求（已按horizon_end过滤）
+                    COALESCE(ao_f.qty, 0) as ao_local,
+                    COALESCE(fc_f.qty, 0) as fc_local,
                     COALESCE(ss.qty, 0) as ss_local
                 FROM supply_calc s
-                LEFT JOIN ao ON s.material = ao.material AND s.location = ao.location
-                LEFT JOIN fc ON s.material = fc.material AND s.location = fc.location
+                LEFT JOIN ao_filtered ao_f ON s.material = ao_f.material AND s.location = ao_f.location
+                LEFT JOIN fc_filtered fc_f ON s.material = fc_f.material AND s.location = fc_f.location
                 LEFT JOIN ss ON s.material = ss.material 
                     AND s.location = ss.location 
                     AND s.horizon_end = ss.date
@@ -242,7 +280,7 @@ def batch_calculate_net_demand_duckdb(
             gaps[key] = (float(row['ao_gap']), float(row['fc_gap']), float(row['ss_gap']))
         
         elapsed_ms = (time.perf_counter() - t0) * 1000
-        print(f"[M3-DuckDB] 批量计算 {len(nodes)} 节点净需求: {elapsed_ms:.1f}ms")
+        print(f"[M3-DuckDB] 批量计算 {len(nodes)} 节点净需求: {elapsed_ms:.1f}ms, input={len(nodes)}, output={len(gaps)}")
         
         if run_id and DuckDBConfig.collect_stats:
             get_perf_stats().record(run_id, 'batch_net_demand', 'duckdb', 
@@ -251,7 +289,9 @@ def batch_calculate_net_demand_duckdb(
         return gaps
         
     except Exception as e:
-        print(f"[M3-DuckDB] 批量计算出错，回退到Pandas: {e}")
+        import traceback
+        print(f"[M3-DuckDB] 批量计算出错，回退到Pandas: {e}", flush=True)
+        print(f"[M3-DuckDB] Traceback:\n{traceback.format_exc()}", flush=True)
         if DuckDBConfig.fallback_on_error:
             return _batch_calculate_pandas(
                 nodes, sim_date, beginning_inventory_df, in_transit_df,
@@ -317,11 +357,49 @@ def _batch_calculate_pandas(
 # 辅助聚合函数
 # ============================================================================
 
+def _empty_df_with_date() -> pd.DataFrame:
+    """返回具有正确类型的空 DataFrame（包含 date 列）"""
+    result = pd.DataFrame({
+        'material': pd.Series([], dtype='str'),
+        'location': pd.Series([], dtype='str'),
+        'date': pd.Series([], dtype='datetime64[ns]'),
+        'qty': pd.Series([], dtype='float64')
+    })
+    return result
+
+
+def _empty_df_ml() -> pd.DataFrame:
+    """返回具有正确类型的空 DataFrame（material, location, qty）"""
+    return pd.DataFrame({
+        'material': pd.Series([], dtype='str'),
+        'location': pd.Series([], dtype='str'),
+        'qty': pd.Series([], dtype='float64')
+    })
+
+
+def _empty_df_mr() -> pd.DataFrame:
+    """返回具有正确类型的空 DataFrame（material, receiving, qty）"""
+    return pd.DataFrame({
+        'material': pd.Series([], dtype='str'),
+        'receiving': pd.Series([], dtype='str'),
+        'qty': pd.Series([], dtype='float64')
+    })
+
+
+def _empty_df_ms() -> pd.DataFrame:
+    """返回具有正确类型的空 DataFrame（material, sending, qty）"""
+    return pd.DataFrame({
+        'material': pd.Series([], dtype='str'),
+        'sending': pd.Series([], dtype='str'),
+        'qty': pd.Series([], dtype='float64')
+    })
+
+
 def _agg_by_ml(df: pd.DataFrame, qty_col: str, 
                date: pd.Timestamp = None, date_filter: str = None) -> pd.DataFrame:
     """按 (material, location) 聚合"""
     if df is None or df.empty:
-        return pd.DataFrame({'material': [], 'location': [], 'qty': []})
+        return _empty_df_ml()
     
     df = df.copy()
     df['material'] = df['material'].astype(str)
@@ -337,7 +415,7 @@ def _agg_by_ml(df: pd.DataFrame, qty_col: str,
             df = df[df['date'] >= date]
     
     if qty_col not in df.columns:
-        return pd.DataFrame({'material': [], 'location': [], 'qty': []})
+        return _empty_df_ml()
     
     agg = df.groupby(['material', 'location'])[qty_col].sum().reset_index()
     agg.columns = ['material', 'location', 'qty']
@@ -348,7 +426,7 @@ def _agg_by_mr(df: pd.DataFrame, qty_col: str,
                date: pd.Timestamp = None, date_filter: str = None) -> pd.DataFrame:
     """按 (material, receiving) 聚合"""
     if df is None or df.empty or 'receiving' not in df.columns:
-        return pd.DataFrame({'material': [], 'receiving': [], 'qty': []})
+        return _empty_df_mr()
     
     df = df.copy()
     df['material'] = df['material'].astype(str)
@@ -360,7 +438,7 @@ def _agg_by_mr(df: pd.DataFrame, qty_col: str,
             df = df[df['date'] == date]
     
     if qty_col not in df.columns:
-        return pd.DataFrame({'material': [], 'receiving': [], 'qty': []})
+        return _empty_df_mr()
     
     agg = df.groupby(['material', 'receiving'])[qty_col].sum().reset_index()
     agg.columns = ['material', 'receiving', 'qty']
@@ -370,7 +448,7 @@ def _agg_by_mr(df: pd.DataFrame, qty_col: str,
 def _agg_production(df: pd.DataFrame, date: pd.Timestamp, mode: str) -> pd.DataFrame:
     """聚合生产数据"""
     if df is None or df.empty or 'available_date' not in df.columns:
-        return pd.DataFrame({'material': [], 'location': [], 'qty': []})
+        return _empty_df_ml()
     
     df = df.copy()
     df['material'] = df['material'].astype(str)
@@ -387,10 +465,10 @@ def _agg_production(df: pd.DataFrame, date: pd.Timestamp, mode: str) -> pd.DataF
                 qty_col = col
                 break
         else:
-            return pd.DataFrame({'material': [], 'location': [], 'qty': []})
+            return _empty_df_ml()
     
     if qty_col not in df.columns:
-        return pd.DataFrame({'material': [], 'location': [], 'qty': []})
+        return _empty_df_ml()
     
     df[qty_col] = pd.to_numeric(df[qty_col], errors='coerce').fillna(0)
     agg = df.groupby(['material', 'location'])[qty_col].sum().reset_index()
@@ -401,7 +479,7 @@ def _agg_production(df: pd.DataFrame, date: pd.Timestamp, mode: str) -> pd.DataF
 def _agg_open_deployment_out(df: pd.DataFrame) -> pd.DataFrame:
     """聚合开放调拨出库"""
     if df is None or df.empty:
-        return pd.DataFrame({'material': [], 'sending': [], 'qty': []})
+        return _empty_df_ms()
     
     df = df.copy()
     df['material'] = df['material'].astype(str)
@@ -414,7 +492,7 @@ def _agg_open_deployment_out(df: pd.DataFrame) -> pd.DataFrame:
     
     qty_col = 'deployed_qty' if 'deployed_qty' in df.columns else 'quantity'
     if qty_col not in df.columns:
-        return pd.DataFrame({'material': [], 'sending': [], 'qty': []})
+        return _empty_df_ms()
     
     agg = df.groupby(['material', 'sending'])[qty_col].sum().reset_index()
     agg.columns = ['material', 'sending', 'qty']
@@ -422,21 +500,39 @@ def _agg_open_deployment_out(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _agg_open_deployment_in(df: pd.DataFrame, date: pd.Timestamp) -> pd.DataFrame:
-    """聚合开放调拨入库（未来）"""
+    """聚合开放调拨入库（未来）
+    
+    Note: Must match Pandas behavior in net_demand.py _get_open_deployment_inbound()
+    - Filter for rows where date > sim_date (future only)
+    - If no date column found, return empty (Pandas returns 0 when 'date' not in columns)
+    """
     if df is None or df.empty or 'receiving' not in df.columns:
-        return pd.DataFrame({'material': [], 'receiving': [], 'qty': []})
+        return _empty_df_mr()
     
     df = df.copy()
     df['material'] = df['material'].astype(str)
     df['receiving'] = df['receiving'].astype(str)
     
-    if 'date' in df.columns:
-        df['date'] = pd.to_datetime(df['date'], errors='coerce')
-        df = df[df['date'] > date]
+    # Find date column - check both 'date' and 'planned_deployment_date'
+    date_col = None
+    for col in ['date', 'planned_deployment_date']:
+        if col in df.columns:
+            date_col = col
+            break
+    
+    if date_col is None:
+        # No date column found - match Pandas behavior which returns 0
+        return _empty_df_mr()
+    
+    df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
+    df = df[df[date_col] > date]  # Only future dates
+    
+    if df.empty:
+        return _empty_df_mr()
     
     qty_col = 'deployed_qty' if 'deployed_qty' in df.columns else 'quantity'
     if qty_col not in df.columns:
-        return pd.DataFrame({'material': [], 'receiving': [], 'qty': []})
+        return _empty_df_mr()
     
     df[qty_col] = pd.to_numeric(df[qty_col], errors='coerce').fillna(0)
     agg = df.groupby(['material', 'receiving'])[qty_col].sum().reset_index()
@@ -447,14 +543,14 @@ def _agg_open_deployment_in(df: pd.DataFrame, date: pd.Timestamp) -> pd.DataFram
 def _agg_delivery_shipment(df: pd.DataFrame, date: pd.Timestamp) -> pd.DataFrame:
     """聚合发运数据"""
     if df is None or df.empty:
-        return pd.DataFrame({'material': [], 'sending': [], 'qty': []})
+        return _empty_df_ms()
     
     df = df.copy()
     df['material'] = df['material'].astype(str)
     
     send_col = 'sending' if 'sending' in df.columns else 'location'
     if send_col not in df.columns:
-        return pd.DataFrame({'material': [], 'sending': [], 'qty': []})
+        return _empty_df_ms()
     
     df['sending'] = df[send_col].astype(str)
     
@@ -465,7 +561,7 @@ def _agg_delivery_shipment(df: pd.DataFrame, date: pd.Timestamp) -> pd.DataFrame
     
     qty_col = 'quantity' if 'quantity' in df.columns else 'shipped_qty'
     if qty_col not in df.columns:
-        return pd.DataFrame({'material': [], 'sending': [], 'qty': []})
+        return _empty_df_ms()
     
     agg = df.groupby(['material', 'sending'])[qty_col].sum().reset_index()
     agg.columns = ['material', 'sending', 'qty']
@@ -473,9 +569,9 @@ def _agg_delivery_shipment(df: pd.DataFrame, date: pd.Timestamp) -> pd.DataFrame
 
 
 def _agg_ao_demand(df: pd.DataFrame, date: pd.Timestamp) -> pd.DataFrame:
-    """聚合AO需求"""
+    """聚合AO需求 - 保留日期维度用于后续horizon_end过滤"""
     if df is None or df.empty:
-        return pd.DataFrame({'material': [], 'location': [], 'qty': []})
+        return _empty_df_with_date()
     
     df = df.copy()
     df['material'] = df['material'].astype(str)
@@ -485,26 +581,36 @@ def _agg_ao_demand(df: pd.DataFrame, date: pd.Timestamp) -> pd.DataFrame:
     if 'demand_type' in df.columns:
         df = df[df['demand_type'] == 'AO']
     
-    # 日期过滤 - horizon内的
+    # 如果过滤后为空，返回正确类型的空 DataFrame
+    if df.empty:
+        return _empty_df_with_date()
+    
+    # 日期过滤 - 只取 >= sim_date 的数据
+    # horizon_end 过滤将在 SQL 中按各节点进行
     if 'date' in df.columns:
         df['date'] = pd.to_datetime(df['date'], errors='coerce')
-        # 这里简化处理，实际应该按各节点的horizon_end过滤
-        # 但为了批量计算效率，先取所有未来需求
         df = df[df['date'] >= date]
+    else:
+        return _empty_df_with_date()
+    
+    # 如果过滤后为空，返回正确类型的空 DataFrame
+    if df.empty:
+        return _empty_df_with_date()
     
     if 'quantity' not in df.columns:
-        return pd.DataFrame({'material': [], 'location': [], 'qty': []})
+        return _empty_df_with_date()
     
     df['quantity'] = pd.to_numeric(df['quantity'], errors='coerce').fillna(0)
-    agg = df.groupby(['material', 'location'])['quantity'].sum().reset_index()
-    agg.columns = ['material', 'location', 'qty']
+    # 保留日期维度，用于后续按 horizon_end 过滤
+    agg = df.groupby(['material', 'location', 'date'])['quantity'].sum().reset_index()
+    agg.columns = ['material', 'location', 'date', 'qty']
     return agg
 
 
 def _agg_forecast_demand(df: pd.DataFrame, date: pd.Timestamp) -> pd.DataFrame:
-    """聚合预测需求"""
+    """聚合预测需求 - 保留日期维度用于后续horizon_end过滤"""
     if df is None or df.empty:
-        return pd.DataFrame({'material': [], 'location': [], 'qty': []})
+        return _empty_df_with_date()
     
     df = df.copy()
     df['material'] = df['material'].astype(str)
@@ -513,20 +619,27 @@ def _agg_forecast_demand(df: pd.DataFrame, date: pd.Timestamp) -> pd.DataFrame:
     if 'date' in df.columns:
         df['date'] = pd.to_datetime(df['date'], errors='coerce')
         df = df[df['date'] >= date]
+    else:
+        return _empty_df_with_date()
+    
+    # 如果过滤后为空，返回正确类型的空 DataFrame
+    if df.empty:
+        return _empty_df_with_date()
     
     if 'quantity' not in df.columns:
-        return pd.DataFrame({'material': [], 'location': [], 'qty': []})
+        return _empty_df_with_date()
     
     df['quantity'] = pd.to_numeric(df['quantity'], errors='coerce').fillna(0)
-    agg = df.groupby(['material', 'location'])['quantity'].sum().reset_index()
-    agg.columns = ['material', 'location', 'qty']
+    # 保留日期维度，用于后续按 horizon_end 过滤
+    agg = df.groupby(['material', 'location', 'date'])['quantity'].sum().reset_index()
+    agg.columns = ['material', 'location', 'date', 'qty']
     return agg
 
 
 def _agg_safety_stock(df: pd.DataFrame) -> pd.DataFrame:
     """聚合安全库存（保留日期维度）"""
     if df is None or df.empty:
-        return pd.DataFrame({'material': [], 'location': [], 'date': [], 'qty': []})
+        return _empty_df_with_date()
     
     df = df.copy()
     df['material'] = df['material'].astype(str)
@@ -535,11 +648,11 @@ def _agg_safety_stock(df: pd.DataFrame) -> pd.DataFrame:
     if 'date' in df.columns:
         df['date'] = pd.to_datetime(df['date'], errors='coerce')
     else:
-        return pd.DataFrame({'material': [], 'location': [], 'date': [], 'qty': []})
+        return _empty_df_with_date()
     
     qty_col = 'safety_stock_qty' if 'safety_stock_qty' in df.columns else 'quantity'
     if qty_col not in df.columns:
-        return pd.DataFrame({'material': [], 'location': [], 'date': [], 'qty': []})
+        return _empty_df_with_date()
     
     df[qty_col] = pd.to_numeric(df[qty_col], errors='coerce').fillna(0)
     agg = df.groupby(['material', 'location', 'date'])[qty_col].sum().reset_index()

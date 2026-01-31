@@ -11,9 +11,11 @@ DuckDB 集成桥接模块
 通过配置开关启用 DuckDB 优化计算。
 """
 
+from __future__ import annotations
+
 import time
 import functools
-from typing import Dict, List, Optional, Tuple, Callable, Any
+from typing import Dict, List, Optional, Tuple, Callable, Any, TYPE_CHECKING
 from contextlib import contextmanager
 
 import numpy as np
@@ -59,6 +61,10 @@ class DuckDBConfig:
     # 自动回退到 Pandas（出错时）
     fallback_on_error: bool = True
     
+    # 最小数据量阈值（节点数超过此值时使用 DuckDB）
+    # 用户要求：节点数超过20个以上启用DuckDB
+    min_rows_threshold: int = 20
+    
     @classmethod
     def get_memory_limit(cls) -> str:
         """动态获取内存限制 (系统90%内存)"""
@@ -68,19 +74,6 @@ class DuckDBConfig:
     def get_threads(cls) -> int:
         """动态获取线程数 (系统90% CPU)"""
         return get_optimal_threads()
-    
-    # 兼容性属性 (动态获取)
-    @property
-    def memory_limit(self) -> str:
-        return get_optimal_memory()
-    
-    @property
-    def threads(self) -> int:
-        return get_optimal_threads()
-    
-    # 最小数据量阈值（低于此值使用 Pandas 更快）
-    # 优化：降低阈值以利用DuckDB的SQL优化，特别是批量计算场景
-    min_rows_threshold: int = 100
 
 
 # 全局引擎实例（懒加载）
@@ -95,9 +88,10 @@ def get_duckdb_calculator() -> Optional[DuckDBCalculator]:
         return None
     
     if _engine_instance is None:
+        # 使用 classmethod 获取动态配置值
         _engine_instance = DuckDBCalculator(
-            memory_limit=DuckDBConfig.memory_limit,
-            threads=DuckDBConfig.threads
+            memory_limit=DuckDBConfig.get_memory_limit(),
+            threads=DuckDBConfig.get_threads()
         )
     
     return _engine_instance

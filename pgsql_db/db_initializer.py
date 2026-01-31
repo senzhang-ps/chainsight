@@ -66,6 +66,13 @@ class DatabaseInitializer:
             )
         return self._db
     
+    def close(self):
+        """关闭数据库连接"""
+        if self._db is not None:
+            self._db.close()
+            self._db = None
+        self._importer = None
+    
     @property
     def importer(self):
         """延迟加载Excel导入器"""

@@ -13,7 +13,7 @@ Module3 常量定义。
 # ============================================================================
 
 # 启用 DuckDB 批量计算（当层内节点数 > 阈值时使用批量处理）
-USE_DUCKDB_BATCH_CALCULATION: bool = True
+USE_DUCKDB_BATCH_CALCULATION: bool = True  # Re-enabled with detailed tracing
 
 # 批量计算阈值（层内节点数超过此值时使用批量处理）
 BATCH_CALCULATION_THRESHOLD: int = 50

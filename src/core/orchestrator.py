@@ -110,8 +110,8 @@ def _normalize_identifiers(df: pd.DataFrame) -> pd.DataFrame:
         df['material'] = df['material'].astype(str)
         # 处理 NA/None
         df['material'] = df['material'].replace(['nan', 'None', '<NA>', 'NaN'], '')
-        # 移除数字的 .0 后缀
-        df['material'] = df['material'].str.replace(r'\.0$', '', regex=True)
+        # 注意: 不移除 .0 后缀，以确保与 Dev 版本输出一致
+        # df['material'] = df['material'].str.replace(r'\.0$', '', regex=True)
     
     # 向量化处理 location 类列（location, sending, receiving, sourcing）
     location_cols = ['location', 'sending', 'receiving', 'sourcing']

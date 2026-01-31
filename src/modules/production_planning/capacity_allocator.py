@@ -14,6 +14,16 @@ from .constants import DEFAULT_CHANGEOVER_TIME
 from .utils import compute_planning_window, safe_float_conversion
 from .plan_builder import optimal_changeover_sequence
 
+# Try to import DuckDB optimizations
+try:
+    from .duckdb_batch_calculator import (
+        simulate_production_batch_duckdb,
+        is_duckdb_available,
+    )
+    DUCKDB_AVAILABLE = True
+except ImportError:
+    DUCKDB_AVAILABLE = False
+
 
 def centralized_capacity_allocation_with_changeover(
     uncon: pd.DataFrame,
@@ -1050,9 +1060,20 @@ def simulate_production(
     Returns:
         pd.DataFrame: 增加produced_qty的计划表
     """
+    # Try DuckDB optimization first
+    if DUCKDB_AVAILABLE and is_duckdb_available():
+        try:
+            return simulate_production_batch_duckdb(plan, pr_cfg, seed)
+        except Exception as e:
+            print(f"[M4] DuckDB optimization failed, using pandas: {e}")
+    
+    # Original pandas implementation
     if plan.empty or 'con_planned_qty' not in plan.columns:
         plan['produced_qty'] = []
         return plan
+
+    # 注意：不要对plan进行排序！源码ChainSight_Dev/module4.py的simulate_production
+    # 直接按原始顺序处理，排序会导致随机数分配顺序不同，产生不同的produced_qty结果
 
     rng = np.random.RandomState(seed)
     pr_map = pr_cfg.set_index(['location', 'line'])['pr'].to_dict()

@@ -1,0 +1,129 @@
+====================================================================================================
+性能分析报告: Module5
+生成时间: 2026-01-31 19:31:34
+====================================================================================================
+
+【按累积时间排序 - 前30个最耗时函数】
+----------------------------------------------------------------------------------------------------
+         57226942 function calls (55864443 primitive calls) in 31.260 seconds
+
+   Ordered by: cumulative time
+   List reduced from 2028 to 30 due to restriction <30>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+        1    0.030    0.030   31.319   31.319 D:\PG\Code\chainsight\src\modules\deployment_planning\main.py:726(main)
+      662    0.003    0.000   30.916    0.047 D:\Python312\Lib\threading.py:323(wait)
+      129    0.001    0.000   26.841    0.208 D:\Python312\Lib\threading.py:637(wait)
+      577    0.002    0.000   26.631    0.046 D:\Python312\Lib\concurrent\futures\_base.py:199(as_completed)
+3389/2690    0.004    0.000   24.177    0.009 {method 'acquire' of '_thread.lock' objects}
+       48    0.000    0.000   24.176    0.504 D:\Python312\Lib\threading.py:1117(join)
+       48    0.000    0.000   24.175    0.504 D:\Python312\Lib\threading.py:1155(_wait_for_tstate_lock)
+35291/8260    0.049    0.000   19.950    0.002 D:\PG\Code\chainsight\.venv\Lib\site-packages\pandas\core\ops\common.py:62(new_method)
+12446/2567    0.050    0.000   19.246    0.007 D:\PG\Code\chainsight\.venv\Lib\site-packages\pandas\core\arraylike.py:68(__and__)
+        5    0.000    0.000   13.170    2.634 D:\Python312\Lib\concurrent\futures\_base.py:646(__exit__)
+        5    0.000    0.000   13.170    2.634 D:\Python312\Lib\concurrent\futures\thread.py:220(shutdown)
+     48/5    0.001    0.000   13.162    2.632 D:\Python312\Lib\threading.py:1018(_bootstrap)
+     48/5    0.001    0.000   13.161    2.632 D:\Python312\Lib\threading.py:1058(_bootstrap_inner)
+     48/5    0.001    0.000   13.160    2.632 D:\Python312\Lib\threading.py:1001(run)
+    97/11    0.003    0.000   13.160    1.196 {method 'get' of '_queue.SimpleQueue' objects}
+     48/5    0.000    0.000   13.160    2.632 D:\Python312\Lib\concurrent\futures\thread.py:70(_worker)
+   582/61    0.006    0.000   12.887    0.211 D:\Python312\Lib\concurrent\futures\thread.py:54(run)
+        1    0.001    0.001   11.996   11.996 D:\PG\Code\chainsight\src\modules\deployment_planning\validation.py:122(log_outputs)
+        3    0.000    0.000    9.126    3.042 D:\PG\Code\chainsight\src\modules\deployment_planning\main.py:179(_process_layer_demands)
+33386/10793    0.118    0.000    8.781    0.001 D:\PG\Code\chainsight\.venv\Lib\site-packages\pandas\core\frame.py:4062(__getitem__)
+   574/57    0.018    0.000    8.779    0.154 D:\PG\Code\chainsight\src\modules\deployment_planning\demand_collector.py:545(collect_node_demands_fast)
+7578/2390    0.036    0.000    8.496    0.004 D:\PG\Code\chainsight\.venv\Lib\site-packages\pandas\core\frame.py:4130(_getitem_bool_array)
+  565/427    0.002    0.000    8.000    0.019 D:\PG\Code\chainsight\.venv\Lib\site-packages\pandas\util\_decorators.py:325(wrapper)
+        1    0.000    0.000    7.656    7.656 D:\PG\Code\chainsight\.venv\Lib\site-packages\pandas\io\excel\_base.py:1347(__exit__)
+        1    0.000    0.000    7.656    7.656 D:\PG\Code\chainsight\.venv\Lib\site-packages\pandas\io\excel\_base.py:1355(close)
+        1    0.000    0.000    7.655    7.655 D:\PG\Code\chainsight\.venv\Lib\site-packages\pandas\io\excel\_openpyxl.py:106(_save)
+        1    0.000    0.000    7.655    7.655 D:\PG\Code\chainsight\.venv\Lib\site-packages\openpyxl\workbook\workbook.py:373(save)
+        1    0.000    0.000    7.655    7.655 D:\PG\Code\chainsight\.venv\Lib\site-packages\openpyxl\writer\excel.py:279(save_workbook)
+        1    0.000    0.000    7.655    7.655 D:\PG\Code\chainsight\.venv\Lib\site-packages\openpyxl\writer\excel.py:273(save)
+        1    0.000    0.000    7.655    7.655 D:\PG\Code\chainsight\.venv\Lib\site-packages\openpyxl\writer\excel.py:53(write_data)
+
+
+
+
+【按调用次数排序 - 前30个最频繁调用函数】
+----------------------------------------------------------------------------------------------------
+         57226942 function calls (55864443 primitive calls) in 31.260 seconds
+
+   Ordered by: call count
+   List reduced from 2028 to 30 due to restriction <30>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+9203347/9071791    1.405    0.000    2.390    0.000 {built-in method builtins.isinstance}
+  2972999    0.531    0.000    0.532    0.000 {method 'write' of '_io.TextIOWrapper' objects}
+2382858/2382814    0.314    0.000    0.320    0.000 {built-in method builtins.getattr}
+  2354375    0.300    0.000    0.300    0.000 {method 'get' of 'dict' objects}
+2037369/1608368    0.363    0.000    0.473    0.000 {built-in method builtins.len}
+  1556039    0.407    0.000    0.582    0.000 D:\PG\Code\chainsight\src\modules\deployment_planning\push_allocation.py:322(<genexpr>)
+  1276153    0.190    0.000    0.190    0.000 {method 'append' of 'list' objects}
+   773306    1.547    0.000    3.275    0.000 D:\PG\Code\chainsight\.venv\Lib\site-packages\et_xmlfile\incremental_tree.py:372(write_elem_start)
+750768/741716    0.222    0.000    0.967    0.000 D:\PG\Code\chainsight\.venv\Lib\site-packages\pandas\core\dtypes\generic.py:42(_instancecheck)
+750768/743166    0.197    0.000    0.285    0.000 D:\PG\Code\chainsight\.venv\Lib\site-packages\pandas\core\dtypes\generic.py:37(_check)
+748833/314045    0.764    0.000    4.019    0.000 D:\PG\Code\chainsight\.venv\Lib\site-packages\et_xmlfile\incremental_tree.py:566(_serialize_ns_xml)
+   689779    0.153    0.000    0.153    0.000 D:\Python312\Lib\xml\etree\ElementTree.py:1024(_escape_attrib)
+   656761    0.068    0.000    0.068    0.000 {method 'add' of 'set' objects}
+   441013    0.075    0.000    0.075    0.000 {method 'get' of 'xml.etree.ElementTree.Element' objects}
+   424816    0.092    0.000    0.094    0.000 {method 'join' of 'str' objects}
+   408214    0.053    0.000    0.053    0.000 {method 'popleft' of 'collections.deque' objects}
+408133/407188    0.175    0.000    0.267    0.000 D:\Python312\Lib\xml\etree\ElementTree.py:1302(read_events)
+407658/328779    0.081    0.000    2.440    0.000 D:\Python312\Lib\xml\etree\ElementTree.py:1233(iterator)
+   379570    0.087    0.000    0.102    0.000 {built-in method builtins.hasattr}
+   378107    0.079    0.000    0.092    0.000 {built-in method builtins.max}
+355626/354798    0.133    0.000    0.754    0.000 D:\PG\Code\chainsight\.venv\Lib\site-packages\pandas\core\dtypes\missing.py:184(_isna)
+355626/354798    0.090    0.000    0.844    0.000 D:\PG\Code\chainsight\.venv\Lib\site-packages\pandas\core\dtypes\missing.py:101(isna)
+   345560    0.062    0.000    0.062    0.000 D:\PG\Code\chainsight\.venv\Lib\site-packages\openpyxl\descriptors\base.py:24(__set__)
+   338814    0.062    0.000    0.062    0.000 {method 'items' of 'xml.etree.ElementTree.Element' objects}
+   338518    0.551    0.000    0.874    0.000 D:\PG\Code\chainsight\.venv\Lib\site-packages\et_xmlfile\incremental_tree.py:279(process_attribs)
+   324864    0.027    0.000    0.027    0.000 D:\PG\Code\chainsight\.venv\Lib\site-packages\openpyxl\cell\read_only.py:108(value)
+   314045    0.212    0.000    4.275    0.000 D:\PG\Code\chainsight\.venv\Lib\site-packages\et_xmlfile\xmlfile.py:95(write)
+   314030    0.057    0.000    0.057    0.000 D:\Python312\Lib\xml\etree\ElementTree.py:1008(_escape_cdata)
+   314029    0.155    0.000    1.565    0.000 D:\PG\Code\chainsight\.venv\Lib\site-packages\pandas\io\formats\excel.py:888(get_formatted_cells)
+   314025    0.179    0.000    0.224    0.000 D:\PG\Code\chainsight\.venv\Lib\site-packages\pandas\io\excel\_base.py:1293(_value_with_fmt)
+
+
+
+
+【按总时间排序 - 前30个纯执行时间最长函数】
+----------------------------------------------------------------------------------------------------
+         57226942 function calls (55864443 primitive calls) in 31.260 seconds
+
+   Ordered by: internal time
+   List reduced from 2028 to 30 due to restriction <30>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+   773306    1.547    0.000    3.275    0.000 D:\PG\Code\chainsight\.venv\Lib\site-packages\et_xmlfile\incremental_tree.py:372(write_elem_start)
+9203347/9071791    1.405    0.000    2.390    0.000 {built-in method builtins.isinstance}
+748833/314045    0.764    0.000    4.019    0.000 D:\PG\Code\chainsight\.venv\Lib\site-packages\et_xmlfile\incremental_tree.py:566(_serialize_ns_xml)
+   314025    0.562    0.000    6.209    0.000 D:\PG\Code\chainsight\.venv\Lib\site-packages\openpyxl\cell\_writer.py:45(etree_write_cell)
+   338518    0.551    0.000    0.874    0.000 D:\PG\Code\chainsight\.venv\Lib\site-packages\et_xmlfile\incremental_tree.py:279(process_attribs)
+  2972999    0.531    0.000    0.532    0.000 {method 'write' of '_io.TextIOWrapper' objects}
+    18053    0.441    0.000    0.501    0.000 D:\PG\Code\chainsight\.venv\Lib\site-packages\pandas\core\ops\array_ops.py:113(comp_method_OBJECT_ARRAY)
+  1556039    0.407    0.000    0.582    0.000 D:\PG\Code\chainsight\src\modules\deployment_planning\push_allocation.py:322(<genexpr>)
+   314025    0.405    0.000    0.846    0.000 D:\PG\Code\chainsight\.venv\Lib\site-packages\openpyxl\worksheet\worksheet.py:251(_get_cell)
+46961/41022    0.377    0.000    4.103    0.000 D:\PG\Code\chainsight\.venv\Lib\site-packages\pandas\core\series.py:389(__init__)
+   313992    0.373    0.000    0.933    0.000 D:\PG\Code\chainsight\.venv\Lib\site-packages\pandas\io\formats\excel.py:872(_generate_body)
+2037369/1608368    0.363    0.000    0.473    0.000 {built-in method builtins.len}
+        4    0.355    0.089    4.255    1.064 D:\PG\Code\chainsight\.venv\Lib\site-packages\pandas\io\excel\_openpyxl.py:442(_write_cells)
+146994/145108    0.346    0.000    2.238    0.000 D:\PG\Code\chainsight\.venv\Lib\site-packages\openpyxl\worksheet\_reader.py:189(parse_cell)
+    24465    0.327    0.000    6.945    0.000 D:\PG\Code\chainsight\.venv\Lib\site-packages\openpyxl\worksheet\_writer.py:130(write_row)
+2382858/2382814    0.314    0.000    0.320    0.000 {built-in method builtins.getattr}
+85711/85385    0.306    0.000    1.035    0.000 D:\PG\Code\chainsight\.venv\Lib\site-packages\pandas\core\generic.py:6236(__finalize__)
+   120747    0.302    0.000    0.388    0.000 D:\PG\Code\chainsight\.venv\Lib\site-packages\openpyxl\cell\cell.py:153(check_string)
+  2354375    0.300    0.000    0.300    0.000 {method 'get' of 'dict' objects}
+85688/84806    0.295    0.000    1.326    0.000 D:\PG\Code\chainsight\.venv\Lib\site-packages\openpyxl\descriptors\serialisable.py:46(from_tree)
+    36959    0.278    0.000    0.331    0.000 D:\PG\Code\chainsight\.venv\Lib\site-packages\openpyxl\utils\datetime.py:81(to_excel)
+217479/215003    0.273    0.000    1.140    0.000 D:\PG\Code\chainsight\.venv\Lib\site-packages\pandas\core\generic.py:6301(__setattr__)
+   314025    0.266    0.000    0.930    0.000 D:\PG\Code\chainsight\.venv\Lib\site-packages\openpyxl\cell\_writer.py:12(_set_attributes)
+64619/61613    0.261    0.000    1.744    0.000 D:\PG\Code\chainsight\.venv\Lib\site-packages\pandas\core\construction.py:517(sanitize_array)
+   314025    0.257    0.000    0.257    0.000 D:\PG\Code\chainsight\.venv\Lib\site-packages\pandas\io\formats\excel.py:67(__init__)
+        4    0.250    0.063    0.362    0.090 D:\PG\Code\chainsight\.venv\Lib\site-packages\openpyxl\worksheet\_writer.py:106(rows)
+149371/147972    0.250    0.000    0.967    0.000 {built-in method builtins.any}
+   170753    0.242    0.000    0.310    0.000 D:\PG\Code\chainsight\.venv\Lib\site-packages\openpyxl\descriptors\sequence.py:24(__set__)
+   314025    0.237    0.000    0.494    0.000 D:\PG\Code\chainsight\.venv\Lib\site-packages\pandas\io\formats\excel.py:85(__init__)
+   314025    0.226    0.000    0.984    0.000 D:\PG\Code\chainsight\.venv\Lib\site-packages\openpyxl\cell\cell.py:176(_bind_value)
+
+

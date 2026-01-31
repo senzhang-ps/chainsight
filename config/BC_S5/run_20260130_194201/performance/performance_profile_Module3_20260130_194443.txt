@@ -1,0 +1,129 @@
+====================================================================================================
+性能分析报告: Module3
+生成时间: 2026-01-30 19:44:43
+====================================================================================================
+
+【按累积时间排序 - 前30个最耗时函数】
+----------------------------------------------------------------------------------------------------
+         22307925 function calls (21356891 primitive calls) in 18.512 seconds
+
+   Ordered by: cumulative time
+   List reduced from 1989 to 30 due to restriction <30>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+4054/3233    0.006    0.000   58.011    0.018 {method 'acquire' of '_thread.lock' objects}
+       92    0.000    0.000   57.999    0.630 D:\Python312\Lib\threading.py:1117(join)
+       92    0.000    0.000   57.997    0.630 D:\Python312\Lib\threading.py:1155(_wait_for_tstate_lock)
+      577    0.004    0.000   55.685    0.097 D:\Python312\Lib\concurrent\futures\_base.py:199(as_completed)
+      286    0.004    0.000   51.011    0.178 D:\Python312\Lib\threading.py:637(wait)
+      784    0.004    0.000   35.301    0.045 D:\Python312\Lib\threading.py:323(wait)
+18613/915    0.026    0.000   18.699    0.020 D:\PG\Code\chainsight\.venv\Lib\site-packages\pandas\core\arraylike.py:38(__eq__)
+        1    0.002    0.002   18.512   18.512 D:\PG\Code\chainsight\ChainSight_Dev\module3.py:1219(run_integrated_mode)
+  3336/42    0.021    0.000   17.094    0.407 D:\PG\Code\chainsight\.venv\Lib\site-packages\pandas\core\arraylike.py:50(__le__)
+        1    0.003    0.003   14.317   14.317 D:\PG\Code\chainsight\ChainSight_Dev\module3.py:813(run_mrp_layered_simulation_daily)
+12783/158    0.029    0.000   14.183    0.090 D:\PG\Code\chainsight\.venv\Lib\site-packages\pandas\core\arraylike.py:68(__and__)
+        3    0.000    0.000   14.181    4.727 D:\Python312\Lib\concurrent\futures\_base.py:646(__exit__)
+        3    0.000    0.000   14.181    4.727 D:\Python312\Lib\concurrent\futures\thread.py:220(shutdown)
+     92/3    0.002    0.000   14.180    4.727 D:\Python312\Lib\threading.py:1018(_bootstrap)
+   160/13    0.004    0.000   14.180    1.091 {method 'get' of '_queue.SimpleQueue' objects}
+     92/3    0.001    0.000   14.180    4.727 D:\Python312\Lib\threading.py:1058(_bootstrap_inner)
+     92/3    0.002    0.000   14.180    4.727 D:\Python312\Lib\threading.py:1001(run)
+     92/3    0.001    0.000   14.179    4.726 D:\Python312\Lib\concurrent\futures\thread.py:70(_worker)
+ 3867/119    0.025    0.000   14.053    0.118 {built-in method _operator.eq}
+  3338/43    0.021    0.000   13.629    0.317 D:\PG\Code\chainsight\.venv\Lib\site-packages\pandas\core\arraylike.py:58(__ge__)
+38726/189    0.101    0.000   13.346    0.071 D:\PG\Code\chainsight\.venv\Lib\site-packages\pandas\core\ops\common.py:62(new_method)
+20633/211    0.073    0.000   13.327    0.063 D:\PG\Code\chainsight\.venv\Lib\site-packages\pandas\core\series.py:6110(_cmp_method)
+    574/3    0.015    0.000   13.325    4.442 D:\Python312\Lib\concurrent\futures\thread.py:54(run)
+    574/3    0.066    0.000   13.324    4.441 D:\PG\Code\chainsight\ChainSight_Dev\module3.py:916(_compute_node_net_demand)
+    574/3    0.017    0.000   13.312    4.437 D:\PG\Code\chainsight\ChainSight_Dev\module3.py:538(calculate_daily_net_demand)
+20633/211    0.096    0.000   13.310    0.063 D:\PG\Code\chainsight\.venv\Lib\site-packages\pandas\core\ops\array_ops.py:288(comparison_op)
+ 1157/560    0.009    0.000   12.295    0.022 D:\PG\Code\chainsight\.venv\Lib\site-packages\pandas\core\series.py:4620(map)
+ 1189/598    0.005    0.000    9.800    0.016 D:\PG\Code\chainsight\.venv\Lib\site-packages\pandas\core\base.py:891(_map_values)
+ 1157/566    0.005    0.000    9.300    0.016 D:\PG\Code\chainsight\.venv\Lib\site-packages\pandas\core\arrays\_mixins.py:78(method)
+30183/1739    0.117    0.000    9.000    0.005 D:\PG\Code\chainsight\.venv\Lib\site-packages\pandas\core\frame.py:4062(__getitem__)
+
+
+
+
+【按调用次数排序 - 前30个最频繁调用函数】
+----------------------------------------------------------------------------------------------------
+         22307925 function calls (21356891 primitive calls) in 18.512 seconds
+
+   Ordered by: call count
+   List reduced from 1989 to 30 due to restriction <30>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+4336977/4211745    0.751    0.000    1.112    0.000 {built-in method builtins.isinstance}
+1211826/1208350    0.191    0.000    0.198    0.000 {built-in method builtins.getattr}
+1096287/730508    0.246    0.000    0.339    0.000 {built-in method builtins.len}
+462889/455451    0.153    0.000    0.359    0.000 D:\PG\Code\chainsight\.venv\Lib\site-packages\pandas\core\dtypes\generic.py:42(_instancecheck)
+462889/462754    0.136    0.000    0.202    0.000 D:\PG\Code\chainsight\.venv\Lib\site-packages\pandas\core\dtypes\generic.py:37(_check)
+   412267    0.067    0.000    0.067    0.000 {method 'get' of 'xml.etree.ElementTree.Element' objects}
+   383550    0.051    0.000    0.051    0.000 {method 'popleft' of 'collections.deque' objects}
+   383422    0.159    0.000    0.251    0.000 D:\Python312\Lib\xml\etree\ElementTree.py:1302(read_events)
+382984/382979    0.071    0.000    0.748    0.000 D:\Python312\Lib\xml\etree\ElementTree.py:1233(iterator)
+   326563    0.058    0.000    0.058    0.000 D:\PG\Code\chainsight\.venv\Lib\site-packages\openpyxl\descriptors\base.py:24(__set__)
+   302976    0.025    0.000    0.025    0.000 D:\PG\Code\chainsight\.venv\Lib\site-packages\openpyxl\cell\read_only.py:108(value)
+   290142    0.066    0.000    0.082    0.000 {built-in method builtins.hasattr}
+   243453    0.053    0.000    0.081    0.000 D:\PG\Code\chainsight\.venv\Lib\site-packages\openpyxl\descriptors\base.py:233(__get__)
+243030/240681    0.060    0.000    0.093    0.000 D:\PG\Code\chainsight\.venv\Lib\site-packages\pandas\core\indexes\range.py:999(__len__)
+214713/214523    0.040    0.000    0.041    0.000 {built-in method builtins.hash}
+   187233    0.056    0.000    0.141    0.000 D:\PG\Code\chainsight\.venv\Lib\site-packages\pandas\core\series.py:734(name)
+180983/179519    0.060    0.000    0.095    0.000 D:\PG\Code\chainsight\.venv\Lib\site-packages\pandas\core\dtypes\inference.py:334(is_hashable)
+177115/175490    0.080    0.000    0.337    0.000 D:\PG\Code\chainsight\.venv\Lib\site-packages\pandas\core\dtypes\missing.py:184(_isna)
+177115/175490    0.043    0.000    0.379    0.000 D:\PG\Code\chainsight\.venv\Lib\site-packages\pandas\core\dtypes\missing.py:101(isna)
+   176545    0.028    0.000    0.028    0.000 {built-in method builtins.issubclass}
+168220/166860    0.046    0.000    0.085    0.000 D:\PG\Code\chainsight\.venv\Lib\site-packages\pandas\core\dtypes\common.py:1590(<genexpr>)
+   163961    0.126    0.000    0.184    0.000 D:\PG\Code\chainsight\.venv\Lib\site-packages\openpyxl\descriptors\base.py:39(__set__)
+   162587    0.019    0.000    0.019    0.000 D:\PG\Code\chainsight\.venv\Lib\site-packages\openpyxl\descriptors\sequence.py:27(<genexpr>)
+   162398    0.234    0.000    0.298    0.000 D:\PG\Code\chainsight\.venv\Lib\site-packages\openpyxl\descriptors\sequence.py:24(__set__)
+   142665    0.029    0.000    0.029    0.000 {method 'append' of 'list' objects}
+   137418    0.331    0.000    2.163    0.000 D:\PG\Code\chainsight\.venv\Lib\site-packages\openpyxl\worksheet\_reader.py:189(parse_cell)
+   137418    0.122    0.000    0.122    0.000 D:\PG\Code\chainsight\.venv\Lib\site-packages\openpyxl\utils\cell.py:206(coordinate_to_tuple)
+   137418    0.050    0.000    0.066    0.000 D:\PG\Code\chainsight\.venv\Lib\site-packages\openpyxl\cell\read_only.py:14(__init__)
+   137418    0.016    0.000    0.016    0.000 D:\PG\Code\chainsight\.venv\Lib\site-packages\openpyxl\cell\read_only.py:112(value)
+   137418    0.096    0.000    0.121    0.000 D:\PG\Code\chainsight\.venv\Lib\site-packages\pandas\io\excel\_openpyxl.py:589(_convert_cell)
+
+
+
+
+【按总时间排序 - 前30个纯执行时间最长函数】
+----------------------------------------------------------------------------------------------------
+         22307925 function calls (21356891 primitive calls) in 18.512 seconds
+
+   Ordered by: internal time
+   List reduced from 1989 to 30 due to restriction <30>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+15320/14914    2.836    0.000    2.811    0.000 D:\PG\Code\chainsight\.venv\Lib\site-packages\pandas\core\ops\array_ops.py:113(comp_method_OBJECT_ARRAY)
+4336977/4211745    0.751    0.000    1.112    0.000 {built-in method builtins.isinstance}
+82242/78218    0.469    0.000    0.457    0.000 D:\PG\Code\chainsight\.venv\Lib\site-packages\pandas\core\arrays\datetimes.py:645(__iter__)
+50683/40772    0.433    0.000    4.088    0.000 D:\PG\Code\chainsight\.venv\Lib\site-packages\pandas\core\series.py:389(__init__)
+   137418    0.331    0.000    2.163    0.000 D:\PG\Code\chainsight\.venv\Lib\site-packages\openpyxl\worksheet\_reader.py:189(parse_cell)
+81308/81170    0.282    0.000    1.280    0.000 D:\PG\Code\chainsight\.venv\Lib\site-packages\openpyxl\descriptors\serialisable.py:46(from_tree)
+1096287/730508    0.246    0.000    0.339    0.000 {built-in method builtins.len}
+57836/56635    0.238    0.000    0.328    0.000 D:\PG\Code\chainsight\.venv\Lib\site-packages\pandas\core\generic.py:6236(__finalize__)
+   162398    0.234    0.000    0.298    0.000 D:\PG\Code\chainsight\.venv\Lib\site-packages\openpyxl\descriptors\sequence.py:24(__set__)
+      435    0.214    0.000    0.399    0.001 D:\Python312\Lib\xml\etree\ElementTree.py:1278(feed)
+49820/49214    0.209    0.000    0.575    0.000 D:\PG\Code\chainsight\.venv\Lib\site-packages\pandas\core\construction.py:517(sanitize_array)
+52702/21137    0.208    0.000    0.090    0.000 {method 'reduce' of 'numpy.ufunc' objects}
+125367/122283    0.191    0.000    0.599    0.000 D:\PG\Code\chainsight\.venv\Lib\site-packages\pandas\core\generic.py:6301(__setattr__)
+1211826/1208350    0.191    0.000    0.198    0.000 {built-in method builtins.getattr}
+34067/29428    0.189    0.000    0.473    0.000 D:\PG\Code\chainsight\.venv\Lib\site-packages\pandas\core\array_algos\take.py:120(_take_nd_ndarray)
+47817/47561    0.187    0.000    0.222    0.000 D:\PG\Code\chainsight\.venv\Lib\site-packages\pandas\core\dtypes\cast.py:550(maybe_promote)
+      440    0.186    0.000    0.186    0.000 {method 'feed' of 'xml.etree.ElementTree.XMLParser' objects}
+74494/74204    0.180    0.000    0.217    0.000 D:\PG\Code\chainsight\.venv\Lib\site-packages\pandas\core\generic.py:278(__init__)
+  5310/52    0.162    0.000    0.003    0.000 D:\PG\Code\chainsight\.venv\Lib\site-packages\pandas\core\arrays\datetimelike.py:977(_cmp_method)
+   383422    0.159    0.000    0.251    0.000 D:\Python312\Lib\xml\etree\ElementTree.py:1302(read_events)
+462889/455451    0.153    0.000    0.359    0.000 D:\PG\Code\chainsight\.venv\Lib\site-packages\pandas\core\dtypes\generic.py:42(_instancecheck)
+33416/30690    0.144    0.000    2.511    0.000 D:\PG\Code\chainsight\.venv\Lib\site-packages\pandas\core\series.py:6201(_construct_result)
+    26952    0.140    0.000    3.188    0.000 D:\PG\Code\chainsight\.venv\Lib\site-packages\openpyxl\worksheet\_reader.py:125(parse)
+46066/45149    0.139    0.000    0.485    0.000 D:\PG\Code\chainsight\.venv\Lib\site-packages\pandas\core\internals\managers.py:1863(from_array)
+462889/462754    0.136    0.000    0.202    0.000 D:\PG\Code\chainsight\.venv\Lib\site-packages\pandas\core\dtypes\generic.py:37(_check)
+   163961    0.126    0.000    0.184    0.000 D:\PG\Code\chainsight\.venv\Lib\site-packages\openpyxl\descriptors\base.py:39(__set__)
+ 5312/387    0.123    0.000    0.040    0.000 D:\PG\Code\chainsight\.venv\Lib\site-packages\pandas\core\arrays\datetimelike.py:836(_isnan)
+66633/66542    0.123    0.000    0.277    0.000 D:\PG\Code\chainsight\.venv\Lib\site-packages\pandas\core\generic.py:6284(__getattr__)
+   137418    0.122    0.000    0.122    0.000 D:\PG\Code\chainsight\.venv\Lib\site-packages\openpyxl\utils\cell.py:206(coordinate_to_tuple)
+    81138    0.121    0.000    0.768    0.000 D:\PG\Code\chainsight\.venv\Lib\site-packages\openpyxl\cell\text.py:161(__init__)
+
+

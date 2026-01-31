@@ -734,7 +734,8 @@ def main(
     orchestrator: object = None,
     current_date: str = None,
     skip_file_output: bool = False,
-    module1_result: dict = None
+    module1_result: dict = None,
+    module4_result: dict = None
 ) -> dict:
     """
     Module 5 主入口：多层级部署规划。
@@ -750,11 +751,12 @@ def main(
         sim_end: 仿真结束日期（独立模式）
         config_dict: 配置字典（集成模式）
         module1_output_dir: Module1输出目录
-        module4_output_path: Module4输出文件路径
+        module4_output_path: Module4输出文件路径（当module4_result为None时使用）
         orchestrator: Orchestrator实例
         current_date: 当前日期（集成模式）
         skip_file_output: 是否跳过文件输出
         module1_result: Module1运行结果（内存数据）
+        module4_result: Module4运行结果（内存数据），优先使用此参数获取生产计划
 
     Returns:
         dict: 运行结果，包含deployment_plan等
@@ -767,7 +769,8 @@ def main(
         config = load_integrated_config(
             config_dict, module1_output_dir, module4_output_path,
             orchestrator, current_date_obj,
-            module1_result=module1_result
+            module1_result=module1_result,
+            module4_result=module4_result
         )
         sim_dates = (
             [current_date_obj] if current_date_obj
@@ -951,9 +954,8 @@ def main(
             for k, v in node_demands_map.items():
                 global_node_demands_map[k] = v
 
-            # 处理每个节点 - 排序确保遍历顺序一致
-            sorted_pairs = sorted(all_pairs)
-            for mat, loc in sorted_pairs:
+            # 处理每个节点 - 与源码保持一致，不排序
+            for mat, loc in all_pairs:
                 node_key = (mat, loc)
                 current_stock = dynamic_soh.get(node_key, 0)
 

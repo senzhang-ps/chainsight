@@ -29,6 +29,99 @@ class ModuleDataWriter:
         self.config_name = config_name
         self.written_tables: Dict[str, Dict] = {}
     
+    def truncate_output_tables(self) -> int:
+        """
+        清空所有模块输出表、Summary表和Orchestrator表
+        
+        在写入新数据之前调用此方法，确保数据库中只有最新一次运行的数据。
+        
+        Returns:
+            int: 清空的表数量
+        """
+        print("\n" + "=" * 60)
+        print("🗑️  清空数据库输出表")
+        print("=" * 60)
+        
+        # 定义所有需要清空的输出表
+        output_tables = [
+            # Module1 输出表
+            'module1_output_orderlog',
+            'module1_output_shipmentlog',
+            'module1_output_cutlog',
+            'module1_output_supplydemandlog',
+            'module1_output_summary',
+            # Module3 输出表
+            'module3_output_netdemand',
+            # Module4 输出表
+            'module4_output_productionplan',
+            'module4_output_capacityexceed',
+            'module4_output_validation',
+            'module4_output_changeoverlog',
+            # Module5 输出表
+            'module5_output_deploymentplan',
+            'module5_output_unfulfilledlog',
+            'module5_output_stockonhandlog',
+            'module5_output_validation',
+            # Module6 输出表
+            'module6_output_deliveryplan',
+            'module6_output_vehiclelog',
+            'module6_output_truckusagelog',
+            'module6_output_unsatisfiedmdqlog',
+            'module6_output_validationlog',
+            'module6_output_bypassrulehitlog',
+            # Summary 输出表
+            'summary_output_ordershipmentcutsummary',
+            'summary_output_fullchangeoverlog',
+            'summary_output_fullcapacityexceed',
+            'summary_output_fullproductionplan',
+            'summary_output_fulldeploymentplan',
+            'summary_output_fulldeliveryplan',
+            'summary_output_fulltruckusage',
+            # Orchestrator 状态表
+            'orchestrator_unrestricted_inventory',
+            'orchestrator_open_deployment',
+            'orchestrator_open_deployment_pastdue_cleanup',
+            'orchestrator_planning_intransit',
+            'orchestrator_space_quota',
+            'orchestrator_delivery_gr',
+            'orchestrator_production_gr',
+            'orchestrator_production_plan_backlog',
+            'orchestrator_shipment_log',
+            'orchestrator_delivery_shipment_log',
+            'orchestrator_inventory_change_log',
+            'orchestrator_daily_logs',
+        ]
+        
+        truncated_count = 0
+        
+        try:
+            with self.db.get_cursor() as cursor:
+                for table_name in output_tables:
+                    try:
+                        # 检查表是否存在
+                        cursor.execute("""
+                            SELECT EXISTS (
+                                SELECT FROM information_schema.tables 
+                                WHERE table_schema = 'public' 
+                                AND table_name = %s
+                            )
+                        """, (table_name,))
+                        exists = cursor.fetchone()[0]
+                        
+                        if exists:
+                            cursor.execute(f'TRUNCATE TABLE "{table_name}"')
+                            truncated_count += 1
+                            print(f"  ✓ 已清空: {table_name}")
+                    except Exception as e:
+                        print(f"  ✗ 清空失败 {table_name}: {e}")
+            
+            print(f"\n✅ 共清空 {truncated_count} 个表")
+            
+        except Exception as e:
+            print(f"\n❌ 清空表时出错: {e}")
+        
+        return truncated_count
+    
     def write_summary_only(
         self,
         output_dir: str,
@@ -459,10 +552,12 @@ class ModuleDataWriter:
         file_patterns = [
             "unrestricted_inventory_*.csv",
             "open_deployment_*.csv",
+            "open_deployment_pastdue_cleanup_*.csv",
             "planning_intransit_*.csv",
             "space_quota_*.csv",
             "delivery_gr_*.csv",
             "production_gr_*.csv",
+            "production_plan_backlog_*.csv",
             "shipment_log_*.csv",
             "delivery_shipment_log_*.csv",
             "inventory_change_log_*.csv",
@@ -518,7 +613,8 @@ class ModuleDataWriter:
         all_results: Dict[str, Any],
         run_id: str = None,
         sim_date: str = None,
-        if_exists: str = "append"
+        if_exists: str = "append",
+        truncate_first: bool = True
     ) -> Dict[str, int]:
         """
         从内存中的模块结果字典直接写入数据库
@@ -537,11 +633,16 @@ class ModuleDataWriter:
             run_id: 运行ID
             sim_date: 仿真日期（格式：YYYYMMDD）
             if_exists: 如果表存在的处理方式
+            truncate_first: 是否在写入前先清空所有输出表（默认True）
         
         Returns:
             dict: 每个表的写入行数
         """
         results = {}
+        
+        # 🗑️ 在写入前先清空所有输出表
+        if truncate_first:
+            self.truncate_output_tables()
         
         print("\n" + "=" * 60)
         print("📤 从内存写入模块输出到数据库")
@@ -552,7 +653,10 @@ class ModuleDataWriter:
         # 键名必须与模块返回的字典键名一致
         module_df_mapping = {
             'module1': {
-                'orders_df': 'module1_output_orderlog',
+                # 🔧 修复：使用 all_orders_for_next_day（累积订单）而不是 orders_df（仅当日订单）
+                # 这样与 Dev baseline 的 OrderLog 输出保持一致
+                # Dev 的 OrderLog 每天输出当天的累积订单（包含所有未来到期的历史订单）
+                'all_orders_for_next_day': 'module1_output_orderlog',
                 'shipment_df': 'module1_output_shipmentlog',
                 'cut_df': 'module1_output_cutlog',
                 'supply_demand_df': 'module1_output_supplydemandlog',
@@ -586,7 +690,29 @@ class ModuleDataWriter:
         for module_name, df_mapping in module_df_mapping.items():
             module_results = all_results.get(module_name, [])
             
+            # 🔍 DEBUG: 打印每个模块的结果详情
+            print(f"\n🔍 DEBUG: {module_name} 结果检查:")
+            print(f"   module_results 类型: {type(module_results)}")
+            print(f"   module_results 长度: {len(module_results) if module_results else 0}")
+            if module_results and len(module_results) > 0:
+                first_result = module_results[0]
+                if isinstance(first_result, dict):
+                    print(f"   第一天结果的键: {list(first_result.keys())}")
+                    print(f"   期望的键 (df_mapping): {list(df_mapping.keys())}")
+                    # 检查键是否匹配
+                    expected_keys = set(df_mapping.keys())
+                    actual_keys = set(first_result.keys())
+                    matched = expected_keys & actual_keys
+                    missing = expected_keys - actual_keys
+                    extra = actual_keys - expected_keys
+                    print(f"   匹配的键: {matched}")
+                    if missing:
+                        print(f"   ⚠️ 缺失的键: {missing}")
+                    if extra:
+                        print(f"   额外的键: {extra}")
+            
             if not module_results:
+                print(f"   ⚠️ {module_name} 没有结果，跳过")
                 continue
             
             print(f"\n📁 写入 {module_name} 输出...")
@@ -607,6 +733,14 @@ class ModuleDataWriter:
                 
                 for df_key, table_name in df_mapping.items():
                     df = day_result.get(df_key)
+                    # 🔍 DEBUG: 打印每个 DataFrame 键的检查结果
+                    if df is not None:
+                        if isinstance(df, pd.DataFrame):
+                            print(f"      ✓ {df_key} -> {table_name}: DataFrame shape={df.shape}")
+                        else:
+                            print(f"      ✗ {df_key} -> {table_name}: 不是DataFrame, type={type(df).__name__}")
+                    else:
+                        print(f"      ✗ {df_key} -> {table_name}: None")
                     if df is not None and isinstance(df, pd.DataFrame):
                         # 为每一天的数据添加 sim_date（包括空 DataFrame）
                         df = df.copy()  # 避免修改原始数据
@@ -623,6 +757,24 @@ class ModuleDataWriter:
             # 写入每个表
             for table_name, dfs in table_data.items():
                 if not dfs:
+                    # 🔧 FIX: 即使没有数据，也创建空表结构
+                    # 创建带有 sim_date 和 run_id 列的空 DataFrame
+                    combined_df = pd.DataFrame()
+                    combined_df['sim_date'] = pd.Series(dtype='string')
+                    if run_id:
+                        combined_df['run_id'] = pd.Series(dtype='string')
+                    # 写入空表到数据库
+                    try:
+                        self.db.create_table_from_df(combined_df, table_name, if_exists, config_name=self.config_name)
+                        results[table_name] = 0
+                        self.written_tables[table_name] = {
+                            "module": module_name,
+                            "rows": 0
+                        }
+                        print(f"  ✅ 创建空表 {table_name}")
+                    except Exception as e:
+                        print(f"  ❌ 创建空表 {table_name} 失败: {e}")
+                        results[table_name] = -1
                     continue
                 
                 # 合并所有天的数据
@@ -691,6 +843,537 @@ class ModuleDataWriter:
         
         print("-" * 80)
         print(f"共 {len(self.written_tables)} 个表")
+    
+    def generate_summary_reports_from_db(
+        self,
+        run_id: str = None,
+        start_date: str = None,
+        end_date: str = None,
+        if_exists: str = "replace"
+    ) -> Dict[str, int]:
+        """
+        从数据库中的模块输出表直接生成Summary汇总报告
+        
+        当使用 --use-db 模式时，模块不会输出xlsx文件，因此无法使用
+        SummaryReportGenerator从文件生成汇总报告。此方法直接从已写入
+        数据库的模块输出表中聚合数据，生成7个Summary报告表：
+        
+        1. summary_output_ordershipmentcutsummary - 订单/发货/缺货汇总
+        2. summary_output_fullchangeoverlog - 换产日志
+        3. summary_output_fullcapacityexceed - 产能超限
+        4. summary_output_fullproductionplan - 生产计划
+        5. summary_output_fulldeploymentplan - 部署计划
+        6. summary_output_fulldeliveryplan - 交付计划
+        7. summary_output_fulltruckusage - 卡车使用
+        
+        Args:
+            run_id: 运行ID，用于筛选数据
+            start_date: 开始日期 (YYYY-MM-DD)，用于过滤数据
+            end_date: 结束日期 (YYYY-MM-DD)，用于过滤数据
+            if_exists: 如果表存在的处理方式 ('replace'推荐)
+        
+        Returns:
+            dict: 每个表的写入行数
+        """
+        import time
+        start_time = time.time()
+        
+        print("\n" + "=" * 60)
+        print("📊 从数据库生成Summary汇总报告")
+        print(f"运行ID: {run_id}")
+        if start_date and end_date:
+            print(f"日期范围: {start_date} 到 {end_date}")
+        print("=" * 60)
+        
+        results = {}
+        
+        # 转换日期为datetime用于过滤
+        end_date_dt = pd.to_datetime(end_date) if end_date else None
+        
+        # 1. 生成 order_shipment_cut 汇总报告
+        try:
+            results['summary_output_ordershipmentcutsummary'] = self._generate_order_shipment_cut_summary(
+                run_id, end_date_dt, if_exists
+            )
+        except Exception as e:
+            print(f"  ❌ order_shipment_cut 生成失败: {e}")
+            results['summary_output_ordershipmentcutsummary'] = -1
+        
+        # 2. 生成 changeover 汇总报告
+        try:
+            results['summary_output_fullchangeoverlog'] = self._generate_changeover_summary(
+                run_id, end_date_dt, if_exists
+            )
+        except Exception as e:
+            print(f"  ❌ changeover 生成失败: {e}")
+            results['summary_output_fullchangeoverlog'] = -1
+        
+        # 3. 生成 capacity_exceed 汇总报告
+        try:
+            results['summary_output_fullcapacityexceed'] = self._generate_capacity_exceed_summary(
+                run_id, end_date_dt, if_exists
+            )
+        except Exception as e:
+            print(f"  ❌ capacity_exceed 生成失败: {e}")
+            results['summary_output_fullcapacityexceed'] = -1
+        
+        # 4. 生成 production_plan 汇总报告
+        try:
+            results['summary_output_fullproductionplan'] = self._generate_production_plan_summary(
+                run_id, end_date_dt, if_exists
+            )
+        except Exception as e:
+            print(f"  ❌ production_plan 生成失败: {e}")
+            results['summary_output_fullproductionplan'] = -1
+        
+        # 5. 生成 deployment_plan 汇总报告
+        try:
+            results['summary_output_fulldeploymentplan'] = self._generate_deployment_plan_summary(
+                run_id, end_date_dt, if_exists
+            )
+        except Exception as e:
+            print(f"  ❌ deployment_plan 生成失败: {e}")
+            results['summary_output_fulldeploymentplan'] = -1
+        
+        # 6. 生成 delivery_plan 汇总报告
+        try:
+            results['summary_output_fulldeliveryplan'] = self._generate_delivery_plan_summary(
+                run_id, end_date_dt, if_exists
+            )
+        except Exception as e:
+            print(f"  ❌ delivery_plan 生成失败: {e}")
+            results['summary_output_fulldeliveryplan'] = -1
+        
+        # 7. 生成 truck_usage 汇总报告
+        try:
+            results['summary_output_fulltruckusage'] = self._generate_truck_usage_summary(
+                run_id, end_date_dt, if_exists
+            )
+        except Exception as e:
+            print(f"  ❌ truck_usage 生成失败: {e}")
+            results['summary_output_fulltruckusage'] = -1
+        
+        elapsed = time.time() - start_time
+        total_tables = sum(1 for v in results.values() if isinstance(v, int) and v >= 0)
+        total_rows = sum(v for v in results.values() if isinstance(v, int) and v > 0)
+        
+        print("\n" + "=" * 60)
+        print(f"✅ Summary汇总报告生成完成!")
+        print(f"   表数量: {total_tables}")
+        print(f"   总行数: {total_rows:,}")
+        print(f"   耗时: {elapsed:.2f}秒")
+        print("=" * 60)
+        
+        return results
+    
+    def _generate_order_shipment_cut_summary(
+        self,
+        run_id: str,
+        end_date_dt: pd.Timestamp,
+        if_exists: str
+    ) -> int:
+        """生成订单/发货/缺货汇总报告"""
+        table_name = "summary_output_ordershipmentcutsummary"
+        
+        # 读取Module1的三个表
+        try:
+            orders_df = self.db.read_table("module1_output_orderlog")
+        except:
+            orders_df = pd.DataFrame()
+        
+        try:
+            shipments_df = self.db.read_table("module1_output_shipmentlog")
+        except:
+            shipments_df = pd.DataFrame()
+        
+        try:
+            cuts_df = self.db.read_table("module1_output_cutlog")
+        except:
+            cuts_df = pd.DataFrame()
+        
+        # 按run_id过滤
+        if run_id:
+            if not orders_df.empty and 'run_id' in orders_df.columns:
+                orders_df = orders_df[orders_df['run_id'] == run_id]
+            if not shipments_df.empty and 'run_id' in shipments_df.columns:
+                shipments_df = shipments_df[shipments_df['run_id'] == run_id]
+            if not cuts_df.empty and 'run_id' in cuts_df.columns:
+                cuts_df = cuts_df[cuts_df['run_id'] == run_id]
+        
+        # 去重订单（AO订单可能在多个simulation_date被重复记录）
+        if not orders_df.empty:
+            dedup_cols = ['date', 'material', 'location', 'quantity', 'sim_date']
+            if 'demand_type' in orders_df.columns:
+                dedup_cols.append('demand_type')
+            existing_cols = [c for c in dedup_cols if c in orders_df.columns]
+            if existing_cols:
+                orders_df = orders_df.drop_duplicates(subset=existing_cols, keep='first')
+        
+        # 聚合订单数据
+        order_agg = pd.DataFrame(columns=['date', 'material', 'location', 'sim_date', 'order_qty'])
+        if not orders_df.empty:
+            orders_df['date'] = pd.to_datetime(orders_df['date'], errors='coerce')
+            group_cols = ['date', 'material', 'location']
+            if 'sim_date' in orders_df.columns:
+                group_cols.append('sim_date')
+            order_agg = orders_df.groupby(group_cols, dropna=False).agg(
+                {'quantity': 'sum'}
+            ).reset_index()
+            order_agg.rename(columns={'quantity': 'order_qty'}, inplace=True)
+        
+        # 聚合发货数据
+        shipment_agg = pd.DataFrame(columns=['date', 'material', 'location', 'sim_date', 'shipment_qty'])
+        if not shipments_df.empty:
+            shipments_df['date'] = pd.to_datetime(shipments_df['date'], errors='coerce')
+            group_cols = ['date', 'material', 'location']
+            if 'sim_date' in shipments_df.columns:
+                group_cols.append('sim_date')
+            shipment_agg = shipments_df.groupby(group_cols, dropna=False).agg(
+                {'quantity': 'sum'}
+            ).reset_index()
+            shipment_agg.rename(columns={'quantity': 'shipment_qty'}, inplace=True)
+        
+        # 聚合缺货数据
+        cut_agg = pd.DataFrame(columns=['date', 'material', 'location', 'sim_date', 'cut_qty'])
+        if not cuts_df.empty:
+            cuts_df['date'] = pd.to_datetime(cuts_df['date'], errors='coerce')
+            group_cols = ['date', 'material', 'location']
+            if 'sim_date' in cuts_df.columns:
+                group_cols.append('sim_date')
+            cut_agg = cuts_df.groupby(group_cols, dropna=False).agg(
+                {'quantity': 'sum'}
+            ).reset_index()
+            cut_agg.rename(columns={'quantity': 'cut_qty'}, inplace=True)
+        
+        # 合并三个汇总表
+        merge_cols = ['date', 'material', 'location']
+        if 'sim_date' in order_agg.columns or 'sim_date' in shipment_agg.columns or 'sim_date' in cut_agg.columns:
+            merge_cols.append('sim_date')
+        
+        summary = order_agg
+        if not shipment_agg.empty:
+            summary = summary.merge(shipment_agg, on=merge_cols, how='outer')
+        if not cut_agg.empty:
+            summary = summary.merge(cut_agg, on=merge_cols, how='outer')
+        
+        if summary.empty:
+            print(f"  ⚠️ {table_name}: 无数据")
+            return 0
+        
+        # 填充缺失值
+        for col in ['order_qty', 'shipment_qty', 'cut_qty']:
+            if col in summary.columns:
+                summary[col] = summary[col].fillna(0).astype(int)
+            else:
+                summary[col] = 0
+        
+        # 按日期过滤
+        if end_date_dt is not None and 'date' in summary.columns:
+            summary = summary[summary['date'] <= end_date_dt]
+        
+        # 排序
+        sort_cols = []
+        if 'sim_date' in summary.columns:
+            sort_cols.append('sim_date')
+        sort_cols.extend(['date', 'material', 'location'])
+        summary = summary.sort_values([c for c in sort_cols if c in summary.columns])
+        
+        # 重命名sim_date为simulation_date以匹配原格式
+        if 'sim_date' in summary.columns:
+            summary = summary.rename(columns={'sim_date': 'simulation_date'})
+            # 调整列顺序
+            cols = ['simulation_date', 'date', 'material', 'location', 'order_qty', 'shipment_qty', 'cut_qty']
+            cols = [c for c in cols if c in summary.columns]
+            summary = summary[cols]
+        
+        # 添加run_id
+        if run_id:
+            summary['run_id'] = run_id
+        
+        # 写入数据库
+        self.db.create_table_from_df(summary, table_name, if_exists, config_name=self.config_name)
+        self.written_tables[table_name] = {"module": "summary", "rows": len(summary)}
+        print(f"  ✅ {table_name}: {len(summary):,} 行")
+        
+        return len(summary)
+    
+    def _generate_changeover_summary(
+        self,
+        run_id: str,
+        end_date_dt: pd.Timestamp,
+        if_exists: str
+    ) -> int:
+        """生成换产汇总报告"""
+        table_name = "summary_output_fullchangeoverlog"
+        
+        try:
+            df = self.db.read_table("module4_output_changeoverlog")
+        except:
+            print(f"  ⚠️ {table_name}: 源表不存在")
+            return 0
+        
+        if df.empty:
+            print(f"  ⚠️ {table_name}: 无数据")
+            return 0
+        
+        # 按run_id过滤
+        if run_id and 'run_id' in df.columns:
+            df = df[df['run_id'] == run_id]
+        
+        # 按日期过滤
+        if end_date_dt is not None:
+            for col in ['changeover_end_date', 'date']:
+                if col in df.columns:
+                    df[col] = pd.to_datetime(df[col], errors='coerce')
+                    df = df[(df[col].isna()) | (df[col] <= end_date_dt)]
+                    break
+        
+        if df.empty:
+            print(f"  ⚠️ {table_name}: 过滤后无数据")
+            return 0
+        
+        # 添加run_id
+        if run_id and 'run_id' not in df.columns:
+            df['run_id'] = run_id
+        
+        # 写入数据库
+        self.db.create_table_from_df(df, table_name, if_exists, config_name=self.config_name)
+        self.written_tables[table_name] = {"module": "summary", "rows": len(df)}
+        print(f"  ✅ {table_name}: {len(df):,} 行")
+        
+        return len(df)
+    
+    def _generate_capacity_exceed_summary(
+        self,
+        run_id: str,
+        end_date_dt: pd.Timestamp,
+        if_exists: str
+    ) -> int:
+        """生成产能超限汇总报告"""
+        table_name = "summary_output_fullcapacityexceed"
+        
+        try:
+            df = self.db.read_table("module4_output_capacityexceed")
+        except:
+            print(f"  ⚠️ {table_name}: 源表不存在")
+            return 0
+        
+        if df.empty:
+            print(f"  ⚠️ {table_name}: 无数据")
+            return 0
+        
+        # 按run_id过滤
+        if run_id and 'run_id' in df.columns:
+            df = df[df['run_id'] == run_id]
+        
+        # 按日期过滤
+        if end_date_dt is not None and 'date' in df.columns:
+            df['date'] = pd.to_datetime(df['date'], errors='coerce')
+            df = df[(df['date'].isna()) | (df['date'] <= end_date_dt)]
+        
+        if df.empty:
+            print(f"  ⚠️ {table_name}: 过滤后无数据")
+            return 0
+        
+        # 添加run_id
+        if run_id and 'run_id' not in df.columns:
+            df['run_id'] = run_id
+        
+        # 写入数据库
+        self.db.create_table_from_df(df, table_name, if_exists, config_name=self.config_name)
+        self.written_tables[table_name] = {"module": "summary", "rows": len(df)}
+        print(f"  ✅ {table_name}: {len(df):,} 行")
+        
+        return len(df)
+    
+    def _generate_production_plan_summary(
+        self,
+        run_id: str,
+        end_date_dt: pd.Timestamp,
+        if_exists: str
+    ) -> int:
+        """生成生产计划汇总报告"""
+        table_name = "summary_output_fullproductionplan"
+        
+        try:
+            df = self.db.read_table("module4_output_productionplan")
+        except:
+            print(f"  ⚠️ {table_name}: 源表不存在")
+            return 0
+        
+        if df.empty:
+            print(f"  ⚠️ {table_name}: 无数据")
+            return 0
+        
+        # 按run_id过滤
+        if run_id and 'run_id' in df.columns:
+            df = df[df['run_id'] == run_id]
+        
+        # 按日期过滤 - 使用available_date作为过滤条件
+        if end_date_dt is not None and 'available_date' in df.columns:
+            df['available_date'] = pd.to_datetime(df['available_date'], errors='coerce')
+            df = df[(df['available_date'].isna()) | (df['available_date'] <= end_date_dt)]
+        
+        if df.empty:
+            print(f"  ⚠️ {table_name}: 过滤后无数据")
+            return 0
+        
+        # 添加run_id
+        if run_id and 'run_id' not in df.columns:
+            df['run_id'] = run_id
+        
+        # 写入数据库
+        self.db.create_table_from_df(df, table_name, if_exists, config_name=self.config_name)
+        self.written_tables[table_name] = {"module": "summary", "rows": len(df)}
+        print(f"  ✅ {table_name}: {len(df):,} 行")
+        
+        return len(df)
+    
+    def _generate_deployment_plan_summary(
+        self,
+        run_id: str,
+        end_date_dt: pd.Timestamp,
+        if_exists: str
+    ) -> int:
+        """生成部署计划汇总报告"""
+        table_name = "summary_output_fulldeploymentplan"
+        
+        try:
+            df = self.db.read_table("module5_output_deploymentplan")
+        except:
+            print(f"  ⚠️ {table_name}: 源表不存在")
+            return 0
+        
+        if df.empty:
+            print(f"  ⚠️ {table_name}: 无数据")
+            return 0
+        
+        # 按run_id过滤
+        if run_id and 'run_id' in df.columns:
+            df = df[df['run_id'] == run_id]
+        
+        # 按日期过滤
+        if end_date_dt is not None:
+            date_cols = ['deployment_date', 'arrival_date', 'ship_date', 'date']
+            for col in date_cols:
+                if col in df.columns:
+                    df[col] = pd.to_datetime(df[col], errors='coerce')
+            
+            # 创建过滤mask
+            mask = pd.Series([True] * len(df))
+            for col in date_cols:
+                if col in df.columns:
+                    mask = mask & ((df[col].isna()) | (df[col] <= end_date_dt))
+            df = df[mask]
+        
+        if df.empty:
+            print(f"  ⚠️ {table_name}: 过滤后无数据")
+            return 0
+        
+        # 添加run_id
+        if run_id and 'run_id' not in df.columns:
+            df['run_id'] = run_id
+        
+        # 写入数据库
+        self.db.create_table_from_df(df, table_name, if_exists, config_name=self.config_name)
+        self.written_tables[table_name] = {"module": "summary", "rows": len(df)}
+        print(f"  ✅ {table_name}: {len(df):,} 行")
+        
+        return len(df)
+    
+    def _generate_delivery_plan_summary(
+        self,
+        run_id: str,
+        end_date_dt: pd.Timestamp,
+        if_exists: str
+    ) -> int:
+        """生成交付计划汇总报告"""
+        table_name = "summary_output_fulldeliveryplan"
+        
+        try:
+            df = self.db.read_table("module6_output_deliveryplan")
+        except:
+            print(f"  ⚠️ {table_name}: 源表不存在")
+            return 0
+        
+        if df.empty:
+            print(f"  ⚠️ {table_name}: 无数据")
+            return 0
+        
+        # 按run_id过滤
+        if run_id and 'run_id' in df.columns:
+            df = df[df['run_id'] == run_id]
+        
+        # 按日期过滤
+        if end_date_dt is not None:
+            date_cols = ['planned_deploy_date', 'actual_ship_date', 'date']
+            for col in date_cols:
+                if col in df.columns:
+                    df[col] = pd.to_datetime(df[col], errors='coerce')
+            
+            mask = pd.Series([True] * len(df))
+            for col in ['planned_deploy_date', 'actual_ship_date']:
+                if col in df.columns:
+                    mask = mask & ((df[col].isna()) | (df[col] <= end_date_dt))
+            df = df[mask]
+        
+        if df.empty:
+            print(f"  ⚠️ {table_name}: 过滤后无数据")
+            return 0
+        
+        # 添加run_id
+        if run_id and 'run_id' not in df.columns:
+            df['run_id'] = run_id
+        
+        # 写入数据库
+        self.db.create_table_from_df(df, table_name, if_exists, config_name=self.config_name)
+        self.written_tables[table_name] = {"module": "summary", "rows": len(df)}
+        print(f"  ✅ {table_name}: {len(df):,} 行")
+        
+        return len(df)
+    
+    def _generate_truck_usage_summary(
+        self,
+        run_id: str,
+        end_date_dt: pd.Timestamp,
+        if_exists: str
+    ) -> int:
+        """生成卡车使用汇总报告"""
+        table_name = "summary_output_fulltruckusage"
+        
+        try:
+            df = self.db.read_table("module6_output_truckusagelog")
+        except:
+            print(f"  ⚠️ {table_name}: 源表不存在")
+            return 0
+        
+        if df.empty:
+            print(f"  ⚠️ {table_name}: 无数据")
+            return 0
+        
+        # 按run_id过滤
+        if run_id and 'run_id' in df.columns:
+            df = df[df['run_id'] == run_id]
+        
+        # 按日期过滤
+        if end_date_dt is not None and 'date' in df.columns:
+            df['date'] = pd.to_datetime(df['date'], errors='coerce')
+            df = df[(df['date'].isna()) | (df['date'] <= end_date_dt)]
+        
+        if df.empty:
+            print(f"  ⚠️ {table_name}: 过滤后无数据")
+            return 0
+        
+        # 添加run_id
+        if run_id and 'run_id' not in df.columns:
+            df['run_id'] = run_id
+        
+        # 写入数据库
+        self.db.create_table_from_df(df, table_name, if_exists, config_name=self.config_name)
+        self.written_tables[table_name] = {"module": "summary", "rows": len(df)}
+        print(f"  ✅ {table_name}: {len(df):,} 行")
+        
+        return len(df)
 
 
 def write_run_data_to_db(

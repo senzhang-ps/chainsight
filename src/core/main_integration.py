@@ -21,10 +21,19 @@ from pathlib import Path
 import sys
 from datetime import datetime
 import os
+from typing import Any, Dict, Optional
 from pandas.errors import EmptyDataError, ParserError
 import logging
-import sys
 from pathlib import Path
+
+# Windows UTF-8 编码设置 - 解决emoji和中文输出问题
+if sys.platform == 'win32':
+    import io
+    # 设置stdout/stderr为UTF-8编码
+    if hasattr(sys.stdout, 'buffer'):
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    if hasattr(sys.stderr, 'buffer'):
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
 # 将父目录添加到路径中以便导入
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -44,6 +53,39 @@ from ..modules import module5
 from ..modules import module6
 
 logger = logging.getLogger(__name__)
+
+
+# ========================= DuckDB内存模式延迟导入 =========================
+_memory_store_imported = False
+_enable_memory_mode = None
+_disable_memory_mode = None
+_is_memory_mode_enabled = None
+_get_data_store = None
+
+
+def _ensure_memory_store_imported():
+    """延迟导入内存存储模块（避免循环导入和启动延迟）"""
+    global _memory_store_imported, _enable_memory_mode, _disable_memory_mode
+    global _is_memory_mode_enabled, _get_data_store
+    if not _memory_store_imported:
+        try:
+            from ..utils.memory_data_store import (
+                enable_memory_mode,
+                disable_memory_mode,
+                is_memory_mode_enabled,
+                get_data_store,
+            )
+            _enable_memory_mode = enable_memory_mode
+            _disable_memory_mode = disable_memory_mode
+            _is_memory_mode_enabled = is_memory_mode_enabled
+            _get_data_store = get_data_store
+        except ImportError as e:
+            logger.warning(f"DuckDB内存模块导入失败: {e}")
+            _enable_memory_mode = lambda **kwargs: None
+            _disable_memory_mode = lambda: None
+            _is_memory_mode_enabled = lambda: False
+            _get_data_store = lambda: None
+        _memory_store_imported = True
 
 
 # ========================= 断点续跑功能 =========================
@@ -704,7 +746,8 @@ def run_module4_integrated(
     simulation_date: pd.Timestamp,
     simulation_start: pd.Timestamp,
     output_dir: str,
-    skip_file_output: bool = False
+    skip_file_output: bool = False,
+    module3_result: Optional[Dict[str, Any]] = None
 ) -> pd.DataFrame:
     """集成模式运行 Module4 生产计划（直接用 config_dict）
 
@@ -713,18 +756,19 @@ def run_module4_integrated(
 
     Args:
         config_dict: 配置数据字典（包含 M4 所需表）。
-        module3_output_dir: Module3 输出目录，用于读取日度净需求。
+        module3_output_dir: Module3 输出目录，用于读取日度净需求（当module3_result为None时使用）。
         simulation_date: 当前仿真日期。
         simulation_start: 仿真开始日期。
         output_dir: 输出目录，用于写每日 M4 输出。
         skip_file_output: 是否跳过写入Excel文件（数据库模式使用）。
+        module3_result: Module3运行结果（内存数据），包含net_demand_df。优先使用此参数。
 
     Returns:
         pd.DataFrame: 生产计划数据（含 available_date 等），用于当日入库处理。
 
     输入数据：
         - M4 配置表（LineCfg/Capacity/ChangeoverMatrix/Definition/ProductionReliability）。
-        - Module3 的日度净需求文件。
+        - Module3 的日度净需求（优先从module3_result内存获取，否则从文件读取）。
 
     输出/副作用：
         - 写每日 M4 输出文件（除非 skip_file_output=True）；返回当日及未来的生产记录；可能更新产线状态与已分配产能持久化。
@@ -750,8 +794,22 @@ def run_module4_integrated(
         # 直接使用config_dict，不再需要子配置字典
         m4_config = config_dict
         
-        # 加载 Module3 的日度净需求数据
-        net_demand_df = module4.load_daily_net_demand(module3_output_dir, simulation_date)
+        # 🦆 优先从内存加载Module3净需求数据，否则从文件读取
+        if module3_result is not None and 'net_demand_df' in module3_result:
+            net_demand_df = module3_result['net_demand_df'].copy()
+            # 🦆 内存模式：不按simulation_date筛选，因为previous_day_m3_result包含前一天计算的所有净需求
+            # 这些净需求的requirement_date才是实际需求日期，simulation_date只是M3运行的日期
+            
+            # 🔧 关键修复：应用与load_daily_net_demand相同的处理逻辑
+            # 1. 筛选layer=0（下游需求），与文件加载模式保持一致
+            if 'layer' in net_demand_df.columns:
+                net_demand_df = net_demand_df[net_demand_df['layer'] == 0].copy()
+            # 2. 数量取绝对值，与文件加载模式保持一致
+            if 'quantity' in net_demand_df.columns:
+                net_demand_df['quantity'] = net_demand_df['quantity'].abs()
+        else:
+            # 从文件加载
+            net_demand_df = module4.load_daily_net_demand(module3_output_dir, simulation_date)
         net_demand_df = module4._cast_identifiers_to_str(net_demand_df, ['material', 'location'])
         
         # 🔧 修复Module3→Module4数据流：标准化material字段，移除.0后缀
@@ -1635,6 +1693,10 @@ def run_integrated_simulation(
             
         print(f"{'='*20} {progress_info}: {current_date.strftime('%Y-%m-%d')} {'='*20}")
         
+        # 🎲 注意：不在每日开始时重置种子，以匹配ChainSight_Dev的随机数行为
+        # ChainSight_Dev没有每日种子重置，随机状态自然演变
+        # 全局种子只在仿真开始时设置一次 (在set_module_seeds中)
+        
         # ==================== 每日开始：GR入库处理 ====================
         try:
             print("🌅 每日开始状态更新")
@@ -2047,6 +2109,12 @@ def run_integrated_simulation_from_dict(
     print(f"📋 配置: {config_name}")
     print("=" * 60)
     
+    # 🦆 启用DuckDB内存模式（加速模块间数据传递）
+    _ensure_memory_store_imported()
+    if _enable_memory_mode:
+        _enable_memory_mode(memory_limit="4GB")
+        print("🦆 DuckDB内存模式已启用（4GB限制）")
+    
     # 跳过预验证（数据库数据已经过验证）
     if skip_validation:
         print("✅ 跳过预验证（数据库模式）")
@@ -2105,6 +2173,15 @@ def run_integrated_simulation_from_dict(
     sim_dates = pd.date_range(start_date, end_date, freq='D')
     print(f"📅 仿真日期范围: {len(sim_dates)} 天")
     
+    # 🦆 完全内存模式：存储前一天的Module3结果供Module4使用
+    previous_day_m3_result: Optional[Dict[str, Any]] = None
+    
+    # 🦆 完全内存模式：存储历史M1订单数据供累积使用（与local模式保持一致）
+    accumulated_m1_orders: pd.DataFrame = pd.DataFrame()
+    
+    # 🦆 完全内存模式：存储历史M4生产计划数据供累积使用（用于历史生产入库）
+    accumulated_m4_production: pd.DataFrame = pd.DataFrame()
+    
     # 每日循环执行
     all_results = {
         'module1': [],
@@ -2117,6 +2194,10 @@ def run_integrated_simulation_from_dict(
     for i, current_date in enumerate(sim_dates, 1):
         print(f"{'='*20} 第 {i}/{len(sim_dates)} 天: {current_date.strftime('%Y-%m-%d')} {'='*20}")
         
+        # 🎲 注意：不在每日开始时重置种子，以匹配本地模式和ChainSight_Dev的随机数行为
+        # ChainSight_Dev没有每日种子重置，随机状态自然演变
+        # 全局种子只在仿真开始时设置一次 (在set_module_seeds中)
+        
         # ==================== 每日开始：GR入库处理 ====================
         try:
             print("🌅 每日开始状态更新")
@@ -2128,11 +2209,19 @@ def run_integrated_simulation_from_dict(
             orch._process_delivery_arrivals(current_date.strftime('%Y-%m-%d'))
             
             print("🏭处理历史生产当日入库...")
-            current_date_production_gr = load_current_date_production_gr(
-                module4_output_dir=str(module_outputs['module4']),
-                current_date=current_date,
-                start_date=pd.to_datetime(start_date)
-            )
+            # 🦆 使用内存中累积的M4生产计划数据，而非读取文件（DB模式skip_file_output=True不生成文件）
+            if not accumulated_m4_production.empty and 'available_date' in accumulated_m4_production.columns:
+                accumulated_m4_production['available_date'] = pd.to_datetime(accumulated_m4_production['available_date'])
+                current_date_production_gr = accumulated_m4_production[
+                    accumulated_m4_production['available_date'].dt.normalize() == current_date.normalize()
+                ].copy()
+                
+                # 确保返回所需列（与load_current_date_production_gr函数一致）
+                required_cols = ['material', 'location', 'line', 'simulation_date', 'available_date', 'produced_qty']
+                available_cols = [c for c in required_cols if c in current_date_production_gr.columns]
+                current_date_production_gr = current_date_production_gr[available_cols]
+            else:
+                current_date_production_gr = pd.DataFrame()
             
             if not current_date_production_gr.empty:
                 print(f"📦当日需要入库的历史生产: {len(current_date_production_gr)} 条记录")
@@ -2159,7 +2248,8 @@ def run_integrated_simulation_from_dict(
                     simulation_date=current_date,
                     output_dir=str(module_outputs['module1']),
                     orchestrator=orch,
-                    skip_file_output=False  # 保持文件输出以确保数据一致性
+                    skip_file_output=True,  # 🦆 完全内存模式：跳过文件输出
+                    previous_orders_df=accumulated_m1_orders if not accumulated_m1_orders.empty else None  # 🦆 传递累积的历史订单
                 )
                 m1_shipments = m1_result.get('shipment_df', pd.DataFrame())
                 
@@ -2168,6 +2258,15 @@ def run_integrated_simulation_from_dict(
                     m1_shipments_normalized = _normalize_identifiers(m1_shipments)
                     orch.process_module1_shipments(m1_shipments_normalized, current_date.strftime('%Y-%m-%d'))
                     print(f"✅ 已扣减 {len(m1_shipments_normalized)} 个shipment的库存")
+                
+                # 🦆 更新累积的历史订单数据（用于下一天的M1）
+                # 🔧 修复：使用 all_orders_for_next_day（累积订单）而不是 orders_df（仅当日订单）
+                # orders_df 只包含当日新生成的订单，会导致历史订单丢失
+                # all_orders_for_next_day 包含所有未来到期的订单（与Excel模式一致）
+                all_orders = m1_result.get('all_orders_for_next_day', pd.DataFrame())
+                if not all_orders.empty:
+                    accumulated_m1_orders = all_orders.copy()
+                    print(f"🦆 累积历史订单更新完成，当前总条目: {len(accumulated_m1_orders)}")
                 
                 print(f"✅ Module1 完成 - 生成 {len(m1_result.get('orders_df', []))} 个订单, {len(m1_shipments)} 个发货")
                 if m1_result is not None:
@@ -2186,7 +2285,8 @@ def run_integrated_simulation_from_dict(
                     simulation_date=current_date,
                     simulation_start=pd.to_datetime(start_date),
                     output_dir=str(module_outputs['module4']),
-                    skip_file_output=False  # 保持文件输出以确保数据一致性
+                    skip_file_output=True,  # 🦆 完全内存模式：跳过文件输出
+                    module3_result=previous_day_m3_result  # 🦆 使用前一天的Module3内存数据
                 )
                 
                 # 从返回结果中获取 production_df
@@ -2207,6 +2307,13 @@ def run_integrated_simulation_from_dict(
                 # 存储完整的Module4结果（包含所有输出表）
                 m4_result['simulation_date'] = current_date
                 all_results['module4'].append(m4_result)
+                
+                # 🦆 累积历史M4生产计划数据（用于历史生产入库）
+                if not m4_production.empty:
+                    m4_for_accumulation = m4_production.copy()
+                    m4_for_accumulation['source_date'] = current_date
+                    accumulated_m4_production = pd.concat([accumulated_m4_production, m4_for_accumulation], ignore_index=True)
+                    print(f"🦆 累积历史M4生产计划更新完成，当前总条目: {len(accumulated_m4_production)}")
             except Exception as e:
                 print(f"❌ Module4 失败: {e}")
                 m4_production = pd.DataFrame()
@@ -2216,13 +2323,14 @@ def run_integrated_simulation_from_dict(
             try:
                 m5_result = module5.main(
                     config_dict=config_dict,
-                    module1_output_dir=str(module_outputs['module1']),  # 使用文件以保证数据一致性
-                    module4_output_path=str(module_outputs['module4'] / f"Module4Output_{current_date.strftime('%Y%m%d')}.xlsx"),  # 修复：需要M4文件以获取未来生产计划
+                    module1_output_dir=str(module_outputs['module1']),
+                    module4_output_path=str(module_outputs['module4'] / f"Module4Output_{current_date.strftime('%Y%m%d')}.xlsx"),  # fallback路径
                     orchestrator=orch,
                     current_date=current_date.strftime('%Y-%m-%d'),
-                    output_path=str(module_outputs['module5'] / f"Module5Output_{current_date.strftime('%Y%m%d')}.xlsx"),  # 完整文件路径
-                    skip_file_output=False,  # 保持文件输出以确保数据一致性
-                    module1_result=m1_result  # 直接传递Module1内存数据
+                    output_path=str(module_outputs['module5'] / f"Module5Output_{current_date.strftime('%Y%m%d')}.xlsx"),
+                    skip_file_output=True,  # 🦆 完全内存模式：跳过文件输出
+                    module1_result=m1_result,  # 🦆 直接传递Module1内存数据
+                    module4_result=m4_result   # 🦆 直接传递Module4内存数据
                 )
                 
                 if m5_result and 'deployment_plan' in m5_result:
@@ -2270,7 +2378,7 @@ def run_integrated_simulation_from_dict(
                     output_dir=str(module_outputs['module6']),
                     max_wait_days=30,
                     random_seed=config_dict.get('M6_RandomSeed', 42),
-                    skip_file_output=False  # 保持文件输出以确保数据一致性
+                    skip_file_output=True  # 🦆 完全内存模式
                 )
                 
                 if m6_result and 'delivery_plan' in m6_result:
@@ -2298,12 +2406,16 @@ def run_integrated_simulation_from_dict(
                     start_date=current_date.strftime('%Y-%m-%d'),
                     end_date=current_date.strftime('%Y-%m-%d'),
                     output_dir=str(module_outputs['module3']),
-                    skip_file_output=False  # Module3必须写入文件，供下一天Module4读取
+                    skip_file_output=True,  # 🦆 完全内存模式 - M3结果通过previous_day_m3_result传递给下一天M4
+                    module1_result=m1_result  # 🦆 直接从内存传递Module1输出（与local模式一致）
                 )
                 print(f"  ✅ Module3 完成")
                 if m3_result is not None:
                     m3_result['simulation_date'] = current_date
                 all_results['module3'].append(m3_result)
+                
+                # 🦆 存储M3结果，供下一天M4使用（完全内存模式）
+                previous_day_m3_result = m3_result
             except Exception as e:
                 print(f"❌ Module3 失败: {e}")
             
@@ -2368,6 +2480,20 @@ def run_integrated_simulation_from_dict(
     
     print("🎉 集成仿真完成!")
     print(f"总共处理: {len(sim_dates)} 天")
+    
+    # 🦆 禁用DuckDB内存模式并打印统计
+    _ensure_memory_store_imported()
+    if _is_memory_mode_enabled and _is_memory_mode_enabled():
+        if _get_data_store:
+            store = _get_data_store()
+            if store:
+                print("\n" + "=" * 60)
+                print("🦆 DuckDB内存模式统计")
+                print("=" * 60)
+                store.print_stats()
+        if _disable_memory_mode:
+            _disable_memory_mode()
+            print("🦆 DuckDB内存模式已禁用")
     
     # 输出运行时间统计
     simulation_end_datetime = datetime.now()

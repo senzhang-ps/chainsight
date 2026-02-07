@@ -1,4 +1,4 @@
-# summary_report_generator.py（汇总报告生成器）
+# summary_report_generator.py
 # 汇总报告生成器 - 全周期模拟结束后输出7类full报告
 
 import pandas as pd
@@ -11,7 +11,7 @@ import glob
 class SummaryReportGenerator:
     """汇总报告生成器"""
     
-    def __init__(self, output_base_dir: str, config_dict: Optional[dict] = None):
+    def __init__(self, output_base_dir: str, config_dict: dict = None):
         """
         初始化汇总报告生成器
         
@@ -36,20 +36,16 @@ class SummaryReportGenerator:
     
     @staticmethod
     def _normalize_material_value(material_str: str) -> str:
-        """标准化 material 值：作为文本处理，仅移除误读的.0后缀"""
+        """标准化 material 值：移除.0后缀"""
         if not material_str or material_str in ['nan', 'None', '']:
             return ""
-        
-        material_str = str(material_str).strip()
-        
         try:
-            # 仅当是以 .0 结尾的纯数字字符串时，才移除 .0
-            # 这样可以保留 '00123' 这种带前导零的物料编码
-            if material_str.endswith('.0') and material_str[:-2].replace('.', '').replace('-', '').isdigit():
+            # 如果是数字，移除.0后缀
+            if '.' in material_str and material_str.replace('.', '').replace('-', '').isdigit():
                 return str(int(float(material_str)))
-            return material_str
+            return material_str.strip()
         except:
-            return material_str
+            return material_str.strip()
     
     @staticmethod
     def _normalize_location_value(location_str: str) -> str:
@@ -98,15 +94,7 @@ class SummaryReportGenerator:
         report_files['truck_usage'] = self._generate_truck_usage_report(daily_files)
         report_files['historical_inventory'] = self._generate_historical_inventory_report(start_date, end_date)
         
-        # 检测是否是临时目录（Windows: Temp, Linux: /tmp）
-        import tempfile
-        temp_dir = Path(tempfile.gettempdir())
-        is_temp_dir = str(self.summary_dir).startswith(str(temp_dir)) or '/tmp/' in str(self.summary_dir)
-        
-        if is_temp_dir:
-            print(f"✅ 汇总报告生成完成（将写入数据库）")
-        else:
-            print(f"✅ 汇总报告生成完成，输出目录: {self.summary_dir}")
+        print(f"✅ 汇总报告生成完成，输出目录: {self.summary_dir}")
         return report_files
     
     def _collect_daily_files(self, start_date: str, end_date: str) -> Dict[str, List[str]]:
@@ -158,34 +146,39 @@ class SummaryReportGenerator:
                 # 从文件名提取simulation_date
                 simulation_date = self._extract_date_from_filename(file_path)
                 
-                with pd.ExcelFile(file_path) as xl:
-                    if 'OrderLog' in xl.sheet_names:
-                        orders_df = xl.parse('OrderLog')
-                        if not orders_df.empty and simulation_date:
-                            orders_df['simulation_date'] = simulation_date
-                        all_orders.append(orders_df)
-                    
-                    if 'ShipmentLog' in xl.sheet_names:
-                        shipments_df = xl.parse('ShipmentLog')
-                        if not shipments_df.empty and simulation_date:
-                            shipments_df['simulation_date'] = simulation_date
-                        all_shipments.append(shipments_df)
-                    
-                    if 'CutLog' in xl.sheet_names:
-                        cuts_df = xl.parse('CutLog')
-                        if not cuts_df.empty and simulation_date:
-                            cuts_df['simulation_date'] = simulation_date
-                        all_cuts.append(cuts_df)
+                xl = pd.ExcelFile(file_path)
+                
+                if 'OrderLog' in xl.sheet_names:
+                    orders_df = xl.parse('OrderLog')
+                    if not orders_df.empty and simulation_date:
+                        orders_df['simulation_date'] = simulation_date
+                    all_orders.append(orders_df)
+                
+                if 'ShipmentLog' in xl.sheet_names:
+                    shipments_df = xl.parse('ShipmentLog')
+                    if not shipments_df.empty and simulation_date:
+                        shipments_df['simulation_date'] = simulation_date
+                    all_shipments.append(shipments_df)
+                
+                if 'CutLog' in xl.sheet_names:
+                    cuts_df = xl.parse('CutLog')
+                    if not cuts_df.empty and simulation_date:
+                        cuts_df['simulation_date'] = simulation_date
+                    all_cuts.append(cuts_df)
             except Exception as e:
                 print(f"Warning: Failed to read {file_path}: {e}")
         
         # 合并并汇总数据
         summary_data = []
         
-        # 合并所有数据
-        combined_orders = pd.concat(all_orders, ignore_index=True) if all_orders else pd.DataFrame()
-        combined_shipments = pd.concat(all_shipments, ignore_index=True) if all_shipments else pd.DataFrame()
-        combined_cuts = pd.concat(all_cuts, ignore_index=True) if all_cuts else pd.DataFrame()
+        # 🔧 FIX: 合并所有数据前过滤空 DataFrame，避免 FutureWarning
+        non_empty_orders = [df for df in all_orders if not df.empty]
+        non_empty_shipments = [df for df in all_shipments if not df.empty]
+        non_empty_cuts = [df for df in all_cuts if not df.empty]
+        
+        combined_orders = pd.concat(non_empty_orders, ignore_index=True) if non_empty_orders else pd.DataFrame()
+        combined_shipments = pd.concat(non_empty_shipments, ignore_index=True) if non_empty_shipments else pd.DataFrame()
+        combined_cuts = pd.concat(non_empty_cuts, ignore_index=True) if non_empty_cuts else pd.DataFrame()
         
         # 🔧 关键修复：去除重复的 AO 订单
         # AO 订单可能在多个 simulation_date 被重复记录，需要按唯一键去重
@@ -267,15 +260,17 @@ class SummaryReportGenerator:
                 if original_count != filtered_count:
                     print(f"📊 过滤超出日期范围的记录：{original_count} 条 → {filtered_count} 条（移除了 {original_count - filtered_count} 条超出 {self.end_date.date()} 的记录）")
             
-            # 🔧 验证：计算 cut_qty 是否等于 order - shipment
+            # 🔧 修复：直接使用计算值覆盖 cut_qty，确保数据一致性
             summary['calculated_cut'] = (summary['order_qty'] - summary['shipment_qty']).clip(lower=0)
             
-            # 检查不一致的记录
+            # 检查并记录不一致的记录（仅用于调试日志）
             inconsistent = summary[summary['cut_qty'] != summary['calculated_cut']]
             if not inconsistent.empty:
-                print(f"\n⚠️  发现 {len(inconsistent)} 条 cut_qty 不一致的记录:")
-                print(f"  (cut_qty 应该 = max(0, order_qty - shipment_qty))")
-                print(inconsistent[['date', 'material', 'location', 'order_qty', 'shipment_qty', 'cut_qty', 'calculated_cut']].head(10))
+                print(f"\n⚠️  发现 {len(inconsistent)} 条 cut_qty 不一致的记录，已自动修正")
+                print(f"  (cut_qty 已修正为 = max(0, order_qty - shipment_qty))")
+            
+            # 🔧 关键修复：用计算值覆盖原始 cut_qty
+            summary['cut_qty'] = summary['calculated_cut']
             
             # 移除临时列
             summary = summary.drop(columns=['calculated_cut'])
@@ -290,6 +285,11 @@ class SummaryReportGenerator:
             # 输出到Excel
             with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
                 summary.to_excel(writer, sheet_name='OrderShipmentCutSummary', index=False)
+        else:
+            # 🔧 FIX: Create empty Excel file to avoid "At least one sheet must be visible" error
+            empty_df = pd.DataFrame(columns=['simulation_date', 'date', 'material', 'location', 'order_qty', 'shipment_qty', 'cut_qty'])
+            with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
+                empty_df.to_excel(writer, sheet_name='OrderShipmentCutSummary', index=False)
         
         return str(output_file)
     
@@ -301,44 +301,57 @@ class SummaryReportGenerator:
         
         for file_path in daily_files['module6']:
             try:
-                with pd.ExcelFile(file_path) as xl:
-                    if 'DeliveryPlan' in xl.sheet_names:
-                        delivery_df = xl.parse('DeliveryPlan')
-                        # 添加date, planned_deploy_date, actual_ship_date字段
-                        file_date = self._extract_date_from_filename(file_path)
-                        delivery_df['date'] = file_date
-                        all_deliveries.append(delivery_df)
+                xl = pd.ExcelFile(file_path)
+                if 'DeliveryPlan' in xl.sheet_names:
+                    delivery_df = xl.parse('DeliveryPlan')
+                    # 添加date, planned_deploy_date, actual_ship_date字段
+                    file_date = self._extract_date_from_filename(file_path)
+                    delivery_df['date'] = file_date
+                    all_deliveries.append(delivery_df)
             except Exception as e:
                 print(f"Warning: Failed to read {file_path}: {e}")
         
         if all_deliveries:
-            combined_deliveries = pd.concat(all_deliveries, ignore_index=True)
-            
-            # 🔧 过滤掉超出模拟日期范围的数据
-            original_count = len(combined_deliveries)
-            date_cols_to_filter = ['planned_deploy_date', 'actual_ship_date', 'date']
-            for col in date_cols_to_filter:
-                if col in combined_deliveries.columns:
-                    combined_deliveries[col] = pd.to_datetime(combined_deliveries[col], errors='coerce')
-            
-            # 只保留 planned_deploy_date 或 actual_ship_date 在范围内的记录
-            if 'planned_deploy_date' in combined_deliveries.columns or 'actual_ship_date' in combined_deliveries.columns:
-                mask = pd.Series([True] * len(combined_deliveries))
-                if 'planned_deploy_date' in combined_deliveries.columns:
-                    mask = mask & ((combined_deliveries['planned_deploy_date'].isna()) | (combined_deliveries['planned_deploy_date'] <= self.end_date))
-                if 'actual_ship_date' in combined_deliveries.columns:
-                    mask = mask & ((combined_deliveries['actual_ship_date'].isna()) | (combined_deliveries['actual_ship_date'] <= self.end_date))
-                combined_deliveries = combined_deliveries[mask]
+            # 🔧 FIX: Filter empty DataFrames before concat
+            non_empty_deliveries = [df for df in all_deliveries if not df.empty]
+            if non_empty_deliveries:
+                combined_deliveries = pd.concat(non_empty_deliveries, ignore_index=True)
                 
-                filtered_count = len(combined_deliveries)
-                if original_count != filtered_count:
-                    print(f"📊 Delivery Plan 过滤：{original_count} 条 → {filtered_count} 条（移除了 {original_count - filtered_count} 条超出日期范围的记录）")
-            
-            # 按需求添加字段: date, material, sending, receiving, planned_qty, delivered_qty, planned_deploy_date, actual_ship_date
-            required_columns = ['date', 'material', 'sending', 'receiving', 'planned_qty', 'delivered_qty', 'planned_deploy_date', 'actual_ship_date']
-            
+                # 🔧 过滤掉超出模拟日期范围的数据
+                original_count = len(combined_deliveries)
+                date_cols_to_filter = ['planned_deploy_date', 'actual_ship_date', 'date']
+                for col in date_cols_to_filter:
+                    if col in combined_deliveries.columns:
+                        combined_deliveries[col] = pd.to_datetime(combined_deliveries[col], errors='coerce')
+                
+                # 只保留 planned_deploy_date 或 actual_ship_date 在范围内的记录
+                if 'planned_deploy_date' in combined_deliveries.columns or 'actual_ship_date' in combined_deliveries.columns:
+                    mask = pd.Series([True] * len(combined_deliveries))
+                    if 'planned_deploy_date' in combined_deliveries.columns:
+                        mask = mask & ((combined_deliveries['planned_deploy_date'].isna()) | (combined_deliveries['planned_deploy_date'] <= self.end_date))
+                    if 'actual_ship_date' in combined_deliveries.columns:
+                        mask = mask & ((combined_deliveries['actual_ship_date'].isna()) | (combined_deliveries['actual_ship_date'] <= self.end_date))
+                    combined_deliveries = combined_deliveries[mask]
+                    
+                    filtered_count = len(combined_deliveries)
+                    if original_count != filtered_count:
+                        print(f"📊 Delivery Plan 过滤：{original_count} 条 → {filtered_count} 条（移除了 {original_count - filtered_count} 条超出日期范围的记录）")
+                
+                # 按需求添加字段: date, material, sending, receiving, planned_qty, delivered_qty, planned_deploy_date, actual_ship_date
+                required_columns = ['date', 'material', 'sending', 'receiving', 'planned_qty', 'delivered_qty', 'planned_deploy_date', 'actual_ship_date']
+                
+                with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
+                    combined_deliveries.to_excel(writer, sheet_name='FullDeliveryPlan', index=False)
+            else:
+                # 🔧 FIX: Create empty Excel file when all DataFrames are empty
+                empty_df = pd.DataFrame(columns=['date', 'material', 'sending', 'receiving', 'planned_qty', 'delivered_qty', 'planned_deploy_date', 'actual_ship_date'])
+                with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
+                    empty_df.to_excel(writer, sheet_name='FullDeliveryPlan', index=False)
+        else:
+            # 🔧 FIX: Create empty Excel file to avoid "At least one sheet must be visible" error
+            empty_df = pd.DataFrame(columns=['date', 'material', 'sending', 'receiving', 'planned_qty', 'delivered_qty', 'planned_deploy_date', 'actual_ship_date'])
             with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
-                combined_deliveries.to_excel(writer, sheet_name='FullDeliveryPlan', index=False)
+                empty_df.to_excel(writer, sheet_name='FullDeliveryPlan', index=False)
         
         return str(output_file)
     
@@ -350,32 +363,45 @@ class SummaryReportGenerator:
         
         for file_path in daily_files['module6']:
             try:
-                with pd.ExcelFile(file_path) as xl:
-                    if 'TruckUsageLog' in xl.sheet_names:
-                        usage_df = xl.parse('TruckUsageLog')
-                        all_usage.append(usage_df)
+                xl = pd.ExcelFile(file_path)
+                if 'TruckUsageLog' in xl.sheet_names:
+                    usage_df = xl.parse('TruckUsageLog')
+                    all_usage.append(usage_df)
             except Exception as e:
                 print(f"Warning: Failed to read {file_path}: {e}")
         
         if all_usage:
-            combined_usage = pd.concat(all_usage, ignore_index=True)
-            
-            # 🔧 过滤掉超出模拟日期范围的数据
-            if 'date' in combined_usage.columns:
-                original_count = len(combined_usage)
-                combined_usage['date'] = pd.to_datetime(combined_usage['date'], errors='coerce')
-                combined_usage = combined_usage[
-                    (combined_usage['date'].isna()) | 
-                    (combined_usage['date'] <= self.end_date)
-                ]
-                filtered_count = len(combined_usage)
-                if original_count != filtered_count:
-                    print(f"📊 Truck Usage 过滤：{original_count} 条 → {filtered_count} 条（移除了 {original_count - filtered_count} 条超出日期范围的记录）")
-            
-            # 按需求字段: date, sending, receiving, truck_type, available_trucks, used_trucks, wfr, vfr
-            
+            # 🔧 FIX: Filter empty DataFrames before concat
+            non_empty_usage = [df for df in all_usage if not df.empty]
+            if non_empty_usage:
+                combined_usage = pd.concat(non_empty_usage, ignore_index=True)
+                
+                # 🔧 过滤掉超出模拟日期范围的数据
+                if 'date' in combined_usage.columns:
+                    original_count = len(combined_usage)
+                    combined_usage['date'] = pd.to_datetime(combined_usage['date'], errors='coerce')
+                    combined_usage = combined_usage[
+                        (combined_usage['date'].isna()) | 
+                        (combined_usage['date'] <= self.end_date)
+                    ]
+                    filtered_count = len(combined_usage)
+                    if original_count != filtered_count:
+                        print(f"📊 Truck Usage 过滤：{original_count} 条 → {filtered_count} 条（移除了 {original_count - filtered_count} 条超出日期范围的记录）")
+                
+                # 按需求字段: date, sending, receiving, truck_type, available_trucks, used_trucks, wfr, vfr
+                
+                with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
+                    combined_usage.to_excel(writer, sheet_name='FullTruckUsage', index=False)
+            else:
+                # 🔧 FIX: Create empty Excel file when all DataFrames are empty
+                empty_df = pd.DataFrame(columns=['date', 'sending', 'receiving', 'truck_type', 'available_trucks', 'used_trucks', 'wfr', 'vfr'])
+                with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
+                    empty_df.to_excel(writer, sheet_name='FullTruckUsage', index=False)
+        else:
+            # 🔧 FIX: Create empty Excel file to avoid "At least one sheet must be visible" error
+            empty_df = pd.DataFrame(columns=['date', 'sending', 'receiving', 'truck_type', 'available_trucks', 'used_trucks', 'wfr', 'vfr'])
             with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
-                combined_usage.to_excel(writer, sheet_name='FullTruckUsage', index=False)
+                empty_df.to_excel(writer, sheet_name='FullTruckUsage', index=False)
         
         return str(output_file)
     
@@ -387,30 +413,43 @@ class SummaryReportGenerator:
         
         for file_path in daily_files['module4']:
             try:
-                with pd.ExcelFile(file_path) as xl:
-                    if 'CapacityExceed' in xl.sheet_names:
-                        exceed_df = xl.parse('CapacityExceed')
-                        all_exceeds.append(exceed_df)
+                xl = pd.ExcelFile(file_path)
+                if 'CapacityExceed' in xl.sheet_names:
+                    exceed_df = xl.parse('CapacityExceed')
+                    all_exceeds.append(exceed_df)
             except Exception as e:
                 print(f"Warning: Failed to read {file_path}: {e}")
         
         if all_exceeds:
-            combined_exceeds = pd.concat(all_exceeds, ignore_index=True)
-            
-            # 🔧 过滤掉超出模拟日期范围的数据
-            if 'date' in combined_exceeds.columns:
-                original_count = len(combined_exceeds)
-                combined_exceeds['date'] = pd.to_datetime(combined_exceeds['date'], errors='coerce')
-                combined_exceeds = combined_exceeds[
-                    (combined_exceeds['date'].isna()) | 
-                    (combined_exceeds['date'] <= self.end_date)
-                ]
-                filtered_count = len(combined_exceeds)
-                if original_count != filtered_count:
-                    print(f"📊 Capacity Exceed 过滤：{original_count} 条 → {filtered_count} 条（移除了 {original_count - filtered_count} 条超出日期范围的记录）")
-            
+            # 🔧 FIX: Filter empty DataFrames before concat to avoid FutureWarning
+            non_empty_exceeds = [df for df in all_exceeds if not df.empty]
+            if non_empty_exceeds:
+                combined_exceeds = pd.concat(non_empty_exceeds, ignore_index=True)
+                
+                # 🔧 过滤掉超出模拟日期范围的数据
+                if 'date' in combined_exceeds.columns:
+                    original_count = len(combined_exceeds)
+                    combined_exceeds['date'] = pd.to_datetime(combined_exceeds['date'], errors='coerce')
+                    combined_exceeds = combined_exceeds[
+                        (combined_exceeds['date'].isna()) | 
+                        (combined_exceeds['date'] <= self.end_date)
+                    ]
+                    filtered_count = len(combined_exceeds)
+                    if original_count != filtered_count:
+                        print(f"📊 Capacity Exceed 过滤：{original_count} 条 → {filtered_count} 条（移除了 {original_count - filtered_count} 条超出日期范围的记录）")
+                
+                with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
+                    combined_exceeds.to_excel(writer, sheet_name='FullCapacityExceed', index=False)
+            else:
+                # 🔧 FIX: Create empty Excel file with header when all DataFrames are empty
+                empty_df = pd.DataFrame(columns=['date', 'location', 'material', 'capacity', 'demand', 'exceed_qty'])
+                with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
+                    empty_df.to_excel(writer, sheet_name='FullCapacityExceed', index=False)
+        else:
+            # 🔧 FIX: Create empty Excel file to avoid "At least one sheet must be visible" error
+            empty_df = pd.DataFrame(columns=['date', 'location', 'material', 'capacity', 'demand', 'exceed_qty'])
             with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
-                combined_exceeds.to_excel(writer, sheet_name='FullCapacityExceed', index=False)
+                empty_df.to_excel(writer, sheet_name='FullCapacityExceed', index=False)
         
         return str(output_file)
     
@@ -422,10 +461,10 @@ class SummaryReportGenerator:
         
         for file_path in daily_files['module4']:
             try:
-                with pd.ExcelFile(file_path) as xl:
-                    if 'ChangeoverLog' in xl.sheet_names:
-                        changeover_df = xl.parse('ChangeoverLog')
-                        all_changeovers.append(changeover_df)
+                xl = pd.ExcelFile(file_path)
+                if 'ChangeoverLog' in xl.sheet_names:
+                    changeover_df = xl.parse('ChangeoverLog')
+                    all_changeovers.append(changeover_df)
             except Exception as e:
                 print(f"Warning: Failed to read {file_path}: {e}")
         
@@ -454,50 +493,83 @@ class SummaryReportGenerator:
                 
                 with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
                     combined_changeovers.to_excel(writer, sheet_name='FullChangeoverLog', index=False)
+            else:
+                # 🔧 FIX: Create empty Excel file when all DataFrames are empty
+                empty_df = pd.DataFrame(columns=['changeover_start_date', 'changeover_end_date', 'location', 'from_material', 'to_material'])
+                with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
+                    empty_df.to_excel(writer, sheet_name='FullChangeoverLog', index=False)
+        else:
+            # 🔧 FIX: Create empty Excel file to avoid "At least one sheet must be visible" error
+            empty_df = pd.DataFrame(columns=['changeover_start_date', 'changeover_end_date', 'location', 'from_material', 'to_material'])
+            with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
+                empty_df.to_excel(writer, sheet_name='FullChangeoverLog', index=False)
         
         return str(output_file)
     
     def _generate_deployment_report(self, daily_files: Dict) -> str:
         """生成部署计划汇总报告"""
-        output_file = self.summary_dir / "full_deployment_plan_report.xlsx"
+        # 🔧 FIX: 使用 CSV 格式处理大数据，避免 Excel 行数限制
+        output_file_csv = self.summary_dir / "full_deployment_plan_report.csv"
+        output_file_xlsx = self.summary_dir / "full_deployment_plan_report.xlsx"
         
         all_deployments = []
         
         for file_path in daily_files['module5']:
             try:
-                with pd.ExcelFile(file_path) as xl:
-                    if 'DeploymentPlan' in xl.sheet_names:
-                        deployment_df = xl.parse('DeploymentPlan')
-                        all_deployments.append(deployment_df)
+                xl = pd.ExcelFile(file_path)
+                if 'DeploymentPlan' in xl.sheet_names:
+                    deployment_df = xl.parse('DeploymentPlan')
+                    all_deployments.append(deployment_df)
             except Exception as e:
                 print(f"Warning: Failed to read {file_path}: {e}")
         
         if all_deployments:
-            combined_deployments = pd.concat(all_deployments, ignore_index=True)
-            
-            # 🔧 过滤掉超出模拟日期范围的数据
-            original_count = len(combined_deployments)
-            # Deployment 可能的日期字段：deployment_date, arrival_date, ship_date 等
-            date_cols_to_filter = ['deployment_date', 'arrival_date', 'ship_date', 'date']
-            for col in date_cols_to_filter:
-                if col in combined_deployments.columns:
-                    combined_deployments[col] = pd.to_datetime(combined_deployments[col], errors='coerce')
-            
-            # 过滤：如果有任何日期列，只保留日期在范围内的记录
-            mask = pd.Series([True] * len(combined_deployments))
-            for col in ['deployment_date', 'arrival_date', 'ship_date', 'date']:
-                if col in combined_deployments.columns:
-                    mask = mask & ((combined_deployments[col].isna()) | (combined_deployments[col] <= self.end_date))
-            
-            combined_deployments = combined_deployments[mask]
-            filtered_count = len(combined_deployments)
-            if original_count != filtered_count:
-                print(f"📊 Deployment Plan 过滤：{original_count} 条 → {filtered_count} 条（移除了 {original_count - filtered_count} 条超出日期范围的记录）")
-            
-            with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
-                combined_deployments.to_excel(writer, sheet_name='FullDeploymentPlan', index=False)
+            # 🔧 FIX: Filter empty DataFrames before concat
+            non_empty_deployments = [df for df in all_deployments if not df.empty]
+            if non_empty_deployments:
+                combined_deployments = pd.concat(non_empty_deployments, ignore_index=True)
+                
+                # 🔧 过滤掉超出模拟日期范围的数据
+                original_count = len(combined_deployments)
+                # Deployment 可能的日期字段：deployment_date, arrival_date, ship_date 等
+                date_cols_to_filter = ['deployment_date', 'arrival_date', 'ship_date', 'date']
+                for col in date_cols_to_filter:
+                    if col in combined_deployments.columns:
+                        combined_deployments[col] = pd.to_datetime(combined_deployments[col], errors='coerce')
+                
+                # 过滤：如果有任何日期列，只保留日期在范围内的记录
+                mask = pd.Series([True] * len(combined_deployments))
+                for col in ['deployment_date', 'arrival_date', 'ship_date', 'date']:
+                    if col in combined_deployments.columns:
+                        mask = mask & ((combined_deployments[col].isna()) | (combined_deployments[col] <= self.end_date))
+                
+                combined_deployments = combined_deployments[mask]
+                filtered_count = len(combined_deployments)
+                if original_count != filtered_count:
+                    print(f"📊 Deployment Plan 过滤：{original_count} 条 → {filtered_count} 条（移除了 {original_count - filtered_count} 条超出日期范围的记录）")
+                
+                # 🔧 FIX: 检查数据量，超过 Excel 限制则使用 CSV
+                EXCEL_MAX_ROWS = 1048576
+                if len(combined_deployments) > EXCEL_MAX_ROWS - 1:  # -1 for header
+                    print(f"📊 Deployment Plan 数据量 ({len(combined_deployments)} 行) 超过 Excel 限制，使用 CSV 格式")
+                    combined_deployments.to_csv(output_file_csv, index=False)
+                    return str(output_file_csv)
+                else:
+                    with pd.ExcelWriter(output_file_xlsx, engine='openpyxl') as writer:
+                        combined_deployments.to_excel(writer, sheet_name='FullDeploymentPlan', index=False)
+                    return str(output_file_xlsx)
+            else:
+                # 🔧 FIX: Create empty Excel file when all DataFrames are empty
+                empty_df = pd.DataFrame(columns=['deployment_date', 'material', 'sending', 'receiving', 'quantity'])
+                with pd.ExcelWriter(output_file_xlsx, engine='openpyxl') as writer:
+                    empty_df.to_excel(writer, sheet_name='FullDeploymentPlan', index=False)
+        else:
+            # 🔧 FIX: Create empty Excel file to avoid "At least one sheet must be visible" error
+            empty_df = pd.DataFrame(columns=['deployment_date', 'material', 'sending', 'receiving', 'quantity'])
+            with pd.ExcelWriter(output_file_xlsx, engine='openpyxl') as writer:
+                empty_df.to_excel(writer, sheet_name='FullDeploymentPlan', index=False)
         
-        return str(output_file)
+        return str(output_file_xlsx)
     
     def _generate_production_report(self, daily_files: Dict) -> str:
         """生成生产计划汇总报告"""
@@ -507,39 +579,52 @@ class SummaryReportGenerator:
         
         for file_path in daily_files['module4']:
             try:
-                with pd.ExcelFile(file_path) as xl:
-                    if 'ProductionPlan' in xl.sheet_names:
-                        production_df = xl.parse('ProductionPlan')
-                        all_productions.append(production_df)
+                xl = pd.ExcelFile(file_path)
+                if 'ProductionPlan' in xl.sheet_names:
+                    production_df = xl.parse('ProductionPlan')
+                    all_productions.append(production_df)
             except Exception as e:
                 print(f"Warning: Failed to read {file_path}: {e}")
         
         if all_productions:
-            combined_productions = pd.concat(all_productions, ignore_index=True)
-            
-            # 🔧 过滤掉超出模拟日期范围的数据
-            original_count = len(combined_productions)
-            date_cols_to_filter = ['available_date', 'production_plan_date']
-            for col in date_cols_to_filter:
-                if col in combined_productions.columns:
-                    combined_productions[col] = pd.to_datetime(combined_productions[col], errors='coerce')
-            
-            # 只保留 available_date 在范围内的记录（这是实际产品可用的日期）
-            if 'available_date' in combined_productions.columns:
-                combined_productions = combined_productions[
-                    (combined_productions['available_date'].isna()) | 
-                    (combined_productions['available_date'] <= self.end_date)
-                ]
-                filtered_count = len(combined_productions)
-                if original_count != filtered_count:
-                    print(f"📊 Production Plan 过滤：{original_count} 条 → {filtered_count} 条（移除了 {original_count - filtered_count} 条超出日期范围的记录）")
-            
+            # 🔧 FIX: Filter empty DataFrames before concat
+            non_empty_productions = [df for df in all_productions if not df.empty]
+            if non_empty_productions:
+                combined_productions = pd.concat(non_empty_productions, ignore_index=True)
+                
+                # 🔧 过滤掉超出模拟日期范围的数据
+                original_count = len(combined_productions)
+                date_cols_to_filter = ['available_date', 'production_plan_date']
+                for col in date_cols_to_filter:
+                    if col in combined_productions.columns:
+                        combined_productions[col] = pd.to_datetime(combined_productions[col], errors='coerce')
+                
+                # 只保留 available_date 在范围内的记录（这是实际产品可用的日期）
+                if 'available_date' in combined_productions.columns:
+                    combined_productions = combined_productions[
+                        (combined_productions['available_date'].isna()) | 
+                        (combined_productions['available_date'] <= self.end_date)
+                    ]
+                    filtered_count = len(combined_productions)
+                    if original_count != filtered_count:
+                        print(f"📊 Production Plan 过滤：{original_count} 条 → {filtered_count} 条（移除了 {original_count - filtered_count} 条超出日期范围的记录）")
+                
+                with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
+                    combined_productions.to_excel(writer, sheet_name='FullProductionPlan', index=False)
+            else:
+                # 🔧 FIX: Create empty Excel file when all DataFrames are empty
+                empty_df = pd.DataFrame(columns=['available_date', 'material', 'location', 'quantity'])
+                with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
+                    empty_df.to_excel(writer, sheet_name='FullProductionPlan', index=False)
+        else:
+            # 🔧 FIX: Create empty Excel file to avoid "At least one sheet must be visible" error
+            empty_df = pd.DataFrame(columns=['available_date', 'material', 'location', 'quantity'])
             with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
-                combined_productions.to_excel(writer, sheet_name='FullProductionPlan', index=False)
+                empty_df.to_excel(writer, sheet_name='FullProductionPlan', index=False)
         
         return str(output_file)
     
-    def _extract_date_from_filename(self, file_path: str) -> Optional[str]:
+    def _extract_date_from_filename(self, file_path: str) -> str:
         """从文件名中提取日期"""
         import re
         match = re.search(r'(\d{8})', file_path)
@@ -563,17 +648,12 @@ class SummaryReportGenerator:
             # 确保日期格式
             if 'date' in ss_df.columns:
                 ss_df['date'] = pd.to_datetime(ss_df['date'])
-            # 向量化构建safety_stock_dict
-            ss_df['material'] = ss_df['material'].astype(str).map(self._normalize_material_value)
-            ss_df['location'] = ss_df['location'].astype(str).map(self._normalize_location_value)
-            ss_df['ss_qty'] = pd.to_numeric(ss_df.get('safety_stock_qty', 0), errors='coerce').fillna(0).astype(int)
-            # 如果有多个日期,按日期排序后取最后一条(最新值)
-            if 'date' in ss_df.columns:
-                ss_df = ss_df.sort_values('date')
-            safety_stock_dict = (
-                ss_df.groupby(['material', 'location'])['ss_qty']
-                .last().to_dict()
-            )
+            for _, row in ss_df.iterrows():
+                material = self._normalize_material_value(str(row['material']))
+                location = self._normalize_location_value(str(row['location']))
+                key = (material, location)
+                # 使用最新的safety stock值（如果有多个日期）
+                safety_stock_dict[key] = int(row.get('safety_stock_qty', 0))
         
         all_records = []
         
@@ -596,18 +676,12 @@ class SummaryReportGenerator:
             if inv_file.exists():
                 try:
                     inv_df = pd.read_csv(inv_file)
-                    if not inv_df.empty:
-                        inv_df = inv_df.assign(
-                            material=inv_df['material'].astype(str).map(self._normalize_material_value),
-                            location=inv_df['location'].astype(str).map(self._normalize_location_value),
-                            quantity=pd.to_numeric(inv_df.get('quantity', 0), errors='coerce').fillna(0).astype(int)
-                        )
-                        ending_inv_dict = (
-                            inv_df.groupby(['material', 'location'], dropna=False)['quantity']
-                            .sum()
-                            .astype(int)
-                            .to_dict()
-                        )
+                    for _, row in inv_df.iterrows():
+                        # 🔧 确保使用标准化的 material 和 location
+                        material = self._normalize_material_value(str(row['material']))
+                        location = self._normalize_location_value(str(row['location']))
+                        key = (material, location)
+                        ending_inv_dict[key] = int(row['quantity'])
                 except Exception as e:
                     print(f"Warning: Failed to read {inv_file}: {e}")
             
@@ -617,18 +691,12 @@ class SummaryReportGenerator:
                 try:
                     intransit_df = pd.read_csv(intransit_file)
                     if not intransit_df.empty:
-                        tmp = intransit_df.assign(
-                            material=intransit_df['material'].astype(str).map(self._normalize_material_value),
-                            receiving=intransit_df['receiving'].astype(str).map(self._normalize_location_value),
-                            quantity=pd.to_numeric(intransit_df.get('quantity', 0), errors='coerce').fillna(0).astype(int)
-                        )
-                        in_transit_dict = (
-                            tmp.groupby(['material', 'receiving'], dropna=False)['quantity']
-                            .sum()
-                            .astype(int)
-                            .rename_axis(['material', 'location'])
-                            .to_dict()
-                        )
+                        # 按接收地点汇总在途数量
+                        for _, row in intransit_df.iterrows():
+                            material = self._normalize_material_value(str(row['material']))
+                            location = self._normalize_location_value(str(row['receiving']))
+                            key = (material, location)
+                            in_transit_dict[key] = in_transit_dict.get(key, 0) + int(row['quantity'])
                 except Exception as e:
                     print(f"Warning: Failed to read {intransit_file}: {e}")
             
@@ -638,17 +706,11 @@ class SummaryReportGenerator:
                 try:
                     prod_gr_df = pd.read_csv(prod_gr_file)
                     if not prod_gr_df.empty:
-                        tmp = prod_gr_df.assign(
-                            material=prod_gr_df['material'].astype(str).map(self._normalize_material_value),
-                            location=prod_gr_df['location'].astype(str).map(self._normalize_location_value),
-                            quantity=pd.to_numeric(prod_gr_df.get('quantity', 0), errors='coerce').fillna(0).astype(int)
-                        )
-                        production_gr_dict = (
-                            tmp.groupby(['material', 'location'], dropna=False)['quantity']
-                            .sum()
-                            .astype(int)
-                            .to_dict()
-                        )
+                        for _, row in prod_gr_df.iterrows():
+                            material = self._normalize_material_value(str(row['material']))
+                            location = self._normalize_location_value(str(row['location']))
+                            key = (material, location)
+                            production_gr_dict[key] = production_gr_dict.get(key, 0) + int(row['quantity'])
                 except Exception as e:
                     print(f"Warning: Failed to read {prod_gr_file}: {e}")
             
@@ -658,18 +720,11 @@ class SummaryReportGenerator:
                 try:
                     del_gr_df = pd.read_csv(del_gr_file)
                     if not del_gr_df.empty:
-                        tmp = del_gr_df.assign(
-                            material=del_gr_df['material'].astype(str).map(self._normalize_material_value),
-                            receiving=del_gr_df['receiving'].astype(str).map(self._normalize_location_value),
-                            quantity=pd.to_numeric(del_gr_df.get('quantity', 0), errors='coerce').fillna(0).astype(int)
-                        )
-                        delivery_gr_dict = (
-                            tmp.groupby(['material', 'receiving'], dropna=False)['quantity']
-                            .sum()
-                            .astype(int)
-                            .rename_axis(['material', 'location'])
-                            .to_dict()
-                        )
+                        for _, row in del_gr_df.iterrows():
+                            material = self._normalize_material_value(str(row['material']))
+                            location = self._normalize_location_value(str(row['receiving']))
+                            key = (material, location)
+                            delivery_gr_dict[key] = delivery_gr_dict.get(key, 0) + int(row['quantity'])
                 except Exception as e:
                     print(f"Warning: Failed to read {del_gr_file}: {e}")
             
@@ -677,40 +732,31 @@ class SummaryReportGenerator:
             order_file = module1_dir / f"module1_output_{date_str_file}.xlsx"
             if order_file.exists():
                 try:
-                    with pd.ExcelFile(order_file) as xl:
-                        if 'OrderLog' in xl.sheet_names:
-                            order_df = xl.parse('OrderLog')
-                            if not order_df.empty and 'date' in order_df.columns:
-                                today_orders = order_df[pd.to_datetime(order_df['date']) == date]
-                                if not today_orders.empty:
-                                    tmp = today_orders.assign(
-                                        material=today_orders['material'].astype(str).map(self._normalize_material_value),
-                                        location=today_orders['location'].astype(str).map(self._normalize_location_value),
-                                        quantity=pd.to_numeric(today_orders.get('quantity', 0), errors='coerce').fillna(0).astype(int)
-                                    )
-                                    order_dict = (
-                                        tmp.groupby(['material', 'location'], dropna=False)['quantity']
-                                        .sum()
-                                        .astype(int)
-                                        .to_dict()
-                                    )
-                        # 读取供需日志 (supply demand log)
-                        if 'SupplyDemandLog' in xl.sheet_names:
-                            sd_df = xl.parse('SupplyDemandLog')
-                            if not sd_df.empty and 'date' in sd_df.columns:
-                                today_sd = sd_df[pd.to_datetime(sd_df['date']) == date]
-                                if not today_sd.empty:
-                                    tmp = today_sd.assign(
-                                        material=today_sd['material'].astype(str).map(self._normalize_material_value),
-                                        location=today_sd['location'].astype(str).map(self._normalize_location_value),
-                                        quantity=pd.to_numeric(today_sd.get('quantity', 0), errors='coerce').fillna(0).astype(int)
-                                    )
-                                    supply_demand_dict = (
-                                        tmp.groupby(['material', 'location'], dropna=False)['quantity']
-                                        .sum()
-                                        .astype(int)
-                                        .to_dict()
-                                    )
+                    xl = pd.ExcelFile(order_file)
+                    if 'OrderLog' in xl.sheet_names:
+                        order_df = xl.parse('OrderLog')
+                        # 只统计当日到期的订单
+                        today_orders = order_df[pd.to_datetime(order_df['date']) == date]
+                        if not today_orders.empty:
+                            for _, row in today_orders.iterrows():
+                                material = self._normalize_material_value(str(row['material']))
+                                location = self._normalize_location_value(str(row['location']))
+                                key = (material, location)
+                                order_dict[key] = order_dict.get(key, 0) + int(row['quantity'])
+                    
+                    # 读取供需日志 (supply demand log)
+                    if 'SupplyDemandLog' in xl.sheet_names:
+                        sd_df = xl.parse('SupplyDemandLog')
+                        if not sd_df.empty and 'date' in sd_df.columns:
+                            # 只统计当日的供需数据
+                            today_sd = sd_df[pd.to_datetime(sd_df['date']) == date]
+                            if not today_sd.empty:
+                                for _, row in today_sd.iterrows():
+                                    material = self._normalize_material_value(str(row['material']))
+                                    location = self._normalize_location_value(str(row['location']))
+                                    key = (material, location)
+                                    # 汇总所有demand_element的quantity
+                                    supply_demand_dict[key] = supply_demand_dict.get(key, 0) + int(row.get('quantity', 0))
                 except Exception as e:
                     print(f"Warning: Failed to read orders/supply-demand from {order_file}: {e}")
             
@@ -720,17 +766,11 @@ class SummaryReportGenerator:
                 try:
                     shipment_df = pd.read_csv(shipment_file)
                     if not shipment_df.empty:
-                        tmp = shipment_df.assign(
-                            material=shipment_df['material'].astype(str).map(self._normalize_material_value),
-                            location=shipment_df['location'].astype(str).map(self._normalize_location_value),
-                            quantity=pd.to_numeric(shipment_df.get('quantity', 0), errors='coerce').fillna(0).astype(int)
-                        )
-                        shipment_dict = (
-                            tmp.groupby(['material', 'location'], dropna=False)['quantity']
-                            .sum()
-                            .astype(int)
-                            .to_dict()
-                        )
+                        for _, row in shipment_df.iterrows():
+                            material = self._normalize_material_value(str(row['material']))
+                            location = self._normalize_location_value(str(row['location']))
+                            key = (material, location)
+                            shipment_dict[key] = shipment_dict.get(key, 0) + int(row['quantity'])
                 except Exception as e:
                     print(f"Warning: Failed to read {shipment_file}: {e}")
             
@@ -740,18 +780,11 @@ class SummaryReportGenerator:
                 try:
                     del_ship_df = pd.read_csv(del_ship_file)
                     if not del_ship_df.empty:
-                        tmp = del_ship_df.assign(
-                            material=del_ship_df['material'].astype(str).map(self._normalize_material_value),
-                            sending=del_ship_df['sending'].astype(str).map(self._normalize_location_value),
-                            quantity=pd.to_numeric(del_ship_df.get('quantity', 0), errors='coerce').fillna(0).astype(int)
-                        )
-                        delivery_ship_dict = (
-                            tmp.groupby(['material', 'sending'], dropna=False)['quantity']
-                            .sum()
-                            .astype(int)
-                            .rename_axis(['material', 'location'])
-                            .to_dict()
-                        )
+                        for _, row in del_ship_df.iterrows():
+                            material = self._normalize_material_value(str(row['material']))
+                            location = self._normalize_location_value(str(row['sending']))
+                            key = (material, location)
+                            delivery_ship_dict[key] = delivery_ship_dict.get(key, 0) + int(row['quantity'])
                 except Exception as e:
                     print(f"Warning: Failed to read {del_ship_file}: {e}")
             

@@ -66,12 +66,12 @@ def normalize_identifiers(df: pd.DataFrame) -> pd.DataFrame:
 
     df = df.copy()
     
-    # 向量化处理 material 列
+    # 向量化处理 material 列 —— 与 Dev 版本一致，移除数值物料的 .0 后缀
     if 'material' in df.columns:
         df['material'] = df['material'].astype(str)
         df['material'] = df['material'].replace(['nan', 'None', '<NA>', 'NaN'], '')
-        # 注意：不移除 .0 后缀，以确保与 Dev 版本输出一致
-        # df['material'] = df['material'].str.replace(r'\.0$', '', regex=True)
+        # 移除数值物料尾部的 .0（例如 "80813644.0" → "80813644"）
+        df['material'] = df['material'].str.replace(r'\.0$', '', regex=True)
     
     # 向量化处理 location 类列
     for col in LOCATION_COLUMNS:

@@ -1,9 +1,0 @@
-timestamp,date,event_type,message
-2026-01-31T19:40:32.343212,2025-12-24,INIT_INVENTORY,Initialized 2368 inventory records
-2026-01-31T19:40:32.346518,2025-12-24,OPEN_DEPLOYMENT_CLEANUP,Removed 0 past-due open deployments (grace_days=100)
-2026-01-31T19:41:15.851074,2025-12-24,M1_SHIPMENTS,Processed 1314 shipments
-2026-01-31T19:43:54.583172,2025-12-24,M5_DEPLOYMENT,Added 62 deployment plans
-2026-01-31T19:44:20.866213,2025-12-24,OPEN_DEPLOYMENT_CLEANUP,Removed 0 past-due open deployments (grace_days=100)
-2026-01-31T19:45:14.162035,2025-12-24,M1_SHIPMENTS,Processed 1780 shipments
-2026-01-31T19:48:47.258525,2025-12-24,M5_DEPLOYMENT,Added 37 deployment plans
-2026-01-31T19:48:47.407284,2025-12-24,M6_DELIVERY,Processed 39 delivery plans

@@ -946,14 +946,17 @@ def run_module4_integrated(
             print(f"Module4 daily output generated: {daily_output_path}")
         
         # 返回完整的Module4结果（包含所有输出表）
-        # production_df 用于数据库写入，应包含完整的生产计划
+        # production_df 与 Dev 版本一致：只返回当日及未来可用的生产
+        # 🔧 修复：不对 production_df 应用 _normalize_identifiers
+        # Dev 版本的 M4 输出 Excel 使用原始 location（如 386），不做 zfill(4)
+        # _normalize_identifiers 仅在传入 orchestrator 时由调用方应用
         production_df = pd.DataFrame()
-        if not plan_log.empty:
-            # 确保 available_date 是日期类型
-            if 'available_date' in plan_log.columns:
-                plan_log['available_date'] = pd.to_datetime(plan_log['available_date'])
-            # 标准化标识符后作为完整的生产计划
-            production_df = _normalize_identifiers(plan_log.copy())
+        if not plan_log.empty and 'available_date' in plan_log.columns:
+            plan_log['available_date'] = pd.to_datetime(plan_log['available_date'])
+            # 与 Dev 版本一致：只返回 available_date >= simulation_date 的记录
+            current_production = plan_log[plan_log['available_date'] >= simulation_date.normalize()]
+            if not current_production.empty:
+                production_df = current_production.copy()
         
         # 返回完整结构供数据库写入
         return {
@@ -1241,7 +1244,7 @@ def load_configuration_from_dict(config_data: dict, config_name: str = "DB_Confi
     
     # 转换配置数据
     for db_name, df in config_data.items():
-        if not isinstance(df, pd.DataFrame) or df.empty:
+        if not isinstance(df, pd.DataFrame):
             continue
         
         # 映射sheet名称
@@ -1250,6 +1253,16 @@ def load_configuration_from_dict(config_data: dict, config_name: str = "DB_Confi
         # 恢复列名大小写
         df_copy = df.copy()
         df_copy.columns = [column_mapping.get(col.lower(), col) for col in df_copy.columns]
+        
+        # 清理残留的 DB 元数据列和非标准列（防止影响模块计算）
+        drop_cols = [c for c in df_copy.columns 
+                     if c in ('config_name', 'config_type', 'db_write_time')
+                     or c.lower().startswith('unnamed')
+                     or (not c.isascii() and c not in column_mapping.values())]
+        if drop_cols:
+            df_copy = df_copy.drop(columns=drop_cols, errors='ignore')
+        # 删除全为 NULL 的列（来自其他配置的表结构残留）
+        df_copy = df_copy.dropna(axis=1, how='all')
         
         config_dict[sheet_name] = df_copy
         print(f"  ✅ 加载配置表: {sheet_name} ({len(df_copy)} 行)")
@@ -1940,9 +1953,7 @@ def run_integrated_simulation(
                         config_dict=config_dict,
                         start_date=current_date.strftime('%Y-%m-%d'),
                         end_date=current_date.strftime('%Y-%m-%d'),
-                        output_dir=str(module_outputs['module3']),
-                        skip_file_output=False,
-                        module1_result=m1_result  # 直接从内存传递Module1输出
+                        output_dir=str(module_outputs['module3'])
                     )
                 print(f"  ✅ Module3 完成")
                 if m3_result is not None:
@@ -2112,8 +2123,14 @@ def run_integrated_simulation_from_dict(
     # 🦆 启用DuckDB内存模式（加速模块间数据传递）
     _ensure_memory_store_imported()
     if _enable_memory_mode:
-        _enable_memory_mode(memory_limit="4GB")
-        print("🦆 DuckDB内存模式已启用（4GB限制）")
+        _enable_memory_mode()  # 使用动态90%系统内存
+        # 获取实际内存限制用于日志显示
+        try:
+            from src.utils.resource_config import get_optimal_memory
+            memory_limit = get_optimal_memory()
+        except ImportError:
+            memory_limit = "4GB"
+        print(f"🦆 DuckDB内存模式已启用（{memory_limit}限制）")
     
     # 跳过预验证（数据库数据已经过验证）
     if skip_validation:
@@ -2173,14 +2190,7 @@ def run_integrated_simulation_from_dict(
     sim_dates = pd.date_range(start_date, end_date, freq='D')
     print(f"📅 仿真日期范围: {len(sim_dates)} 天")
     
-    # 🦆 完全内存模式：存储前一天的Module3结果供Module4使用
-    previous_day_m3_result: Optional[Dict[str, Any]] = None
-    
-    # 🦆 完全内存模式：存储历史M1订单数据供累积使用（与local模式保持一致）
-    accumulated_m1_orders: pd.DataFrame = pd.DataFrame()
-    
-    # 🦆 完全内存模式：存储历史M4生产计划数据供累积使用（用于历史生产入库）
-    accumulated_m4_production: pd.DataFrame = pd.DataFrame()
+    # 🔧 修复：DB模式与文件模式使用相同的数据流（模块间通过文件传递数据，与Dev一致）
     
     # 每日循环执行
     all_results = {
@@ -2209,19 +2219,12 @@ def run_integrated_simulation_from_dict(
             orch._process_delivery_arrivals(current_date.strftime('%Y-%m-%d'))
             
             print("🏭处理历史生产当日入库...")
-            # 🦆 使用内存中累积的M4生产计划数据，而非读取文件（DB模式skip_file_output=True不生成文件）
-            if not accumulated_m4_production.empty and 'available_date' in accumulated_m4_production.columns:
-                accumulated_m4_production['available_date'] = pd.to_datetime(accumulated_m4_production['available_date'])
-                current_date_production_gr = accumulated_m4_production[
-                    accumulated_m4_production['available_date'].dt.normalize() == current_date.normalize()
-                ].copy()
-                
-                # 确保返回所需列（与load_current_date_production_gr函数一致）
-                required_cols = ['material', 'location', 'line', 'simulation_date', 'available_date', 'produced_qty']
-                available_cols = [c for c in required_cols if c in current_date_production_gr.columns]
-                current_date_production_gr = current_date_production_gr[available_cols]
-            else:
-                current_date_production_gr = pd.DataFrame()
+            # 🔧 修复：使用文件模式读取历史M4生产计划（与Dev一致）
+            current_date_production_gr = load_current_date_production_gr(
+                module4_output_dir=str(module_outputs['module4']),
+                current_date=current_date,
+                start_date=pd.to_datetime(start_date)
+            )
             
             if not current_date_production_gr.empty:
                 print(f"📦当日需要入库的历史生产: {len(current_date_production_gr)} 条记录")
@@ -2247,9 +2250,7 @@ def run_integrated_simulation_from_dict(
                     config_dict=config_dict,
                     simulation_date=current_date,
                     output_dir=str(module_outputs['module1']),
-                    orchestrator=orch,
-                    skip_file_output=True,  # 🦆 完全内存模式：跳过文件输出
-                    previous_orders_df=accumulated_m1_orders if not accumulated_m1_orders.empty else None  # 🦆 传递累积的历史订单
+                    orchestrator=orch
                 )
                 m1_shipments = m1_result.get('shipment_df', pd.DataFrame())
                 
@@ -2258,15 +2259,6 @@ def run_integrated_simulation_from_dict(
                     m1_shipments_normalized = _normalize_identifiers(m1_shipments)
                     orch.process_module1_shipments(m1_shipments_normalized, current_date.strftime('%Y-%m-%d'))
                     print(f"✅ 已扣减 {len(m1_shipments_normalized)} 个shipment的库存")
-                
-                # 🦆 更新累积的历史订单数据（用于下一天的M1）
-                # 🔧 修复：使用 all_orders_for_next_day（累积订单）而不是 orders_df（仅当日订单）
-                # orders_df 只包含当日新生成的订单，会导致历史订单丢失
-                # all_orders_for_next_day 包含所有未来到期的订单（与Excel模式一致）
-                all_orders = m1_result.get('all_orders_for_next_day', pd.DataFrame())
-                if not all_orders.empty:
-                    accumulated_m1_orders = all_orders.copy()
-                    print(f"🦆 累积历史订单更新完成，当前总条目: {len(accumulated_m1_orders)}")
                 
                 print(f"✅ Module1 完成 - 生成 {len(m1_result.get('orders_df', []))} 个订单, {len(m1_shipments)} 个发货")
                 if m1_result is not None:
@@ -2284,22 +2276,23 @@ def run_integrated_simulation_from_dict(
                     module3_output_dir=str(module_outputs['module3']),
                     simulation_date=current_date,
                     simulation_start=pd.to_datetime(start_date),
-                    output_dir=str(module_outputs['module4']),
-                    skip_file_output=True,  # 🦆 完全内存模式：跳过文件输出
-                    module3_result=previous_day_m3_result  # 🦆 使用前一天的Module3内存数据
+                    output_dir=str(module_outputs['module4'])
                 )
                 
                 # 从返回结果中获取 production_df
                 m4_production = m4_result.get('production_df', pd.DataFrame())
                 
+                # 🔄 简化调用：仅持久化"未来 available_date"的生产计划，避免重复当日GR
                 if not m4_production.empty and 'available_date' in m4_production.columns:
                     m4_production['available_date'] = pd.to_datetime(m4_production['available_date'])
                     future_plans = m4_production[m4_production['available_date'].dt.normalize() > current_date.normalize()]
                     if not future_plans.empty:
-                        print("🗂️ 持久化未来生产计划...")
+                        print("🗂️ 持久化未来生产计划（不触发当日GR）...")
                         future_plans_normalized = _normalize_identifiers(future_plans)
                         orch.process_module4_production(future_plans_normalized, current_date.strftime('%Y-%m-%d'))
-                        print(f"✅已写入未来计划: {len(future_plans_normalized)} 条")
+                        print(f"✅已写入未来计划回补: {len(future_plans_normalized)} 条")
+                    else:
+                        print("📦当日无未来 available_date 的计划需要持久化")
                 else:
                     print(f"📦M4当日未生成生产计划或缺少 available_date 列")
                 
@@ -2307,13 +2300,6 @@ def run_integrated_simulation_from_dict(
                 # 存储完整的Module4结果（包含所有输出表）
                 m4_result['simulation_date'] = current_date
                 all_results['module4'].append(m4_result)
-                
-                # 🦆 累积历史M4生产计划数据（用于历史生产入库）
-                if not m4_production.empty:
-                    m4_for_accumulation = m4_production.copy()
-                    m4_for_accumulation['source_date'] = current_date
-                    accumulated_m4_production = pd.concat([accumulated_m4_production, m4_for_accumulation], ignore_index=True)
-                    print(f"🦆 累积历史M4生产计划更新完成，当前总条目: {len(accumulated_m4_production)}")
             except Exception as e:
                 print(f"❌ Module4 失败: {e}")
                 m4_production = pd.DataFrame()
@@ -2324,13 +2310,12 @@ def run_integrated_simulation_from_dict(
                 m5_result = module5.main(
                     config_dict=config_dict,
                     module1_output_dir=str(module_outputs['module1']),
-                    module4_output_path=str(module_outputs['module4'] / f"Module4Output_{current_date.strftime('%Y%m%d')}.xlsx"),  # fallback路径
+                    module4_output_path=str(module_outputs['module4'] / f"Module4Output_{current_date.strftime('%Y%m%d')}.xlsx"),
                     orchestrator=orch,
                     current_date=current_date.strftime('%Y-%m-%d'),
                     output_path=str(module_outputs['module5'] / f"Module5Output_{current_date.strftime('%Y%m%d')}.xlsx"),
-                    skip_file_output=True,  # 🦆 完全内存模式：跳过文件输出
-                    module1_result=m1_result,  # 🦆 直接传递Module1内存数据
-                    module4_result=m4_result   # 🦆 直接传递Module4内存数据
+                    module1_result=m1_result,
+                    module4_result=m4_result
                 )
                 
                 if m5_result and 'deployment_plan' in m5_result:
@@ -2377,8 +2362,7 @@ def run_integrated_simulation_from_dict(
                     current_date=current_date,
                     output_dir=str(module_outputs['module6']),
                     max_wait_days=30,
-                    random_seed=config_dict.get('M6_RandomSeed', 42),
-                    skip_file_output=True  # 🦆 完全内存模式
+                    random_seed=config_dict.get('M6_RandomSeed', 42)
                 )
                 
                 if m6_result and 'delivery_plan' in m6_result:
@@ -2405,17 +2389,12 @@ def run_integrated_simulation_from_dict(
                     config_dict=config_dict,
                     start_date=current_date.strftime('%Y-%m-%d'),
                     end_date=current_date.strftime('%Y-%m-%d'),
-                    output_dir=str(module_outputs['module3']),
-                    skip_file_output=True,  # 🦆 完全内存模式 - M3结果通过previous_day_m3_result传递给下一天M4
-                    module1_result=m1_result  # 🦆 直接从内存传递Module1输出（与local模式一致）
+                    output_dir=str(module_outputs['module3'])
                 )
                 print(f"  ✅ Module3 完成")
                 if m3_result is not None:
                     m3_result['simulation_date'] = current_date
                 all_results['module3'].append(m3_result)
-                
-                # 🦆 存储M3结果，供下一天M4使用（完全内存模式）
-                previous_day_m3_result = m3_result
             except Exception as e:
                 print(f"❌ Module3 失败: {e}")
             
@@ -2513,7 +2492,8 @@ def run_integrated_simulation_from_dict(
         'results': all_results,
         'final_stats': final_stats,
         'output_directory': str(output_dir),
-        'summary_reports': summary_reports
+        'summary_reports': summary_reports,
+        'config_dict': config_dict  # 返回config_dict供本地文件输出使用
     }
 
 

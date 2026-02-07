@@ -94,7 +94,9 @@ def _normalize_identifiers(df: pd.DataFrame) -> pd.DataFrame:
     """
     将标识符列规范化为字符串并按规则格式化。
 
-    使用向量化操作提升性能，替代原有的逐行 apply 处理。
+    使用向量化操作提升性能，与 Dev 版本 orchestrator._normalize_identifiers 行为一致：
+    - material 列：调用 _normalize_material 移除数值物料的 .0 后缀
+    - location/sending/receiving/sourcing 列：纯数字补齐到 4 位
     """
     if df.empty:
         return df
@@ -104,14 +106,12 @@ def _normalize_identifiers(df: pd.DataFrame) -> pd.DataFrame:
     
     df = df.copy()
     
-    # 向量化处理 material 列
+    # 向量化处理 material 列 —— 与 Dev 版本一致，移除数值物料的 .0 后缀
     if 'material' in df.columns:
-        # 转换为字符串
         df['material'] = df['material'].astype(str)
-        # 处理 NA/None
         df['material'] = df['material'].replace(['nan', 'None', '<NA>', 'NaN'], '')
-        # 注意: 不移除 .0 后缀，以确保与 Dev 版本输出一致
-        # df['material'] = df['material'].str.replace(r'\.0$', '', regex=True)
+        # 移除数值物料尾部的 .0（例如 "80813644.0" → "80813644"）
+        df['material'] = df['material'].str.replace(r'\.0$', '', regex=True)
     
     # 向量化处理 location 类列（location, sending, receiving, sourcing）
     location_cols = ['location', 'sending', 'receiving', 'sourcing']
@@ -479,7 +479,12 @@ class Orchestrator:
         else:
             future = pd.DataFrame(columns=['material','location','available_date','quantity'])
 
-        out = pd.concat([today_gr, future], ignore_index=True)
+        # 🔧 FIX: Filter empty DataFrames before concat to avoid FutureWarning
+        dfs_to_concat = [df for df in [today_gr, future] if not df.empty]
+        if dfs_to_concat:
+            out = pd.concat(dfs_to_concat, ignore_index=True)
+        else:
+            return pd.DataFrame(columns=['material','location','available_date','quantity'])
         if out.empty:
             return out
         out = out.groupby(['material','location','available_date'], as_index=False).agg({'quantity':'sum'})

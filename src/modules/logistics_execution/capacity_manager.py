@@ -290,11 +290,14 @@ def get_optimal_truck_sequence(truck_cfgs: pd.DataFrame) -> list:
     if truck_cfgs.empty:
         return []
     
-    optimal_types = truck_cfgs[
-        truck_cfgs['optimal_type'] == 'Y'
-    ]['truck_type'].tolist()
-    
     all_types = truck_cfgs['truck_type'].tolist()
-    non_optimal = [t for t in all_types if t not in optimal_types]
     
-    return optimal_types + non_optimal
+    # optimal_type 列可能不存在（如 DB 模式下全 NaN 被 dropna 移除）
+    if 'optimal_type' in truck_cfgs.columns:
+        optimal_types = truck_cfgs[
+            truck_cfgs['optimal_type'] == 'Y'
+        ]['truck_type'].tolist()
+        non_optimal = [t for t in all_types if t not in optimal_types]
+        return optimal_types + non_optimal
+    
+    return all_types

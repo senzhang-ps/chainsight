@@ -669,20 +669,42 @@ def load_integrated_config(
         config['OrderLog'] = pd.DataFrame()
         config['TodayShipment'] = pd.DataFrame()
 
-    # 3. 🦆 加载生产计划（优先从内存获取）
+    # 3. 🦆 加载生产计划（修复：合并当日production GR和未来生产计划）
     config['ProductionPlan'] = pd.DataFrame()
     
-    # 3.1 优先从module4_result内存获取
+    # 3.1 首先从orchestrator获取当日已确认的production GR（这是关键！）
+    # 在DB模式下，module4_result包含的是未来生产计划，不包含当日production GR
+    # 必须从orchestrator获取当日production GR，否则Module5计算dynamic_soh时会缺少当日产量
+    if orchestrator and current_date:
+        _load_production_from_orchestrator(orchestrator, current_date, config)
+    
+    # 3.2 合并module4_result中的未来生产计划（仅在DB模式下）
     if module4_result is not None and 'production_df' in module4_result:
         production_df = module4_result['production_df']
         if isinstance(production_df, pd.DataFrame) and not production_df.empty:
-            config['ProductionPlan'] = production_df.copy()
-    
-    # 3.2 如果内存没有，尝试从orchestrator获取
-    if config['ProductionPlan'].empty and orchestrator and current_date:
-        _load_production_from_orchestrator(orchestrator, current_date, config)
+            future_prod = production_df.copy()
+            # 确保available_date列存在并转换为datetime
+            if 'available_date' not in future_prod.columns and 'date' in future_prod.columns:
+                future_prod = future_prod.rename(columns={'date': 'available_date'})
+            if 'available_date' in future_prod.columns:
+                future_prod['available_date'] = pd.to_datetime(
+                    future_prod['available_date'], errors='coerce'
+                )
+                # 仅保留未来日期的生产计划，避免与当日production GR重复
+                current_date_normalized = pd.to_datetime(current_date).normalize()
+                future_prod = future_prod[
+                    future_prod['available_date'] > current_date_normalized
+                ]
+            # 合并当日GR和未来生产计划
+            if not future_prod.empty:
+                if not config['ProductionPlan'].empty:
+                    config['ProductionPlan'] = pd.concat(
+                        [config['ProductionPlan'], future_prod], ignore_index=True
+                    )
+                else:
+                    config['ProductionPlan'] = future_prod
 
-    # 3.3 最后从文件获取
+    # 3.3 如果以上都没有数据，最后从文件获取
     if config['ProductionPlan'].empty:
         _load_production_from_module4(module4_output_path, config)
 

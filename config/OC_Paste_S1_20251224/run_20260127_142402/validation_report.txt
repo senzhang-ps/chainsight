@@ -1,0 +1,41 @@
+================================================================================
+SUPPLY CHAIN INTEGRATION VALIDATION REPORT
+================================================================================
+Validation Start Time: 2026-01-27 14:24:02
+Validation End Time: 2026-01-27 14:24:17
+Duration: 14.82 seconds
+Total Errors: 0
+Total Warnings: 1
+Total Infos: 18
+
+⚠️  VALIDATION PASSED WITH WARNINGS
+Simulation can proceed but please review warnings.
+
+WARNINGS:
+----------------------------------------
+[14:24:17] [WARNING] [Global] [EmptyConfig] Global_SpaceCapacity configuration is empty
+
+INFORMATION:
+----------------------------------------
+[14:24:17] [INFO] [ConfigValidator] [Start] Starting configuration validation
+[14:24:17] [INFO] [Global] [Start] Validating global configurations
+[14:24:17] [INFO] [Global] [DataConversion] Column 'eff_from': 100.0% conversion success rate
+[14:24:17] [INFO] [Global] [DataConversion] Column 'eff_to': 100.0% conversion success rate
+[14:24:17] [INFO] [Module1] [Start] Validating Module1 configurations
+[14:24:17] [INFO] [Module1] [DataConversion] Column 'date': 100.0% conversion success rate
+[14:24:17] [INFO] [Module3] [Start] Validating Module3 configurations
+[14:24:17] [INFO] [Module3] [DataConversion] Column 'date': 100.0% conversion success rate
+[14:24:17] [INFO] [Module4] [Start] Validating Module4 configurations
+[14:24:17] [INFO] [Module4] [DataConversion] Column 'date': 100.0% conversion success rate
+[14:24:17] [INFO] [Module5] [Start] Validating Module5 configurations
+[14:24:17] [INFO] [Module6] [Start] Validating Module6 configurations
+[14:24:17] [INFO] [CrossModule] [Start] Validating cross-module consistency
+[14:24:17] [INFO] [CrossModule] [ValidationDetails] Network locations: ['A668', 'A672', 'A673', 'A680', 'A715', 'A716', 'C563', 'C595', 'C731', 'C810', 'C816', 'C819', 'C937', 'D191', 'D767', 'D901', 'E295', 'E467', 'E474', 'E496', 'E546', 'E556', 'E564', 'E568', 'E569']
+[14:24:17] [INFO] [CrossModule] [ValidationDetails] Network sourcings: ['0386', 'A672', 'A673', 'C810', 'C816']
+[14:24:17] [INFO] [CrossModule] [ValidationDetails] All network places: ['0386', 'A668', 'A672', 'A673', 'A680', 'A715', 'A716', 'C563', 'C595', 'C731', 'C810', 'C816', 'C819', 'C937', 'D191', 'D767', 'D901', 'E295', 'E467', 'E474', 'E496', 'E546', 'E556', 'E564', 'E568', 'E569']
+[14:24:17] [INFO] [CrossModule] [ValidationDetails] Initial inventory locations: ['A668', 'A672', 'A673', 'A680', 'A715', 'A716', 'C563', 'C595', 'C731', 'C810', 'C816', 'C819', 'C937', 'D191', 'D767', 'D901', 'E295', 'E467', 'E546', 'E556', 'E564', 'E568', 'E569']
+[14:24:17] [INFO] [ConfigValidator] [Complete] All configuration validations passed
+
+================================================================================
+END OF VALIDATION REPORT
+================================================================================

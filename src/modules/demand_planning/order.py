@@ -126,6 +126,8 @@ def _compute_ml_avg_demand(
             ['material', 'location'], as_index=False
         )['quantity'].mean()
         ml_avg.columns = ['material', 'location', 'avg_daily_demand']
+        # 确保确定性排序，使np.random.normal()结果与输入数据顺序无关
+        ml_avg = ml_avg.sort_values(['material', 'location']).reset_index(drop=True)
         return ml_avg
 
     # 回退至1天窗口
@@ -140,6 +142,8 @@ def _compute_ml_avg_demand(
             ['material', 'location'], as_index=False
         )['quantity'].mean()
         ml_avg.columns = ['material', 'location', 'avg_daily_demand']
+        # 确保确定性排序，使np.random.normal()结果与输入数据顺序无关
+        ml_avg = ml_avg.sort_values(['material', 'location']).reset_index(drop=True)
         return ml_avg
 
     return pd.DataFrame(columns=['material', 'location', 'avg_daily_demand'])
@@ -172,6 +176,8 @@ def _generate_ao_orders(
     # AO配置去重
     ao_cols = ['material', 'location', 'advance_days', 'ao_percent']
     ao_cfg = ao_config[ao_cols].drop_duplicates()
+    # 🔧 标准化AO配置中的标识符以确保merge键类型一致
+    ao_cfg = normalize_identifiers(ao_cfg)
 
     # 合并平均需求
     ao_lines = ml_avg_demand.merge(
@@ -188,13 +194,16 @@ def _generate_ao_orders(
     )
 
     # 获取AO误差配置
-    fe = forecast_error.groupby(
+    # 🔧 标准化forecast_error中的标识符以确保merge键类型一致
+    fe_normalized = normalize_identifiers(forecast_error.copy())
+    fe = fe_normalized.groupby(
         ['material', 'location', 'order_type'], as_index=False
     )['error_std_percent'].max()
     fe_ao = fe[fe['order_type'] == 'AO'][
         ['material', 'location', 'error_std_percent']
     ]
     ao_e = ao_lines.merge(fe_ao, on=['material', 'location'], how='left')
+
 
     # 向量化生成数量
     ao_abs_std = ao_e['ao_daily_avg'] * ao_e['error_std_percent'].fillna(0)
@@ -244,6 +253,8 @@ def _generate_normal_orders(
     ao_cols = ['material', 'location', 'advance_days', 'ao_percent']
     if not ao_config.empty:
         ao_cfg = ao_config[ao_cols].drop_duplicates()
+        # 🔧 标准化AO配置中的标识符以确保merge键类型一致
+        ao_cfg = normalize_identifiers(ao_cfg)
     else:
         ao_cfg = pd.DataFrame(columns=ao_cols)
 
@@ -265,13 +276,16 @@ def _generate_normal_orders(
         return pd.DataFrame(columns=empty_cols)
 
     # 获取Normal误差配置
-    fe = forecast_error.groupby(
+    # 🔧 标准化forecast_error中的标识符以确保merge键类型一致
+    fe_normalized = normalize_identifiers(forecast_error.copy())
+    fe = fe_normalized.groupby(
         ['material', 'location', 'order_type'], as_index=False
     )['error_std_percent'].max()
     fe_n = fe[fe['order_type'] == 'normal'][
         ['material', 'location', 'error_std_percent']
     ]
     n_e = normal.merge(fe_n, on=['material', 'location'], how='left')
+
 
     # 向量化生成数量
     n_abs_std = n_e['normal_daily_avg'] * n_e['error_std_percent'].fillna(0)

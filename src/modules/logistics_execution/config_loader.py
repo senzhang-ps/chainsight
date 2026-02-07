@@ -169,6 +169,13 @@ def _load_deployment_plan(
     
     _log_route_statistics(open_deployment)
     _ensure_date_format(open_deployment)
+    planned_dates = pd.to_datetime(open_deployment['planned_deployment_date'], errors='coerce')
+    planned_leq = int((planned_dates <= current_date).sum())
+    print(
+        f"[M6] OpenDeployment rows={len(open_deployment)} "
+        f"planned<=sim_date={planned_leq} "
+        f"min={planned_dates.min()} max={planned_dates.max()}"
+    )
     
     return open_deployment
 

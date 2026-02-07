@@ -1,0 +1,30 @@
+{
+  "TPOCPACK": {
+    "last_material": "21314602",
+    "last_location": "0386",
+    "last_production_date": "2026-02-02",
+    "last_activity": "production",
+    "changeover_info": null
+  },
+  "TPODPACK": {
+    "last_material": "21255844",
+    "last_location": "0386",
+    "last_production_date": "2026-02-02",
+    "last_activity": "production",
+    "changeover_info": null
+  },
+  "TPOEPACK": {
+    "last_material": "80804133",
+    "last_location": "0386",
+    "last_production_date": "2026-02-02",
+    "last_activity": "production",
+    "changeover_info": null
+  },
+  "TPOGPACK": {
+    "last_material": "21151196",
+    "last_location": "0386",
+    "last_production_date": "2026-02-02",
+    "last_activity": "production",
+    "changeover_info": null
+  }
+}

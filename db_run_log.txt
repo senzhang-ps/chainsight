@@ -1,0 +1,176 @@
+﻿
+======================================================================
+馃梽锔? 鏁版嵁搴撴ā寮忚繍琛?
+======================================================================
+[INFO] 閰嶇疆鍚嶇О: config/OC_Paste_S1_20251224
+馃搮 鏃ユ湡鑼冨洿: 2025-12-15 鍒?2025-12-24
+馃攲 鏁版嵁搴? localhost:5432/test_db
+======================================================================
+
+馃攳 妫€娴嬫暟鎹簱 'test_db'...
+鉁?鏁版嵁搴撳凡瀛樺湪: test_db
+馃攳 娴嬭瘯鏁版嵁搴撹繛鎺?..
+鉁?鏁版嵁搴撹繛鎺ユ垚鍔?(鐗堟湰: PostgreSQL 18.1 on x86_64-windows, compi...)
+
+馃攳 妫€娴嬮厤缃〃 'config/OC_Paste_S1_20251224'...
+鉁?鎵惧埌 362342 涓厤缃〃
+[DIR] 鏃ュ織鐩綍: D:\PG\Code\chainsight\outputs\db_config\OC_Paste_S1_20251224_20260206_130058
+2026-02-06 13:00:58 [INFO] 鏃ュ織绯荤粺宸插垵濮嬪寲锛屾棩蹇楁枃浠? D:\PG\Code\chainsight\outputs\db_config\OC_Paste_S1_20251224_20260206_130058\simulation_log_20260206_130058.txt
+2026-02-06 13:00:58 [INFO] 
+============================================================
+2026-02-06 13:00:58 [INFO] 馃晲 绋嬪簭鏃堕棿淇℃伅
+2026-02-06 13:00:58 [INFO] ============================================================
+2026-02-06 13:00:58 [INFO] 馃搮 绋嬪簭寮€濮嬫椂闂? 2026-02-06 13:00:58
+2026-02-06 13:00:58 [INFO] 
+============================================================
+2026-02-06 13:00:58 [INFO] 馃摜 姝ラ1: 浠庢暟鎹簱鍔犺浇閰嶇疆
+2026-02-06 13:00:58 [INFO] ============================================================
+  [OK] 鍔犺浇閰嶇疆琛? cfg_config_guide -> config_guide (116 琛?
+  [OK] 鍔犺浇閰嶇疆琛? cfg_covalidation -> covalidation (0 琛?
+  [OK] 鍔犺浇閰嶇疆琛? cfg_global_demandpriority -> global_demandpriority (22 琛?
+  [OK] 鍔犺浇閰嶇疆琛? cfg_global_leadtime -> global_leadtime (46 琛?
+  [OK] 鍔犺浇閰嶇疆琛? cfg_global_network -> global_network (4397 琛?
+  [OK] 鍔犺浇閰嶇疆琛? cfg_global_network_old -> global_network_old (4605 琛?
+  [OK] 鍔犺浇閰嶇疆琛? cfg_global_seed -> global_seed (6 琛?
+  [OK] 鍔犺浇閰嶇疆琛? cfg_global_spacecapacity -> global_spacecapacity (0 琛?
+  [OK] 鍔犺浇閰嶇疆琛? cfg_m1_aoconfig -> m1_aoconfig (9218 琛?
+  [OK] 鍔犺浇閰嶇疆琛? cfg_m1_demandforecast -> m1_demandforecast (97416 琛?
+  [OK] 鍔犺浇閰嶇疆琛? cfg_m1_dpsconfig -> m1_dpsconfig (0 琛?
+  [OK] 鍔犺浇閰嶇疆琛? cfg_m1_forecasterror -> m1_forecasterror (6598 琛?
+  [OK] 鍔犺浇閰嶇疆琛? cfg_m1_initialinventory -> m1_initialinventory (2368 琛?
+  [OK] 鍔犺浇閰嶇疆琛? cfg_m1_initialinventory_30d -> m1_initialinventory_30d (0 琛?
+  [OK] 鍔犺浇閰嶇疆琛? cfg_m1_ordercalendar -> m1_ordercalendar (76 琛?
+  [OK] 鍔犺浇閰嶇疆琛? cfg_m1_supplychoiceconfig -> m1_supplychoiceconfig (0 琛?
+  [OK] 鍔犺浇閰嶇疆琛? cfg_m3_safetystock -> m3_safetystock (180576 琛?
+  [OK] 鍔犺浇閰嶇疆琛? cfg_m4_changeoverdefinition -> m4_changeoverdefinition (20 琛?
+  [OK] 鍔犺浇閰嶇疆琛? cfg_m4_changeovermatrix -> m4_changeovermatrix (43929 琛?
+  [OK] 鍔犺浇閰嶇疆琛? cfg_m4_linecapacity -> m4_linecapacity (1825 琛?
+  [OK] 鍔犺浇閰嶇疆琛? cfg_m4_materiallocationlinecfg -> m4_materiallocationlinecfg (435 琛?
+  [OK] 鍔犺浇閰嶇疆琛? cfg_m4_productionreliability -> m4_productionreliability (5 琛?
+  [OK] 鍔犺浇閰嶇疆琛? cfg_m5_deployconfig -> m5_deployconfig (10045 琛?
+  [OK] 鍔犺浇閰嶇疆琛? cfg_m5_pushpullmodel -> m5_pushpullmodel (304 琛?
+  [OK] 鍔犺浇閰嶇疆琛? cfg_m6_deliverydelaydistribution -> m6_deliverydelaydistribution (2 琛?
+  [OK] 鍔犺浇閰嶇疆琛? cfg_m6_materialmd -> m6_materialmd (305 琛?
+  [OK] 鍔犺浇閰嶇疆琛? cfg_m6_mdqbypassrules -> m6_mdqbypassrules (1 琛?
+  [OK] 鍔犺浇閰嶇疆琛? cfg_m6_truckcapacityplan -> m6_truckcapacityplan (0 琛?
+  [OK] 鍔犺浇閰嶇疆琛? cfg_m6_truckreleasecon -> m6_truckreleasecon (0 琛?
+  [OK] 鍔犺浇閰嶇疆琛? cfg_m6_trucktypespecs -> m6_trucktypespecs (3 琛?
+  [OK] 鍔犺浇閰嶇疆琛? cfg_sheet1 -> sheet1 (0 琛?
+  [OK] 鍔犺浇閰嶇疆琛? cfg_sit_design -> sit_design (24 琛?
+2026-02-06 13:01:00 [INFO] [OK] 宸插姞杞?32 涓厤缃〃
+2026-02-06 13:01:00 [INFO] 
+============================================================
+2026-02-06 13:01:00 [INFO] [DUCK] 姝ラ2: DuckDB澶勭悊閰嶇疆骞惰繍琛屼豢鐪?
+2026-02-06 13:01:00 [INFO] ============================================================
+2026-02-06 13:01:00 [INFO] [RUN] 浣跨敤楂樻€ц兘寮曟搸杩愯浠跨湡...
+
+============================================================
+馃殌 楂樻€ц兘寮曟搸浠跨湡妯″紡
+============================================================
+閰嶇疆: config/OC_Paste_S1_20251224
+鏃ユ湡: 2025-12-15 鍒?2025-12-24
+楂樻€ц兘寮曟搸: 鍚敤
+============================================================
+馃殌 鍒濆鍖朌uckDB浼樺寲寮曟搸...
+馃搳 棰勬瀯寤洪厤缃暟鎹储寮?..
+鉁?閰嶇疆绱㈠紩棰勫缓瀹屾垚: 0 涓储寮? 鑰楁椂 0.0ms
+鉁?浼樺寲寮曟搸鍒濆鍖栧畬鎴愶紝鑰楁椂: 0.00绉?
+
+============================================================
+馃晲 绋嬪簭鏃堕棿淇℃伅
+============================================================
+馃搮 绋嬪簭寮€濮嬫椂闂? 2026-02-06 13:01:00
+馃殌 寮€濮嬮泦鎴愪豢鐪?(鏁版嵁搴撴ā寮?: 2025-12-15 鍒?2025-12-24
+馃搵 閰嶇疆: config/OC_Paste_S1_20251224
+============================================================
+鉁?DuckDB鍐呭瓨妯″紡宸插惎鐢?(threads=14, memory=28GB)
+馃 DuckDB鍐呭瓨妯″紡宸插惎鐢紙28GB闄愬埗锛?
+鉁?璺宠繃棰勯獙璇侊紙鏁版嵁搴撴ā寮忥級
+馃 DuckDB澶勭悊閰嶇疆鏁版嵁...
+馃搵 澶勭悊閰嶇疆鏁版嵁: config/OC_Paste_S1_20251224 (鍏?32 涓〃)
+  鉁?鍔犺浇閰嶇疆琛? Config Guide (116 琛?
+  鉁?鍔犺浇閰嶇疆琛? COValidation (0 琛?
+  鉁?鍔犺浇閰嶇疆琛? Global_DemandPriority (22 琛?
+  鉁?鍔犺浇閰嶇疆琛? Global_LeadTime (46 琛?
+  鉁?鍔犺浇閰嶇疆琛? Global_Network (4397 琛?
+  鉁?鍔犺浇閰嶇疆琛? global_network_old (4605 琛?
+  鉁?鍔犺浇閰嶇疆琛? Global_seed (6 琛?
+  鉁?鍔犺浇閰嶇疆琛? Global_SpaceCapacity (0 琛?
+  鉁?鍔犺浇閰嶇疆琛? M1_AOConfig (9218 琛?
+  鉁?鍔犺浇閰嶇疆琛? M1_DemandForecast (97416 琛?
+  鉁?鍔犺浇閰嶇疆琛? M1_DPSConfig (0 琛?
+  鉁?鍔犺浇閰嶇疆琛? M1_ForecastError (6598 琛?
+  鉁?鍔犺浇閰嶇疆琛? M1_InitialInventory (2368 琛?
+  鉁?鍔犺浇閰嶇疆琛? M1_InitialInventory_30D (0 琛?
+  鉁?鍔犺浇閰嶇疆琛? M1_OrderCalendar (76 琛?
+  鉁?鍔犺浇閰嶇疆琛? M1_SupplyChoiceConfig (0 琛?
+  鉁?鍔犺浇閰嶇疆琛? M3_SafetyStock (180576 琛?
+  鉁?鍔犺浇閰嶇疆琛? M4_ChangeoverDefinition (20 琛?
+  鉁?鍔犺浇閰嶇疆琛? M4_ChangeoverMatrix (43929 琛?
+  鉁?鍔犺浇閰嶇疆琛? M4_LineCapacity (1825 琛?
+  鉁?鍔犺浇閰嶇疆琛? M4_MaterialLocationLineCfg (435 琛?
+  鉁?鍔犺浇閰嶇疆琛? M4_ProductionReliability (5 琛?
+  鉁?鍔犺浇閰嶇疆琛? M5_DeployConfig (10045 琛?
+  鉁?鍔犺浇閰嶇疆琛? M5_PushPullModel (304 琛?
+  鉁?鍔犺浇閰嶇疆琛? M6_DeliveryDelayDistribution (2 琛?
+  鉁?鍔犺浇閰嶇疆琛? M6_MaterialMD (305 琛?
+  鉁?鍔犺浇閰嶇疆琛? M6_MDQBypassRules (1 琛?
+  鉁?鍔犺浇閰嶇疆琛? M6_TruckCapacityPlan (0 琛?
+  鉁?鍔犺浇閰嶇疆琛? M6_TruckReleaseCon (0 琛?
+  鉁?鍔犺浇閰嶇疆琛? M6_TruckTypeSpecs (3 琛?
+  鉁?鍔犺浇閰嶇疆琛? Sheet1 (0 琛?
+  鉁?鍔犺浇閰嶇疆琛? SIT Design (24 琛?
+馃敡 姝ｅ湪鏍囧噯鍖栨爣璇嗙瀛楁...
+
+馃敡 鏍￠獙 Changeover Matrix 閰嶇疆...
+  鉁?Changeover Matrix 鏃犻噸澶嶅畾涔?
+
+馃敡 鏍￠獙 Changeover Definition 閰嶇疆...
+  鉁?Changeover Definition 鏃犻噸澶嶅畾涔?
+
+馃敡 姝ｅ湪鏄犲皠 Module4 閰嶇疆琛?..
+  馃敡 鏄犲皠 M4_MaterialLocationLineCfg 鈫?MaterialLocationLineCfg
+  馃敡 鏄犲皠 M4_LineCapacity 鈫?LineCapacity
+  馃敡 鏄犲皠 M4_ChangeoverMatrix 鈫?ChangeoverMatrix
+  馃敡 鏄犲皠 M4_ChangeoverDefinition 鈫?ChangeoverDefinition
+  馃敡 鏄犲皠 M4_ProductionReliability 鈫?ProductionReliability
+鉁?宸叉槧灏?5 涓?Module4 閰嶇疆琛?
+鈿狅笍鏈壘鍒?Global_Seed 閰嶇疆锛屼娇鐢ㄩ粯璁ゅ€? 42
+鉁ㄥ凡涓烘墍鏈夋ā鍧楄缃粺涓€闅忔満绉嶅瓙: 42
+馃幆 鍒濆鍖朞rchestrator
+鉁?Orchestrator initialized for simulation starting 2025-12-15
+馃啎鍏ㄦ柊寮€濮嬶細璁剧疆鍒濆鐘舵€?
+鈿狅笍鏈壘鍒扮┖闂村閲忛厤缃?
+馃搮 浠跨湡鏃ユ湡鑼冨洿: 10 澶?
+==================== 绗?1/10 澶? 2025-12-15 ====================
+馃寘 姣忔棩寮€濮嬬姸鎬佹洿鏂?
+馃捑淇濆瓨鏈熷垵搴撳瓨蹇収...
+馃捑宸蹭繚瀛?2025-12-15 鏈熷垵搴撳瓨: 2368 椤?
+馃摝澶勭悊褰撴棩delivery GR鍒拌揪...
+馃彮澶勭悊鍘嗗彶鐢熶骇褰撴棩鍏ュ簱...
+馃摝褰撴棩鏃犲巻鍙茬敓浜у叆搴?
+1锔忊儯 杩愯 Module1 - 璁㈠崟鐢熸垚
+[M1] 鍛ㄥ害鈫掓棩搴︽媶鍒嗗畬鎴愶紝鐢熸垚澶╂暟: 681912锛岃€楁椂: 0.110s
+[M1] 鍛ㄥ害鈫掓棩搴︽媶鍒嗗畬鎴愶紝鐢熸垚澶╂暟: 681912锛岃€楁椂: 0.107s
+[M1] 骞冲潎闇€姹傝绠楀畬鎴愶紝ML鏁? 2376锛岃€楁椂: 0.232s
+[M1] 璁㈠崟鐢熸垚瀹屾垚 (AO鑰楁椂: 0.039s, Normal鑰楁椂: 0.044s, 鎬昏€楁椂: 0.315s)锛岃鍗曟暟: 4532
+[M1] AO娑堣€楀畬鎴?鍚戦噺鍖?锛岃€楁椂: 0.121s
+[M1] Normal娑堣€楀畬鎴?鍚戦噺鍖?锛岃€楁椂: 0.060s
+[M1] 褰撴棩璁㈠崟鐢熸垚瀹屾垚锛岃鍗曟暟: 4532锛岃€楁椂: 20.019s
+[M1] 鍘嗗彶璁㈠崟璇诲彇瀹屾垚锛屾枃浠舵暟: 0锛屽悎骞舵潯鐩? 0
+[M1] 鍘嗗彶璁㈠崟鍚堝苟鍓嶈繃婊ゅ畬鎴愶紝鑰楁椂: 0.001s
+[M1] 鍙戣揣涓庣己璐ц绠楀畬鎴愶紝shipment: 1314锛宑ut: 1314锛岃€楁椂: 0.036s
+[M1] 渚涢渶鏃ュ織鐢熸垚瀹屾垚锛屾潯鐩? 213840锛岃€楁椂: 3.653s
+馃殮绔嬪嵆澶勭悊M1 shipment锛屾墸鍑忓簱瀛?..
+鉁?Processed 1314 M1 shipments for 2025-12-15
+鉁?宸叉墸鍑?1314 涓猻hipment鐨勫簱瀛?
+鉁?Module1 瀹屾垚 - 鐢熸垚 4532 涓鍗? 1314 涓彂璐?
+2锔忊儯 杩愯 Module4 - 鐢熶骇璁″垝
+Warning: No NetDemand data for 2025-12-15. Generating empty output.
+馃攧鏃犲墠涓€澶╀骇绾跨姸鎬?- 鍏ㄦ柊寮€濮?
+馃攧鏃犱箣鍓嶅凡鍒嗛厤浜ц兘 - 鍏ㄦ柊寮€濮?
+Module4 daily output generated: C:\Users\25936\AppData\Local\Temp\tmp_u5g0c91\output\module4\Module4Output_20251215.xlsx
+馃摝M4褰撴棩鏈敓鎴愮敓浜ц鍒掓垨缂哄皯 available_date 鍒?
+鉁?Module4 瀹屾垚 - 鐢熸垚鐢熶骇璁″垝: 0 鏉¤褰?
+3锔忊儯 杩愯 Module5 - 閮ㄧ讲璁″垝
+鈿狅笍Orchestrator褰撴棩鏃犲巻鍙茬敓浜R鏁版嵁

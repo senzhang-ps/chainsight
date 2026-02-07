@@ -95,16 +95,18 @@ def run_daily_order_generation(
         # 8) 生成Summary（供数据库模式使用）
         summary_df = _build_summary_df(today_orders_df, shipment_df, cut_df, supply_demand_df)
 
-        # 🔧 重要：输出结果应该只包含当日新生成的订单，而不是累积的历史订单
-        # 这样才能与Dev版本保持一致：每天只输出当日的738个订单
+        # 🔧 修复：使用累积订单 all_orders_df 作为 orders_df
+        # Dev 版本的 _save_output 将 all_orders_df（累积快照）写入 Excel 的 OrderLog sheet
+        # DB 模式应写入同样的累积快照，确保每天的 DB 数据与 Dev 的 Excel 完全一致
+        # module_data_writer 使用 sim_date 字段区分每天的快照，不会混淆
         return {
-            'orders_df': today_orders_df,  # ✅ 修改：只返回当日订单，而不是累积订单
+            'orders_df': all_orders_df,  # ✅ 修复：写入累积订单快照，与 Dev 的 Excel OrderLog 一致
             'shipment_df': shipment_df,
             'cut_df': cut_df,
             'supply_demand_df': supply_demand_df,
             'summary_df': summary_df,
             'output_file': output_file,
-            'all_orders_for_next_day': all_orders_df  # ✅ 新增：保留累积订单供下一天使用
+            'all_orders_for_next_day': all_orders_df  # 保留累积订单供下一天使用
         }
 
     except Exception as e:
@@ -170,6 +172,12 @@ def _validate_config(config_dict: dict) -> tuple:
         raise ValueError("缺少必需的配置数据：M1_ForecastError")
 
     order_calendar['date'] = pd.to_datetime(order_calendar['date'])
+    
+    # 🔧 确保所有配置的material列为string类型，避免merge时类型不匹配
+    demand_forecast = normalize_identifiers(demand_forecast)
+    forecast_error = normalize_identifiers(forecast_error)
+    ao_config = normalize_identifiers(ao_config)
+    
     return demand_forecast, forecast_error, order_calendar, ao_config
 
 

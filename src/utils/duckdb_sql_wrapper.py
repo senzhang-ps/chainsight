@@ -57,7 +57,13 @@ class DuckDBSQL:
             import os
             cpu_count = os.cpu_count() or 4
             cls._conn.execute(f"SET threads TO {int(cpu_count * 0.9)}")
-            cls._conn.execute("SET memory_limit = '4GB'")
+            # 动态获取内存限制（90%系统内存）
+            try:
+                from src.utils.resource_config import get_optimal_memory
+                memory_limit = get_optimal_memory()
+            except ImportError:
+                memory_limit = "4GB"
+            cls._conn.execute(f"SET memory_limit = '{memory_limit}'")
         return cls._conn
     
     @classmethod

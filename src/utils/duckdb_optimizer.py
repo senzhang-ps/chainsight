@@ -51,8 +51,13 @@ class DuckDBOptimizer:
             cls._conn = duckdb.connect(':memory:')
             # 使用所有 CPU 核心
             cls._conn.execute(f"SET threads TO {CPU_COUNT}")
-            # 设置较大的内存限制
-            cls._conn.execute("SET memory_limit = '8GB'")
+            # 动态获取内存限制（90%系统内存）
+            try:
+                from src.utils.resource_config import get_optimal_memory
+                memory_limit = get_optimal_memory()
+            except ImportError:
+                memory_limit = "8GB"
+            cls._conn.execute(f"SET memory_limit = '{memory_limit}'")
             # 启用并行执行
             cls._conn.execute("SET preserve_insertion_order = false")
     

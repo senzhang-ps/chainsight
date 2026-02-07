@@ -27,9 +27,17 @@ class DuckDBAccelerator:
         """初始化 DuckDB 连接。"""
         if DuckDBAccelerator._conn is None:
             DuckDBAccelerator._conn = duckdb.connect(':memory:')
-            # 设置线程数以充分利用 CPU
-            DuckDBAccelerator._conn.execute("SET threads TO 16")
-            DuckDBAccelerator._conn.execute("SET memory_limit = '4GB'")
+            # 动态获取系统资源（90%）
+            import os
+            threads = max(1, int((os.cpu_count() or 4) * 0.9))
+            DuckDBAccelerator._conn.execute(f"SET threads TO {threads}")
+            # 动态获取内存限制（90%系统内存）
+            try:
+                from src.utils.resource_config import get_optimal_memory
+                memory_limit = get_optimal_memory()
+            except ImportError:
+                memory_limit = "4GB"
+            DuckDBAccelerator._conn.execute(f"SET memory_limit = '{memory_limit}'")
     
     @property
     def conn(self) -> duckdb.DuckDBPyConnection:

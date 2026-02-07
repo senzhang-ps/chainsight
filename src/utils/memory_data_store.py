@@ -74,7 +74,7 @@ class MemoryDataStore:
             'rows_read': 0,
         }
     
-    def enable(self, memory_limit: str = "4GB", threads: int = None) -> bool:
+    def enable(self, memory_limit: str = None, threads: int = None) -> bool:
         """
         启用DuckDB内存模式
         
@@ -97,6 +97,14 @@ class MemoryDataStore:
             if threads is None:
                 import os
                 threads = max(1, int(os.cpu_count() * 0.9))
+            
+            # 动态获取内存限制（90%系统内存）
+            if memory_limit is None:
+                try:
+                    from src.utils.resource_config import get_optimal_memory
+                    memory_limit = get_optimal_memory()
+                except ImportError:
+                    memory_limit = "4GB"  # 回退默认值
             
             # 创建内存数据库连接
             self._conn = duckdb.connect(':memory:', config={
@@ -418,8 +426,13 @@ def get_data_store() -> MemoryDataStore:
     return _data_store
 
 
-def enable_memory_mode(memory_limit: str = "4GB", threads: int = None) -> bool:
-    """启用DuckDB内存模式的便捷函数"""
+def enable_memory_mode(memory_limit: str = None, threads: int = None) -> bool:
+    """启用DuckDB内存模式的便捷函数
+    
+    Args:
+        memory_limit: 内存限制，默认为None时使用系统90%内存
+        threads: 并行线程数，默认为None时使用系统90%核心
+    """
     return get_data_store().enable(memory_limit, threads)
 
 

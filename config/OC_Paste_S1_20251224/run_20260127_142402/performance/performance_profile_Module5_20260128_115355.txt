@@ -1,0 +1,129 @@
+====================================================================================================
+性能分析报告: Module5
+生成时间: 2026-01-28 11:53:56
+====================================================================================================
+
+【按累积时间排序 - 前30个最耗时函数】
+----------------------------------------------------------------------------------------------------
+         531089133 function calls (521798660 primitive calls) in 515.513 seconds
+
+   Ordered by: cumulative time
+   List reduced from 2031 to 30 due to restriction <30>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+366101/214058    1.058    0.000  898.576    0.004 C:\Users\zhang.s.37\AppData\Local\Programs\Python\Python313\Lib\site-packages\pandas\core\ops\common.py:62(new_method)
+33534/21909    0.168    0.000  858.474    0.039 C:\Users\zhang.s.37\AppData\Local\Programs\Python\Python313\Lib\site-packages\pandas\core\generic.py:6662(copy)
+33630/21967    0.247    0.000  831.527    0.038 C:\Users\zhang.s.37\AppData\Local\Programs\Python\Python313\Lib\site-packages\pandas\core\internals\managers.py:557(copy)
+ 1186/426    0.048    0.000  642.790    1.509 C:\Users\zhang.s.37\OneDrive - Procter and Gamble\9-unattended planning\ChainSight\Engineering\MVP version\ChainSightMVPOri\module5.py:388(_lookup_moq_rv)
+69177/23569    0.176    0.000  614.344    0.026 C:\Users\zhang.s.37\AppData\Local\Programs\Python\Python313\Lib\site-packages\pandas\core\arraylike.py:68(__and__)
+        1    1.684    1.684  515.519  515.519 C:\Users\zhang.s.37\OneDrive - Procter and Gamble\9-unattended planning\ChainSight\Engineering\MVP version\ChainSightMVPOri\module5.py:1988(main)
+     4750    0.070    0.000  453.071    0.095 C:\Users\zhang.s.37\AppData\Local\Programs\Python\Python313\Lib\concurrent\futures\_base.py:199(as_completed)
+26870/4698    0.107    0.000  425.819    0.091 C:\Users\zhang.s.37\AppData\Local\Programs\Python\Python313\Lib\site-packages\pandas\core\arraylike.py:58(__ge__)
+69177/23569    0.525    0.000  416.715    0.018 C:\Users\zhang.s.37\AppData\Local\Programs\Python\Python313\Lib\site-packages\pandas\core\series.py:6123(_logical_method)
+69177/23569    0.493    0.000  413.970    0.018 C:\Users\zhang.s.37\AppData\Local\Programs\Python\Python313\Lib\site-packages\pandas\core\ops\array_ops.py:393(logical_op)
+     1291    0.013    0.000  406.955    0.315 C:\Users\zhang.s.37\AppData\Local\Programs\Python\Python313\Lib\threading.py:641(wait)
+      135    0.001    0.000  385.446    2.855 C:\Users\zhang.s.37\AppData\Local\Programs\Python\Python313\Lib\threading.py:1059(join)
+      135    0.004    0.000  385.443    2.855 {method 'join' of '_thread._ThreadHandle' objects}
+180333/172059    0.443    0.000  376.770    0.002 C:\Users\zhang.s.37\AppData\Local\Programs\Python\Python313\Lib\site-packages\pandas\core\generic.py:4142(_take_with_is_copy)
+223502/173132    0.284    0.000  375.844    0.002 C:\Users\zhang.s.37\AppData\Local\Programs\Python\Python313\Lib\site-packages\pandas\core\arraylike.py:38(__eq__)
+182463/174201    1.226    0.000  349.477    0.002 C:\Users\zhang.s.37\AppData\Local\Programs\Python\Python313\Lib\site-packages\pandas\core\generic.py:4027(take)
+     5792    0.039    0.000  337.551    0.058 C:\Users\zhang.s.37\AppData\Local\Programs\Python\Python313\Lib\threading.py:327(wait)
+138354/47686    0.227    0.000  298.358    0.006 C:\Users\zhang.s.37\AppData\Local\Programs\Python\Python313\Lib\site-packages\pandas\core\ops\array_ops.py:410(fill_bool)
+13976/5251    4.638    0.000  289.336    0.055 C:\Users\zhang.s.37\OneDrive - Procter and Gamble\9-unattended planning\ChainSight\Engineering\MVP version\ChainSightMVPOri\module5.py:842(get_active_network)
+6836/2479    0.123    0.000  280.238    0.113 C:\Users\zhang.s.37\OneDrive - Procter and Gamble\9-unattended planning\ChainSight\Engineering\MVP version\ChainSightMVPOri\module5.py:713(get_sending_location_type)
+   393/36    0.306    0.001  258.924    7.192 {method 'get' of '_queue.SimpleQueue' objects}
+        6    0.000    0.000  258.922   43.154 C:\Users\zhang.s.37\AppData\Local\Programs\Python\Python313\Lib\concurrent\futures\_base.py:646(__exit__)
+        6    0.000    0.000  258.922   43.154 C:\Users\zhang.s.37\AppData\Local\Programs\Python\Python313\Lib\concurrent\futures\thread.py:220(shutdown)
+    135/6    0.001    0.000  258.916   43.153 C:\Users\zhang.s.37\AppData\Local\Programs\Python\Python313\Lib\threading.py:1001(_bootstrap)
+    135/6    0.005    0.000  258.916   43.153 C:\Users\zhang.s.37\AppData\Local\Programs\Python\Python313\Lib\threading.py:1028(_bootstrap_inner)
+    135/6    0.017    0.000  258.913   43.152 C:\Users\zhang.s.37\AppData\Local\Programs\Python\Python313\Lib\threading.py:984(run)
+    135/6    0.003    0.000  258.873   43.146 C:\Users\zhang.s.37\AppData\Local\Programs\Python\Python313\Lib\concurrent\futures\thread.py:70(_worker)
+   4754/6    0.411    0.000  255.522   42.587 C:\Users\zhang.s.37\AppData\Local\Programs\Python\Python313\Lib\concurrent\futures\thread.py:54(run)
+59818/37638    0.661    0.000  241.984    0.006 C:\Users\zhang.s.37\AppData\Local\Programs\Python\Python313\Lib\site-packages\pandas\core\internals\managers.py:1782(_consolidate_inplace)
+184354/176254    0.729    0.000  237.259    0.001 C:\Users\zhang.s.37\AppData\Local\Programs\Python\Python313\Lib\site-packages\pandas\core\internals\managers.py:869(take)
+
+
+
+
+【按调用次数排序 - 前30个最频繁调用函数】
+----------------------------------------------------------------------------------------------------
+         531089133 function calls (521798660 primitive calls) in 515.513 seconds
+
+   Ordered by: call count
+   List reduced from 2031 to 30 due to restriction <30>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+ 78053571   14.198    0.000   14.198    0.000 {method 'get' of 'dict' objects}
+ 74397950   27.469    0.000   40.883    0.000 C:\Users\zhang.s.37\OneDrive - Procter and Gamble\9-unattended planning\ChainSight\Engineering\MVP version\ChainSightMVPOri\module5.py:1618(<genexpr>)
+71813947/71021262   15.275    0.000   23.521    0.000 {built-in method builtins.isinstance}
+18481383/18481090    3.391    0.000    3.480    0.000 {built-in method builtins.getattr}
+17865192/13365512    4.506    0.000    6.162    0.000 {built-in method builtins.len}
+8252937/8236045    3.403    0.000    7.903    0.000 C:\Users\zhang.s.37\AppData\Local\Programs\Python\Python313\Lib\site-packages\pandas\core\dtypes\generic.py:42(_instancecheck)
+8252937/8238706    3.104    0.000    4.410    0.000 C:\Users\zhang.s.37\AppData\Local\Programs\Python\Python313\Lib\site-packages\pandas\core\dtypes\generic.py:37(_check)
+  7760762    1.793    0.000    1.793    0.000 {method 'write' of '_io.TextIOWrapper' objects}
+  4959083    1.137    0.000    1.137    0.000 {method 'append' of 'list' objects}
+  3611932    0.637    0.000    0.637    0.000 {method 'get' of 'xml.etree.ElementTree.Element' objects}
+3541880/3541397    1.071    0.000    1.498    0.000 {built-in method builtins.hasattr}
+  3348259    0.574    0.000    0.574    0.000 {method 'popleft' of 'collections.deque' objects}
+3347342/3316767    1.941    0.000    2.932    0.000 C:\Users\zhang.s.37\AppData\Local\Programs\Python\Python313\Lib\xml\etree\ElementTree.py:1315(read_events)
+3343535/2879906    0.909    0.000   14.321    0.000 C:\Users\zhang.s.37\AppData\Local\Programs\Python\Python313\Lib\xml\etree\ElementTree.py:1239(iterator)
+  3334987    0.650    0.000    0.650    0.000 {built-in method builtins.issubclass}
+  2813838    0.666    0.000    0.666    0.000 C:\Users\zhang.s.37\AppData\Local\Programs\Python\Python313\Lib\site-packages\openpyxl\descriptors\base.py:24(__set__)
+2774647/2774371    1.269    0.000    2.307    0.000 C:\Users\zhang.s.37\AppData\Local\Programs\Python\Python313\Lib\site-packages\pandas\core\dtypes\missing.py:184(_isna)
+2774647/2774356    0.998    0.000    3.304    0.000 C:\Users\zhang.s.37\AppData\Local\Programs\Python\Python313\Lib\site-packages\pandas\core\dtypes\missing.py:101(isna)
+2684527/2683869    0.614    0.000    0.616    0.000 {built-in method builtins.hash}
+  2658859    0.305    0.000    0.305    0.000 C:\Users\zhang.s.37\AppData\Local\Programs\Python\Python313\Lib\site-packages\openpyxl\cell\read_only.py:108(value)
+  2628990    0.466    0.000    0.466    0.000 {built-in method builtins.callable}
+2416962/2416175    0.802    0.000    1.208    0.000 C:\Users\zhang.s.37\AppData\Local\Programs\Python\Python313\Lib\site-packages\pandas\core\indexes\range.py:999(__len__)
+2106453/2103552    0.631    0.000    0.973    0.000 C:\Users\zhang.s.37\AppData\Local\Programs\Python\Python313\Lib\site-packages\openpyxl\descriptors\base.py:233(__get__)
+  2018772    5.625    0.000   11.921    0.000 C:\Users\zhang.s.37\AppData\Local\Programs\Python\Python313\Lib\site-packages\et_xmlfile\incremental_tree.py:372(write_elem_start)
+2005750/1813308    1.498    0.000    7.175    0.000 {built-in method numpy.asarray}
+  2005245    0.335    0.000    0.335    0.000 {method 'add' of 'set' objects}
+1975354/1974168    0.870    0.000    1.338    0.000 C:\Users\zhang.s.37\AppData\Local\Programs\Python\Python313\Lib\site-packages\pandas\core\dtypes\inference.py:334(is_hashable)
+1962373/865162    2.622    0.000   14.522    0.000 C:\Users\zhang.s.37\AppData\Local\Programs\Python\Python313\Lib\site-packages\et_xmlfile\incremental_tree.py:566(_serialize_ns_xml)
+  1892014    0.433    0.000    0.433    0.000 C:\Users\zhang.s.37\AppData\Local\Programs\Python\Python313\Lib\site-packages\pandas\core\generic.py:572(_get_axis_number)
+  1876507    0.551    0.000    0.551    0.000 C:\Users\zhang.s.37\AppData\Local\Programs\Python\Python313\Lib\xml\etree\ElementTree.py:1030(_escape_attrib)
+
+
+
+
+【按总时间排序 - 前30个纯执行时间最长函数】
+----------------------------------------------------------------------------------------------------
+         531089133 function calls (521798660 primitive calls) in 515.513 seconds
+
+   Ordered by: internal time
+   List reduced from 2031 to 30 due to restriction <30>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+94780/49169  113.549    0.001   15.854    0.000 C:\Users\zhang.s.37\AppData\Local\Programs\Python\Python313\Lib\site-packages\pandas\core\ops\array_ops.py:113(comp_method_OBJECT_ARRAY)
+ 74397950   27.469    0.000   40.883    0.000 C:\Users\zhang.s.37\OneDrive - Procter and Gamble\9-unattended planning\ChainSight\Engineering\MVP version\ChainSightMVPOri\module5.py:1618(<genexpr>)
+71813947/71021262   15.275    0.000   23.521    0.000 {built-in method builtins.isinstance}
+289533/185212   14.306    0.000    0.499    0.000 {method 'astype' of 'numpy.ndarray' objects}
+ 78053571   14.198    0.000   14.198    0.000 {method 'get' of 'dict' objects}
+1319398/1318776   13.253    0.000   56.124    0.000 {built-in method builtins.any}
+237143/199662    9.435    0.000    0.458    0.000 {method 'nonzero' of 'numpy.ndarray' objects}
+69177/25262    8.681    0.000    0.638    0.000 {built-in method _operator.and_}
+  2018772    5.625    0.000   11.921    0.000 C:\Users\zhang.s.37\AppData\Local\Programs\Python\Python313\Lib\site-packages\et_xmlfile\incremental_tree.py:372(write_elem_start)
+469538/443609    5.547    0.000   39.583    0.000 C:\Users\zhang.s.37\AppData\Local\Programs\Python\Python313\Lib\site-packages\pandas\core\series.py:389(__init__)
+13976/5251    4.638    0.000  289.336    0.055 C:\Users\zhang.s.37\OneDrive - Procter and Gamble\9-unattended planning\ChainSight\Engineering\MVP version\ChainSightMVPOri\module5.py:842(get_active_network)
+751300/745483    4.565    0.000   14.670    0.000 C:\Users\zhang.s.37\AppData\Local\Programs\Python\Python313\Lib\site-packages\pandas\core\construction.py:517(sanitize_array)
+17865192/13365512    4.506    0.000    6.162    0.000 {built-in method builtins.len}
+952719/826119    4.348    0.000    2.931    0.000 {method 'reduce' of 'numpy.ufunc' objects}
+895458/892318    4.255    0.000    5.903    0.000 C:\Users\zhang.s.37\AppData\Local\Programs\Python\Python313\Lib\site-packages\pandas\core\generic.py:6236(__finalize__)
+1203964/1152286    3.763    0.000   22.341    0.000 C:\Users\zhang.s.37\AppData\Local\Programs\Python\Python313\Lib\site-packages\openpyxl\worksheet\_reader.py:189(parse_cell)
+8252937/8236045    3.403    0.000    7.903    0.000 C:\Users\zhang.s.37\AppData\Local\Programs\Python\Python313\Lib\site-packages\pandas\core\dtypes\generic.py:42(_instancecheck)
+18481383/18481090    3.391    0.000    3.480    0.000 {built-in method builtins.getattr}
+29251/6519    3.352    0.000    3.763    0.001 C:\Users\zhang.s.37\AppData\Local\Programs\Python\Python313\Lib\site-packages\pandas\core\arrays\datetimelike.py:977(_cmp_method)
+8252937/8238706    3.104    0.000    4.410    0.000 C:\Users\zhang.s.37\AppData\Local\Programs\Python\Python313\Lib\site-packages\pandas\core\dtypes\generic.py:37(_check)
+401641/368336    2.997    0.000    7.340    0.000 C:\Users\zhang.s.37\AppData\Local\Programs\Python\Python313\Lib\site-packages\pandas\core\array_algos\take.py:120(_take_nd_ndarray)
+1810946/1801176    2.991    0.000    8.118    0.000 C:\Users\zhang.s.37\AppData\Local\Programs\Python\Python313\Lib\site-packages\pandas\core\generic.py:6301(__setattr__)
+117530/72679    2.844    0.000  126.715    0.002 C:\Users\zhang.s.37\AppData\Local\Programs\Python\Python313\Lib\site-packages\pandas\core\internals\managers.py:2276(_merge_blocks)
+702682/684957    2.793    0.000   13.181    0.000 C:\Users\zhang.s.37\AppData\Local\Programs\Python\Python313\Lib\site-packages\openpyxl\descriptors\serialisable.py:46(from_tree)
+318693/318397    2.749    0.000    6.639    0.000 C:\Users\zhang.s.37\AppData\Local\Programs\Python\Python313\Lib\site-packages\pandas\core\dtypes\cast.py:1156(maybe_infer_to_datetimelike)
+969432/966362    2.675    0.000    3.244    0.000 C:\Users\zhang.s.37\AppData\Local\Programs\Python\Python313\Lib\site-packages\pandas\core\generic.py:278(__init__)
+1962373/865162    2.622    0.000   14.522    0.000 C:\Users\zhang.s.37\AppData\Local\Programs\Python\Python313\Lib\site-packages\et_xmlfile\incremental_tree.py:566(_serialize_ns_xml)
+514589/393497    2.498    0.000  231.104    0.001 C:\Users\zhang.s.37\AppData\Local\Programs\Python\Python313\Lib\site-packages\pandas\core\frame.py:4062(__getitem__)
+1404523/1397967    2.353    0.000    3.080    0.000 C:\Users\zhang.s.37\AppData\Local\Programs\Python\Python313\Lib\site-packages\openpyxl\descriptors\sequence.py:24(__set__)
+   921561    2.174    0.000    3.391    0.000 C:\Users\zhang.s.37\AppData\Local\Programs\Python\Python313\Lib\site-packages\et_xmlfile\incremental_tree.py:279(process_attribs)
+
+

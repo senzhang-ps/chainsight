@@ -25,6 +25,18 @@ class ExcelImporter:
         self.db = db
         self.imported_tables: Dict[str, Dict] = {}
     
+    @staticmethod
+    def _derive_config_type(config_name: str) -> str:
+        """根据 config_name 推导配置类型 (OC / BC / OTHER)"""
+        if not config_name:
+            return 'OTHER'
+        name_upper = config_name.upper()
+        if name_upper.startswith('OC'):
+            return 'OC'
+        elif name_upper.startswith('BC'):
+            return 'BC'
+        return 'OTHER'
+
     def import_excel_file(
         self,
         excel_path: str,
@@ -56,8 +68,11 @@ class ExcelImporter:
         if config_name is None:
             config_name = path.stem  # 例如: BC_S5.xlsx -> BC_S5
         
+        # 推导配置类型
+        config_type = self._derive_config_type(config_name)
+
         print(f"\n📂 导入Excel文件: {path.name}")
-        print(f"🏷️  配置标识: {config_name} (将通过 config_name 字段区分)")
+        print(f"🏷️  配置标识: {config_name}  类型: {config_type} (将通过 config_name/config_type 字段区分)")
         print(f"📋 表名规则: 统一配置表名 (cfg_xxx)")
         print("-" * 50)
         
@@ -79,15 +94,15 @@ class ExcelImporter:
                     # 检查是否有列定义
                     if len(df.columns) > 0:
                         print(f"  📋 Sheet [{sheet_name}] 为空表，创建表结构 ({len(df.columns)} 列)")
-                        self.db.create_table_from_df(df, table_name, if_exists, config_name=config_name)
+                        self.db.create_table_from_df(df, table_name, if_exists, config_name=config_name, config_type=config_type)
                         results[sheet_name] = 0
                     else:
                         print(f"  ⚠️ Sheet [{sheet_name}] 无数据且无列定义，跳过")
                         results[sheet_name] = -1
                     continue
                 
-                # 写入数据库，添加config_name字段
-                self.db.create_table_from_df(df, table_name, if_exists, config_name=config_name)
+                # 写入数据库，添加config_name和config_type字段
+                self.db.create_table_from_df(df, table_name, if_exists, config_name=config_name, config_type=config_type)
                 results[sheet_name] = len(df)
                 
                 # 记录导入信息

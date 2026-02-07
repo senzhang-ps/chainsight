@@ -151,16 +151,18 @@ class DatabaseInitializer:
                 # 检查表是否有config_name列
                 cols = self.db._get_column_types(tbl)
                 if 'config_name' in cols:
-                    # 有config_name列，检查数据
+                    # 有config_name列，检查数据（兼容带/不带路径前缀的config_name）
+                    config_basename = config_name.split('/')[-1] if '/' in config_name else config_name
                     result = self.db.execute_query(
-                        f'SELECT COUNT(*) FROM "{tbl}" WHERE config_name = %s',
-                        (config_name,)
+                        f'SELECT COUNT(*) FROM "{tbl}" WHERE config_name = %s OR config_name = %s',
+                        (config_name, config_basename)
                     )
                     total_rows += result[0][0] if result else 0
                 else:
-                    # 没有config_name列，计算总行数
-                    result = self.db.execute_query(f'SELECT COUNT(*) FROM "{tbl}"')
-                    total_rows += result[0][0] if result else 0
+                    # 没有config_name列 -> 旧格式表，不计入统一配置检测
+                    # 旧格式表（如 bc_s5_*）无法被 _load_config_from_database 读取，
+                    # 计入会导致误判"配置已存在"而跳过自动导入
+                    pass
             except Exception:
                 continue
         

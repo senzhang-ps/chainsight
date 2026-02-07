@@ -316,6 +316,10 @@ def push_softpush_allocation(
     except Exception:
         push_levels = DEFAULT_PUSH_LEVELS
 
+    # 跳过原因统计
+    skip_reasons = {'pending_gap': 0, 'no_pushpull': 0, 'wrong_model': 0, 'no_soh': 0, 'no_recs': 0, 'no_ss': 0, 'no_available': 0}
+    pushpull_found = 0
+
     # 逐组处理
     for mat, sending in group_keys:
         # 检查是否有未满足的非push需求
@@ -331,6 +335,7 @@ def push_softpush_allocation(
             for r in deployment_plan_rows
         )
         if pending_gap:
+            skip_reasons['pending_gap'] += 1
             continue
 
         # 检查push/soft push配置
@@ -339,10 +344,14 @@ def push_softpush_allocation(
             (pushpull['sending'] == sending)
         ]
         if row_pp.empty:
+            skip_reasons['no_pushpull'] += 1
             continue
+        
+        pushpull_found += 1
 
         model = str(row_pp.iloc[0]['model']).strip().lower()
         if model not in ['push', 'soft push']:
+            skip_reasons['wrong_model'] += 1
             continue
 
         # 计算剩余库存
@@ -350,6 +359,7 @@ def push_softpush_allocation(
         already_allocated = int(allocated_inventory.get((mat, sending), 0) or 0)
         soh = max(0, total_soh - already_allocated)
         if soh <= 0:
+            skip_reasons['no_soh'] += 1
             continue
 
         # 读取LSK/Day
@@ -378,6 +388,7 @@ def push_softpush_allocation(
             else max(0, soh - sending_ss)
         )
         if available_soh <= 0:
+            skip_reasons['no_available'] += 1
             continue
 
         # 找下游receiving
@@ -386,6 +397,7 @@ def push_softpush_allocation(
             (net['sourcing'] == sending)
         ]['location'].dropna().unique().tolist()
         if not recs:
+            skip_reasons['no_recs'] += 1
             continue
 
         # 计算接收端安全库存数据
@@ -396,6 +408,7 @@ def push_softpush_allocation(
 
         total_ss = sum(x['ss_qty'] for x in receiving_ss_data)
         if total_ss <= 0:
+            skip_reasons['no_ss'] += 1
             continue
 
         # 构建库存基线
@@ -452,8 +465,8 @@ def push_softpush_allocation(
                     else 'soft push replenishment'
                 ),
                 'planned_qty': int(qty),
-                # 注意: 移除deployed_qty_invCon_push以与Dev版保持一致
-                'deployed_qty_invCon': int(qty),
+                'deployed_qty_invCon_push': int(qty),  # 与Dev版保持一致
+                'deployed_qty_invCon': int(qty),  # 兼容后续空间配额与库存统计
                 'planned_delivery_date': x['planned_delivery_date'],
                 'orig_location': x['receiving'],
                 'leadtime': int(x['leadtime']),

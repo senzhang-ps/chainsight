@@ -1,0 +1,50 @@
+{
+  "meta": {
+    "sample_every": 10,
+    "sample_dates": [
+      "20251005",
+      "20251015",
+      "20251025",
+      "20251104",
+      "20251114",
+      "20251124",
+      "20251204",
+      "20251214",
+      "20251224",
+      "20251230"
+    ],
+    "total_days": 87,
+    "total_comparisons": 200,
+    "total_pass": 200,
+    "total_fail": 0,
+    "elapsed_s": 79.9
+  },
+  "modules": {
+    "module1": {
+      "pass": 50,
+      "fail": 0,
+      "time": 32.6
+    },
+    "module3": {
+      "pass": 10,
+      "fail": 0,
+      "time": 0.7
+    },
+    "module4": {
+      "pass": 40,
+      "fail": 0,
+      "time": 0.2
+    },
+    "module5": {
+      "pass": 40,
+      "fail": 0,
+      "time": 45.6
+    },
+    "module6": {
+      "pass": 60,
+      "fail": 0,
+      "time": 0.8
+    }
+  },
+  "failures": []
+}

@@ -538,7 +538,7 @@ def get_or_init_simulation_start(output_root: Path, provided_start: Optional[str
     """
     start_file = output_root / "simulation_start.txt"
     if start_file.exists():
-        return start_file.read_text(encoding="utf-8").strip()
+        return start_file.read_text(encoding="utf-8-sig").strip()
     if not provided_start:
         raise ValueError("Simulation start date required for first run")
     start_file.write_text(provided_start, encoding="utf-8")

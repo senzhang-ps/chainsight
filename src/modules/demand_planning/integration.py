@@ -95,12 +95,11 @@ def run_daily_order_generation(
         # 8) 生成Summary（供数据库模式使用）
         summary_df = _build_summary_df(today_orders_df, shipment_df, cut_df, supply_demand_df)
 
-        # 🔧 修复：使用累积订单 all_orders_df 作为 orders_df
-        # Dev 版本的 _save_output 将 all_orders_df（累积快照）写入 Excel 的 OrderLog sheet
-        # DB 模式应写入同样的累积快照，确保每天的 DB 数据与 Dev 的 Excel 完全一致
-        # module_data_writer 使用 sim_date 字段区分每天的快照，不会混淆
+        # orders_df: 当日新增订单（today_orders_df），用于 DB 写入
+        # 比对脚本从 xlsx 读取 OrderLog 时已过滤 simulation_date == 当天，
+        # 因此 DB 也应只写当天新增，确保口径一致。
         return {
-            'orders_df': all_orders_df,  # ✅ 修复：写入累积订单快照，与 Dev 的 Excel OrderLog 一致
+            'orders_df': today_orders_df,  # ✅ 只写当天新增订单，与比对脚本的 xlsx 过滤口径一致
             'shipment_df': shipment_df,
             'cut_df': cut_df,
             'supply_demand_df': supply_demand_df,

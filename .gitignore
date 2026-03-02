@@ -58,3 +58,12 @@ Thumbs.db
 *.tmp
 .temp/
 temp/
+
+# Outputs (generated reports, not tracked)
+outputs/
+
+# ChainSight Dev run outputs
+ChainSight_Dev/**/run_*/
+
+# Claude
+.claude/

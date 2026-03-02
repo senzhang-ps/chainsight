@@ -24,6 +24,7 @@ import os
 from typing import Any, Dict, Optional
 from pandas.errors import EmptyDataError, ParserError
 import logging
+from tqdm import tqdm
 from pathlib import Path
 
 # Windows UTF-8 编码设置 - 解决emoji和中文输出问题
@@ -1695,7 +1696,8 @@ def run_integrated_simulation(
         'module6': []
     }
     
-    for i, current_date in enumerate(sim_dates, 1):
+    pbar = tqdm(sim_dates, total=len(sim_dates), desc='仿真进度', unit='天', ncols=80, dynamic_ncols=False, leave=True)
+    for i, current_date in enumerate(pbar, 1):
         # 计算实际的总进度（考虑续跑情况）
         if is_resuming:
             actual_day_number = resume_info['days_completed'] + i
@@ -1705,6 +1707,7 @@ def run_integrated_simulation(
             progress_info = f"第 {i}/{len(sim_dates)} 天"
             
         print(f"{'='*20} {progress_info}: {current_date.strftime('%Y-%m-%d')} {'='*20}")
+        pbar.set_postfix(date=current_date.strftime('%Y-%m-%d'), day=progress_info)
         
         # 🎲 注意：不在每日开始时重置种子，以匹配ChainSight_Dev的随机数行为
         # ChainSight_Dev没有每日种子重置，随机状态自然演变

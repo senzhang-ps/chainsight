@@ -32,12 +32,12 @@ from typing import Any
 BASE_DIR = Path(r"D:\PG\test\chainsight")
 
 LOG_PATHS: dict[str, Path] = {
-    "Dev": BASE_DIR / "ChainSight_Dev" / "BC_S5" / "run_20260211_181635" / "simulation_log_20260211_181635.txt",
-    "Src": BASE_DIR / "outputs" / "BC_S5" / "run_20260211_145215" / "simulation_log_20260211_145215.txt",
-    "DB":  BASE_DIR / "outputs" / "db_BC_S5_20260212_184043" / "simulation_log_20260212_184043.txt",
+    "Dev": BASE_DIR / "outputs" / "dev_output" / "BC_S5" / "run_20260211_181635" / "simulation_log_20260211_181635.txt",
+    "Src": BASE_DIR / "outputs" / "BC_S5" / "run_20260301_111720" / "simulation_log_20260301_111720.txt",
+    "DB":  BASE_DIR / "outputs" / "db_BC_S5_20260301_190902" / "simulation_log_20260301_190902.txt",
 }
 
-JSON_PATH = BASE_DIR / "tools" / "bc_3way_content_results.json"
+JSON_PATH = BASE_DIR / "tools" / "bc_3way_content_results_full.json"
 
 OUTPUT_DIR = BASE_DIR / "docs"
 
@@ -58,9 +58,9 @@ INTERVALS: list[tuple[int, int]] = [
 ]
 
 OUTPUT_PATHS: dict[str, str] = {
-    "Dev": "ChainSight_Dev/BC_S5/run_20260211_181635/",
-    "Src": "outputs/BC_S5/run_20260211_145215/",
-    "DB":  "outputs/db_BC_S5_20260212_184043/",
+    "Dev": "outputs/dev_output/BC_S5/run_20260211_181635/",
+    "Src": "outputs/BC_S5/run_20260301_111720/",
+    "DB":  "outputs/db_BC_S5_20260301_190902/",
 }
 
 # Ordered list of all tables, grouped by module
@@ -788,9 +788,9 @@ def generate_interval_report(
     a("")
     a("---")
     a("")
-    a("**报告生成时间**: 2026-02-12  ")
+    a("**报告生成时间**: 2026-02-26  ")
     a("**测试执行人**: chenxianyue002@chinasofti.com  ")
-    a("**版本**: v6.0")
+    a("**版本**: v7.0")
     a("")
 
     return "\n".join(lines)

@@ -26,21 +26,22 @@ from typing import Any
 
 import pandas as pd
 import numpy as np
-import psycopg2
+import psycopg
 
 warnings.filterwarnings("ignore")
 
 # ─── Configuration ───────────────────────────────────────────────────
 
 PROJECT_ROOT = Path(__file__).parent.parent
-DEV_DIR = PROJECT_ROOT / "outputs" / "run_20260127_142402"
-SRC_DIR = PROJECT_ROOT / "outputs" / "OC_Paste_S1_20251224" / "run_20260209_222302"
+DEV_DIR = PROJECT_ROOT / "outputs" / "dev_output" / "OC_Paste_S1_20251224" / "run_20260127_142402"
+SRC_DIR = PROJECT_ROOT / "outputs" / "OC_Paste_S1_20251224" / "run_20260301_125122"
 DB_CONN_PARAMS = dict(host="localhost", port=5432, dbname="test_db",
-                      user="postgres", password="123456", client_encoding="utf8")
+                      user="postgres", password="123456")
 
 START_DATE = datetime(2025, 12, 15)
 NUM_DAYS = 76
 
+DB_RUN_ID = "OC_Paste_S1_20251224_20260301_222907"
 DB_META_COLS = {"sim_date", "run_id", "config_name", "db_write_time"}
 
 # ─── Sheet/Table mapping ────────────────────────────────────────────
@@ -257,12 +258,21 @@ def get_daily_order_count(filepath: Path, date_str: str) -> int | None:
 
 
 def load_xlsx_sheet(filepath: Path, sheet_name: str,
-                    col_rename: dict | None = None) -> pd.DataFrame | None:
-    """Load a single sheet from an xlsx file. Returns None if not found/empty."""
+                    col_rename: dict | None = None,
+                    filter_date: str | None = None) -> pd.DataFrame | None:
+    """Load a single sheet from an xlsx file. Returns None if not found/empty.
+
+    If filter_date (YYYY-MM-DD) is provided and sheet_name == 'OrderLog',
+    filter to only rows where simulation_date == filter_date.
+    This is needed because OrderLog in xlsx is a cumulative snapshot.
+    """
     if not filepath.exists():
         return None
     try:
         df = pd.read_excel(filepath, sheet_name=sheet_name, engine="openpyxl")
+        if sheet_name == "OrderLog" and filter_date is not None and "simulation_date" in df.columns:
+            target = pd.Timestamp(filter_date)
+            df = df[df["simulation_date"] == target].copy()
         if col_rename:
             df = df.rename(columns=col_rename)
         return df
@@ -271,12 +281,16 @@ def load_xlsx_sheet(filepath: Path, sheet_name: str,
 
 
 def load_db_data(conn, table: str, date_col: str, date_val: str,
-                 col_rename: dict) -> pd.DataFrame | None:
-    """Load data from DB for a specific simulation date."""
+                 col_rename: dict, run_id: str = DB_RUN_ID) -> pd.DataFrame | None:
+    """Load data from DB for a specific simulation date, filtered by run_id."""
     try:
         # date_val is YYYYMMDD, DB stores as date or string
-        query = f"SELECT * FROM {table} WHERE {date_col} = %s"
-        df = pd.read_sql(query, conn, params=[date_val])
+        query = f"SELECT * FROM {table} WHERE {date_col} = %s AND run_id = %s"
+        with conn.cursor() as cur:
+            cur.execute(query, [date_val, run_id])
+            rows = cur.fetchall()
+            cols = [desc[0] for desc in cur.description]
+        df = pd.DataFrame(rows, columns=cols)
         # Drop DB metadata columns
         drop_cols = [c for c in df.columns if c in DB_META_COLS]
         df = df.drop(columns=drop_cols, errors="ignore")
@@ -309,9 +323,9 @@ def _normalize_location_str(s: str) -> str:
     return s
 
 
-def _normalize_bool_str(s: str) -> str:
+def _normalize_bool_str(s) -> str:
     """Normalize boolean-like strings: 'True'/'true'/'TRUE'/1 -> 'True', 'False'/'false'/0 -> 'False'."""
-    s = s.strip().lower()
+    s = str(s).strip().lower()
     if s in ("true", "1", "1.0"):
         return "True"
     if s in ("false", "0", "0.0"):
@@ -358,7 +372,7 @@ def normalize_df(df: pd.DataFrame, key_cols: list[str], compare_cols: list[str])
             df[col] = df[col].dt.strftime("%Y-%m-%d").fillna("")
         elif is_bool_col:
             # Normalize booleans to consistent string representation
-            df[col] = df[col].astype(str).str.strip().apply(_normalize_bool_str)
+            df[col] = df[col].fillna("").astype(str).str.strip().apply(_normalize_bool_str)
         elif pd.api.types.is_numeric_dtype(df[col]):
             df[col] = pd.to_numeric(df[col], errors="coerce")
         else:
@@ -536,7 +550,7 @@ def run_comparison(day_range: range, module_filter: str | None = None,
     # Connect to DB
     conn = None
     try:
-        conn = psycopg2.connect(**DB_CONN_PARAMS)
+        conn = psycopg.connect(**DB_CONN_PARAMS)
         if verbose:
             print("DB connected", flush=True)
     except Exception as e:
@@ -551,6 +565,7 @@ def run_comparison(day_range: range, module_filter: str | None = None,
     total_sheets = 0
     total_pass_dev_src = 0
     total_pass_dev_db = 0
+    total_pass_src_db = 0
 
     for mapping in SHEET_MAPPINGS:
         mod = mapping["module"]
@@ -573,11 +588,11 @@ def run_comparison(day_range: range, module_filter: str | None = None,
             # Load Dev xlsx
             xlsx_rename = mapping.get("xlsx_col_rename")
             dev_file = DEV_DIR / mod / mapping["file_pattern"].format(date=ds)
-            dev_df = load_xlsx_sheet(dev_file, sheet, col_rename=xlsx_rename)
+            dev_df = load_xlsx_sheet(dev_file, sheet, col_rename=xlsx_rename, filter_date=ds_iso)
 
             # Load Src xlsx
             src_file = SRC_DIR / mod / mapping["file_pattern"].format(date=ds)
-            src_df = load_xlsx_sheet(src_file, sheet, col_rename=xlsx_rename)
+            src_df = load_xlsx_sheet(src_file, sheet, col_rename=xlsx_rename, filter_date=ds_iso)
 
             # Load DB
             db_df = None
@@ -585,17 +600,8 @@ def run_comparison(day_range: range, module_filter: str | None = None,
                 db_df = load_db_data(conn, mapping["db_table"], mapping["db_date_col"],
                                      ds, mapping["db_col_rename"])
 
-            # ── 修正 module1/Summary 的 total_orders：将累积值转换为当日值 ──
-            # Dev/Src 的 Summary 中 total_orders 是 OrderLog 的累积行数，
-            # DB 的 total_orders 是当日新增订单数。
-            # 为了在同一维度下对比，从 OrderLog 中提取当日新增行数替换。
-            if comp_key == "module1/Summary":
-                dev_daily_orders = get_daily_order_count(dev_file, ds_iso)
-                src_daily_orders = get_daily_order_count(src_file, ds_iso)
-                if dev_df is not None and dev_daily_orders is not None:
-                    dev_df["total_orders"] = dev_daily_orders
-                if src_df is not None and src_daily_orders is not None:
-                    src_df["total_orders"] = src_daily_orders
+            # Note: module1/Summary total_orders is cumulative in both xlsx and DB.
+            # No conversion needed — compare raw values directly.
 
             # Normalize
             key_cols = mapping["key_cols"]
@@ -613,6 +619,10 @@ def run_comparison(day_range: range, module_filter: str | None = None,
             cmp_dev_db = compare_two_dfs(dev_norm, db_norm, key_cols, compare_cols,
                                          label1="Dev", label2="DB")
 
+            # Compare Src vs DB
+            cmp_src_db = compare_two_dfs(src_norm, db_norm, key_cols, compare_cols,
+                                         label1="Src", label2="DB")
+
             day_result = {
                 "day": day_num,
                 "date": ds_iso,
@@ -629,6 +639,11 @@ def run_comparison(day_range: range, module_filter: str | None = None,
                     "content_match": cmp_dev_db["content_match"],
                     "diff_count": cmp_dev_db["diff_count"],
                 },
+                "src_vs_db": {
+                    "row_match": cmp_src_db["row_match"],
+                    "content_match": cmp_src_db["content_match"],
+                    "diff_count": cmp_src_db["diff_count"],
+                },
             }
 
             # Include diff details if any
@@ -636,30 +651,38 @@ def run_comparison(day_range: range, module_filter: str | None = None,
                 day_result["dev_vs_src"]["diff_details"] = cmp_dev_src["diff_details"]
             if cmp_dev_db.get("diff_details"):
                 day_result["dev_vs_db"]["diff_details"] = cmp_dev_db["diff_details"]
+            if cmp_src_db.get("diff_details"):
+                day_result["src_vs_db"]["diff_details"] = cmp_src_db["diff_details"]
             if "only_in_1" in cmp_dev_src:
                 day_result["dev_vs_src"]["only_in_dev"] = cmp_dev_src["only_in_1"]
                 day_result["dev_vs_src"]["only_in_src"] = cmp_dev_src["only_in_2"]
             if "only_in_1" in cmp_dev_db:
                 day_result["dev_vs_db"]["only_in_dev"] = cmp_dev_db["only_in_1"]
                 day_result["dev_vs_db"]["only_in_db"] = cmp_dev_db["only_in_2"]
+            if "only_in_1" in cmp_src_db:
+                day_result["src_vs_db"]["only_in_src"] = cmp_src_db["only_in_1"]
+                day_result["src_vs_db"]["only_in_db"] = cmp_src_db["only_in_2"]
 
             daily_results.append(day_result)
 
             if verbose:
                 ds_match = "OK" if cmp_dev_src["content_match"] else f"DIFF({cmp_dev_src['diff_count']})"
                 db_match = "OK" if cmp_dev_db["content_match"] else f"DIFF({cmp_dev_db['diff_count']})"
+                sb_match = "OK" if cmp_src_db["content_match"] else f"DIFF({cmp_src_db['diff_count']})"
                 sys.stdout.write(f"  Day{day_num:02d} {ds_iso}: Dev={len(dev_norm):>6} Src={len(src_norm):>6} DB={len(db_norm):>6}  "
-                                 f"Dev/Src={ds_match:<12} Dev/DB={db_match}\n")
+                                 f"Dev/Src={ds_match:<12} Dev/DB={db_match:<12} Src/DB={sb_match}\n")
                 sys.stdout.flush()
 
         # Compute totals for this sheet
         all_dev_src_match = all(d["dev_vs_src"]["content_match"] for d in daily_results)
         all_dev_db_match = all(d["dev_vs_db"]["content_match"] for d in daily_results)
+        all_src_db_match = all(d["src_vs_db"]["content_match"] for d in daily_results)
         total_dev_rows = sum(d["dev_rows"] for d in daily_results)
         total_src_rows = sum(d["src_rows"] for d in daily_results)
         total_db_rows = sum(d["db_rows"] for d in daily_results)
         total_dev_src_diffs = sum(d["dev_vs_src"]["diff_count"] for d in daily_results)
         total_dev_db_diffs = sum(d["dev_vs_db"]["diff_count"] for d in daily_results)
+        total_src_db_diffs = sum(d["src_vs_db"]["diff_count"] for d in daily_results)
 
         results["comparisons"][comp_key] = {
             "total_dev_rows": total_dev_rows,
@@ -667,8 +690,10 @@ def run_comparison(day_range: range, module_filter: str | None = None,
             "total_db_rows": total_db_rows,
             "dev_vs_src_all_match": all_dev_src_match,
             "dev_vs_db_all_match": all_dev_db_match,
+            "src_vs_db_all_match": all_src_db_match,
             "total_dev_src_diffs": total_dev_src_diffs,
             "total_dev_db_diffs": total_dev_db_diffs,
+            "total_src_db_diffs": total_src_db_diffs,
             "daily": daily_results,
         }
 
@@ -677,12 +702,15 @@ def run_comparison(day_range: range, module_filter: str | None = None,
             total_pass_dev_src += 1
         if all_dev_db_match:
             total_pass_dev_db += 1
+        if all_src_db_match:
+            total_pass_src_db += 1
 
         if verbose:
             status_ds = "PASS" if all_dev_src_match else f"FAIL(diffs={total_dev_src_diffs})"
             status_db = "PASS" if all_dev_db_match else f"FAIL(diffs={total_dev_db_diffs})"
+            status_sb = "PASS" if all_src_db_match else f"FAIL(diffs={total_src_db_diffs})"
             print(f"  TOTAL: Dev={total_dev_rows:,} Src={total_src_rows:,} DB={total_db_rows:,}"
-                  f"  Dev/Src={status_ds}  Dev/DB={status_db}", flush=True)
+                  f"  Dev/Src={status_ds}  Dev/DB={status_db}  Src/DB={status_sb}", flush=True)
 
     if conn:
         conn.close()
@@ -691,8 +719,10 @@ def run_comparison(day_range: range, module_filter: str | None = None,
         "total_sheets_compared": total_sheets,
         "dev_vs_src_pass": total_pass_dev_src,
         "dev_vs_db_pass": total_pass_dev_db,
+        "src_vs_db_pass": total_pass_src_db,
         "dev_vs_src_fail": total_sheets - total_pass_dev_src,
         "dev_vs_db_fail": total_sheets - total_pass_dev_db,
+        "src_vs_db_fail": total_sheets - total_pass_src_db,
     }
 
     return results
@@ -702,24 +732,26 @@ def run_comparison(day_range: range, module_filter: str | None = None,
 
 def print_summary(results: dict) -> None:
     """Print a clean summary table."""
-    print("\n" + "=" * 110)
-    print("3-WAY COMPARISON SUMMARY")
-    print("=" * 110)
-    print(f"{'Sheet':<35} {'Dev Rows':>10} {'Src Rows':>10} {'DB Rows':>10} {'Dev/Src':>12} {'Dev/DB':>12}")
-    print("-" * 110)
+    print("\n" + "=" * 130)
+    print("3-WAY COMPARISON SUMMARY (OC_Paste_S1_20251224)")
+    print("=" * 130)
+    print(f"{'Sheet':<35} {'Dev Rows':>10} {'Src Rows':>10} {'DB Rows':>10} {'Dev/Src':>12} {'Dev/DB':>12} {'Src/DB':>12}")
+    print("-" * 130)
 
     for comp_key, data in results["comparisons"].items():
         ds_status = "PASS" if data["dev_vs_src_all_match"] else f"FAIL({data['total_dev_src_diffs']})"
         db_status = "PASS" if data["dev_vs_db_all_match"] else f"FAIL({data['total_dev_db_diffs']})"
+        sb_status = "PASS" if data["src_vs_db_all_match"] else f"FAIL({data['total_src_db_diffs']})"
         print(f"{comp_key:<35} {data['total_dev_rows']:>10,} {data['total_src_rows']:>10,} "
-              f"{data['total_db_rows']:>10,} {ds_status:>12} {db_status:>12}")
+              f"{data['total_db_rows']:>10,} {ds_status:>12} {db_status:>12} {sb_status:>12}")
 
     s = results["summary"]
-    print("-" * 110)
+    print("-" * 130)
     print(f"Total: {s['total_sheets_compared']} sheets | "
           f"Dev/Src: {s['dev_vs_src_pass']} PASS, {s['dev_vs_src_fail']} FAIL | "
-          f"Dev/DB: {s['dev_vs_db_pass']} PASS, {s['dev_vs_db_fail']} FAIL")
-    print("=" * 110)
+          f"Dev/DB: {s['dev_vs_db_pass']} PASS, {s['dev_vs_db_fail']} FAIL | "
+          f"Src/DB: {s['src_vs_db_pass']} PASS, {s['src_vs_db_fail']} FAIL")
+    print("=" * 130)
 
 
 # ─── CLI ─────────────────────────────────────────────────────────────
@@ -749,7 +781,7 @@ def main():
     print_summary(results)
 
     # Save results
-    out_path = Path(args.output) if args.output else PROJECT_ROOT / "tools" / "oc_3way_content_results.json"
+    out_path = Path(args.output) if args.output else PROJECT_ROOT / "tools" / "oc_3way_content_results_full.json"
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(results, f, ensure_ascii=False, indent=2, default=str)
     print(f"\nResults saved to: {out_path}")

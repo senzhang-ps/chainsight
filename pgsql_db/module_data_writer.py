@@ -29,20 +29,28 @@ class ModuleDataWriter:
         self.config_name = config_name
         self.written_tables: Dict[str, Dict] = {}
     
-    def truncate_output_tables(self) -> int:
+    def truncate_output_tables(self, run_id: str = None) -> int:
         """
-        清空所有模块输出表、Summary表和Orchestrator表
-        
-        在写入新数据之前调用此方法，确保数据库中只有最新一次运行的数据。
-        
+        删除指定 run_id 的所有模块输出表数据。
+
+        使用 DELETE WHERE run_id = %s 而非 TRUNCATE，确保不同场景（BC/OC）
+        的历史数据互不干扰。若 run_id 为 None，则跳过删除并发出警告。
+
+        Args:
+            run_id: 本次运行的唯一标识符（必须提供）
+
         Returns:
-            int: 清空的表数量
+            int: 成功删除数据的表数量
         """
+        if not run_id:
+            print("\n[WARN] truncate_output_tables: run_id 为空，跳过删除操作")
+            return 0
+
         print("\n" + "=" * 60)
-        print("[DEL]  清空数据库输出表")
+        print(f"[DEL]  删除 run_id={run_id} 的数据库输出表数据")
         print("=" * 60)
-        
-        # 定义所有需要清空的输出表
+
+        # 定义所有需要按 run_id 删除的输出表
         output_tables = [
             # Module1 输出表
             'module1_output_orderlog',
@@ -91,9 +99,9 @@ class ModuleDataWriter:
             'orchestrator_inventory_change_log',
             'orchestrator_daily_logs',
         ]
-        
-        truncated_count = 0
-        
+
+        deleted_count = 0
+
         try:
             with self.db.get_cursor() as cursor:
                 for table_name in output_tables:
@@ -101,26 +109,29 @@ class ModuleDataWriter:
                         # 检查表是否存在
                         cursor.execute("""
                             SELECT EXISTS (
-                                SELECT FROM information_schema.tables 
-                                WHERE table_schema = 'public' 
+                                SELECT FROM information_schema.tables
+                                WHERE table_schema = 'public'
                                 AND table_name = %s
                             )
                         """, (table_name,))
                         exists = cursor.fetchone()[0]
-                        
+
                         if exists:
-                            cursor.execute(f'TRUNCATE TABLE "{table_name}"')
-                            truncated_count += 1
-                            print(f"  [v] 已清空: {table_name}")
+                            cursor.execute(
+                                f'DELETE FROM "{table_name}" WHERE run_id = %s',
+                                (run_id,)
+                            )
+                            deleted_count += 1
+                            print(f"  [v] 已删除 run_id={run_id} 的数据: {table_name}")
                     except Exception as e:
-                        print(f"  [x] 清空失败 {table_name}: {e}")
-            
-            print(f"\n[OK] 共清空 {truncated_count} 个表")
-            
+                        print(f"  [x] 删除失败 {table_name}: {e}")
+
+            print(f"\n[OK] 共处理 {deleted_count} 个表（按 run_id={run_id} 删除）")
+
         except Exception as e:
-            print(f"\n[ERROR] 清空表时出错: {e}")
-        
-        return truncated_count
+            print(f"\n[ERROR] 删除表数据时出错: {e}")
+
+        return deleted_count
     
     def write_summary_only(
         self,
@@ -640,9 +651,9 @@ class ModuleDataWriter:
         """
         results = {}
         
-        # [DEL] 在写入前先清空所有输出表
+        # [DEL] 在写入前按 run_id 删除当前运行的旧数据（不影响其他 run_id 数据）
         if truncate_first:
-            self.truncate_output_tables()
+            self.truncate_output_tables(run_id=run_id)
         
         print("\n" + "=" * 60)
         print("[OUT] 从内存写入模块输出到数据库")
@@ -653,8 +664,8 @@ class ModuleDataWriter:
         # 键名必须与模块返回的字典键名一致
         module_df_mapping = {
             'module1': {
-                # orders_df 现在是累积订单快照（all_orders_df），与 Dev 的 Excel OrderLog 一致
-                # 每天的快照通过 sim_date 字段区分，直接与 Dev 的每日 Excel 文件对应
+                # orders_df 是当天新增订单（today_orders_df），与比对脚本从 xlsx 过滤
+                # simulation_date == 当天的口径一致
                 'orders_df': 'module1_output_orderlog',
                 'shipment_df': 'module1_output_shipmentlog',
                 'cut_df': 'module1_output_cutlog',

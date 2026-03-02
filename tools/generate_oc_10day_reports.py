@@ -32,9 +32,9 @@ from typing import Any
 BASE_DIR = Path(r"D:\PG\test\chainsight")
 
 LOG_PATHS: dict[str, Path] = {
-    "Dev": BASE_DIR / "outputs" / "run_20260127_142402" / "simulation_log_20260127_142402.txt",
-    "Src": BASE_DIR / "outputs" / "OC_Paste_S1_20251224" / "run_20260209_222302" / "simulation_log_20260209_222302.txt",
-    "DB":  BASE_DIR / "outputs" / "db_config" / "OC_Paste_S1_20251224_20260209_164639" / "simulation_log_20260209_164639.txt",
+    "Dev": BASE_DIR / "outputs" / "dev_output" / "OC_Paste_S1_20251224" / "run_20260127_142402" / "simulation_log_20260127_142402.txt",
+    "Src": BASE_DIR / "outputs" / "OC_Paste_S1_20251224" / "run_20260301_125122" / "simulation_log_20260301_125122.txt",
+    "DB":  BASE_DIR / "outputs" / "db_OC_Paste_S1_20251224_20260301_222907" / "simulation_log_20260301_222907.txt",
 }
 
 JSON_PATH = BASE_DIR / "tools" / "oc_3way_content_results_full.json"
@@ -57,9 +57,9 @@ INTERVALS: list[tuple[int, int]] = [
 ]
 
 OUTPUT_PATHS: dict[str, str] = {
-    "Dev": "outputs/run_20260127_142402/",
-    "Src": "outputs/OC_Paste_S1_20251224/run_20260209_222302/",
-    "DB":  "outputs/db_config/OC_Paste_S1_20251224_20260209_164639/",
+    "Dev": "outputs/dev_output/OC_Paste_S1_20251224/run_20260127_142402/",
+    "Src": "outputs/OC_Paste_S1_20251224/run_20260301_125122/",
+    "DB":  "outputs/db_OC_Paste_S1_20251224_20260301_222907/",
 }
 
 # Ordered list of all tables, grouped by module
@@ -501,6 +501,9 @@ def generate_interval_report(
             dd_all_match = all(
                 dd["dev_vs_db"]["content_match"] for dd in interval_days
             ) if interval_days else True
+            sd_all_match = all(
+                dd["src_vs_db"]["content_match"] for dd in interval_days
+            ) if interval_days else True
 
             table_interval_summary.append({
                 "module": _mod_label,
@@ -511,17 +514,19 @@ def generate_interval_report(
                 "db_rows": db_rows,
                 "ds_content_match": ds_all_match,
                 "dd_content_match": dd_all_match,
+                "sd_content_match": sd_all_match,
             })
 
-    a("| 模块 | 表名 | Dev行数 | Src行数 | DB行数 | Dev vs Src | Dev vs DB |")
-    a("|------|------|---------|---------|--------|------------|-----------|")
+    a("| 模块 | 表名 | Dev行数 | Src行数 | DB行数 | Dev vs Src | Dev vs DB | Src vs DB |")
+    a("|------|------|---------|---------|--------|------------|-----------|-----------|")
     for ts in table_interval_summary:
         ds_mark = "PASS" if ts["ds_content_match"] else "FAIL"
-        dd_mark = "PASS" if ts["dd_content_match"] else "FAIL*"
+        dd_mark = "PASS" if ts["dd_content_match"] else "FAIL"
+        sd_mark = "PASS" if ts["sd_content_match"] else "FAIL"
         a(
             f"| {ts['module']} | {ts['table_cn']} | {ts['dev_rows']:,} | "
             f"{ts['src_rows']:,} | {ts['db_rows']:,} | "
-            f"{ds_mark} | {dd_mark} |"
+            f"{ds_mark} | {dd_mark} | {sd_mark} |"
         )
     a("")
 
@@ -529,8 +534,10 @@ def generate_interval_report(
     total_tables = len(table_interval_summary)
     ds_pass = sum(1 for ts in table_interval_summary if ts["ds_content_match"])
     dd_pass = sum(1 for ts in table_interval_summary if ts["dd_content_match"])
+    sd_pass = sum(1 for ts in table_interval_summary if ts["sd_content_match"])
     ds_fail = total_tables - ds_pass
     dd_fail = total_tables - dd_pass
+    sd_fail = total_tables - sd_pass
 
     a(
         f"> **Dev vs Src**: {ds_pass}/{total_tables} 表全部PASS"
@@ -540,21 +547,13 @@ def generate_interval_report(
     a(
         f"> **Dev vs DB**: {dd_pass}/{total_tables} 表PASS"
         + ("" if dd_fail == 0 else f"，{dd_fail}表FAIL")
+        + "  "
+    )
+    a(
+        f"> **Src vs DB**: {sd_pass}/{total_tables} 表PASS"
+        + ("" if sd_fail == 0 else f"，{sd_fail}表FAIL")
     )
     a("")
-
-    # Note about module1/Summary if it has failures in this interval
-    has_summary_fail = False
-    for ts in table_interval_summary:
-        if ts["table_key"] == "module1/Summary" and not ts["dd_content_match"]:
-            has_summary_fail = True
-            break
-    if has_summary_fail:
-        a(
-            "> **\\*** `module1/Summary` 的 `total_orders` 列：DB版本存储当日新增订单数，"
-            "Dev/Src存储累积订单数。这是Summary表的统计口径差异，不影响实际业务数据的一致性。"
-        )
-        a("")
 
     # ── 3.2+ Per-module detailed tables ──
     section_idx = 2
@@ -587,19 +586,21 @@ def generate_interval_report(
             a(
                 f"- **全局一致性**: "
                 f"Dev vs Src {'PASS' if tbl_data['dev_vs_src_all_match'] else 'FAIL'}, "
-                f"Dev vs DB {'PASS' if tbl_data['dev_vs_db_all_match'] else 'FAIL'}"
+                f"Dev vs DB {'PASS' if tbl_data['dev_vs_db_all_match'] else 'FAIL'}, "
+                f"Src vs DB {'PASS' if tbl_data['src_vs_db_all_match'] else 'FAIL'}"
             )
             a("")
 
             # Daily detail table for this interval
-            a("| 天数 | 日期 | Dev行数 | Src行数 | DB行数 | Dev vs Src | Dev vs DB |")
-            a("|------|------|---------|---------|--------|------------|-----------|")
+            a("| 天数 | 日期 | Dev行数 | Src行数 | DB行数 | Dev vs Src | Dev vs DB | Src vs DB |")
+            a("|------|------|---------|---------|--------|------------|-----------|-----------|")
 
             interval_dev_total = 0
             interval_src_total = 0
             interval_db_total = 0
             interval_ds_pass = 0
             interval_dd_pass = 0
+            interval_sd_pass = 0
 
             for dd in interval_days:
                 day_num = dd["day"]
@@ -614,28 +615,36 @@ def generate_interval_report(
 
                 ds_match = dd["dev_vs_src"]["content_match"]
                 dd_match = dd["dev_vs_db"]["content_match"]
+                sd_match = dd["src_vs_db"]["content_match"]
 
                 if ds_match:
                     interval_ds_pass += 1
                 if dd_match:
                     interval_dd_pass += 1
+                if sd_match:
+                    interval_sd_pass += 1
 
                 ds_mark = "PASS" if ds_match else "FAIL"
                 dd_mark = "PASS" if dd_match else "FAIL"
+                sd_mark = "PASS" if sd_match else "FAIL"
 
                 # Add diff detail if FAIL
                 ds_detail = ""
                 dd_detail = ""
+                sd_detail = ""
                 if not ds_match:
                     diff_cnt = dd["dev_vs_src"].get("diff_count", 0)
                     ds_detail = f" ({diff_cnt}差异)"
                 if not dd_match:
                     diff_cnt = dd["dev_vs_db"].get("diff_count", 0)
                     dd_detail = f" ({diff_cnt}差异)"
+                if not sd_match:
+                    diff_cnt = dd["src_vs_db"].get("diff_count", 0)
+                    sd_detail = f" ({diff_cnt}差异)"
 
                 a(
                     f"| Day {day_num:02d} | {date_str} | {dev_r:,} | {src_r:,} | "
-                    f"{db_r:,} | {ds_mark}{ds_detail} | {dd_mark}{dd_detail} |"
+                    f"{db_r:,} | {ds_mark}{ds_detail} | {dd_mark}{dd_detail} | {sd_mark}{sd_detail} |"
                 )
 
             # Interval totals row
@@ -643,7 +652,8 @@ def generate_interval_report(
                 f"| **合计** | | **{interval_dev_total:,}** | **{interval_src_total:,}** | "
                 f"**{interval_db_total:,}** | "
                 f"**{interval_ds_pass}/{len(interval_days)}天PASS** | "
-                f"**{interval_dd_pass}/{len(interval_days)}天PASS** |"
+                f"**{interval_dd_pass}/{len(interval_days)}天PASS** | "
+                f"**{interval_sd_pass}/{len(interval_days)}天PASS** |"
             )
             a("")
 
@@ -733,24 +743,21 @@ def generate_interval_report(
 
     # Check overall pass/fail for this interval
     all_ds_pass = all(ts["ds_content_match"] for ts in table_interval_summary)
-    # Exclude module1/Summary for "business data" conclusion
-    biz_dd_pass = all(
-        ts["dd_content_match"]
-        for ts in table_interval_summary
-        if ts["table_key"] != "module1/Summary"
-    )
+    all_dd_pass = all(ts["dd_content_match"] for ts in table_interval_summary)
+    all_sd_pass = all(ts["sd_content_match"] for ts in table_interval_summary)
 
-    if all_ds_pass and biz_dd_pass:
+    if all_ds_pass and all_dd_pass and all_sd_pass:
         a("**重构版本(Src/DB)与原始版本(Dev)业务数据100%一致**")
+    elif all_ds_pass and all_dd_pass:
+        a(f"**Dev vs Src**: 全部{ds_pass}张表数据100%一致")
+        a(f"**Dev vs DB**: 全部{dd_pass}张表数据100%一致")
+        a(f"**Src vs DB**: {sd_pass}/{total_tables}张表数据一致")
     elif all_ds_pass:
         a(f"**Dev vs Src**: 全部{ds_pass}张表数据100%一致")
-        a(
-            f"**Dev vs DB**: {dd_pass}/{total_tables}张表一致"
-            + ("（module1/Summary统计口径差异，不影响业务数据）" if biz_dd_pass else "")
-        )
+        a(f"**Dev vs DB**: {dd_pass}/{total_tables}张表数据一致")
     else:
-        a(f"Dev vs Src: {ds_pass}/{total_tables}张表一致")
-        a(f"Dev vs DB: {dd_pass}/{total_tables}张表一致")
+        a(f"Dev vs Src: {ds_pass}/{total_tables}张表数据一致")
+        a(f"Dev vs DB: {dd_pass}/{total_tables}张表数据一致")
     a("")
 
     a("验证覆盖（本区间）：")
@@ -758,7 +765,8 @@ def generate_interval_report(
         a(
             f"- {ts['module']} / {ts['table_cn']}: {ts['dev_rows']:,}行 "
             f"(Dev vs Src {'PASS' if ts['ds_content_match'] else 'FAIL'}, "
-            f"Dev vs DB {'PASS' if ts['dd_content_match'] else 'FAIL'})"
+            f"Dev vs DB {'PASS' if ts['dd_content_match'] else 'FAIL'}, "
+            f"Src vs DB {'PASS' if ts['sd_content_match'] else 'FAIL'})"
         )
     a("")
 
@@ -785,9 +793,9 @@ def generate_interval_report(
     a("")
     a("---")
     a("")
-    a("**报告生成时间**: 2026-02-10  ")
+    a("**报告生成时间**: 2026-02-26  ")
     a("**测试执行人**: chenxianyue002@chinasofti.com  ")
-    a("**版本**: v6.0")
+    a("**版本**: v7.0")
     a("")
 
     return "\n".join(lines)

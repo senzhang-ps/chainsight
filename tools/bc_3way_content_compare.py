@@ -26,19 +26,18 @@ from typing import Any
 
 import pandas as pd
 import numpy as np
-import psycopg2
+import psycopg
 
 warnings.filterwarnings("ignore")
 
 # ─── Configuration ───────────────────────────────────────────────────
 
 PROJECT_ROOT = Path(__file__).parent.parent
-DEV_DIR = PROJECT_ROOT / "ChainSight_Dev" / "BC_S5" / "run_20260211_181635"
-SRC_DIR = PROJECT_ROOT / "outputs" / "BC_S5" / "run_20260211_145215"
+DEV_DIR = PROJECT_ROOT / "outputs" / "dev_output" / "BC_S5" / "run_20260211_181635"
+SRC_DIR = PROJECT_ROOT / "outputs" / "BC_S5" / "run_20260301_111720"
 DB_CONN_PARAMS = dict(host="localhost", port=5432, dbname="test_db",
-                      user="postgres", password="123456", client_encoding="utf8")
-DB_RUN_ID = "BC_S5_20260211_145215"
-
+                      user="postgres", password="123456")
+DB_RUN_ID = "BC_S5_20260301_190902"
 START_DATE = datetime(2025, 10, 5)
 NUM_DAYS = 87
 
@@ -257,12 +256,21 @@ def get_daily_order_count(filepath: Path, date_str: str) -> int | None:
 
 
 def load_xlsx_sheet(filepath: Path, sheet_name: str,
-                    col_rename: dict | None = None) -> pd.DataFrame | None:
-    """Load a single sheet from an xlsx file. Returns None if not found/empty."""
+                    col_rename: dict | None = None,
+                    filter_date: str | None = None) -> pd.DataFrame | None:
+    """Load a single sheet from an xlsx file. Returns None if not found/empty.
+
+    If filter_date (YYYY-MM-DD) is provided and sheet_name == 'OrderLog',
+    filter to only rows where simulation_date == filter_date.
+    This is needed because OrderLog in xlsx is a cumulative snapshot.
+    """
     if not filepath.exists():
         return None
     try:
         df = pd.read_excel(filepath, sheet_name=sheet_name, engine="openpyxl")
+        if sheet_name == "OrderLog" and filter_date is not None and "simulation_date" in df.columns:
+            target = pd.Timestamp(filter_date)
+            df = df[df["simulation_date"] == target].copy()
         if col_rename:
             df = df.rename(columns=col_rename)
         return df
@@ -275,7 +283,11 @@ def load_db_data(conn, table: str, date_col: str, date_val: str,
     """Load data from DB for a specific simulation date, filtered by run_id."""
     try:
         query = f"SELECT * FROM {table} WHERE {date_col} = %s AND run_id = %s"
-        df = pd.read_sql(query, conn, params=[date_val, run_id])
+        with conn.cursor() as cur:
+            cur.execute(query, [date_val, run_id])
+            rows = cur.fetchall()
+            cols = [desc[0] for desc in cur.description]
+        df = pd.DataFrame(rows, columns=cols)
         # Drop DB metadata columns
         drop_cols = [c for c in df.columns if c in DB_META_COLS]
         df = df.drop(columns=drop_cols, errors="ignore")
@@ -510,7 +522,7 @@ def run_comparison(day_range: range, module_filter: str | None = None,
 
     conn = None
     try:
-        conn = psycopg2.connect(**DB_CONN_PARAMS)
+        conn = psycopg.connect(**DB_CONN_PARAMS)
         if verbose:
             print("DB connected", flush=True)
     except Exception as e:
@@ -547,24 +559,18 @@ def run_comparison(day_range: range, module_filter: str | None = None,
 
             xlsx_rename = mapping.get("xlsx_col_rename")
             dev_file = DEV_DIR / mod / mapping["file_pattern"].format(date=ds)
-            dev_df = load_xlsx_sheet(dev_file, sheet, col_rename=xlsx_rename)
+            dev_df = load_xlsx_sheet(dev_file, sheet, col_rename=xlsx_rename, filter_date=ds_iso)
 
             src_file = SRC_DIR / mod / mapping["file_pattern"].format(date=ds)
-            src_df = load_xlsx_sheet(src_file, sheet, col_rename=xlsx_rename)
+            src_df = load_xlsx_sheet(src_file, sheet, col_rename=xlsx_rename, filter_date=ds_iso)
 
             db_df = None
             if conn is not None:
                 db_df = load_db_data(conn, mapping["db_table"], mapping["db_date_col"],
                                      ds, mapping["db_col_rename"], DB_RUN_ID)
 
-            # Fix module1/Summary total_orders: convert cumulative to daily
-            if comp_key == "module1/Summary":
-                dev_daily_orders = get_daily_order_count(dev_file, ds_iso)
-                src_daily_orders = get_daily_order_count(src_file, ds_iso)
-                if dev_df is not None and dev_daily_orders is not None:
-                    dev_df["total_orders"] = dev_daily_orders
-                if src_df is not None and src_daily_orders is not None:
-                    src_df["total_orders"] = src_daily_orders
+            # Note: module1/Summary total_orders is cumulative in both xlsx and DB.
+            # No conversion needed — compare raw values directly.
 
             key_cols = mapping["key_cols"]
             compare_cols = mapping["compare_cols"]

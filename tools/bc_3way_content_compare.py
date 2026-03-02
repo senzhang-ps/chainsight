@@ -156,7 +156,7 @@ SHEET_MAPPINGS = [
                          "deploy_qty_with_plan_order", "deploy_from_in_transit",
                          "deploy_from_open_deployment_inbound", "deploy_from_future_production",
                          "planned_delivery_date", "orig_location", "leadtime", "is_cross_node",
-                         "deployed_qty_invCon_push", "deployed_qty", "quota"],
+                         "deployed_qty_invCon_push", "deployed_qty", "quota", "WFR", "VFR"],
         "db_col_rename": {"deployed_qty_invcon": "deployed_qty_invCon",
                           "deployed_qty_invcon_push": "deployed_qty_invCon_push",
                           "wfr": "WFR", "vfr": "VFR"},

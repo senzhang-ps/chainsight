@@ -84,6 +84,16 @@ SHEET_MAPPINGS = [
     {
         "module": "module1",
         "file_pattern": "module1_output_{date}.xlsx",
+        "sheet": "SupplyDemandLog",
+        "db_table": "module1_output_supplydemandlog",
+        "db_date_col": "sim_date",
+        "key_cols": ["date", "material", "location", "demand_element"],
+        "compare_cols": ["quantity"],
+        "db_col_rename": {},
+    },
+    {
+        "module": "module1",
+        "file_pattern": "module1_output_{date}.xlsx",
         "sheet": "Summary",
         "db_table": "module1_output_summary",
         "db_date_col": "sim_date",

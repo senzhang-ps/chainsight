@@ -50,6 +50,7 @@ MODULE_TABLES: list[tuple[str, str, list[tuple[str, str]]]] = [
         ("module1/OrderLog",        "订单日志 (OrderLog)"),
         ("module1/ShipmentLog",     "发货日志 (ShipmentLog)"),
         ("module1/CutLog",          "削减日志 (CutLog)"),
+        ("module1/SupplyDemandLog", "供需日志 (SupplyDemandLog)"),
         ("module1/Summary",         "每日汇总 (Summary)"),
     ]),
     ("Module3", "净需求计算模块", [

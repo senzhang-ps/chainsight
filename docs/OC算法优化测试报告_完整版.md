@@ -64,6 +64,7 @@
 | Module1 | 订单日志 (OrderLog) | 351,100 | 351,100 | 351,100 | PASS | PASS | PASS |
 | Module1 | 发货日志 (ShipmentLog) | 157,433 | 157,433 | 157,433 | PASS | PASS | PASS |
 | Module1 | 削减日志 (CutLog) | 157,433 | 157,433 | 157,433 | PASS | PASS | PASS |
+| Module1 | 供需日志 (SupplyDemandLog) | 16,251,840 | 16,251,840 | 16,251,840 | PASS | PASS | PASS |
 | Module1 | 每日汇总 (Summary) | 76 | 76 | 76 | PASS | PASS | PASS |
 | Module3 | 净需求 (NetDemand) | 93,693 | 93,693 | 93,693 | PASS | PASS | PASS |
 | Module4 | 生产计划 (ProductionPlan) | 685 | 685 | 685 | PASS | PASS | PASS |
@@ -77,9 +78,9 @@
 | Module6 | 车辆日志 (VehicleLog) | 823 | 823 | 823 | PASS | PASS | PASS |
 | Module6 | 卡车使用日志 (TruckUsageLog) | 803 | 803 | 803 | PASS | PASS | PASS |
 
-> **Dev vs Src**: 15/15 表全部PASS  
-> **Dev vs DB**:  15/15 表PASS  
-> **Src vs DB**:  15/15 表PASS
+> **Dev vs Src**: 16/16 表全部PASS  
+> **Dev vs DB**:  16/16 表PASS  
+> **Src vs DB**:  16/16 表PASS
 
 ---
 
@@ -339,6 +340,91 @@
 | Day 75 | 2026-02-27 | 2,069 | 2,069 | 2,069 | PASS | PASS | PASS |
 | Day 76 | 2026-02-28 | 2,065 | 2,065 | 2,065 | PASS | PASS | PASS |
 | **合计** | | **157,433** | **157,433** | **157,433** | **76/76天PASS** | **76/76天PASS** | **76/76天PASS** |
+
+#### 供需日志 (SupplyDemandLog)
+
+- **总行数 (全76天)**: Dev=16,251,840, Src=16,251,840, DB=16,251,840
+- **全局一致性**: Dev vs Src PASS, Dev vs DB PASS, Src vs DB PASS
+
+| 天数 | 日期 | Dev行数 | Src行数 | DB行数 | Dev vs Src | Dev vs DB | Src vs DB |
+|------|------|---------|---------|--------|------------|-----------|-----------|
+| Day 01 | 2025-12-15 | 213,840 | 213,840 | 213,840 | PASS | PASS | PASS |
+| Day 02 | 2025-12-16 | 213,840 | 213,840 | 213,840 | PASS | PASS | PASS |
+| Day 03 | 2025-12-17 | 213,840 | 213,840 | 213,840 | PASS | PASS | PASS |
+| Day 04 | 2025-12-18 | 213,840 | 213,840 | 213,840 | PASS | PASS | PASS |
+| Day 05 | 2025-12-19 | 213,840 | 213,840 | 213,840 | PASS | PASS | PASS |
+| Day 06 | 2025-12-20 | 213,840 | 213,840 | 213,840 | PASS | PASS | PASS |
+| Day 07 | 2025-12-21 | 213,840 | 213,840 | 213,840 | PASS | PASS | PASS |
+| Day 08 | 2025-12-22 | 213,840 | 213,840 | 213,840 | PASS | PASS | PASS |
+| Day 09 | 2025-12-23 | 213,840 | 213,840 | 213,840 | PASS | PASS | PASS |
+| Day 10 | 2025-12-24 | 213,840 | 213,840 | 213,840 | PASS | PASS | PASS |
+| Day 11 | 2025-12-25 | 213,840 | 213,840 | 213,840 | PASS | PASS | PASS |
+| Day 12 | 2025-12-26 | 213,840 | 213,840 | 213,840 | PASS | PASS | PASS |
+| Day 13 | 2025-12-27 | 213,840 | 213,840 | 213,840 | PASS | PASS | PASS |
+| Day 14 | 2025-12-28 | 213,840 | 213,840 | 213,840 | PASS | PASS | PASS |
+| Day 15 | 2025-12-29 | 213,840 | 213,840 | 213,840 | PASS | PASS | PASS |
+| Day 16 | 2025-12-30 | 213,840 | 213,840 | 213,840 | PASS | PASS | PASS |
+| Day 17 | 2025-12-31 | 213,840 | 213,840 | 213,840 | PASS | PASS | PASS |
+| Day 18 | 2026-01-01 | 213,840 | 213,840 | 213,840 | PASS | PASS | PASS |
+| Day 19 | 2026-01-02 | 213,840 | 213,840 | 213,840 | PASS | PASS | PASS |
+| Day 20 | 2026-01-03 | 213,840 | 213,840 | 213,840 | PASS | PASS | PASS |
+| Day 21 | 2026-01-04 | 213,840 | 213,840 | 213,840 | PASS | PASS | PASS |
+| Day 22 | 2026-01-05 | 213,840 | 213,840 | 213,840 | PASS | PASS | PASS |
+| Day 23 | 2026-01-06 | 213,840 | 213,840 | 213,840 | PASS | PASS | PASS |
+| Day 24 | 2026-01-07 | 213,840 | 213,840 | 213,840 | PASS | PASS | PASS |
+| Day 25 | 2026-01-08 | 213,840 | 213,840 | 213,840 | PASS | PASS | PASS |
+| Day 26 | 2026-01-09 | 213,840 | 213,840 | 213,840 | PASS | PASS | PASS |
+| Day 27 | 2026-01-10 | 213,840 | 213,840 | 213,840 | PASS | PASS | PASS |
+| Day 28 | 2026-01-11 | 213,840 | 213,840 | 213,840 | PASS | PASS | PASS |
+| Day 29 | 2026-01-12 | 213,840 | 213,840 | 213,840 | PASS | PASS | PASS |
+| Day 30 | 2026-01-13 | 213,840 | 213,840 | 213,840 | PASS | PASS | PASS |
+| Day 31 | 2026-01-14 | 213,840 | 213,840 | 213,840 | PASS | PASS | PASS |
+| Day 32 | 2026-01-15 | 213,840 | 213,840 | 213,840 | PASS | PASS | PASS |
+| Day 33 | 2026-01-16 | 213,840 | 213,840 | 213,840 | PASS | PASS | PASS |
+| Day 34 | 2026-01-17 | 213,840 | 213,840 | 213,840 | PASS | PASS | PASS |
+| Day 35 | 2026-01-18 | 213,840 | 213,840 | 213,840 | PASS | PASS | PASS |
+| Day 36 | 2026-01-19 | 213,840 | 213,840 | 213,840 | PASS | PASS | PASS |
+| Day 37 | 2026-01-20 | 213,840 | 213,840 | 213,840 | PASS | PASS | PASS |
+| Day 38 | 2026-01-21 | 213,840 | 213,840 | 213,840 | PASS | PASS | PASS |
+| Day 39 | 2026-01-22 | 213,840 | 213,840 | 213,840 | PASS | PASS | PASS |
+| Day 40 | 2026-01-23 | 213,840 | 213,840 | 213,840 | PASS | PASS | PASS |
+| Day 41 | 2026-01-24 | 213,840 | 213,840 | 213,840 | PASS | PASS | PASS |
+| Day 42 | 2026-01-25 | 213,840 | 213,840 | 213,840 | PASS | PASS | PASS |
+| Day 43 | 2026-01-26 | 213,840 | 213,840 | 213,840 | PASS | PASS | PASS |
+| Day 44 | 2026-01-27 | 213,840 | 213,840 | 213,840 | PASS | PASS | PASS |
+| Day 45 | 2026-01-28 | 213,840 | 213,840 | 213,840 | PASS | PASS | PASS |
+| Day 46 | 2026-01-29 | 213,840 | 213,840 | 213,840 | PASS | PASS | PASS |
+| Day 47 | 2026-01-30 | 213,840 | 213,840 | 213,840 | PASS | PASS | PASS |
+| Day 48 | 2026-01-31 | 213,840 | 213,840 | 213,840 | PASS | PASS | PASS |
+| Day 49 | 2026-02-01 | 213,840 | 213,840 | 213,840 | PASS | PASS | PASS |
+| Day 50 | 2026-02-02 | 213,840 | 213,840 | 213,840 | PASS | PASS | PASS |
+| Day 51 | 2026-02-03 | 213,840 | 213,840 | 213,840 | PASS | PASS | PASS |
+| Day 52 | 2026-02-04 | 213,840 | 213,840 | 213,840 | PASS | PASS | PASS |
+| Day 53 | 2026-02-05 | 213,840 | 213,840 | 213,840 | PASS | PASS | PASS |
+| Day 54 | 2026-02-06 | 213,840 | 213,840 | 213,840 | PASS | PASS | PASS |
+| Day 55 | 2026-02-07 | 213,840 | 213,840 | 213,840 | PASS | PASS | PASS |
+| Day 56 | 2026-02-08 | 213,840 | 213,840 | 213,840 | PASS | PASS | PASS |
+| Day 57 | 2026-02-09 | 213,840 | 213,840 | 213,840 | PASS | PASS | PASS |
+| Day 58 | 2026-02-10 | 213,840 | 213,840 | 213,840 | PASS | PASS | PASS |
+| Day 59 | 2026-02-11 | 213,840 | 213,840 | 213,840 | PASS | PASS | PASS |
+| Day 60 | 2026-02-12 | 213,840 | 213,840 | 213,840 | PASS | PASS | PASS |
+| Day 61 | 2026-02-13 | 213,840 | 213,840 | 213,840 | PASS | PASS | PASS |
+| Day 62 | 2026-02-14 | 213,840 | 213,840 | 213,840 | PASS | PASS | PASS |
+| Day 63 | 2026-02-15 | 213,840 | 213,840 | 213,840 | PASS | PASS | PASS |
+| Day 64 | 2026-02-16 | 213,840 | 213,840 | 213,840 | PASS | PASS | PASS |
+| Day 65 | 2026-02-17 | 213,840 | 213,840 | 213,840 | PASS | PASS | PASS |
+| Day 66 | 2026-02-18 | 213,840 | 213,840 | 213,840 | PASS | PASS | PASS |
+| Day 67 | 2026-02-19 | 213,840 | 213,840 | 213,840 | PASS | PASS | PASS |
+| Day 68 | 2026-02-20 | 213,840 | 213,840 | 213,840 | PASS | PASS | PASS |
+| Day 69 | 2026-02-21 | 213,840 | 213,840 | 213,840 | PASS | PASS | PASS |
+| Day 70 | 2026-02-22 | 213,840 | 213,840 | 213,840 | PASS | PASS | PASS |
+| Day 71 | 2026-02-23 | 213,840 | 213,840 | 213,840 | PASS | PASS | PASS |
+| Day 72 | 2026-02-24 | 213,840 | 213,840 | 213,840 | PASS | PASS | PASS |
+| Day 73 | 2026-02-25 | 213,840 | 213,840 | 213,840 | PASS | PASS | PASS |
+| Day 74 | 2026-02-26 | 213,840 | 213,840 | 213,840 | PASS | PASS | PASS |
+| Day 75 | 2026-02-27 | 213,840 | 213,840 | 213,840 | PASS | PASS | PASS |
+| Day 76 | 2026-02-28 | 213,840 | 213,840 | 213,840 | PASS | PASS | PASS |
+| **合计** | | **16,251,840** | **16,251,840** | **16,251,840** | **76/76天PASS** | **76/76天PASS** | **76/76天PASS** |
 
 #### 每日汇总 (Summary)
 
@@ -1472,6 +1558,7 @@
 - Module1 / 订单日志 (OrderLog): 351,100行 (Dev vs Src PASS, Dev vs DB PASS)
 - Module1 / 发货日志 (ShipmentLog): 157,433行 (Dev vs Src PASS, Dev vs DB PASS)
 - Module1 / 削减日志 (CutLog): 157,433行 (Dev vs Src PASS, Dev vs DB PASS)
+- Module1 / 供需日志 (SupplyDemandLog): 16,251,840行 (Dev vs Src PASS, Dev vs DB PASS)
 - Module1 / 每日汇总 (Summary): 76行 (Dev vs Src PASS, Dev vs DB PASS)
 - Module3 / 净需求 (NetDemand): 93,693行 (Dev vs Src PASS, Dev vs DB PASS)
 - Module4 / 生产计划 (ProductionPlan): 685行 (Dev vs Src PASS, Dev vs DB PASS)

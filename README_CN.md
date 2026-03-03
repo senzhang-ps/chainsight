@@ -16,7 +16,7 @@
 
 ## 💻 环境要求
 
-- **Python**: 3.10+ (推荐 3.11 或 3.13)
+- **Python**: 3.12（推荐使用 `.venv` 虚拟环境，已在 3.12.9 验证）
 - **操作系统**: Windows / Linux / macOS
 - **数据库** (可选): PostgreSQL 14+ (用于数据库模式)
 
@@ -35,8 +35,8 @@ cd chainsight
 
 **Windows (PowerShell):**
 ```powershell
-# 创建虚拟环境
-python -m venv .venv
+# 使用 Python 3.12 创建虚拟环境
+py -3.12 -m venv .venv
 
 # 激活虚拟环境
 Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope Process -Force; . .\.venv\Scripts\Activate.ps1
@@ -47,8 +47,8 @@ Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope Process -Force; . .\.ve
 
 **Windows (CMD):**
 ```cmd
-# 创建虚拟环境
-python -m venv .venv
+# 使用 Python 3.12 创建虚拟环境
+py -3.12 -m venv .venv
 
 # 激活虚拟环境
 .\.venv\Scripts\activate.bat
@@ -56,8 +56,8 @@ python -m venv .venv
 
 **Linux / macOS:**
 ```bash
-# 创建虚拟环境
-python3 -m venv .venv
+# 使用 Python 3.12 创建虚拟环境
+python3.12 -m venv .venv
 
 # 激活虚拟环境
 source .venv/bin/activate
@@ -76,12 +76,14 @@ python setup.py build_ext --inplace
 **核心依赖说明:**
 | 依赖 | 版本 | 用途 |
 |------|------|------|
-| pandas | 2.2.3 | 数据处理 |
+| pandas | 3.0.1 | 数据处理 |
 | openpyxl | 3.1.5 | Excel 读写 |
-| duckdb | 1.1.3 | 高性能数据处理 |
-| psycopg[binary] | 3.2.3 | PostgreSQL 连接 |
-| numpy | 2.0+ | 数值计算 |
-| Cython | 3.0+ | 性能优化（可选） |
+| xlsxwriter | 3.2.9 | Excel 写入（M6 输出）|
+| duckdb | 1.4.4 | 高性能数据处理 |
+| psycopg[binary] | 3.3.3 | PostgreSQL 连接 |
+| numpy | 2.4.2 | 数值计算 |
+| scipy | 1.17.1 | 统计计算 |
+| matplotlib | 3.10.8 | 图表生成 |
 
 ### 4. 运行仿真
 
@@ -664,15 +666,15 @@ python -c "from pgsql_db import DatabaseConnection; db = DatabaseConnection(); p
 
 ---
 
-**版本**: 2.1.0  
-**最后更新**: 2026-01-29
+**版本**: 2.1.1  
+**最后更新**: 2026-03-03
 
 ## 📝 更新日志
 
-### v2.1.0 (2026-01-29)
-- ✅ **代码清理**: 删除 42 个非必要的测试/调试脚本
-- ✅ **文档更新**: 更新架构文档，反映最新目录结构
-- ✅ **性能优化**: 添加 Cython 性能优化内核支持
+### v2.1.1 (2026-03-03)
+- ✅ **Python 3.12 支持**: 创建 `.venv` 虚拟环境（Python 3.12.9），确认所有依赖兼容
+- ✅ **依赖升级**: pandas 3.0.1, duckdb 1.4.4, numpy 2.4.2, scipy 1.17.1
+- ✅ **requirements.txt**: 按功能分类，附精确版本号
 - ✅ **数据处理**: 集成 DuckDB 高性能数据处理引擎
 - ✅ **数据库优化**: 完善统一配置表设计
 - ✅ **工具增强**: 增加对比、基准测试、报告生成工具

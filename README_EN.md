@@ -16,7 +16,7 @@
 
 ## 💻 Requirements
 
-- **Python**: 3.10+ (Recommended: 3.11 or 3.13)
+- **Python**: 3.12 (Virtual environment `.venv` recommended, validated on 3.12.9)
 - **OS**: Windows / Linux / macOS
 - **Database** (Optional): PostgreSQL 14+ (for database mode)
 
@@ -35,20 +35,23 @@ cd chainsight
 
 **Windows (PowerShell):**
 ```powershell
-python -m venv .venv
+# Create virtual environment with Python 3.12
+py -3.12 -m venv .venv
 Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope Process -Force
-.\.venv\Scripts\Activate.ps1
+.\venv\Scripts\Activate.ps1
 ```
 
 **Windows (CMD):**
 ```cmd
-python -m venv .venv
-.\.venv\Scripts\activate.bat
+# Create virtual environment with Python 3.12
+py -3.12 -m venv .venv
+.\venv\Scripts\activate.bat
 ```
 
 **Linux / macOS:**
 ```bash
-python3 -m venv .venv
+# Create virtual environment with Python 3.12
+python3.12 -m venv .venv
 source .venv/bin/activate
 ```
 
@@ -64,11 +67,16 @@ python setup.py build_ext --inplace
 **Core Dependencies:**
 | Package | Version | Purpose |
 |---------|---------|---------|
-| pandas | 2.2.3 | Data processing |
+| pandas | 3.0.1 | Data processing |
 | openpyxl | 3.1.5 | Excel I/O |
-| duckdb | 1.1.3 | High-performance data processing |
-| psycopg[binary] | 3.2.3 | PostgreSQL connection |
-| numpy | 2.0+ | Numerical computation |
+| xlsxwriter | 3.2.9 | Excel write (M6 output) |
+| duckdb | 1.4.4 | High-performance data processing |
+| psycopg[binary] | 3.3.3 | PostgreSQL connection |
+| numpy | 2.4.2 | Numerical computation |
+| scipy | 1.17.1 | Statistical computation |
+| matplotlib | 3.10.8 | Chart generation |
+| python-docx | 1.2.0 | Word report generation |
+| tqdm | 4.67.3 | Progress display |
 | Cython | 3.0+ | Performance optimization (optional) |
 # Resume mode
 python run.py --config test_files/BC_S5.xlsx --end-date 2025-10-15 --resume
@@ -568,5 +576,19 @@ Having issues? Check:
 
 ---
 
-**Version**: 2.1.0  
-**Last Updated**: 2026-01-09
+**Version**: 2.1.1  
+**Last Updated**: 2026-03-03
+
+## 📝 Changelog
+
+### v2.1.1 (2026-03-03)
+- ✅ **Python 3.12 support**: Created `.venv` virtual environment (Python 3.12.9), all dependencies verified
+- ✅ **Dependency upgrade**: pandas 3.0.1, duckdb 1.4.4, numpy 2.4.2, scipy 1.17.1
+- ✅ **Added xlsxwriter**: Required for Module6 Excel output
+- ✅ **requirements.txt**: Categorized with pinned versions
+
+### v2.1.0 (2026-01-29)
+- ✅ **Code cleanup**: Removed 42 unnecessary test/debug scripts
+- ✅ **Documentation**: Updated architecture docs
+- ✅ **Performance**: Added Cython optimization kernel support
+- ✅ **DuckDB integration**: High-performance data processing engine

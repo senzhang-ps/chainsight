@@ -669,44 +669,40 @@ def load_integrated_config(
         config['OrderLog'] = pd.DataFrame()
         config['TodayShipment'] = pd.DataFrame()
 
-    # 3. 🦆 加载生产计划（修复：合并当日production GR和未来生产计划）
+    # 3. 加载生产计划
+    # 与Dev版本行为一致：优先从orchestrator取当日GR，回退读Module4文件
+    # DB模式下module4_result作为文件读取的内存替代，行为与文件读取完全一致
     config['ProductionPlan'] = pd.DataFrame()
     
-    # 3.1 首先从orchestrator获取当日已确认的production GR（这是关键！）
-    # 在DB模式下，module4_result包含的是未来生产计划，不包含当日production GR
-    # 必须从orchestrator获取当日production GR，否则Module5计算dynamic_soh时会缺少当日产量
+    # 3.1 首先从orchestrator获取当日已确认的production GR
     if orchestrator and current_date:
         _load_production_from_orchestrator(orchestrator, current_date, config)
     
-    # 3.2 合并module4_result中的未来生产计划（仅在DB模式下）
-    if module4_result is not None and 'production_df' in module4_result:
-        production_df = module4_result['production_df']
-        if isinstance(production_df, pd.DataFrame) and not production_df.empty:
-            future_prod = production_df.copy()
-            # 确保available_date列存在并转换为datetime
-            if 'available_date' not in future_prod.columns and 'date' in future_prod.columns:
-                future_prod = future_prod.rename(columns={'date': 'available_date'})
-            if 'available_date' in future_prod.columns:
-                future_prod['available_date'] = pd.to_datetime(
-                    future_prod['available_date'], errors='coerce'
-                )
-                # 仅保留未来日期的生产计划，避免与当日production GR重复
-                current_date_normalized = pd.to_datetime(current_date).normalize()
-                future_prod = future_prod[
-                    future_prod['available_date'] > current_date_normalized
-                ]
-            # 合并当日GR和未来生产计划
-            if not future_prod.empty:
-                if not config['ProductionPlan'].empty:
-                    config['ProductionPlan'] = pd.concat(
-                        [config['ProductionPlan'], future_prod], ignore_index=True
-                    )
-                else:
-                    config['ProductionPlan'] = future_prod
-
-    # 3.3 如果以上都没有数据，最后从文件获取
+    # 3.2 如果orchestrator无数据，回退获取生产计划
+    # 优先从module4_result内存获取（DB模式），否则从文件获取（Src模式）
     if config['ProductionPlan'].empty:
-        _load_production_from_module4(module4_output_path, config)
+        if module4_result is not None and 'production_df' in module4_result:
+            # 内存模式：与_load_production_from_module4文件读取行为一致
+            production_df = module4_result['production_df']
+            if isinstance(production_df, pd.DataFrame) and not production_df.empty:
+                m4_production = production_df.copy()
+                if 'available_date' not in m4_production.columns:
+                    if 'date' in m4_production.columns:
+                        m4_production = m4_production.rename(
+                            columns={'date': 'available_date'}
+                        )
+                if 'available_date' in m4_production.columns:
+                    m4_production['available_date'] = pd.to_datetime(
+                        m4_production['available_date'], errors='coerce'
+                    )
+                for col in ['produced_qty', 'uncon_planned_qty', 'planned_qty', 'quantity']:
+                    if col in m4_production.columns:
+                        m4_production[col] = pd.to_numeric(
+                            m4_production[col], errors='coerce'
+                        ).fillna(0)
+                config['ProductionPlan'] = m4_production
+        else:
+            _load_production_from_module4(module4_output_path, config)
 
     # 4. 加载M4_MaterialLocationLineCfg
     config['M4_MaterialLocationLineCfg'] = config_dict.get(

@@ -1,0 +1,2157 @@
+{
+  "run_time": "2026-02-27T11:26:01.327058",
+  "day_range": "1-76",
+  "comparisons": {
+    "module3/NetDemand": {
+      "total_dev_rows": 93693,
+      "total_src_rows": 93693,
+      "total_db_rows": 93693,
+      "dev_vs_src_all_match": true,
+      "dev_vs_db_all_match": true,
+      "src_vs_db_all_match": true,
+      "total_dev_src_diffs": 0,
+      "total_dev_db_diffs": 0,
+      "total_src_db_diffs": 0,
+      "daily": [
+        {
+          "day": 1,
+          "date": "2025-12-15",
+          "dev_rows": 1227,
+          "src_rows": 1227,
+          "db_rows": 1227,
+          "dev_vs_src": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_src": 0
+          },
+          "dev_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_db": 0
+          },
+          "src_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_src": 0,
+            "only_in_db": 0
+          }
+        },
+        {
+          "day": 2,
+          "date": "2025-12-16",
+          "dev_rows": 1331,
+          "src_rows": 1331,
+          "db_rows": 1331,
+          "dev_vs_src": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_src": 0
+          },
+          "dev_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_db": 0
+          },
+          "src_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_src": 0,
+            "only_in_db": 0
+          }
+        },
+        {
+          "day": 3,
+          "date": "2025-12-17",
+          "dev_rows": 1492,
+          "src_rows": 1492,
+          "db_rows": 1492,
+          "dev_vs_src": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_src": 0
+          },
+          "dev_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_db": 0
+          },
+          "src_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_src": 0,
+            "only_in_db": 0
+          }
+        },
+        {
+          "day": 4,
+          "date": "2025-12-18",
+          "dev_rows": 1644,
+          "src_rows": 1644,
+          "db_rows": 1644,
+          "dev_vs_src": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_src": 0
+          },
+          "dev_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_db": 0
+          },
+          "src_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_src": 0,
+            "only_in_db": 0
+          }
+        },
+        {
+          "day": 5,
+          "date": "2025-12-19",
+          "dev_rows": 1743,
+          "src_rows": 1743,
+          "db_rows": 1743,
+          "dev_vs_src": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_src": 0
+          },
+          "dev_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_db": 0
+          },
+          "src_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_src": 0,
+            "only_in_db": 0
+          }
+        },
+        {
+          "day": 6,
+          "date": "2025-12-20",
+          "dev_rows": 1888,
+          "src_rows": 1888,
+          "db_rows": 1888,
+          "dev_vs_src": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_src": 0
+          },
+          "dev_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_db": 0
+          },
+          "src_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_src": 0,
+            "only_in_db": 0
+          }
+        },
+        {
+          "day": 7,
+          "date": "2025-12-21",
+          "dev_rows": 2001,
+          "src_rows": 2001,
+          "db_rows": 2001,
+          "dev_vs_src": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_src": 0
+          },
+          "dev_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_db": 0
+          },
+          "src_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_src": 0,
+            "only_in_db": 0
+          }
+        },
+        {
+          "day": 8,
+          "date": "2025-12-22",
+          "dev_rows": 2032,
+          "src_rows": 2032,
+          "db_rows": 2032,
+          "dev_vs_src": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_src": 0
+          },
+          "dev_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_db": 0
+          },
+          "src_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_src": 0,
+            "only_in_db": 0
+          }
+        },
+        {
+          "day": 9,
+          "date": "2025-12-23",
+          "dev_rows": 2020,
+          "src_rows": 2020,
+          "db_rows": 2020,
+          "dev_vs_src": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_src": 0
+          },
+          "dev_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_db": 0
+          },
+          "src_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_src": 0,
+            "only_in_db": 0
+          }
+        },
+        {
+          "day": 10,
+          "date": "2025-12-24",
+          "dev_rows": 2005,
+          "src_rows": 2005,
+          "db_rows": 2005,
+          "dev_vs_src": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_src": 0
+          },
+          "dev_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_db": 0
+          },
+          "src_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_src": 0,
+            "only_in_db": 0
+          }
+        },
+        {
+          "day": 11,
+          "date": "2025-12-25",
+          "dev_rows": 1958,
+          "src_rows": 1958,
+          "db_rows": 1958,
+          "dev_vs_src": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_src": 0
+          },
+          "dev_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_db": 0
+          },
+          "src_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_src": 0,
+            "only_in_db": 0
+          }
+        },
+        {
+          "day": 12,
+          "date": "2025-12-26",
+          "dev_rows": 1920,
+          "src_rows": 1920,
+          "db_rows": 1920,
+          "dev_vs_src": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_src": 0
+          },
+          "dev_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_db": 0
+          },
+          "src_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_src": 0,
+            "only_in_db": 0
+          }
+        },
+        {
+          "day": 13,
+          "date": "2025-12-27",
+          "dev_rows": 1886,
+          "src_rows": 1886,
+          "db_rows": 1886,
+          "dev_vs_src": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_src": 0
+          },
+          "dev_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_db": 0
+          },
+          "src_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_src": 0,
+            "only_in_db": 0
+          }
+        },
+        {
+          "day": 14,
+          "date": "2025-12-28",
+          "dev_rows": 1845,
+          "src_rows": 1845,
+          "db_rows": 1845,
+          "dev_vs_src": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_src": 0
+          },
+          "dev_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_db": 0
+          },
+          "src_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_src": 0,
+            "only_in_db": 0
+          }
+        },
+        {
+          "day": 15,
+          "date": "2025-12-29",
+          "dev_rows": 1819,
+          "src_rows": 1819,
+          "db_rows": 1819,
+          "dev_vs_src": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_src": 0
+          },
+          "dev_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_db": 0
+          },
+          "src_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_src": 0,
+            "only_in_db": 0
+          }
+        },
+        {
+          "day": 16,
+          "date": "2025-12-30",
+          "dev_rows": 1782,
+          "src_rows": 1782,
+          "db_rows": 1782,
+          "dev_vs_src": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_src": 0
+          },
+          "dev_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_db": 0
+          },
+          "src_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_src": 0,
+            "only_in_db": 0
+          }
+        },
+        {
+          "day": 17,
+          "date": "2025-12-31",
+          "dev_rows": 1784,
+          "src_rows": 1784,
+          "db_rows": 1784,
+          "dev_vs_src": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_src": 0
+          },
+          "dev_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_db": 0
+          },
+          "src_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_src": 0,
+            "only_in_db": 0
+          }
+        },
+        {
+          "day": 18,
+          "date": "2026-01-01",
+          "dev_rows": 1835,
+          "src_rows": 1835,
+          "db_rows": 1835,
+          "dev_vs_src": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_src": 0
+          },
+          "dev_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_db": 0
+          },
+          "src_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_src": 0,
+            "only_in_db": 0
+          }
+        },
+        {
+          "day": 19,
+          "date": "2026-01-02",
+          "dev_rows": 1816,
+          "src_rows": 1816,
+          "db_rows": 1816,
+          "dev_vs_src": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_src": 0
+          },
+          "dev_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_db": 0
+          },
+          "src_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_src": 0,
+            "only_in_db": 0
+          }
+        },
+        {
+          "day": 20,
+          "date": "2026-01-03",
+          "dev_rows": 1799,
+          "src_rows": 1799,
+          "db_rows": 1799,
+          "dev_vs_src": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_src": 0
+          },
+          "dev_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_db": 0
+          },
+          "src_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_src": 0,
+            "only_in_db": 0
+          }
+        },
+        {
+          "day": 21,
+          "date": "2026-01-04",
+          "dev_rows": 1815,
+          "src_rows": 1815,
+          "db_rows": 1815,
+          "dev_vs_src": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_src": 0
+          },
+          "dev_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_db": 0
+          },
+          "src_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_src": 0,
+            "only_in_db": 0
+          }
+        },
+        {
+          "day": 22,
+          "date": "2026-01-05",
+          "dev_rows": 1796,
+          "src_rows": 1796,
+          "db_rows": 1796,
+          "dev_vs_src": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_src": 0
+          },
+          "dev_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_db": 0
+          },
+          "src_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_src": 0,
+            "only_in_db": 0
+          }
+        },
+        {
+          "day": 23,
+          "date": "2026-01-06",
+          "dev_rows": 1753,
+          "src_rows": 1753,
+          "db_rows": 1753,
+          "dev_vs_src": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_src": 0
+          },
+          "dev_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_db": 0
+          },
+          "src_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_src": 0,
+            "only_in_db": 0
+          }
+        },
+        {
+          "day": 24,
+          "date": "2026-01-07",
+          "dev_rows": 1717,
+          "src_rows": 1717,
+          "db_rows": 1717,
+          "dev_vs_src": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_src": 0
+          },
+          "dev_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_db": 0
+          },
+          "src_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_src": 0,
+            "only_in_db": 0
+          }
+        },
+        {
+          "day": 25,
+          "date": "2026-01-08",
+          "dev_rows": 1694,
+          "src_rows": 1694,
+          "db_rows": 1694,
+          "dev_vs_src": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_src": 0
+          },
+          "dev_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_db": 0
+          },
+          "src_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_src": 0,
+            "only_in_db": 0
+          }
+        },
+        {
+          "day": 26,
+          "date": "2026-01-09",
+          "dev_rows": 1689,
+          "src_rows": 1689,
+          "db_rows": 1689,
+          "dev_vs_src": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_src": 0
+          },
+          "dev_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_db": 0
+          },
+          "src_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_src": 0,
+            "only_in_db": 0
+          }
+        },
+        {
+          "day": 27,
+          "date": "2026-01-10",
+          "dev_rows": 1726,
+          "src_rows": 1726,
+          "db_rows": 1726,
+          "dev_vs_src": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_src": 0
+          },
+          "dev_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_db": 0
+          },
+          "src_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_src": 0,
+            "only_in_db": 0
+          }
+        },
+        {
+          "day": 28,
+          "date": "2026-01-11",
+          "dev_rows": 1664,
+          "src_rows": 1664,
+          "db_rows": 1664,
+          "dev_vs_src": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_src": 0
+          },
+          "dev_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_db": 0
+          },
+          "src_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_src": 0,
+            "only_in_db": 0
+          }
+        },
+        {
+          "day": 29,
+          "date": "2026-01-12",
+          "dev_rows": 1515,
+          "src_rows": 1515,
+          "db_rows": 1515,
+          "dev_vs_src": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_src": 0
+          },
+          "dev_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_db": 0
+          },
+          "src_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_src": 0,
+            "only_in_db": 0
+          }
+        },
+        {
+          "day": 30,
+          "date": "2026-01-13",
+          "dev_rows": 1490,
+          "src_rows": 1490,
+          "db_rows": 1490,
+          "dev_vs_src": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_src": 0
+          },
+          "dev_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_db": 0
+          },
+          "src_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_src": 0,
+            "only_in_db": 0
+          }
+        },
+        {
+          "day": 31,
+          "date": "2026-01-14",
+          "dev_rows": 1379,
+          "src_rows": 1379,
+          "db_rows": 1379,
+          "dev_vs_src": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_src": 0
+          },
+          "dev_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_db": 0
+          },
+          "src_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_src": 0,
+            "only_in_db": 0
+          }
+        },
+        {
+          "day": 32,
+          "date": "2026-01-15",
+          "dev_rows": 1344,
+          "src_rows": 1344,
+          "db_rows": 1344,
+          "dev_vs_src": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_src": 0
+          },
+          "dev_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_db": 0
+          },
+          "src_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_src": 0,
+            "only_in_db": 0
+          }
+        },
+        {
+          "day": 33,
+          "date": "2026-01-16",
+          "dev_rows": 1376,
+          "src_rows": 1376,
+          "db_rows": 1376,
+          "dev_vs_src": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_src": 0
+          },
+          "dev_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_db": 0
+          },
+          "src_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_src": 0,
+            "only_in_db": 0
+          }
+        },
+        {
+          "day": 34,
+          "date": "2026-01-17",
+          "dev_rows": 1284,
+          "src_rows": 1284,
+          "db_rows": 1284,
+          "dev_vs_src": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_src": 0
+          },
+          "dev_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_db": 0
+          },
+          "src_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_src": 0,
+            "only_in_db": 0
+          }
+        },
+        {
+          "day": 35,
+          "date": "2026-01-18",
+          "dev_rows": 1286,
+          "src_rows": 1286,
+          "db_rows": 1286,
+          "dev_vs_src": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_src": 0
+          },
+          "dev_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_db": 0
+          },
+          "src_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_src": 0,
+            "only_in_db": 0
+          }
+        },
+        {
+          "day": 36,
+          "date": "2026-01-19",
+          "dev_rows": 1159,
+          "src_rows": 1159,
+          "db_rows": 1159,
+          "dev_vs_src": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_src": 0
+          },
+          "dev_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_db": 0
+          },
+          "src_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_src": 0,
+            "only_in_db": 0
+          }
+        },
+        {
+          "day": 37,
+          "date": "2026-01-20",
+          "dev_rows": 1111,
+          "src_rows": 1111,
+          "db_rows": 1111,
+          "dev_vs_src": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_src": 0
+          },
+          "dev_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_db": 0
+          },
+          "src_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_src": 0,
+            "only_in_db": 0
+          }
+        },
+        {
+          "day": 38,
+          "date": "2026-01-21",
+          "dev_rows": 1122,
+          "src_rows": 1122,
+          "db_rows": 1122,
+          "dev_vs_src": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_src": 0
+          },
+          "dev_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_db": 0
+          },
+          "src_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_src": 0,
+            "only_in_db": 0
+          }
+        },
+        {
+          "day": 39,
+          "date": "2026-01-22",
+          "dev_rows": 1088,
+          "src_rows": 1088,
+          "db_rows": 1088,
+          "dev_vs_src": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_src": 0
+          },
+          "dev_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_db": 0
+          },
+          "src_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_src": 0,
+            "only_in_db": 0
+          }
+        },
+        {
+          "day": 40,
+          "date": "2026-01-23",
+          "dev_rows": 1184,
+          "src_rows": 1184,
+          "db_rows": 1184,
+          "dev_vs_src": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_src": 0
+          },
+          "dev_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_db": 0
+          },
+          "src_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_src": 0,
+            "only_in_db": 0
+          }
+        },
+        {
+          "day": 41,
+          "date": "2026-01-24",
+          "dev_rows": 1188,
+          "src_rows": 1188,
+          "db_rows": 1188,
+          "dev_vs_src": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_src": 0
+          },
+          "dev_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_db": 0
+          },
+          "src_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_src": 0,
+            "only_in_db": 0
+          }
+        },
+        {
+          "day": 42,
+          "date": "2026-01-25",
+          "dev_rows": 1113,
+          "src_rows": 1113,
+          "db_rows": 1113,
+          "dev_vs_src": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_src": 0
+          },
+          "dev_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_db": 0
+          },
+          "src_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_src": 0,
+            "only_in_db": 0
+          }
+        },
+        {
+          "day": 43,
+          "date": "2026-01-26",
+          "dev_rows": 1051,
+          "src_rows": 1051,
+          "db_rows": 1051,
+          "dev_vs_src": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_src": 0
+          },
+          "dev_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_db": 0
+          },
+          "src_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_src": 0,
+            "only_in_db": 0
+          }
+        },
+        {
+          "day": 44,
+          "date": "2026-01-27",
+          "dev_rows": 1000,
+          "src_rows": 1000,
+          "db_rows": 1000,
+          "dev_vs_src": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_src": 0
+          },
+          "dev_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_db": 0
+          },
+          "src_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_src": 0,
+            "only_in_db": 0
+          }
+        },
+        {
+          "day": 45,
+          "date": "2026-01-28",
+          "dev_rows": 997,
+          "src_rows": 997,
+          "db_rows": 997,
+          "dev_vs_src": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_src": 0
+          },
+          "dev_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_db": 0
+          },
+          "src_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_src": 0,
+            "only_in_db": 0
+          }
+        },
+        {
+          "day": 46,
+          "date": "2026-01-29",
+          "dev_rows": 1012,
+          "src_rows": 1012,
+          "db_rows": 1012,
+          "dev_vs_src": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_src": 0
+          },
+          "dev_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_db": 0
+          },
+          "src_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_src": 0,
+            "only_in_db": 0
+          }
+        },
+        {
+          "day": 47,
+          "date": "2026-01-30",
+          "dev_rows": 1060,
+          "src_rows": 1060,
+          "db_rows": 1060,
+          "dev_vs_src": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_src": 0
+          },
+          "dev_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_db": 0
+          },
+          "src_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_src": 0,
+            "only_in_db": 0
+          }
+        },
+        {
+          "day": 48,
+          "date": "2026-01-31",
+          "dev_rows": 1014,
+          "src_rows": 1014,
+          "db_rows": 1014,
+          "dev_vs_src": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_src": 0
+          },
+          "dev_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_db": 0
+          },
+          "src_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_src": 0,
+            "only_in_db": 0
+          }
+        },
+        {
+          "day": 49,
+          "date": "2026-02-01",
+          "dev_rows": 1022,
+          "src_rows": 1022,
+          "db_rows": 1022,
+          "dev_vs_src": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_src": 0
+          },
+          "dev_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_db": 0
+          },
+          "src_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_src": 0,
+            "only_in_db": 0
+          }
+        },
+        {
+          "day": 50,
+          "date": "2026-02-02",
+          "dev_rows": 986,
+          "src_rows": 986,
+          "db_rows": 986,
+          "dev_vs_src": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_src": 0
+          },
+          "dev_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_db": 0
+          },
+          "src_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_src": 0,
+            "only_in_db": 0
+          }
+        },
+        {
+          "day": 51,
+          "date": "2026-02-03",
+          "dev_rows": 953,
+          "src_rows": 953,
+          "db_rows": 953,
+          "dev_vs_src": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_src": 0
+          },
+          "dev_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_db": 0
+          },
+          "src_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_src": 0,
+            "only_in_db": 0
+          }
+        },
+        {
+          "day": 52,
+          "date": "2026-02-04",
+          "dev_rows": 956,
+          "src_rows": 956,
+          "db_rows": 956,
+          "dev_vs_src": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_src": 0
+          },
+          "dev_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_db": 0
+          },
+          "src_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_src": 0,
+            "only_in_db": 0
+          }
+        },
+        {
+          "day": 53,
+          "date": "2026-02-05",
+          "dev_rows": 930,
+          "src_rows": 930,
+          "db_rows": 930,
+          "dev_vs_src": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_src": 0
+          },
+          "dev_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_db": 0
+          },
+          "src_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_src": 0,
+            "only_in_db": 0
+          }
+        },
+        {
+          "day": 54,
+          "date": "2026-02-06",
+          "dev_rows": 919,
+          "src_rows": 919,
+          "db_rows": 919,
+          "dev_vs_src": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_src": 0
+          },
+          "dev_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_db": 0
+          },
+          "src_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_src": 0,
+            "only_in_db": 0
+          }
+        },
+        {
+          "day": 55,
+          "date": "2026-02-07",
+          "dev_rows": 924,
+          "src_rows": 924,
+          "db_rows": 924,
+          "dev_vs_src": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_src": 0
+          },
+          "dev_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_db": 0
+          },
+          "src_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_src": 0,
+            "only_in_db": 0
+          }
+        },
+        {
+          "day": 56,
+          "date": "2026-02-08",
+          "dev_rows": 866,
+          "src_rows": 866,
+          "db_rows": 866,
+          "dev_vs_src": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_src": 0
+          },
+          "dev_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_db": 0
+          },
+          "src_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_src": 0,
+            "only_in_db": 0
+          }
+        },
+        {
+          "day": 57,
+          "date": "2026-02-09",
+          "dev_rows": 843,
+          "src_rows": 843,
+          "db_rows": 843,
+          "dev_vs_src": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_src": 0
+          },
+          "dev_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_db": 0
+          },
+          "src_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_src": 0,
+            "only_in_db": 0
+          }
+        },
+        {
+          "day": 58,
+          "date": "2026-02-10",
+          "dev_rows": 769,
+          "src_rows": 769,
+          "db_rows": 769,
+          "dev_vs_src": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_src": 0
+          },
+          "dev_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_db": 0
+          },
+          "src_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_src": 0,
+            "only_in_db": 0
+          }
+        },
+        {
+          "day": 59,
+          "date": "2026-02-11",
+          "dev_rows": 730,
+          "src_rows": 730,
+          "db_rows": 730,
+          "dev_vs_src": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_src": 0
+          },
+          "dev_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_db": 0
+          },
+          "src_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_src": 0,
+            "only_in_db": 0
+          }
+        },
+        {
+          "day": 60,
+          "date": "2026-02-12",
+          "dev_rows": 715,
+          "src_rows": 715,
+          "db_rows": 715,
+          "dev_vs_src": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_src": 0
+          },
+          "dev_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_db": 0
+          },
+          "src_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_src": 0,
+            "only_in_db": 0
+          }
+        },
+        {
+          "day": 61,
+          "date": "2026-02-13",
+          "dev_rows": 699,
+          "src_rows": 699,
+          "db_rows": 699,
+          "dev_vs_src": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_src": 0
+          },
+          "dev_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_db": 0
+          },
+          "src_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_src": 0,
+            "only_in_db": 0
+          }
+        },
+        {
+          "day": 62,
+          "date": "2026-02-14",
+          "dev_rows": 671,
+          "src_rows": 671,
+          "db_rows": 671,
+          "dev_vs_src": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_src": 0
+          },
+          "dev_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_db": 0
+          },
+          "src_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_src": 0,
+            "only_in_db": 0
+          }
+        },
+        {
+          "day": 63,
+          "date": "2026-02-15",
+          "dev_rows": 683,
+          "src_rows": 683,
+          "db_rows": 683,
+          "dev_vs_src": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_src": 0
+          },
+          "dev_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_db": 0
+          },
+          "src_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_src": 0,
+            "only_in_db": 0
+          }
+        },
+        {
+          "day": 64,
+          "date": "2026-02-16",
+          "dev_rows": 788,
+          "src_rows": 788,
+          "db_rows": 788,
+          "dev_vs_src": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_src": 0
+          },
+          "dev_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_db": 0
+          },
+          "src_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_src": 0,
+            "only_in_db": 0
+          }
+        },
+        {
+          "day": 65,
+          "date": "2026-02-17",
+          "dev_rows": 794,
+          "src_rows": 794,
+          "db_rows": 794,
+          "dev_vs_src": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_src": 0
+          },
+          "dev_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_db": 0
+          },
+          "src_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_src": 0,
+            "only_in_db": 0
+          }
+        },
+        {
+          "day": 66,
+          "date": "2026-02-18",
+          "dev_rows": 845,
+          "src_rows": 845,
+          "db_rows": 845,
+          "dev_vs_src": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_src": 0
+          },
+          "dev_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_db": 0
+          },
+          "src_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_src": 0,
+            "only_in_db": 0
+          }
+        },
+        {
+          "day": 67,
+          "date": "2026-02-19",
+          "dev_rows": 922,
+          "src_rows": 922,
+          "db_rows": 922,
+          "dev_vs_src": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_src": 0
+          },
+          "dev_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_db": 0
+          },
+          "src_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_src": 0,
+            "only_in_db": 0
+          }
+        },
+        {
+          "day": 68,
+          "date": "2026-02-20",
+          "dev_rows": 921,
+          "src_rows": 921,
+          "db_rows": 921,
+          "dev_vs_src": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_src": 0
+          },
+          "dev_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_db": 0
+          },
+          "src_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_src": 0,
+            "only_in_db": 0
+          }
+        },
+        {
+          "day": 69,
+          "date": "2026-02-21",
+          "dev_rows": 847,
+          "src_rows": 847,
+          "db_rows": 847,
+          "dev_vs_src": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_src": 0
+          },
+          "dev_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_db": 0
+          },
+          "src_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_src": 0,
+            "only_in_db": 0
+          }
+        },
+        {
+          "day": 70,
+          "date": "2026-02-22",
+          "dev_rows": 527,
+          "src_rows": 527,
+          "db_rows": 527,
+          "dev_vs_src": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_src": 0
+          },
+          "dev_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_db": 0
+          },
+          "src_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_src": 0,
+            "only_in_db": 0
+          }
+        },
+        {
+          "day": 71,
+          "date": "2026-02-23",
+          "dev_rows": 476,
+          "src_rows": 476,
+          "db_rows": 476,
+          "dev_vs_src": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_src": 0
+          },
+          "dev_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_db": 0
+          },
+          "src_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_src": 0,
+            "only_in_db": 0
+          }
+        },
+        {
+          "day": 72,
+          "date": "2026-02-24",
+          "dev_rows": 394,
+          "src_rows": 394,
+          "db_rows": 394,
+          "dev_vs_src": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_src": 0
+          },
+          "dev_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_db": 0
+          },
+          "src_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_src": 0,
+            "only_in_db": 0
+          }
+        },
+        {
+          "day": 73,
+          "date": "2026-02-25",
+          "dev_rows": 225,
+          "src_rows": 225,
+          "db_rows": 225,
+          "dev_vs_src": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_src": 0
+          },
+          "dev_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_db": 0
+          },
+          "src_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_src": 0,
+            "only_in_db": 0
+          }
+        },
+        {
+          "day": 74,
+          "date": "2026-02-26",
+          "dev_rows": 238,
+          "src_rows": 238,
+          "db_rows": 238,
+          "dev_vs_src": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_src": 0
+          },
+          "dev_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_db": 0
+          },
+          "src_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_src": 0,
+            "only_in_db": 0
+          }
+        },
+        {
+          "day": 75,
+          "date": "2026-02-27",
+          "dev_rows": 277,
+          "src_rows": 277,
+          "db_rows": 277,
+          "dev_vs_src": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_src": 0
+          },
+          "dev_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_db": 0
+          },
+          "src_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_src": 0,
+            "only_in_db": 0
+          }
+        },
+        {
+          "day": 76,
+          "date": "2026-02-28",
+          "dev_rows": 319,
+          "src_rows": 319,
+          "db_rows": 319,
+          "dev_vs_src": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_src": 0
+          },
+          "dev_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_dev": 0,
+            "only_in_db": 0
+          },
+          "src_vs_db": {
+            "row_match": true,
+            "content_match": true,
+            "diff_count": 0,
+            "only_in_src": 0,
+            "only_in_db": 0
+          }
+        }
+      ]
+    }
+  },
+  "summary": {
+    "total_sheets_compared": 1,
+    "dev_vs_src_pass": 1,
+    "dev_vs_db_pass": 1,
+    "src_vs_db_pass": 1,
+    "dev_vs_src_fail": 0,
+    "dev_vs_db_fail": 0,
+    "src_vs_db_fail": 0
+  },
+  "elapsed_seconds": 24.4
+}

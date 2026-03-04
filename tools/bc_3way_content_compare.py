@@ -26,18 +26,19 @@ from typing import Any
 
 import pandas as pd
 import numpy as np
-import psycopg
+import psycopg2
 
 warnings.filterwarnings("ignore")
 
 # ─── Configuration ───────────────────────────────────────────────────
 
 PROJECT_ROOT = Path(__file__).parent.parent
-DEV_DIR = PROJECT_ROOT / "outputs" / "dev_output" / "BC_S5" / "run_20260211_181635"
-SRC_DIR = PROJECT_ROOT / "outputs" / "BC_S5" / "run_20260301_111720"
+DEV_DIR = PROJECT_ROOT / "ChainSight_Dev" / "BC_S5" / "run_20260211_181635"
+SRC_DIR = PROJECT_ROOT / "outputs" / "BC_S5" / "run_20260211_145215"
 DB_CONN_PARAMS = dict(host="localhost", port=5432, dbname="test_db",
-                      user="postgres", password="123456")
-DB_RUN_ID = "BC_S5_20260301_190902"
+                      user="postgres", password="123456", client_encoding="utf8")
+DB_RUN_ID = "BC_S5_20260226_223105"
+
 START_DATE = datetime(2025, 10, 5)
 NUM_DAYS = 87
 
@@ -156,7 +157,7 @@ SHEET_MAPPINGS = [
                          "deploy_qty_with_plan_order", "deploy_from_in_transit",
                          "deploy_from_open_deployment_inbound", "deploy_from_future_production",
                          "planned_delivery_date", "orig_location", "leadtime", "is_cross_node",
-                         "deployed_qty_invCon_push", "deployed_qty", "quota", "WFR", "VFR"],
+                         "deployed_qty_invCon_push", "deployed_qty", "quota"],
         "db_col_rename": {"deployed_qty_invcon": "deployed_qty_invCon",
                           "deployed_qty_invcon_push": "deployed_qty_invCon_push",
                           "wfr": "WFR", "vfr": "VFR"},
@@ -283,11 +284,7 @@ def load_db_data(conn, table: str, date_col: str, date_val: str,
     """Load data from DB for a specific simulation date, filtered by run_id."""
     try:
         query = f"SELECT * FROM {table} WHERE {date_col} = %s AND run_id = %s"
-        with conn.cursor() as cur:
-            cur.execute(query, [date_val, run_id])
-            rows = cur.fetchall()
-            cols = [desc[0] for desc in cur.description]
-        df = pd.DataFrame(rows, columns=cols)
+        df = pd.read_sql(query, conn, params=[date_val, run_id])
         # Drop DB metadata columns
         drop_cols = [c for c in df.columns if c in DB_META_COLS]
         df = df.drop(columns=drop_cols, errors="ignore")
@@ -522,7 +519,7 @@ def run_comparison(day_range: range, module_filter: str | None = None,
 
     conn = None
     try:
-        conn = psycopg.connect(**DB_CONN_PARAMS)
+        conn = psycopg2.connect(**DB_CONN_PARAMS)
         if verbose:
             print("DB connected", flush=True)
     except Exception as e:

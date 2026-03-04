@@ -45,7 +45,7 @@ def create_report():
     info.alignment = WD_ALIGN_PARAGRAPH.CENTER
     info.add_run('文档版本: v1.0\n').bold = True
     info.add_run('报告日期: 2026年1月23日\n')
-    info.add_run('测试执行人: GitHub Copilot\n')
+    info.add_run('测试执行人: chenxianyue002@chinasofti.com\n')
     info.add_run('测试环境: Windows 11, Python 3.13.1')
     
     doc.add_page_break()
@@ -196,13 +196,13 @@ def create_report():
     
     doc.add_heading('3.3 测试配置', level=2)
     config_info = [
-        '配置名称: BC_S5',
-        '仿真日期: 2025-10-06 到 2025-10-10 (5天)',
+        '配置名称: OC_Paste_S1_20251224',
+        '仿真日期: 2025-12-15 到 2026-02-28 (76天)',
         '配置表数量: 31个',
-        'M1_DemandForecast: 6838行',
-        'M3_SafetyStock: 37940行',
-        'Global_Network: 519行',
-        'M5_DeployConfig: 641行',
+        'M1_DemandForecast: 681912 天级分解',
+        'M3_SafetyStock: 4746 行节点',
+        'Global_Network: 4397 行',
+        'M5_DeployConfig: 41240 行（源数据）',
     ]
     for c in config_info:
         doc.add_paragraph(c, style='List Bullet')

@@ -32,9 +32,9 @@ from typing import Any
 BASE_DIR = Path(r"D:\PG\test\chainsight")
 
 LOG_PATHS: dict[str, Path] = {
-    "Dev": BASE_DIR / "outputs" / "dev_output" / "OC_Paste_S1_20251224" / "run_20260127_142402" / "simulation_log_20260127_142402.txt",
-    "Src": BASE_DIR / "outputs" / "OC_Paste_S1_20251224" / "run_20260301_125122" / "simulation_log_20260301_125122.txt",
-    "DB":  BASE_DIR / "outputs" / "db_OC_Paste_S1_20251224_20260301_222907" / "simulation_log_20260301_222907.txt",
+    "Dev": BASE_DIR / "outputs" / "run_20260127_142402" / "simulation_log_20260127_142402.txt",
+    "Src": BASE_DIR / "outputs" / "OC_Paste_S1_20251224" / "run_20260209_222302" / "simulation_log_20260209_222302.txt",
+    "DB":  BASE_DIR / "outputs" / "db_OC_Paste_S1_20251224_20260225_150912" / "simulation_log_20260225_150912.txt",
 }
 
 JSON_PATH = BASE_DIR / "tools" / "oc_3way_content_results_full.json"
@@ -57,9 +57,9 @@ INTERVALS: list[tuple[int, int]] = [
 ]
 
 OUTPUT_PATHS: dict[str, str] = {
-    "Dev": "outputs/dev_output/OC_Paste_S1_20251224/run_20260127_142402/",
-    "Src": "outputs/OC_Paste_S1_20251224/run_20260301_125122/",
-    "DB":  "outputs/db_OC_Paste_S1_20251224_20260301_222907/",
+    "Dev": "outputs/run_20260127_142402/",
+    "Src": "outputs/OC_Paste_S1_20251224/run_20260209_222302/",
+    "DB":  "outputs/db_OC_Paste_S1_20251224_20260225_150912/",
 }
 
 # Ordered list of all tables, grouped by module
@@ -69,7 +69,6 @@ MODULE_TABLES: list[tuple[str, str, list[tuple[str, str]]]] = [
         ("module1/OrderLog", "订单日志 (OrderLog)"),
         ("module1/ShipmentLog", "发货日志 (ShipmentLog)"),
         ("module1/CutLog", "削减日志 (CutLog)"),
-        ("module1/SupplyDemandLog", "供需日志 (SupplyDemandLog)"),
         ("module1/Summary", "每日汇总 (Summary)"),
     ]),
     ("Module3", "净需求计算模块", [

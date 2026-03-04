@@ -26,22 +26,22 @@ from typing import Any
 
 import pandas as pd
 import numpy as np
-import psycopg
+import psycopg2
 
 warnings.filterwarnings("ignore")
 
 # ─── Configuration ───────────────────────────────────────────────────
 
 PROJECT_ROOT = Path(__file__).parent.parent
-DEV_DIR = PROJECT_ROOT / "outputs" / "dev_output" / "OC_Paste_S1_20251224" / "run_20260127_142402"
-SRC_DIR = PROJECT_ROOT / "outputs" / "OC_Paste_S1_20251224" / "run_20260301_125122"
+DEV_DIR = PROJECT_ROOT / "outputs" / "run_20260127_142402"
+SRC_DIR = PROJECT_ROOT / "outputs" / "OC_Paste_S1_20251224" / "run_20260209_222302"
 DB_CONN_PARAMS = dict(host="localhost", port=5432, dbname="test_db",
-                      user="postgres", password="123456")
+                      user="postgres", password="123456", client_encoding="utf8")
 
 START_DATE = datetime(2025, 12, 15)
 NUM_DAYS = 76
 
-DB_RUN_ID = "OC_Paste_S1_20251224_20260301_222907"
+DB_RUN_ID = "OC_Paste_S1_20251224_20260227_052227"
 DB_META_COLS = {"sim_date", "run_id", "config_name", "db_write_time"}
 
 # ─── Sheet/Table mapping ────────────────────────────────────────────
@@ -78,16 +78,6 @@ SHEET_MAPPINGS = [
         "db_table": "module1_output_cutlog",
         "db_date_col": "sim_date",
         "key_cols": ["date", "material", "location"],
-        "compare_cols": ["quantity"],
-        "db_col_rename": {},
-    },
-    {
-        "module": "module1",
-        "file_pattern": "module1_output_{date}.xlsx",
-        "sheet": "SupplyDemandLog",
-        "db_table": "module1_output_supplydemandlog",
-        "db_date_col": "sim_date",
-        "key_cols": ["date", "material", "location", "demand_element"],
         "compare_cols": ["quantity"],
         "db_col_rename": {},
     },
@@ -160,7 +150,7 @@ SHEET_MAPPINGS = [
                          "deploy_qty_with_plan_order", "deploy_from_in_transit",
                          "deploy_from_open_deployment_inbound", "deploy_from_future_production",
                          "planned_delivery_date", "orig_location", "leadtime", "is_cross_node",
-                         "deployed_qty_invCon_push", "deployed_qty", "quota", "WFR", "VFR"],
+                         "deployed_qty_invCon_push", "deployed_qty", "quota"],
         "db_col_rename": {"deployed_qty_invcon": "deployed_qty_invCon",
                           "deployed_qty_invcon_push": "deployed_qty_invCon_push",
                           "wfr": "WFR", "vfr": "VFR"},
@@ -296,11 +286,7 @@ def load_db_data(conn, table: str, date_col: str, date_val: str,
     try:
         # date_val is YYYYMMDD, DB stores as date or string
         query = f"SELECT * FROM {table} WHERE {date_col} = %s AND run_id = %s"
-        with conn.cursor() as cur:
-            cur.execute(query, [date_val, run_id])
-            rows = cur.fetchall()
-            cols = [desc[0] for desc in cur.description]
-        df = pd.DataFrame(rows, columns=cols)
+        df = pd.read_sql(query, conn, params=[date_val, run_id])
         # Drop DB metadata columns
         drop_cols = [c for c in df.columns if c in DB_META_COLS]
         df = df.drop(columns=drop_cols, errors="ignore")
@@ -333,9 +319,9 @@ def _normalize_location_str(s: str) -> str:
     return s
 
 
-def _normalize_bool_str(s) -> str:
+def _normalize_bool_str(s: str) -> str:
     """Normalize boolean-like strings: 'True'/'true'/'TRUE'/1 -> 'True', 'False'/'false'/0 -> 'False'."""
-    s = str(s).strip().lower()
+    s = s.strip().lower()
     if s in ("true", "1", "1.0"):
         return "True"
     if s in ("false", "0", "0.0"):
@@ -382,7 +368,7 @@ def normalize_df(df: pd.DataFrame, key_cols: list[str], compare_cols: list[str])
             df[col] = df[col].dt.strftime("%Y-%m-%d").fillna("")
         elif is_bool_col:
             # Normalize booleans to consistent string representation
-            df[col] = df[col].fillna("").astype(str).str.strip().apply(_normalize_bool_str)
+            df[col] = df[col].astype(str).str.strip().apply(_normalize_bool_str)
         elif pd.api.types.is_numeric_dtype(df[col]):
             df[col] = pd.to_numeric(df[col], errors="coerce")
         else:
@@ -560,7 +546,7 @@ def run_comparison(day_range: range, module_filter: str | None = None,
     # Connect to DB
     conn = None
     try:
-        conn = psycopg.connect(**DB_CONN_PARAMS)
+        conn = psycopg2.connect(**DB_CONN_PARAMS)
         if verbose:
             print("DB connected", flush=True)
     except Exception as e:

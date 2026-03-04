@@ -620,7 +620,7 @@ class DatabaseConnection:
                         new_row.append(None)
                 elif j in float_col_indices:
                     try:
-                        new_row.append(round(float(val), 10))
+                        new_row.append(float(val))
                     except (ValueError, TypeError):
                         new_row.append(None)
                 elif j in text_col_indices:

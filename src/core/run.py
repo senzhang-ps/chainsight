@@ -538,7 +538,7 @@ def get_or_init_simulation_start(output_root: Path, provided_start: Optional[str
     """
     start_file = output_root / "simulation_start.txt"
     if start_file.exists():
-        return start_file.read_text(encoding="utf-8-sig").strip()
+        return start_file.read_text(encoding="utf-8").strip()
     if not provided_start:
         raise ValueError("Simulation start date required for first run")
     start_file.write_text(provided_start, encoding="utf-8")
@@ -660,7 +660,8 @@ def _run_with_database(ns: argparse.Namespace) -> int:
             start_date=start_date,
             end_date=end_date,
             output_base_dir=str(temp_output),
-            skip_validation=True
+            skip_validation=True,
+            skip_summary_report=True  # DB模式下跳过汇总报告，由run.py在写入DB后单独生成
         )
         
         if not result or not result.get('simulation_completed'):

@@ -93,7 +93,10 @@ def run_daily_order_generation(
         )
 
         # 8) 生成Summary（供数据库模式使用）
-        summary_df = _build_summary_df(today_orders_df, shipment_df, cut_df, supply_demand_df)
+        # 🔧 修复：使用 all_orders_df（累积订单）而非 today_orders_df（当日新增）
+        # xlsx 的 Summary 通过 _save_output → _build_summary 使用 all_orders_df，
+        # DB 的 Summary 也应使用 all_orders_df，确保 Total_Orders 一致（累积快照行数）
+        summary_df = _build_summary_df(all_orders_df, shipment_df, cut_df, supply_demand_df)
 
         # orders_df: 当日新增订单（today_orders_df），用于 DB 写入
         # 比对脚本从 xlsx 读取 OrderLog 时已过滤 simulation_date == 当天，

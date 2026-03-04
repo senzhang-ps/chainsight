@@ -24,7 +24,6 @@ import os
 from typing import Any, Dict, Optional
 from pandas.errors import EmptyDataError, ParserError
 import logging
-from tqdm import tqdm
 from pathlib import Path
 
 # Windows UTF-8 编码设置 - 解决emoji和中文输出问题
@@ -1696,8 +1695,7 @@ def run_integrated_simulation(
         'module6': []
     }
     
-    pbar = tqdm(sim_dates, total=len(sim_dates), desc='仿真进度', unit='天', ncols=80, dynamic_ncols=False, leave=True)
-    for i, current_date in enumerate(pbar, 1):
+    for i, current_date in enumerate(sim_dates, 1):
         # 计算实际的总进度（考虑续跑情况）
         if is_resuming:
             actual_day_number = resume_info['days_completed'] + i
@@ -1707,7 +1705,6 @@ def run_integrated_simulation(
             progress_info = f"第 {i}/{len(sim_dates)} 天"
             
         print(f"{'='*20} {progress_info}: {current_date.strftime('%Y-%m-%d')} {'='*20}")
-        pbar.set_postfix(date=current_date.strftime('%Y-%m-%d'), day=progress_info)
         
         # 🎲 注意：不在每日开始时重置种子，以匹配ChainSight_Dev的随机数行为
         # ChainSight_Dev没有每日种子重置，随机状态自然演变
@@ -1831,7 +1828,8 @@ def run_integrated_simulation(
                         orchestrator=orchestrator,
                         current_date=current_date.strftime('%Y-%m-%d'),
                         # 输出路径
-                        output_path=str(module_outputs['module5'] / f"Module5Output_{current_date.strftime('%Y%m%d')}.xlsx")
+                        output_path=str(module_outputs['module5'] / f"Module5Output_{current_date.strftime('%Y%m%d')}.xlsx"),
+                        module1_result=m1_result
                     )
                 
                 # 获取部署计划数据
@@ -2091,7 +2089,8 @@ def run_integrated_simulation_from_dict(
     start_date: str,
     end_date: str,
     output_base_dir: str = "./integrated_output",
-    skip_validation: bool = True
+    skip_validation: bool = True,
+    skip_summary_report: bool = False
 ) -> dict:
     """从DataFrame字典运行集成仿真（数据库模式专用）
     
@@ -2107,6 +2106,7 @@ def run_integrated_simulation_from_dict(
         end_date: 仿真结束日期 (YYYY-MM-DD)
         output_base_dir: 输出基础目录
         skip_validation: 是否跳过预验证（数据库数据已验证）
+        skip_summary_report: 是否跳过汇总报告生成（DB模式下由run.py负责）
     
     Returns:
         dict: 仿真结果字典
@@ -2317,8 +2317,7 @@ def run_integrated_simulation_from_dict(
                     orchestrator=orch,
                     current_date=current_date.strftime('%Y-%m-%d'),
                     output_path=str(module_outputs['module5'] / f"Module5Output_{current_date.strftime('%Y%m%d')}.xlsx"),
-                    module1_result=m1_result,
-                    module4_result=m4_result
+                    module1_result=m1_result
                 )
                 
                 if m5_result and 'deployment_plan' in m5_result:
@@ -2431,24 +2430,28 @@ def run_integrated_simulation_from_dict(
     else:
         runtime_str = f"{total_runtime_seconds:.2f}秒"
     
-    # 生成汇总报告
-    print("📊 正在生成汇总报告...")
-    try:
-        report_generator = SummaryReportGenerator(
-            output_base_dir=str(output_dir),
-            config_dict=config_dict
-        )
-        # start_date 和 end_date 在本函数中已是字符串格式
-        summary_reports = report_generator.generate_all_reports(
-            start_date=start_date,
-            end_date=end_date
-        )
-        print(f"✅ 汇总报告生成完成，输出目录: {output_dir / 'summary'}")
-    except Exception as e:
-        print(f"⚠️ 汇总报告生成失败: {e}")
-        import traceback
-        traceback.print_exc()
-        summary_reports = {}
+    # 生成汇总报告（DB模式下跳过，由run.py在写入数据库后单独生成）
+    summary_reports = {}
+    if skip_summary_report:
+        print("⏭️ 跳过汇总报告生成（DB模式下由run.py负责）")
+    else:
+        print("📊 正在生成汇总报告...")
+        try:
+            report_generator = SummaryReportGenerator(
+                output_base_dir=str(output_dir),
+                config_dict=config_dict
+            )
+            # start_date 和 end_date 在本函数中已是字符串格式
+            summary_reports = report_generator.generate_all_reports(
+                start_date=start_date,
+                end_date=end_date
+            )
+            print(f"✅ 汇总报告生成完成，输出目录: {output_dir / 'summary'}")
+        except Exception as e:
+            print(f"⚠️ 汇总报告生成失败: {e}")
+            import traceback
+            traceback.print_exc()
+            summary_reports = {}
     
     # 最终统计
     try:

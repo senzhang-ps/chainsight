@@ -620,12 +620,7 @@ class DatabaseConnection:
                         new_row.append(None)
                 elif j in float_col_indices:
                     try:
-                        # 使用 16 位有效数字格式化，与 openpyxl 写入 Excel 时的精度保持一致
-                        # openpyxl 在将 float 序列化为 xlsx XML 时采用 %.16g，导致
-                        # Python float64 原始 repr（17位）与 Excel 读回值存在末位差异。
-                        # 此处统一截断到 16 位有效数字，确保 DB 精度与本地 Excel 精度一致。
-                        f = float(val)
-                        new_row.append(float(f"{f:.16g}"))
+                        new_row.append(float(val))
                     except (ValueError, TypeError):
                         new_row.append(None)
                 elif j in text_col_indices:

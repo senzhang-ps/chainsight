@@ -1,5 +1,5 @@
 # =============================================================
-# 模块5 多层级部署规划（说明与配置指引）
+# Module5 多层级部署规划（说明与配置指引）
 #
 # 用途：在给定网络、需求、库存与产运数据下，按优先级与约束生成跨节点调拨计划。
 # 运行模式：
@@ -14,14 +14,14 @@
 # - `PushPullModel`：按 (material, sending) 维护 `model` ∈ {push, soft push, pull}。
 # - `LeadTime`：按 (sending, receiving) 维护 `PDT/GR/MCT`。
 # - `M4_MaterialLocationLineCfg`：按 (material, location) 维护 `PTF/LSK`。
-# - `SafetyStock`：按 (material, location, date) 维护安全库存目标量。
+# - ``SafetyStock``：按 (material, location, date) 维护安全库存目标量。
 # - `DemandPriority`：维护 `demand_element -> priority`。
 # - `ReceivingSpace`：按 (receiving, date) 维护 `max_qty`（收货空间上限）。
 # - `Network`：按 (material, location) 维护 `sourcing`（上游）。
-# - `OrderLog`（集成模式自动从Module1日输出提取）：AO/normal订单参与分配。
+# - ``OrderLog``（集成模式自动从Module1日输出提取）：AO/normal订单参与分配。
 # =============================================================
 """
-模块5：多层级部署规划模块。
+Module5：多层级部署规划模块。
 
 本模块提供跨节点调拨计划生成功能，支持独立运行和集成运行两种模式。
 重构后的实现已拆分至 deployment_planning 子包，本文件作为对外接口入口。

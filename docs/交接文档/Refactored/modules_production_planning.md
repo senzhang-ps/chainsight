@@ -1,4 +1,4 @@
-# modules/production_planning — 生产计划模块文档
+# `src/modules/production_planning` — 生产计划模块文档
 
 ## 模块概述
 
@@ -25,7 +25,7 @@ src/modules/production_planning/
 ├── state_manager.py          # 状态持久化（产线状态、已分配产能）
 ├── plan_builder.py           # 无约束计划构建 + 换产序列优化
 ├── capacity_allocator.py     # 约束产能分配（核心，1086行）
-├── main.py                   # 主流程编排 + CLI 入口（600行）
+├── main.py                   # 主流程编排 + 命令行入口（600行）
 ├── output_writer.py          # Excel 输出管理
 └── duckdb_batch_calculator.py # DuckDB 生产仿真加速
 ```
@@ -415,7 +415,7 @@ class CapacityAllocator:
 
 ### `main.py`
 
-主流程编排类和 CLI 入口。
+主流程编排类和命令行入口。
 
 #### 函数 `run_daily_production_planning(config_file, module3_output_dir, simulation_date, simulation_start, output_dir) -> str`
 
@@ -466,7 +466,7 @@ class DailyProductionPlanner:
 
 从配置构建换产矩阵 Series，index=`(from_material, to_material)`，排序后返回。
 
-#### CLI 入口 `main()`
+#### 命令行入口 `main()`
 
 支持两种执行模式：
 
@@ -599,7 +599,7 @@ Pandas fallback 版本，与主模块中的 `simulate_production()` 逻辑相同
 }
 ```
 
-### MaterialLocationLineCfg DataFrame 关键列
+### `MaterialLocationLineCfg` 数据表关键列
 
 | 列名 | 类型 | 说明 |
 |---|---|---|

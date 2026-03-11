@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Module 6 - Physical Flow Management Module (物流管理模块)
+Module6 - 实物流执行管理模块 (物流管理模块)
 
 提供供应链的物流发运管理功能，包括：
 - 车辆装载优化
@@ -8,19 +8,19 @@ Module 6 - Physical Flow Management Module (物流管理模块)
 - MDQ (最小发货量) 规则处理
 - 延迟采样和交货时间计算
 
-Integration Mode Support:
-- Standalone Mode: Excel file input/output (legacy)
-- Integrated Mode: Config dict + Orchestrator integration
+集成模式支持:
+- 独立模式: Excel 文件输入输出（旧版流程）
+- 集成模式: 配置字典 + 编排器集成
 
-Data Sources (Integrated):
-- OpenDeployment: orchestrator.get_open_deployment(current_date)
-- M6_ Configs: M6_TruckReleaseCon, M6_TruckCapacityPlan, etc.
-- Global_ Configs: Global_DemandPriority, Global_LeadTime
+数据来源（集成模式）:
+- 开放调拨：通过 `orchestrator.get_open_deployment(current_date)` 获取。
+- Module6 配置：如 `M6_TruckReleaseCon`、`M6_TruckCapacityPlan` 等。
+- 全局配置：如 `Global_DemandPriority`、`Global_LeadTime`。
 
-Execution Pattern: Daily processing following Module4/5 pattern
-Module Execution Order: Module1 → Module4 → Module5 → Module6 → Module3
+执行模式: 按 Module4 / Module5 的日处理模式执行
+模块执行顺序: Module1 → Module4 → Module5 → Module6 → Module3
 
-Typical usage example:
+典型用法示例:
     # 独立模式
     result = run_physical_flow_module(
         input_excel='input.xlsx',
@@ -66,7 +66,7 @@ from .logistics_execution.delivery_processor import (
     should_bypass_mdq,
 )
 
-# DuckDB batch optimization
+# DuckDB 批量优化
 try:
     from .logistics_execution.duckdb_batch_calculator import (
         batch_sample_delivery_delays_duckdb,
@@ -117,7 +117,7 @@ def run_daily_physical_flow(
     """
     每日物流执行函数，处理当日的部署计划。
     
-    Args:
+    参数：
         config_dict: 配置数据字典
         orchestrator: Orchestrator 实例
         current_date: 当前仿真日期
@@ -126,7 +126,7 @@ def run_daily_physical_flow(
         random_seed: 随机种子
         skip_file_output: 是否跳过写入 Excel 文件
         
-    Returns:
+    返回：
         包含输出结果的字典
     """
     daily_output_file = f"{output_dir}/Module6Output_{current_date.strftime('%Y%m%d')}.xlsx"
@@ -177,7 +177,7 @@ def run_physical_flow_module(
     - 独立模式：使用 Excel 文件输入输出
     - 集成模式：与 Orchestrator 集成运行
     
-    Args:
+    参数：
         input_excel: 独立模式的输入 Excel 文件路径
         simulation_start: 独立模式的仿真开始日期
         simulation_end: 独立模式的仿真结束日期
@@ -190,7 +190,7 @@ def run_physical_flow_module(
         random_seed: 随机种子
         skip_file_output: 是否跳过文件输出
         
-    Returns:
+    返回：
         包含处理结果的字典
     """
     # 初始化运行参数
@@ -228,10 +228,10 @@ def _initialize_run_params(
     """
     初始化运行参数。
     
-    Args:
+    参数：
         各种输入参数
         
-    Returns:
+    返回：
         运行参数字典
     """
     params = {
@@ -265,13 +265,13 @@ def _init_integrated_params(
     """
     初始化集成模式参数。
     
-    Args:
+    参数：
         config_dict: 配置字典
         orchestrator: Orchestrator 实例
         current_date: 当前日期字符串
         output_path: 输出路径
         
-    Returns:
+    返回：
         集成模式参数字典
     """
     sim_date = pd.to_datetime(current_date)
@@ -297,14 +297,14 @@ def _init_standalone_params(
     """
     初始化独立模式参数。
     
-    Args:
+    参数：
         input_excel: 输入文件路径
         simulation_start: 开始日期
         simulation_end: 结束日期
         output_excel: 输出文件路径
         max_wait_days: 最大等待天数
         
-    Returns:
+    返回：
         独立模式参数字典
     """
     config = load_standalone_config(input_excel)
@@ -335,10 +335,10 @@ def _prepare_data(run_params: Dict[str, Any]) -> Dict[str, Any]:
     """
     准备和验证数据。
     
-    Args:
+    参数：
         run_params: 运行参数
         
-    Returns:
+    返回：
         准备好的数据字典
     """
     config = run_params['config']
@@ -419,11 +419,11 @@ def _filter_empty_demand_element(
     
     demand_element 字段允许重复，但不允许为空。
     
-    Args:
+    参数：
         demand_prio: DemandPriority DataFrame
         validation_log: 验证日志
         
-    Returns:
+    返回：
         过滤后的 DataFrame
     """
     if demand_prio.empty:
@@ -483,12 +483,12 @@ def _process_material_metadata(
     """
     处理物料元数据。
     
-    Args:
+    参数：
         dp: 部署计划 DataFrame
         mat_map: 物料映射
         validation_log: 验证日志
         
-    Returns:
+    返回：
         处理后的部署计划
     """
     if dp.empty:
@@ -546,11 +546,11 @@ def _prepare_deployment_plan(
     """
     准备部署计划数据。
     
-    Args:
+    参数：
         dp: 部署计划 DataFrame
         prio_map: 优先级映射
         
-    Returns:
+    返回：
         准备好的部署计划
     """
     if dp.empty:
@@ -590,11 +590,11 @@ def _handle_uid_duplicates(
     """
     处理 UID 重复问题。
     
-    Args:
+    参数：
         dp: 部署计划 DataFrame
         validation_log: 验证日志
         
-    Returns:
+    返回：
         (处理后的 DataFrame, 更新后的验证日志)
     """
     if dp.empty or not dp['ori_deployment_uid'].duplicated().any():
@@ -630,11 +630,11 @@ def _run_simulation_loop(
     """
     运行仿真主循环。
     
-    Args:
+    参数：
         run_params: 运行参数
         prepared_data: 准备好的数据
         
-    Returns:
+    返回：
         仿真结果字典
     """
     # 初始化状态
@@ -679,10 +679,10 @@ def _init_aggregation_status(
     """
     初始化聚合状态。
     
-    Args:
+    参数：
         dp_dict: 部署计划字典
         
-    Returns:
+    返回：
         聚合状态字典
     """
     return {
@@ -708,7 +708,7 @@ def _process_daily_demands(
     """
     处理单日需求。
     
-    Args:
+    参数：
         sim_date: 仿真日期
         agg_status: 聚合状态
         prepared_data: 准备好的数据
@@ -754,12 +754,12 @@ def _collect_pending_demands(
     """
     收集待处理的需求。
     
-    Args:
+    参数：
         sim_date: 仿真日期
         agg_status: 聚合状态
         dp_dict: 部署计划字典
         
-    Returns:
+    返回：
         待处理需求列表
     """
     pending_rows = []
@@ -805,7 +805,7 @@ def _process_routes(
     """
     处理所有路线。
     
-    Args:
+    参数：
         sim_date: 仿真日期
         cross_node_sorted: 排序后的跨节点需求
         agg_status: 聚合状态
@@ -851,7 +851,7 @@ def _process_single_route(
     """
     处理单条路线。
     
-    Args:
+    参数：
         各种参数
     """
     sending, receiving = route_key
@@ -902,10 +902,10 @@ def _process_truck_type(
     """
     处理单种车型的装载。
     
-    Args:
+    参数：
         各种参数
         
-    Returns:
+    返回：
         剩余未处理的需求 DataFrame
     """
     # 获取车辆数量
@@ -999,13 +999,13 @@ def _first_pass_loading(
     """
     第一轮装载（尽量装入但不超容量）。
     
-    Args:
+    参数：
         packer: 装载器
         remaining_demands: 剩余需求
         available_inventory: 可用库存
         inventory_check_enabled: 是否启用库存检查
         
-    Returns:
+    返回：
         更新后的剩余需求
     """
     for row_tuple in remaining_demands.itertuples():
@@ -1036,13 +1036,13 @@ def _second_pass_loading(
     """
     第二轮装载（触发后贴近 1.0）。
     
-    Args:
+    参数：
         packer: 装载器
         remaining_demands: 剩余需求
         available_inventory: 可用库存
         inventory_check_enabled: 是否启用库存检查
         
-    Returns:
+    返回：
         更新后的剩余需求
     """
     taken = packer.get_loaded_indices()
@@ -1112,7 +1112,7 @@ def _generate_shipment_records(
     """
     生成发运记录。
     
-    Args:
+    参数：
         各种参数
         random_seed: 随机种子，用于批量延迟采样的可复现性
     """
@@ -1207,7 +1207,7 @@ def _handle_remaining_demands(
     """
     处理剩余未发出的需求。
     
-    Args:
+    参数：
         各种参数
     """
     route_remaining = route_demands[route_demands['deployed_qty'] > 0]
@@ -1238,12 +1238,12 @@ def _enforce_shipment_constraint(
     """
     强制约束出货量不超过订单量，如果超出则按比例裁剪。
     
-    Args:
+    参数：
         delivery_plan_df: 出货计划 DataFrame
         orchestrator: Orchestrator 实例
         validation_log: 验证日志
         
-    Returns:
+    返回：
         裁剪后的出货计划 DataFrame
     """
     if delivery_plan_df.empty or orchestrator is None:
@@ -1320,12 +1320,12 @@ def _validate_shipment_delivery_constraint(
     """
     验证出货量不超过订单量约束。
     
-    Args:
+    参数：
         delivery_plan_df: 出货计划 DataFrame
         orchestrator: Orchestrator 实例
         validation_log: 验证日志
         
-    Returns:
+    返回：
         (是否通过验证, 订单量, 出货量)
     """
     if delivery_plan_df.empty or orchestrator is None:
@@ -1390,13 +1390,13 @@ def _generate_outputs(
     """
     生成输出结果。
     
-    Args:
+    参数：
         run_params: 运行参数
         results: 仿真结果
         validation_log: 验证日志
         skip_file_output: 是否跳过文件输出
         
-    Returns:
+    返回：
         输出结果字典
     """
     # 构建 DataFrame - 空列表时也要带列名

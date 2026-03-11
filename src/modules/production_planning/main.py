@@ -44,17 +44,17 @@ def run_daily_production_planning(
     主要功能包括：加载配置与净需求、构建无约束计划、
     分配产能与仿真生产、保存状态与产能、写出当日输出。
 
-    Args:
+    参数：
         config_file: M4配置Excel路径
         module3_output_dir: Module3每日输出目录
         simulation_date: 当前仿真日期
         simulation_start: 仿真起始日期
         output_dir: 输出目录
 
-    Returns:
+    返回：
         str: 生成的每日输出文件路径
 
-    Raises:
+    异常：
         Exception: 执行失败时
     """
     try:
@@ -88,7 +88,7 @@ class DailyProductionPlanner:
     ):
         """初始化计划器。
 
-        Args:
+        参数：
             config_file: 配置文件路径
             module3_output_dir: Module3输出目录
             simulation_date: 仿真日期
@@ -105,7 +105,7 @@ class DailyProductionPlanner:
     def run(self) -> str:
         """执行生产计划流程。
 
-        Returns:
+        返回：
             str: 输出文件路径
         """
         cfg = self._load_and_validate_config()
@@ -132,7 +132,7 @@ class DailyProductionPlanner:
     def _load_and_validate_config(self) -> dict:
         """加载并校验配置。
 
-        Returns:
+        返回：
             dict: 配置字典
         """
         cfg = load_config(self.config_file)
@@ -142,7 +142,7 @@ class DailyProductionPlanner:
     def _load_net_demand(self) -> pd.DataFrame:
         """加载净需求数据。
 
-        Returns:
+        返回：
             pd.DataFrame: 净需求数据
         """
         net_demand = load_daily_net_demand(
@@ -163,10 +163,10 @@ class DailyProductionPlanner:
     def _prepare_config(self, cfg: dict) -> pd.DataFrame:
         """准备配置数据。
 
-        Args:
+        参数：
             cfg: 配置字典
 
-        Returns:
+        返回：
             pd.DataFrame: 物料地点产线配置
         """
         mlcfg = cfg['MaterialLocationLineCfg']
@@ -192,11 +192,11 @@ class DailyProductionPlanner:
     ) -> pd.DataFrame:
         """构建无约束计划。
 
-        Args:
+        参数：
             net_demand: 净需求数据
             mlcfg: 配置
 
-        Returns:
+        返回：
             pd.DataFrame: 无约束计划
         """
         try:
@@ -225,12 +225,12 @@ class DailyProductionPlanner:
     ) -> tuple:
         """分配产能。
 
-        Args:
+        参数：
             uncon_plan: 无约束计划
             cfg: 配置字典
             mlcfg: 物料地点产线配置
 
-        Returns:
+        返回：
             tuple: (计划日志, 超额日志)
         """
         previous_states = load_line_state(
@@ -264,10 +264,10 @@ class DailyProductionPlanner:
     def _build_changeover_matrix(self, cfg: dict) -> pd.Series:
         """构建换产矩阵。
 
-        Args:
+        参数：
             cfg: 配置字典
 
-        Returns:
+        返回：
             pd.Series: 换产矩阵
         """
         co_mat_df = cfg['ChangeoverMatrix'].copy()
@@ -288,12 +288,12 @@ class DailyProductionPlanner:
     ) -> pd.DataFrame:
         """仿真生产并添加校验。
 
-        Args:
+        参数：
             plan_log: 计划日志
             cfg: 配置字典
             mlcfg: 配置
 
-        Returns:
+        返回：
             pd.DataFrame: 最终计划日志
         """
         seed = cfg.get('RandomSeed', 42)
@@ -328,7 +328,7 @@ class DailyProductionPlanner:
     ) -> None:
         """保存状态信息。
 
-        Args:
+        参数：
             plan_log: 计划日志
             cfg: 配置字典
             mlcfg: 配置
@@ -369,12 +369,12 @@ class DailyProductionPlanner:
     ) -> str:
         """写出输出文件。
 
-        Args:
+        参数：
             plan_log: 计划日志
             exceed_log: 超额日志
             changeover_log: 换产日志
 
-        Returns:
+        返回：
             str: 输出文件路径
         """
         self.issues = dedup_issues(self.issues)
@@ -428,7 +428,7 @@ def main():
 def _create_argument_parser() -> argparse.ArgumentParser:
     """创建命令行参数解析器。
 
-    Returns:
+    返回：
         argparse.ArgumentParser: 参数解析器
     """
     parser = argparse.ArgumentParser(
@@ -486,7 +486,7 @@ def _create_argument_parser() -> argparse.ArgumentParser:
 def _run_daily_mode(args) -> None:
     """运行日度模式。
 
-    Args:
+    参数：
         args: 命令行参数
     """
     required = [
@@ -518,7 +518,7 @@ def _run_daily_mode(args) -> None:
 def _run_legacy_mode(args) -> None:
     """运行旧版兼容模式。
 
-    Args:
+    参数：
         args: 命令行参数
     """
     required = [args.input, args.sim_start, args.sim_end, args.output]
@@ -578,7 +578,7 @@ def _run_legacy_mode(args) -> None:
 def _check_legacy_critical_issues(issues: list) -> None:
     """检查Legacy模式的关键问题。
 
-    Args:
+    参数：
         issues: 问题列表
     """
     critical = [

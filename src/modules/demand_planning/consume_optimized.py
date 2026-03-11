@@ -18,11 +18,11 @@ def consume_orders_duckdb(
 ) -> pd.DataFrame:
     """使用 DuckDB 处理订单消耗。
     
-    Args:
+    参数：
         orders_df: 订单 DataFrame
         consumed_forecast: 预测视图
         
-    Returns:
+    返回：
         消耗后的预测 DataFrame
     """
     if orders_df.empty:
@@ -47,7 +47,7 @@ def consume_orders_duckdb(
         )
         print(f"[M1] AO消耗完成(DuckDB)，耗时: {time.perf_counter()-t1:.3f}s")
         
-        # Normal 订单消耗
+        # 普通订单消耗
         t2 = time.perf_counter()
         consumed_forecast = _consume_orders_by_type_duckdb(
             conn, 'normal', orders_df, consumed_forecast, offsets
@@ -69,14 +69,14 @@ def _consume_orders_by_type_duckdb(
 ) -> pd.DataFrame:
     """按需求类型处理订单消耗。
     
-    Args:
+    参数：
         conn: DuckDB 连接
         demand_type: 需求类型 ('AO' 或 'normal')
         orders_df: 订单 DataFrame
         consumed_forecast: 预测视图
         offsets: 消耗偏移量列表
         
-    Returns:
+    返回：
         消耗后的预测 DataFrame
     """
     # 过滤指定类型的订单
@@ -148,11 +148,11 @@ def consume_orders_vectorized(
     注意：由于消耗具有状态依赖性（先消耗的订单影响后续可用量），
     完全向量化可能导致结果不一致。此实现仅用于测试。
     
-    Args:
+    参数：
         orders_df: 订单 DataFrame
         consumed_forecast: 预测视图
         
-    Returns:
+    返回：
         消耗后的预测 DataFrame
     """
     if orders_df.empty:
@@ -183,7 +183,7 @@ def consume_orders_vectorized(
         _consume_orders_fast(ao_orders, quantities, idx_map, offsets)
         print(f"[M1] AO消耗完成(向量化)，耗时: {time.perf_counter()-t1:.3f}s")
     
-    # Normal 订单消耗
+    # 普通订单消耗
     normal_orders = orders_df[orders_df['demand_type'] == 'normal'].copy()
     if not normal_orders.empty:
         normal_orders = normal_orders.sort_values(
@@ -207,7 +207,7 @@ def _consume_orders_fast(
 ) -> None:
     """快速消耗订单（修改 quantities 数组）。
     
-    Args:
+    参数：
         orders: 订单 DataFrame
         quantities: 可用量数组（会被修改）
         idx_map: (material, location, date) -> row_index 映射

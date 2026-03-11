@@ -27,7 +27,7 @@ class DatabaseConnection:
         """
         初始化数据库连接参数
         
-        Args:
+        参数：
             host: 数据库主机地址
             port: 数据库端口
             database: 数据库名称
@@ -47,7 +47,21 @@ class DatabaseConnection:
         return f"postgresql://{self.user}:{self.password}@{self.host}:{self.port}/{self.database}"
     
     def connect(self) -> psycopg.Connection:
-        """建立数据库连接"""
+        """建立数据库连接（autocommit=True 模式）
+        
+        [FIX] 使用 autocommit=True 确保 conn.transaction() 始终创建真正的
+        BEGIN...COMMIT 事务块。在 autocommit=False（psycopg3 默认值）下，
+        任何先前的 SQL 语句（包括 SELECT）都会隐式开启事务，导致后续的
+        conn.transaction() 仅创建 SAVEPOINT 而非顶层事务。SAVEPOINT 退出时
+        只发出 RELEASE SAVEPOINT 而非 COMMIT，数据不会持久化到磁盘。
+        进程被 KeyboardInterrupt 终止后，PostgreSQL 回滚整个未提交的外层事务，
+        所有已写入的数据全部丢失。
+        
+        使用 autocommit=True 后：
+        - conn.transaction() 始终发出 BEGIN...COMMIT（数据真正持久化）
+        - 每次 flush 的数据在事务退出时即刻可见且不可丢失
+        - 无需在 conn.transaction() 前手动 conn.commit() 清理隐式事务
+        """
         if self._connection is None or self._connection.closed:
             self._connection = psycopg.connect(
                 host=self.host,
@@ -55,7 +69,8 @@ class DatabaseConnection:
                 dbname=self.database,
                 user=self.user,
                 password=self.password,
-                client_encoding='UTF8'
+                client_encoding='UTF8',
+                autocommit=True,
             )
         return self._connection
     
@@ -70,26 +85,33 @@ class DatabaseConnection:
         """
         获取数据库游标的上下文管理器
         
-        Args:
-            commit: 是否自动提交
+        参数：
+            commit: 是否在事务中执行（True=包裹在 BEGIN...COMMIT 中，False=直接执行）
+        
+        [FIX] autocommit=True 模式下：
+        - commit=True: 使用 conn.transaction() 包裹，保证原子性
+        - commit=False: 直接执行（每条语句自动提交，适用于只读查询）
         """
         conn = self.connect()
-        cursor = conn.cursor()
-        try:
-            yield cursor
-            if commit:
-                conn.commit()
-        except Exception as e:
-            conn.rollback()
-            raise e
-        finally:
-            cursor.close()
+        if commit:
+            with conn.transaction():
+                cursor = conn.cursor()
+                try:
+                    yield cursor
+                finally:
+                    cursor.close()
+        else:
+            cursor = conn.cursor()
+            try:
+                yield cursor
+            finally:
+                cursor.close()
     
     def database_exists(self) -> bool:
         """
         检测目标数据库是否存在
         
-        Returns:
+        返回：
             bool: 数据库是否存在
         """
         temp_conn = None
@@ -121,7 +143,7 @@ class DatabaseConnection:
         """
         如果数据库不存在则创建
         
-        Returns:
+        返回：
             bool: 是否成功
         """
         if self.database_exists():
@@ -158,10 +180,10 @@ class DatabaseConnection:
         """
         检查多个表是否存在
         
-        Args:
+        参数：
             table_names: 表名列表
         
-        Returns:
+        返回：
             dict: 表名 -> 是否存在
         """
         result = {}
@@ -175,7 +197,7 @@ class DatabaseConnection:
         """
         测试数据库连接
         
-        Returns:
+        返回：
             dict: 包含连接状态、数据库版本、连接时间等信息
         """
         result = {
@@ -239,11 +261,11 @@ class DatabaseConnection:
         """
         检查指定配置是否已在表中存在数据
         
-        Args:
+        参数：
             table_name: 表名
             config_name: 配置名称（如 BC_S5, BC_S9）
         
-        Returns:
+        返回：
             bool: 配置是否已存在
         """
         clean_name = self._clean_name(table_name)
@@ -276,11 +298,11 @@ class DatabaseConnection:
         """
         删除表中指定配置的数据
         
-        Args:
+        参数：
             table_name: 表名
             config_name: 配置名称（如 BC_S5, BC_S9）
         
-        Returns:
+        返回：
             int: 删除的行数
         """
         clean_name = self._clean_name(table_name)
@@ -309,25 +331,29 @@ class DatabaseConnection:
         table_name: str,
         if_exists: str = "replace",
         add_write_time: bool = True,
-        config_name: str = None,
-        config_type: str = None
+        config_name: Optional[str] = None,
+        config_type: Optional[str] = None,
+        round_float_values: Optional[bool] = None
     ) -> bool:
         """
         根据DataFrame创建表并写入数据
         
-        Args:
+        参数：
             df: 数据DataFrame
             table_name: 表名
             if_exists: 如果表存在的处理方式 ('replace', 'append', 'fail')
             add_write_time: 是否自动添加写入时间列
             config_name: 配置文件标识（如 BC_S5, BC_S9），用于区分不同配置的数据
             config_type: 配置类型 ('OC' / 'BC' / 'OTHER')，用于快速区分配置类别
+            round_float_values: 是否在写入前将浮点数四舍五入到10位小数；默认对 cfg_* 表关闭，对其他表开启
         
-        Returns:
+        返回：
             bool: 是否成功
         """
         # 清理表名（去除特殊字符）
         clean_table_name = self._clean_name(table_name)
+        if round_float_values is None:
+            round_float_values = not clean_table_name.startswith('cfg_')
         
         # 检查是否为空表（只有列定义）
         is_empty_table = df.empty
@@ -369,7 +395,7 @@ class DatabaseConnection:
                     print(f"[WARN]表结构不兼容，跳过追加: {clean_table_name}")
                     return False
             elif if_exists == "append":
-                # append模式：检查表结构是否兼容
+                # 追加模式（append）：检查表结构是否兼容
                 if not self._check_table_compatible(clean_table_name, df_to_write):
                     print(f"[WARN]表结构不兼容，跳过追加: {clean_table_name}")
                     return False
@@ -396,7 +422,11 @@ class DatabaseConnection:
         
         # 插入数据（非空表才插入）
         if not is_empty_table:
-            self._insert_dataframe(df_to_write, clean_table_name)
+            self._insert_dataframe(
+                df_to_write,
+                clean_table_name,
+                round_float_values=round_float_values,
+            )
         
         # 性能优化 (Phase 4 - 问题2)：调整索引创建顺序
         # - 原因：先创建索引再写入数据，导致B-tree维护开销 +10-20%
@@ -420,23 +450,24 @@ class DatabaseConnection:
         - 如果现有表缺少db_write_time列，自动添加该列
         - 检查DataFrame的其他列是否都存在于现有表中
         
-        Args:
+        参数：
             table_name: 表名
             df: 要写入的DataFrame
         
-        Returns:
+        返回：
             bool: 是否兼容
         """
         try:
-            # 获取现有表的列信息
+            # 获取现有表的列信息（含类型）
             with self.get_cursor(commit=False) as cursor:
                 cursor.execute("""
-                    SELECT column_name
+                    SELECT column_name, data_type
                     FROM information_schema.columns
                     WHERE table_name = %s
                     ORDER BY ordinal_position;
                 """, (table_name,))
-                existing_cols = set(row[0] for row in cursor.fetchall())
+                existing_col_info = {row[0]: row[1].upper() for row in cursor.fetchall()}
+            existing_cols = set(existing_col_info.keys())
             
             # 获取DataFrame的列（清理后）
             df_cols = set(self._clean_name(str(col)) for col in df.columns)
@@ -453,6 +484,26 @@ class DatabaseConnection:
                         ALTER TABLE {} ADD COLUMN db_write_time TIMESTAMP
                     """).format(sql.Identifier(table_name)))
                 existing_cols.add('db_write_time')
+            
+            # 列类型升级：BIGINT → DOUBLE PRECISION（防止浮点数截断）
+            INT_TYPES = {'BIGINT', 'INTEGER', 'SMALLINT', 'INT', 'INT4', 'INT8', 'INT2'}
+            for col_name in (df_cols & existing_cols):  # 仅检查已存在的公共列
+                df_dtype = df_col_types.get(col_name)
+                if df_dtype is None:
+                    continue
+                expected_pg_type = self._pandas_to_pg_type(df_dtype, col_name=col_name)
+                existing_pg_type = existing_col_info.get(col_name, '').upper()
+                # 如果 DataFrame 期望 DOUBLE PRECISION 但 DB 现有列是整型 → 升级
+                if expected_pg_type == 'DOUBLE PRECISION' and existing_pg_type in INT_TYPES:
+                    print(f"🔧 表 {table_name} 列 {col_name}: {existing_pg_type} → DOUBLE PRECISION（防止浮点截断）")
+                    with self.get_cursor() as cursor:
+                        cursor.execute(sql.SQL("""
+                            ALTER TABLE {} ALTER COLUMN {} TYPE DOUBLE PRECISION USING {}::DOUBLE PRECISION
+                        """).format(
+                            sql.Identifier(table_name),
+                            sql.Identifier(col_name),
+                            sql.Identifier(col_name)
+                        ))
             
             # 检查DataFrame的列是否都在现有表中（允许现有表有额外列）
             missing_cols = df_cols - existing_cols
@@ -520,7 +571,7 @@ class DatabaseConnection:
             
             # 3. 日期类 -> 仅对明确的日期字段使用 DATE 类型
             # 注意：某些包含 "date" 的列可能存储 "ALL" 等特殊值，需要使用 TEXT
-            # file_date 和 sim_date 作为标识符使用 TEXT 类型（格式：YYYYMMDD）
+            # `file_date` 和 `sim_date` 作为标识符使用 `TEXT` 类型（格式：YYYYMMDD）
             date_specific_names = [
                 'start_date', 'end_date', 'order_date', 'delivery_date', 
                 'ship_date', 'arrival_date', 'due_date', 'created_date',
@@ -537,7 +588,10 @@ class DatabaseConnection:
                 'demand', 'supply', 'shipment', 'production', 'weight', 'volume',
                 'price', 'cost', 'ratio', 'percent', 'rate', 'yield',
                 'leadtime', 'duration', 'hours', 'time_needed',
-                'wfr', 'vfr', 'mdq'  # 物流配置参数 (weight fill rate, volume fill rate, min dispatch qty)
+                'wfr', 'vfr', 'mdq',  # 物流配置参数 (weight fill rate, volume fill rate, min dispatch qty)
+                # 生产/配置参数 (防止 BIGINT 截断浮点数)
+                'min_batch', 'rv', 'ptf', 'lsk', 'mct', 'moq', 'prd_rate',
+                'pdt', 'gr', 'otd',  # Global_LeadTime 参数
             ]
             if not col_name_lower.endswith('_date') and any(name in col_name_lower for name in float_measures):
                 return "DOUBLE PRECISION"
@@ -560,7 +614,13 @@ class DatabaseConnection:
         else:
             return "TEXT"
     
-    def _insert_dataframe(self, df: pd.DataFrame, table_name: str, batch_size: int = 1000):
+    def _insert_dataframe(
+        self,
+        df: pd.DataFrame,
+        table_name: str,
+        batch_size: int = 1000,
+        round_float_values: bool = True,
+    ):
         """
         批量插入DataFrame数据 - 使用高效的COPY方式（批块化优化版）
         
@@ -568,7 +628,7 @@ class DatabaseConnection:
         - 批块化写入：每1000行提交一次，减少事务开销
         - 预计性能提升：60-80s → 8-12s (-85%)
         
-        Args:
+        参数：
             df: 要插入的DataFrame
             table_name: 目标表名
             batch_size: 每批写入的行数，默认1000
@@ -600,17 +660,18 @@ class DatabaseConnection:
                     int_col_indices.add(idx)
                 elif ct_upper in ('DOUBLE PRECISION', 'REAL', 'NUMERIC', 'FLOAT4', 'FLOAT8'):
                     float_col_indices.add(idx)
-                elif ct_upper in ('TEXT', 'VARCHAR', 'CHAR', 'CHARACTER'):
+                elif ct_upper in ('TEXT', 'VARCHAR', 'CHARACTER VARYING', 'CHAR', 'CHARACTER'):
                     text_col_indices.add(idx)
         
         # 准备插入数据
         records = df.values.tolist()
         
         # 处理NaN值和数据类型转换
+        import numpy as np
         for i, row in enumerate(records):
             new_row = []
             for j, val in enumerate(row):
-                if pd.isna(val):
+                if pd.isna(val) if not isinstance(val, str) else False:
                     new_row.append(None)
                 elif j in int_col_indices:
                     try:
@@ -620,11 +681,20 @@ class DatabaseConnection:
                         new_row.append(None)
                 elif j in float_col_indices:
                     try:
-                        new_row.append(float(val))
+                        float_val = float(val)
+                        if round_float_values:
+                            new_row.append(round(float_val, 10))
+                        else:
+                            new_row.append(float_val)
                     except (ValueError, TypeError):
                         new_row.append(None)
                 elif j in text_col_indices:
-                    new_row.append(str(val))
+                    # [FIX] Convert booleans to "True"/"False" strings to match
+                    # 与 Dev/Src 的 xlsx 输出格式保持一致（避免 PG 将 bool->text 转成 `t`/`f`）
+                    if isinstance(val, (bool, np.bool_)):
+                        new_row.append(str(val))
+                    else:
+                        new_row.append(str(val) if val is not None else None)
                 else:
                     new_row.append(val)
             records[i] = tuple(new_row)
@@ -652,7 +722,8 @@ class DatabaseConnection:
                 print(f"  [DATA] 写入完成: {total_rows} 行数据")
                 print(f"  [FAST] 性能优化：单次事务提交")
         except Exception as error:
-            conn.rollback()
+            # [FIX] autocommit=True 模式下，conn.transaction() 退出时已自动 ROLLBACK，
+            # 无需手动 rollback
             raise error
     
     def _get_column_types(self, table_name: str) -> Dict[str, str]:
@@ -677,13 +748,13 @@ class DatabaseConnection:
         - 为 run_id 创建HASH索引
         - 预计查询性能提升：5-10s → 2-4s (-60%)
         
-        Args:
+        参数：
             table_name: 表名
             df: 对应的DataFrame（用于检测列名）
         """
         # 定义需要索引的列及其索引类型
         index_columns = {
-            # BTREE索引 - 适合范围查询和等值查询
+            # B 树索引 - 适合范围查询和等值查询
             'material': 'BTREE',
             'location': 'BTREE',
             'sending': 'BTREE',
@@ -693,7 +764,7 @@ class DatabaseConnection:
             'order_date': 'BTREE',
             'available_date': 'BTREE',
             'delivery_date': 'BTREE',
-            # HASH索引 - 适合等值查询
+            # 哈希索引 - 适合等值查询
             'run_id': 'HASH',
         }
         

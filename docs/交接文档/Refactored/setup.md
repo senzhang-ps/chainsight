@@ -1,4 +1,4 @@
-# ChainSight 部署与配置指南（Setup Guide）
+# ChainSight 部署与配置指南
 
 ## 文档信息
 
@@ -11,7 +11,7 @@
 
 ---
 
-# Part 1：环境配置
+# 第一部分：环境配置
 
 ## 1. 系统要求
 
@@ -137,7 +137,7 @@ python -c "import sys; print(sys.executable)"
 
 ---
 
-# Part 2：本地版部署
+# 第二部分：本地版部署
 
 ## 5. 配置文件格式
 
@@ -319,7 +319,7 @@ outputs/
 
 ---
 
-# Part 3：数据库版部署
+# 第三部分：数据库版部署
 
 ## 9. PostgreSQL 配置
 
@@ -506,7 +506,7 @@ DuckDBConfig.fallback_on_error = True
 
 ---
 
-# Part 4：故障排查
+# 第四部分：故障排查
 
 ## 14. 常见问题
 
@@ -626,7 +626,7 @@ print(result)
 
 ---
 
-# Part 5：进阶主题
+# 第五部分：进阶主题
 
 ## 17. 自定义配置
 

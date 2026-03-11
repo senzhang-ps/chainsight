@@ -37,13 +37,16 @@ class ChangeSet:
     
     @property
     def has_changes(self) -> bool:
+        """判断本次比较是否存在新增、修改或删除记录。"""
         return len(self.added) > 0 or len(self.modified) > 0 or len(self.deleted) > 0
     
     @property
     def total_changes(self) -> int:
+        """返回本次比较中发生变化的记录总数。"""
         return len(self.added) + len(self.modified) + len(self.deleted)
     
     def summary(self) -> str:
+        """返回变化集合的摘要字符串。"""
         return f"Added: {len(self.added)}, Modified: {len(self.modified)}, Deleted: {len(self.deleted)}, Unchanged: {self.unchanged_count}"
 
 
@@ -56,7 +59,7 @@ class ChangeDetector:
     
     def __init__(self, key_columns: List[str]):
         """
-        Args:
+        参数：
             key_columns: 用于唯一标识记录的列
         """
         self.key_columns = key_columns
@@ -77,10 +80,10 @@ class ChangeDetector:
         """
         检测数据变化
         
-        Args:
+        参数：
             current_df: 当前数据
         
-        Returns:
+        返回：
             ChangeSet: 变化集合
         """
         if current_df.empty:
@@ -157,7 +160,7 @@ class IncrementalProcessor:
         # 各数据集的变化检测器
         self._detectors: Dict[str, ChangeDetector] = {}
         
-        # DuckDB连接
+        # DuckDB 连接
         self.duckdb_conn = None
         if DUCKDB_AVAILABLE:
             self.duckdb_conn = duckdb.connect(':memory:')
@@ -175,7 +178,7 @@ class IncrementalProcessor:
         """
         注册数据集用于增量检测
         
-        Args:
+        参数：
             name: 数据集名称
             key_columns: 主键列
         """
@@ -185,11 +188,11 @@ class IncrementalProcessor:
         """
         获取数据集的变化
         
-        Args:
+        参数：
             name: 数据集名称
             current_df: 当前数据
         
-        Returns:
+        返回：
             ChangeSet: 变化集合
         """
         if name not in self._detectors:
@@ -299,7 +302,7 @@ class IncrementalProcessor:
         """
         保存检查点
         
-        Args:
+        参数：
             name: 检查点名称
             data: 数据
             date: 日期
@@ -312,11 +315,11 @@ class IncrementalProcessor:
         """
         加载检查点
         
-        Args:
+        参数：
             name: 检查点名称
             date: 日期
         
-        Returns:
+        返回：
             数据DataFrame或None
         """
         checkpoint_file = self.cache_dir / f"{name}_{date}.parquet"
@@ -329,7 +332,7 @@ class IncrementalProcessor:
         """
         清理旧检查点
         
-        Args:
+        参数：
             keep_days: 保留天数
         """
         import os
@@ -446,12 +449,12 @@ class DeltaCalculator:
         
         当某个物料-位置变化时，识别所有受影响的下游
         
-        Args:
+        参数：
             changed_items: 变化的物料-位置集合
             bom_df: BOM数据
             network_df: 网络配置数据
         
-        Returns:
+        返回：
             所有受影响的物料-位置集合
         """
         affected = set(changed_items)
@@ -475,11 +478,11 @@ class DeltaCalculator:
                     network_downstream[sending] = []
                 network_downstream[sending].append(row['receiving'])
         
-        # BFS遍历影响
+        # 使用 BFS 遍历受影响节点
         while to_process:
             material, location = to_process.pop(0)
             
-            # BOM下游
+            # BOM 下游节点
             if material in bom_children:
                 for child in bom_children[material]:
                     key = (child, location)
@@ -507,11 +510,11 @@ def create_incremental_processor(
     """
     创建增量处理器
     
-    Args:
+    参数：
         cache_dir: 缓存目录
         datasets: 数据集配置 {name: key_columns}
     
-    Returns:
+    返回：
         IncrementalProcessor实例
     """
     processor = IncrementalProcessor(cache_dir)

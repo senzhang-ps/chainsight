@@ -52,7 +52,7 @@ def write_output(
 ) -> str:
     """写出每日或汇总输出文件。
 
-    Args:
+    参数：
         plan: 生产计划DataFrame
         exc: 超额记录DataFrame
         issues: 校验问题列表
@@ -61,7 +61,7 @@ def write_output(
         simulation_date: 仿真日期（提供则写每日版本）
         skip_file_output: 是否跳过文件输出（使用DuckDB内存模式时为True）
 
-    Returns:
+    返回：
         str: 实际写出的文件路径（或内存模式下的虚拟路径）
     """
     plan = ensure_dataframe_columns(plan, PLAN_COLUMNS)
@@ -99,10 +99,10 @@ def write_output(
 def _prepare_issues_df(issues: List[Dict[str, Any]]) -> pd.DataFrame:
     """准备校验问题DataFrame。
 
-    Args:
+    参数：
         issues: 问题列表
 
-    Returns:
+    返回：
         pd.DataFrame: 问题DataFrame
     """
     issues_df = pd.DataFrame(issues)
@@ -115,11 +115,11 @@ def _get_output_path(
 ) -> str:
     """获取输出文件路径。
 
-    Args:
+    参数：
         out_path: 基础路径
         simulation_date: 仿真日期
 
-    Returns:
+    返回：
         str: 最终路径
     """
     if simulation_date is None:
@@ -141,7 +141,7 @@ def _write_excel_file(
 ) -> None:
     """写出Excel文件。
 
-    Args:
+    参数：
         file_path: 文件路径
         plan: 生产计划
         exc: 超额记录
@@ -163,7 +163,7 @@ def generate_consolidated_output(
 ) -> None:
     """合并多个每日输出生成汇总文件。
 
-    Args:
+    参数：
         daily_output_files: 每日输出文件列表
         output_path: 汇总输出路径
     """
@@ -189,10 +189,10 @@ def _collect_all_daily_data(
 ) -> Dict[str, List[pd.DataFrame]]:
     """收集所有每日数据。
 
-    Args:
+    参数：
         daily_files: 文件列表
 
-    Returns:
+    返回：
         Dict[str, List[pd.DataFrame]]: 按类型分组的数据
     """
     all_data = {
@@ -218,10 +218,10 @@ def _read_daily_file(
 ) -> Dict[str, Optional[pd.DataFrame]]:
     """读取每日文件。
 
-    Args:
+    参数：
         file_path: 文件路径
 
-    Returns:
+    返回：
         Dict[str, Optional[pd.DataFrame]]: 读取的数据
     """
     try:
@@ -243,11 +243,11 @@ def _read_sheet(
 ) -> Optional[pd.DataFrame]:
     """读取工作表。
 
-    Args:
+    参数：
         xl: Excel文件对象
         sheet_name: 工作表名
 
-    Returns:
+    返回：
         Optional[pd.DataFrame]: 数据或None
     """
     if sheet_name not in xl.sheet_names:
@@ -263,7 +263,7 @@ def _merge_daily_data(
 ) -> None:
     """合并每日数据到总数据。
 
-    Args:
+    参数：
         all_data: 总数据（会被修改）
         daily_data: 每日数据
     """
@@ -285,10 +285,10 @@ def _consolidate_data(
 ) -> Dict[str, Any]:
     """合并所有数据。
 
-    Args:
+    参数：
         all_data: 按类型分组的数据
 
-    Returns:
+    返回：
         Dict[str, Any]: 合并后的数据
     """
     plans = (

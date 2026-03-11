@@ -7,7 +7,7 @@
 - 装载后库存更新
 - 库存可用性检查
 
-Typical usage example:
+典型用法示例:
     inventory = calculate_physical_inventory(orchestrator, current_date)
     inventory = update_inventory_after_load(inventory, material, location, qty)
 """
@@ -26,11 +26,11 @@ def calculate_physical_inventory(
     
     直接使用 Orchestrator 在 M1, M4, M5 执行后的最新实物库存状态。
     
-    Args:
+    参数：
         orchestrator: Orchestrator 实例
         current_date: 当前日期
         
-    Returns:
+    返回：
         实物库存字典 {(material, location): physical_quantity}
     """
     try:
@@ -49,10 +49,10 @@ def _extract_inventory_from_orchestrator(
     """
     从 Orchestrator 提取库存数据。
     
-    Args:
+    参数：
         orchestrator: Orchestrator 实例
         
-    Returns:
+    返回：
         库存字典
     """
     physical_inventory = {}
@@ -70,7 +70,7 @@ def _check_inventory_duplicates(
     """
     检查库存数据中的重复键。
     
-    Args:
+    参数：
         inventory: 库存字典
     """
     location_counts = {}
@@ -97,7 +97,7 @@ def _log_inventory_statistics(
     """
     记录库存统计信息。
     
-    Args:
+    参数：
         physical_inventory: 库存字典
     """
     if not physical_inventory:
@@ -120,13 +120,13 @@ def update_inventory_after_load(
     """
     装载后更新可用库存。
     
-    Args:
+    参数：
         inventory: 当前库存字典
         material: 物料
         location: 地点
         load_qty: 装载数量
         
-    Returns:
+    返回：
         更新后的库存字典
     """
     inv_key = (material, location)
@@ -146,12 +146,12 @@ def get_available_inventory(
     """
     获取可用库存数量。
     
-    Args:
+    参数：
         inventory: 库存字典
         material: 物料
         location: 地点
         
-    Returns:
+    返回：
         可用库存数量
     """
     return inventory.get((material, location), 0)
@@ -166,13 +166,13 @@ def calculate_inventory_limit(
     """
     计算库存限制（考虑已装载量）。
     
-    Args:
+    参数：
         inventory: 库存字典
         material: 物料
         location: 地点
         already_loaded: 该物料已装载的数量
         
-    Returns:
+    返回：
         可用于装载的剩余数量
     """
     available = get_available_inventory(inventory, material, location)
@@ -188,13 +188,13 @@ def has_sufficient_inventory(
     """
     检查是否有足够的库存。
     
-    Args:
+    参数：
         inventory: 库存字典
         material: 物料
         location: 地点
         required_qty: 需求数量
         
-    Returns:
+    返回：
         是否有足够库存
     """
     available = get_available_inventory(inventory, material, location)
@@ -208,11 +208,11 @@ def batch_update_inventory(
     """
     批量更新库存。
     
-    Args:
+    参数：
         inventory: 当前库存字典
         load_records: 装载记录列表，每条包含 material, sending, load_qty
         
-    Returns:
+    返回：
         更新后的库存字典
     """
     for record in load_records:
@@ -233,10 +233,10 @@ def get_inventory_summary(
     """
     获取库存摘要信息。
     
-    Args:
+    参数：
         inventory: 库存字典
         
-    Returns:
+    返回：
         包含统计信息的字典
     """
     if not inventory:

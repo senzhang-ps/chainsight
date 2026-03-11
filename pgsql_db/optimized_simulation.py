@@ -50,7 +50,7 @@ class OptimizedSimulationRunner:
         """
         初始化优化仿真器
         
-        Args:
+        参数：
             config_dict: 配置数据字典
             db_connection_string: PostgreSQL连接字符串
             enable_optimization: 是否启用优化
@@ -111,7 +111,7 @@ class OptimizedSimulationRunner:
         """
         准备每日计算上下文
         
-        Args:
+        参数：
             current_date: 当前日期
             orchestrator: Orchestrator实例
         """
@@ -438,13 +438,13 @@ def create_optimized_runner(
     """
     创建优化仿真运行器的工厂函数
     
-    Args:
+    参数：
         config_dict: 配置数据字典
         db_connection_string: PostgreSQL连接字符串
         enable_optimization: 是否启用优化
         cache_dir: 缓存目录
     
-    Returns:
+    返回：
         OptimizedSimulationRunner实例
     """
     runner = OptimizedSimulationRunner(
@@ -475,7 +475,7 @@ def run_optimized_simulation_from_dict(
     这是 run_integrated_simulation_from_dict 的优化版本，
     可以直接替换原有函数使用。
     
-    Args:
+    参数：
         config_data: 配置数据字典 {sheet_name: DataFrame}
         config_name: 配置名称
         start_date: 开始日期
@@ -484,7 +484,7 @@ def run_optimized_simulation_from_dict(
         skip_validation: 是否跳过验证
         enable_high_performance: 是否启用高性能引擎
     
-    Returns:
+    返回：
         仿真结果字典
     """
     import time as time_module
@@ -575,12 +575,12 @@ def wrap_module_with_optimization(
     """
     包装模块函数以添加优化
     
-    Args:
+    参数：
         module_func: 原始模块函数
         runner: 优化运行器
         module_name: 模块名称
     
-    Returns:
+    返回：
         包装后的函数
     """
     def wrapped(*args, **kwargs):
@@ -617,12 +617,12 @@ def integrate_optimization_to_simulation(
             enable_optimization=True
         )
     
-    Args:
+    参数：
         run_integrated_simulation_func: 原始仿真函数
         db_connection_string: 数据库连接字符串
         enable_optimization: 是否启用优化
     
-    Returns:
+    返回：
         优化后的仿真函数
     """
     def optimized_simulation(*args, **kwargs):

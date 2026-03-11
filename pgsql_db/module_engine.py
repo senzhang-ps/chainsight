@@ -27,7 +27,7 @@ class ModuleCalculationEngine:
         """
         初始化计算引擎
         
-        Args:
+        参数：
             processor: OptimizedDataProcessor实例
         """
         self.processor = processor
@@ -121,14 +121,14 @@ class ModuleCalculationEngine:
         """
         预建每日数据索引
         
-        Args:
+        参数：
             supply_demand_log: 供需日志
             safety_stock: 安全库存
             order_log: 订单日志
         """
         t0 = time.perf_counter()
         
-        # SupplyDemandLog索引
+        # ``SupplyDemandLog`` 索引
         if not supply_demand_log.empty:
             self.processor.build_groupby_index(
                 supply_demand_log,
@@ -136,7 +136,7 @@ class ModuleCalculationEngine:
                 'sdl_daily'
             )
         
-        # SafetyStock索引
+        # ``SafetyStock`` 索引
         if not safety_stock.empty:
             self.processor.build_groupby_index(
                 safety_stock,
@@ -144,7 +144,7 @@ class ModuleCalculationEngine:
                 'ss_daily'
             )
         
-        # OrderLog索引
+        # ``OrderLog`` 索引
         if order_log is not None and not order_log.empty:
             self.processor.build_groupby_index(
                 order_log,
@@ -421,13 +421,13 @@ def create_calculation_engine(
     """
     创建计算引擎
     
-    Args:
+    参数：
         pg_connection_string: PostgreSQL连接字符串
         cache_dir: 缓存目录
         memory_limit: 内存限制 (默认: 系统90%内存)
         threads: 线程数 (默认: 系统90% CPU)
     
-    Returns:
+    返回：
         (processor, engine) 元组
     """
     # 动态获取默认值

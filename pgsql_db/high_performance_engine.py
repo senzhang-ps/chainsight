@@ -114,7 +114,7 @@ class FastChangeDetector:
         """
         初始化检测器。
         
-        Args:
+        参数：
             key_columns: 主键列
         """
         self.key_columns = key_columns
@@ -126,10 +126,10 @@ class FastChangeDetector:
         """
         检测数据变化。
         
-        Args:
+        参数：
             current_df: 当前数据
             
-        Returns:
+        返回：
             ChangeSet: 变化集合
         """
         if current_df.empty:
@@ -192,7 +192,7 @@ class FastChangeDetector:
         return dict(zip(result['row_key'], result['row_hash']))
     
     def _compute_hashes_python(self, df: pd.DataFrame) -> Dict[str, str]:
-        """Python回退方案计算哈希。"""
+        """使用 Python 回退方案计算哈希。"""
         hashes = {}
         for _, row in df.iterrows():
             key = '|'.join(str(row[c]) for c in self.key_columns)
@@ -276,7 +276,7 @@ class DuckDBCalculator:
         """
         初始化计算器。
         
-        Args:
+        参数：
             memory_limit: 内存限制 (默认: 系统90%内存)
             threads: 并行线程数 (默认: 系统90% CPU)
         """
@@ -331,13 +331,13 @@ class DuckDBCalculator:
         """
         批量计算净需求（DuckDB SQL实现）。
         
-        Args:
+        参数：
             demand_df: 需求数据 (material, location, date, quantity)
             supply_df: 供给数据 (material, location, qty)
             safety_stock_df: 安全库存 (material, location, date, safety_stock_qty)
             target_date: 目标日期
             
-        Returns:
+        返回：
             净需求结果DataFrame
         """
         t0 = time.perf_counter()
@@ -401,11 +401,11 @@ class DuckDBCalculator:
         """
         批量应用MOQ/RV（DuckDB SQL实现）。
         
-        Args:
+        参数：
             demand_df: 需求数据
             config_df: MOQ/RV配置
             
-        Returns:
+        返回：
             调整后的需求DataFrame
         """
         t0 = time.perf_counter()
@@ -449,12 +449,12 @@ class DuckDBCalculator:
         """
         批量优先级分配（DuckDB SQL实现）。
         
-        Args:
+        参数：
             demand_df: 需求数据
             inventory_df: 库存数据
             priority_df: 优先级配置
             
-        Returns:
+        返回：
             分配结果DataFrame
         """
         t0 = time.perf_counter()
@@ -549,7 +549,7 @@ class HybridQueryEngine:
         """
         初始化混合引擎。
         
-        Args:
+        参数：
             pg_conn_str: PostgreSQL连接字符串
             memory_limit: DuckDB内存限制
             threads: 并行线程数
@@ -583,11 +583,11 @@ class HybridQueryEngine:
         """
         查询配置表。
         
-        Args:
+        参数：
             table_name: 表名
             use_cache: 是否使用缓存
             
-        Returns:
+        返回：
             配置数据DataFrame
         """
         if use_cache and table_name in self._table_cache:
@@ -615,7 +615,7 @@ class HybridQueryEngine:
         """
         批量写入到PostgreSQL。
         
-        Args:
+        参数：
             df: 要写入的数据
             table_name: 目标表名
             if_exists: 存在时的处理方式
@@ -668,7 +668,7 @@ class IncrementalComputeManager:
         """
         初始化管理器。
         
-        Args:
+        参数：
             cache_dir: 缓存目录
         """
         self.cache_dir = Path(cache_dir) if cache_dir else Path("./cache/incremental")
@@ -686,7 +686,7 @@ class IncrementalComputeManager:
         """
         注册数据集。
         
-        Args:
+        参数：
             name: 数据集名称
             key_columns: 主键列
         """
@@ -696,11 +696,11 @@ class IncrementalComputeManager:
         """
         获取数据集变化。
         
-        Args:
+        参数：
             name: 数据集名称
             current_df: 当前数据
             
-        Returns:
+        返回：
             变化集合
         """
         if name not in self._detectors:
@@ -711,10 +711,10 @@ class IncrementalComputeManager:
         """
         获取所有变化集合影响的键。
         
-        Args:
+        参数：
             changesets: 多个变化集合
             
-        Returns:
+        返回：
             受影响的键集合
         """
         affected = set()
@@ -733,14 +733,14 @@ class IncrementalComputeManager:
         """
         增量计算。
         
-        Args:
+        参数：
             name: 结果名称
             full_df: 完整数据
             affected_keys: 受影响的键
             calculator: 计算函数
             key_columns: 键列
             
-        Returns:
+        返回：
             计算结果
         """
         if not affected_keys:
@@ -793,7 +793,7 @@ class IncrementalComputeManager:
         """
         重置缓存。
         
-        Args:
+        参数：
             name: 指定数据集名称，None则重置全部
         """
         if name:
@@ -830,7 +830,7 @@ class ParallelExecutor:
         """
         初始化执行器。
         
-        Args:
+        参数：
             max_workers: 最大工作进程/线程数
             use_process: True使用ProcessPool，False使用ThreadPool
         """
@@ -865,12 +865,12 @@ class ParallelExecutor:
         """
         并行映射执行。
         
-        Args:
+        参数：
             func: 要执行的函数
             items: 输入项列表
             chunk_size: 分块大小
             
-        Returns:
+        返回：
             结果列表
         """
         if not items:
@@ -896,11 +896,11 @@ class ParallelExecutor:
         """
         批量提交任务。
         
-        Args:
+        参数：
             func: 要执行的函数
             args_list: 参数列表
             
-        Returns:
+        返回：
             结果列表
         """
         if not args_list:
@@ -955,7 +955,7 @@ class HighPerformanceEngine:
         """
         初始化高性能引擎。
         
-        Args:
+        参数：
             pg_conn_str: PostgreSQL连接字符串
             cache_dir: 缓存目录
             memory_limit: DuckDB内存限制
@@ -1008,14 +1008,14 @@ class HighPerformanceEngine:
         """
         计算净需求。
         
-        Args:
+        参数：
             demand_df: 需求数据
             supply_df: 供给数据
             safety_stock_df: 安全库存数据
             target_date: 目标日期
             use_incremental: 是否使用增量计算
             
-        Returns:
+        返回：
             净需求结果
         """
         if not use_incremental:
@@ -1046,11 +1046,11 @@ class HighPerformanceEngine:
         """
         应用MOQ/RV约束。
         
-        Args:
+        参数：
             demand_df: 需求数据
             config_df: MOQ/RV配置
             
-        Returns:
+        返回：
             调整后的需求
         """
         return self.calculator.apply_moq_rv_batch(demand_df, config_df)
@@ -1064,12 +1064,12 @@ class HighPerformanceEngine:
         """
         优先级分配。
         
-        Args:
+        参数：
             demand_df: 需求数据
             inventory_df: 库存数据
             priority_df: 优先级配置
             
-        Returns:
+        返回：
             分配结果
         """
         return self.calculator.priority_allocation_batch(
@@ -1084,11 +1084,11 @@ class HighPerformanceEngine:
         """
         并行处理。
         
-        Args:
+        参数：
             func: 处理函数
             items: 输入项
             
-        Returns:
+        返回：
             处理结果
         """
         return self.parallel.map(func, items)
@@ -1152,12 +1152,12 @@ def create_high_performance_engine(
     """
     创建高性能引擎实例。
     
-    Args:
+    参数：
         pg_conn_str: PostgreSQL连接字符串
         cache_dir: 缓存目录
         **kwargs: 其他参数
         
-    Returns:
+    返回：
         HighPerformanceEngine实例
     """
     return HighPerformanceEngine(

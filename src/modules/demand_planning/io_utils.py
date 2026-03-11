@@ -1,4 +1,4 @@
-"""Module 1 历史订单与文件IO处理。
+"""Module1 历史订单与文件IO处理。
 
 本模块提供历史订单加载和文件输出功能。
 
@@ -133,7 +133,7 @@ def _read_orderlog(path: str) -> Optional[pd.DataFrame]:
         path: 文件路径。
 
     返回:
-        OrderLog DataFrame或None。
+        `OrderLog` DataFrame或None。
     """
     try:
         xl = pd.ExcelFile(path)

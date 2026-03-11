@@ -74,11 +74,11 @@ def load_module1_daily_shipment(
     """
     加载 Module1 当日发货数据（ShipmentLog）。
 
-    Args:
+    参数：
         module1_output_dir: Module1输出目录
         current_date: 当前日期
 
-    Returns:
+    返回：
         pd.DataFrame: 包含date, material, location, quantity的发货数据
     """
     required_cols = ['date', 'material', 'location', 'quantity']
@@ -114,15 +114,15 @@ def load_module1_daily_orders(
     current_date: pd.Timestamp
 ) -> pd.DataFrame:
     """
-    加载 Module1 当日订单池（OrderLog）。
+    加载 Module1 当日订单池（`OrderLog`）。
 
     选择requirement_date >= current_date的订单。
 
-    Args:
+    参数：
         module1_output_dir: Module1输出目录
         current_date: 当前日期
 
-    Returns:
+    返回：
         pd.DataFrame: 订单数据，包含date, material, location等字段
     """
     cols = [
@@ -174,11 +174,11 @@ def load_orchestrator_delivery_gr(
     """
     从 Orchestrator 加载当日收货（GR）视图。
 
-    Args:
+    参数：
         orchestrator: Orchestrator实例
         current_date: 当前日期
 
-    Returns:
+    返回：
         pd.DataFrame: 收货数据，包含date, material, receiving, quantity
     """
     required_cols = ['date', 'material', 'receiving', 'quantity']
@@ -230,11 +230,11 @@ def load_orchestrator_open_deployment(
     """
     从 Orchestrator 加载开放调拨（Open Deployment）视图。
 
-    Args:
+    参数：
         orchestrator: Orchestrator实例
         current_date: 当前日期
 
-    Returns:
+    返回：
         pd.DataFrame: 开放调拨数据
     """
     required_cols = ['material', 'sending', 'receiving', 'quantity']
@@ -283,7 +283,7 @@ def _load_static_config(config_dict: dict, config: dict, skip_normalize: bool = 
     """
     从配置字典加载静态配置表（带缓存优化）。
 
-    Args:
+    参数：
         config_dict: 原始配置字典
         config: 目标配置字典（会被修改）
         skip_normalize: 是否跳过规范化（当config_dict来自main_integration时已被规范化）
@@ -335,12 +335,12 @@ def _load_module1_data_from_memory(
     """
     从内存加载Module1数据（数据库模式）。
 
-    Args:
+    参数：
         module1_result: Module1运行结果
         config: 目标配置字典（会被修改）
     """
     # 🔧 修复：使用 all_orders_for_next_day（累积订单）而不是 orders_df（仅当日新订单）
-    # all_orders_for_next_day 包含当天及之后的所有未履行订单，与文件模式中的 OrderLog 一致
+    # `all_orders_for_next_day` 包含当天及之后所有未履行订单，与文件模式中的 ``OrderLog`` 保持一致
     # 回退到 orders_df 以兼容旧版本
     orders_df = module1_result.get('all_orders_for_next_day', module1_result.get('orders_df', pd.DataFrame()))
     supply_demand_df = module1_result.get('supply_demand_df', pd.DataFrame())
@@ -368,7 +368,7 @@ def _load_module1_data_from_file(
     """
     从文件并行加载Module1数据。
 
-    Args:
+    参数：
         module1_output_dir: Module1输出目录
         current_date: 当前日期
         config: 目标配置字典（会被修改）
@@ -441,7 +441,7 @@ def _load_production_from_orchestrator(
     """
     从Orchestrator加载生产计划数据。
 
-    Args:
+    参数：
         orchestrator: Orchestrator实例
         current_date: 当前日期
         config: 目标配置字典（会被修改）
@@ -477,7 +477,7 @@ def _load_production_from_module4(
     """
     从Module4文件加载生产计划数据。
 
-    Args:
+    参数：
         module4_output_path: Module4输出文件路径
         config: 目标配置字典（会被修改）
     """
@@ -523,7 +523,7 @@ def _load_orchestrator_dynamic_data(
     """
     从Orchestrator并行加载动态数据。
 
-    Args:
+    参数：
         orchestrator: Orchestrator实例
         current_date: 当前日期
         config: 目标配置字典（会被修改）
@@ -614,7 +614,7 @@ def _process_date_fields(config: dict) -> None:
     """
     处理配置中的日期字段。
 
-    Args:
+    参数：
         config: 配置字典（会被修改）
     """
     for sheet, fields in DATE_FIELDS_MAP.items():
@@ -637,7 +637,7 @@ def load_integrated_config(
     """
     加载集成配置数据（替代load_config）。
 
-    Args:
+    参数：
         config_dict: 配置字典
         module1_output_dir: Module1输出目录
         module4_output_path: Module4输出文件路径（当module4_result为None时使用）
@@ -646,7 +646,7 @@ def load_integrated_config(
         module1_result: Module1运行结果（可选，用于数据库模式）
         module4_result: Module4运行结果（可选，优先从内存获取生产计划）
 
-    Returns:
+    返回：
         dict: 完整的配置字典
     """
     t0 = time.perf_counter()
@@ -669,40 +669,44 @@ def load_integrated_config(
         config['OrderLog'] = pd.DataFrame()
         config['TodayShipment'] = pd.DataFrame()
 
-    # 3. 加载生产计划
-    # 与Dev版本行为一致：优先从orchestrator取当日GR，回退读Module4文件
-    # DB模式下module4_result作为文件读取的内存替代，行为与文件读取完全一致
+    # 3. 🦆 加载生产计划（修复：合并当日production GR和未来生产计划）
     config['ProductionPlan'] = pd.DataFrame()
     
-    # 3.1 首先从orchestrator获取当日已确认的production GR
+    # 3.1 首先从orchestrator获取当日已确认的production GR（这是关键！）
+    # 在DB模式下，module4_result包含的是未来生产计划，不包含当日production GR
+    # 必须从orchestrator获取当日production GR，否则Module5计算dynamic_soh时会缺少当日产量
     if orchestrator and current_date:
         _load_production_from_orchestrator(orchestrator, current_date, config)
     
-    # 3.2 如果orchestrator无数据，回退获取生产计划
-    # 优先从module4_result内存获取（DB模式），否则从文件获取（Src模式）
-    if config['ProductionPlan'].empty:
-        if module4_result is not None and 'production_df' in module4_result:
-            # 内存模式：与_load_production_from_module4文件读取行为一致
-            production_df = module4_result['production_df']
-            if isinstance(production_df, pd.DataFrame) and not production_df.empty:
-                m4_production = production_df.copy()
-                if 'available_date' not in m4_production.columns:
-                    if 'date' in m4_production.columns:
-                        m4_production = m4_production.rename(
-                            columns={'date': 'available_date'}
-                        )
-                if 'available_date' in m4_production.columns:
-                    m4_production['available_date'] = pd.to_datetime(
-                        m4_production['available_date'], errors='coerce'
+    # 3.2 合并module4_result中的未来生产计划（仅在DB模式下）
+    if module4_result is not None and 'production_df' in module4_result:
+        production_df = module4_result['production_df']
+        if isinstance(production_df, pd.DataFrame) and not production_df.empty:
+            future_prod = production_df.copy()
+            # 确保available_date列存在并转换为datetime
+            if 'available_date' not in future_prod.columns and 'date' in future_prod.columns:
+                future_prod = future_prod.rename(columns={'date': 'available_date'})
+            if 'available_date' in future_prod.columns:
+                future_prod['available_date'] = pd.to_datetime(
+                    future_prod['available_date'], errors='coerce'
+                )
+                # 仅保留未来日期的生产计划，避免与当日production GR重复
+                current_date_normalized = pd.to_datetime(current_date).normalize()
+                future_prod = future_prod[
+                    future_prod['available_date'] > current_date_normalized
+                ]
+            # 合并当日GR和未来生产计划
+            if not future_prod.empty:
+                if not config['ProductionPlan'].empty:
+                    config['ProductionPlan'] = pd.concat(
+                        [config['ProductionPlan'], future_prod], ignore_index=True
                     )
-                for col in ['produced_qty', 'uncon_planned_qty', 'planned_qty', 'quantity']:
-                    if col in m4_production.columns:
-                        m4_production[col] = pd.to_numeric(
-                            m4_production[col], errors='coerce'
-                        ).fillna(0)
-                config['ProductionPlan'] = m4_production
-        else:
-            _load_production_from_module4(module4_output_path, config)
+                else:
+                    config['ProductionPlan'] = future_prod
+
+    # 3.3 如果以上都没有数据，最后从文件获取
+    if config['ProductionPlan'].empty:
+        _load_production_from_module4(module4_output_path, config)
 
     # 4. 加载M4_MaterialLocationLineCfg
     config['M4_MaterialLocationLineCfg'] = config_dict.get(
@@ -757,10 +761,10 @@ def load_config(input_path: str) -> dict:
     """
     独立模式读取Excel配置。
 
-    Args:
+    参数：
         input_path: 输入Excel文件路径
 
-    Returns:
+    返回：
         dict: 配置字典
     """
     config = {}
@@ -819,7 +823,7 @@ def get_static_config_cache_status() -> dict:
     """
     获取静态配置缓存状态。
     
-    Returns:
+    返回：
         dict: 缓存状态信息
     """
     global _static_config_cache

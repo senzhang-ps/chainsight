@@ -28,14 +28,14 @@ def compute_root_horizon(
 
     公式: horizon = max(PDT+GR, MCT) + PTF + LSK - 1
 
-    Args:
+    参数：
         material: 物料编码
         location: 地点编码
         lead_time_df: 提前期配置DataFrame
         m4_mlcfg_df: M4配置DataFrame
         ptf_lsk_cache: PTF/LSK缓存
 
-    Returns:
+    返回：
         int: 计划窗口天数
     """
     ptf, lsk = get_ptf_lsk(
@@ -91,7 +91,7 @@ def determine_lead_time(
     """
     确定提前期。
 
-    Args:
+    参数：
         sending: 发送节点
         receiving: 接收节点
         location_type: 发送端类型
@@ -100,7 +100,7 @@ def determine_lead_time(
         material: 物料编码
         ptf_lsk_cache: PTF/LSK缓存
 
-    Returns:
+    返回：
         Tuple[int, str]: (提前期, 错误信息)
     """
     if lead_time_df.empty:
@@ -165,14 +165,14 @@ def infer_sending_location_type(
     3) 若 sending 只在 sourcing 列出现、从不在 location 列出现，判为 'Plant'
     4) 其他情况默认为 'DC'
 
-    Args:
+    参数：
         network_df: 网络配置DataFrame
         location_layer_map: 节点层级映射 dict[(material, location): layer]
         sending: 发送节点标识
         material: 物料编码
         sim_date: 模拟日期
 
-    Returns:
+    返回：
         str: 'Plant' 或 'DC'
     """
     if sending is None or (isinstance(sending, float) and pd.isna(sending)) or str(sending).strip() == '':

@@ -300,10 +300,10 @@ class PerformanceDashboard:
         """
         导出性能报告
         
-        Args:
+        参数：
             format: 导出格式 (json, csv, html)
         
-        Returns:
+        返回：
             报告文件路径
         """
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')

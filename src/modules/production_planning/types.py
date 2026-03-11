@@ -32,7 +32,7 @@ class ChangeoverInfo:
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典格式。
 
-        Returns:
+        返回：
             Dict[str, Any]: 换产信息字典
         """
         return {
@@ -48,10 +48,10 @@ class ChangeoverInfo:
     def from_dict(cls, data: Dict[str, Any]) -> 'ChangeoverInfo':
         """从字典创建实例。
 
-        Args:
+        参数：
             data: 换产信息字典
 
-        Returns:
+        返回：
             ChangeoverInfo: 换产信息实例
         """
         return cls(
@@ -85,7 +85,7 @@ class LineState:
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典格式。
 
-        Returns:
+        返回：
             Dict[str, Any]: 产线状态字典
         """
         result = {
@@ -104,10 +104,10 @@ class LineState:
     def from_dict(cls, data: Dict[str, Any]) -> 'LineState':
         """从字典创建实例。
 
-        Args:
+        参数：
             data: 产线状态字典
 
-        Returns:
+        返回：
             LineState: 产线状态实例
         """
         changeover_info = None
@@ -152,7 +152,7 @@ class PlanRecord:
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典格式。
 
-        Returns:
+        返回：
             Dict[str, Any]: 计划记录字典
         """
         return {
@@ -191,7 +191,7 @@ class ExceedRecord:
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典格式。
 
-        Returns:
+        返回：
             Dict[str, Any]: 超额记录字典
         """
         return {
@@ -229,7 +229,7 @@ class ValidationIssue:
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典格式。
 
-        Returns:
+        返回：
             Dict[str, Any]: 校验问题字典
         """
         return {

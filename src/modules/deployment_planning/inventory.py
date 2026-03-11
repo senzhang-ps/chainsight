@@ -18,10 +18,10 @@ def build_open_deployment_inbound(
 
     过滤sending != receiving且数量>0的记录，按(material, receiving)汇总。
 
-    Args:
+    参数：
         open_deployment_df: 开放调拨DataFrame
 
-    Returns:
+    返回：
         dict: (material, receiving) -> sum(quantity)
     """
     if open_deployment_df is None or open_deployment_df.empty:
@@ -70,7 +70,7 @@ def calculate_projected_inventory(
     公式：beginning + in_transit + delivery_gr + today_production
           + future_production - today_shipment - open_deployment
 
-    Args:
+    参数：
         beginning_inventory: 期初库存
         in_transit: 在途库存
         delivery_gr: 当日收货
@@ -79,7 +79,7 @@ def calculate_projected_inventory(
         today_shipment: 当日发货
         open_deployment: 开放调拨
 
-    Returns:
+    返回：
         dict: (material, location) -> 预测库存量
     """
     all_keys = set()
@@ -116,7 +116,7 @@ def calculate_available_inventory(
 
     公式：beginning + delivery_gr + today_production_gr - open_deployment
 
-    Args:
+    参数：
         beginning_inventory: 期初库存
         delivery_gr: 当日收货
         today_production_gr: 当日生产
@@ -124,7 +124,7 @@ def calculate_available_inventory(
         open_deployment: 开放调拨
         open_deployment_inbound: 开放调拨入库（未使用，保留接口兼容性）
 
-    Returns:
+    返回：
         dict: (material, location) -> 可用库存量
     """
     all_keys = set()
@@ -147,11 +147,11 @@ def get_qty_from_row(row, col_names: list) -> int:
     """
     从行中获取第一个有效的数量值。
 
-    Args:
+    参数：
         row: DataFrame行（namedtuple）
         col_names: 按优先级排列的列名列表
 
-    Returns:
+    返回：
         int: 找到的数量值，未找到返回0
     """
     for col in col_names:
@@ -168,11 +168,11 @@ def build_production_dicts(
     """
     构建当日和未来生产字典。
 
-    Args:
+    参数：
         production_plan: 生产计划DataFrame
         sim_date: 仿真日期
 
-    Returns:
+    返回：
         tuple: (today_production_gr, future_production) 两个字典
     """
     today_production_gr = {}
@@ -213,11 +213,11 @@ def build_intransit_dicts(
     """
     构建当日和未来在途字典。
 
-    Args:
+    参数：
         in_transit: 在途库存DataFrame
         sim_date: 仿真日期
 
-    Returns:
+    返回：
         tuple: (today_intransit, future_intransit) 两个字典
     """
     today_intransit = {}
@@ -264,11 +264,11 @@ def build_delivery_gr_dict(
     """
     构建当日收货字典。
 
-    Args:
+    参数：
         delivery_gr_data: 收货数据DataFrame
         sim_date: 仿真日期
 
-    Returns:
+    返回：
         dict: (material, receiving) -> 收货量
     """
     delivery_gr = {}
@@ -298,11 +298,11 @@ def build_shipment_dict(
     """
     构建当日发货字典。
 
-    Args:
+    参数：
         shipment_data: 发货数据DataFrame
         sim_date: 仿真日期
 
-    Returns:
+    返回：
         dict: (material, location) -> 发货量
     """
     today_shipment = {}
@@ -328,10 +328,10 @@ def build_open_deployment_dict(open_deployment_data: pd.DataFrame) -> dict:
     """
     构建开放调拨发送端字典（排除自循环）。
 
-    Args:
+    参数：
         open_deployment_data: 开放调拨DataFrame
 
-    Returns:
+    返回：
         dict: (material, sending) -> 调拨量
     """
     open_deployment = {}

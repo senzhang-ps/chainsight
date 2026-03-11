@@ -30,14 +30,14 @@ def build_unconstrained_plan_for_single_day(
 
     仅针对审查日物料，读取当日净需求，计算最小批与舍入。
 
-    Args:
+    参数：
         net_demand_df: 当日净需求
         mlcfg: 物料地点产线配置
         simulation_date: 当前仿真日期
         simulation_start: 仿真起始日期
         issues: 问题收集列表
 
-    Returns:
+    返回：
         pd.DataFrame: 无约束计划
     """
     if net_demand_df.empty:
@@ -71,7 +71,7 @@ def _build_plan_for_material(
 ) -> Optional[pd.DataFrame]:
     """为单个物料构建计划。
 
-    Args:
+    参数：
         row: 配置行（namedtuple 或 Series）
         net_demand_df: 净需求数据
         mlcfg: 配置DataFrame
@@ -79,7 +79,7 @@ def _build_plan_for_material(
         simulation_start: 仿真起始日期
         issues: 问题列表
 
-    Returns:
+    返回：
         Optional[pd.DataFrame]: 计划DataFrame或None
     """
     # 兼容 itertuples() 返回的 namedtuple
@@ -122,12 +122,12 @@ def _get_material_demands(
 ) -> pd.DataFrame:
     """获取物料的需求记录。
 
-    Args:
+    参数：
         net_demand_df: 净需求数据
         material: 物料编码
         location: 地点
 
-    Returns:
+    返回：
         pd.DataFrame: 筛选后的需求
     """
     mask = (
@@ -145,13 +145,13 @@ def _merge_with_config(
 ) -> pd.DataFrame:
     """与配置合并。
 
-    Args:
+    参数：
         nd_sub: 需求子集
         mlcfg: 配置DataFrame
         material: 物料编码
         location: 地点
 
-    Returns:
+    返回：
         pd.DataFrame: 合并后的DataFrame
     """
     cfg_slice = mlcfg[
@@ -176,14 +176,14 @@ def _filter_by_date(
 ) -> pd.DataFrame:
     """按日期筛选需求。
 
-    Args:
+    参数：
         nd_sub: 需求子集
         simulation_date: 仿真日期
         material: 物料编码
         location: 地点
         issues: 问题列表
 
-    Returns:
+    返回：
         pd.DataFrame: 筛选后的DataFrame
     """
     nd_sub['requirement_date'] = pd.to_datetime(
@@ -207,7 +207,7 @@ def _report_date_mismatches(
 ) -> None:
     """报告日期不匹配的需求。
 
-    Args:
+    参数：
         mismatched: 不匹配的记录
         simulation_date: 仿真日期
         issues: 问题列表
@@ -237,12 +237,12 @@ def _create_plan_record(
 ) -> pd.DataFrame:
     """创建计划记录。
 
-    Args:
+    参数：
         row: 配置行（namedtuple 或 Series）
         nd_sub: 需求子集
         simulation_date: 仿真日期
 
-    Returns:
+    返回：
         pd.DataFrame: 计划记录
     """
     agg_qty = nd_sub['quantity'].sum()
@@ -285,13 +285,13 @@ def optimal_changeover_sequence(
     首件按原始需求量最大选择；后续优先最小换产时间，
     若并列使用数量打破。
 
-    Args:
+    参数：
         batches: 批次列表
         co_mat: 换产矩阵
         co_def: 换产定义
         line: 产线标识
 
-    Returns:
+    返回：
         List[int]: 批次索引的执行顺序
     """
     if not batches:
@@ -324,11 +324,11 @@ def _select_first_batch(
 ) -> int:
     """选择第一个批次（最大原始数量）。
 
-    Args:
+    参数：
         batches: 批次列表
         remaining: 剩余批次索引集合
 
-    Returns:
+    返回：
         int: 选中的批次索引
     """
     return max(
@@ -352,7 +352,7 @@ def _select_next_batch(
 
     优先最小换产时间，同时间用数量打破。
 
-    Args:
+    参数：
         batches: 批次列表
         remaining: 剩余索引集合
         current_material: 当前物料
@@ -360,7 +360,7 @@ def _select_next_batch(
         co_def: 换产定义
         line: 产线
 
-    Returns:
+    返回：
         int: 选中的批次索引
     """
     min_cost = None
@@ -400,14 +400,14 @@ def _get_changeover_time(
 ) -> float:
     """获取换产时间。
 
-    Args:
+    参数：
         from_material: 源物料
         to_material: 目标物料
         co_mat: 换产矩阵
         co_def: 换产定义
         line: 产线
 
-    Returns:
+    返回：
         float: 换产时间
     """
     try:

@@ -1,4 +1,4 @@
-"""Module 1 集成模式主入口。
+"""Module1 集成模式主入口。
 
 本模块提供集成模式的主要功能。
 
@@ -92,17 +92,14 @@ def run_daily_order_generation(
             output_dir, simulation_date, skip_file_output
         )
 
-        # 8) 生成Summary（供数据库模式使用）
-        # 🔧 修复：使用 all_orders_df（累积订单）而非 today_orders_df（当日新增）
-        # xlsx 的 Summary 通过 _save_output → _build_summary 使用 all_orders_df，
-        # DB 的 Summary 也应使用 all_orders_df，确保 Total_Orders 一致（累积快照行数）
+        # 8) 生成Summary（供数据库模式使用，与Excel保持一致：使用累计订单）
         summary_df = _build_summary_df(all_orders_df, shipment_df, cut_df, supply_demand_df)
 
-        # orders_df: 当日新增订单（today_orders_df），用于 DB 写入
-        # 比对脚本从 xlsx 读取 OrderLog 时已过滤 simulation_date == 当天，
-        # 因此 DB 也应只写当天新增，确保口径一致。
+        # `orders_df`：累积订单（`all_orders_df`），与本地 Excel 输出保持一致
+        # 本地 _save_output 使用 all_orders_df 写入 `OrderLog` sheet，
+        # 数据库模式也应写入累积订单，确保数据库与本地结果完全一致。
         return {
-            'orders_df': today_orders_df,  # ✅ 只写当天新增订单，与比对脚本的 xlsx 过滤口径一致
+            'orders_df': all_orders_df,  # ✅ 累积订单，与本地 Excel `OrderLog` 一致
             'shipment_df': shipment_df,
             'cut_df': cut_df,
             'supply_demand_df': supply_demand_df,
@@ -383,7 +380,7 @@ def _apply_orders_consumption(
     
     quantities = consumed['quantity'].values.copy().astype(float)
 
-    # AO消耗
+    # AO 订单消耗
     ao_orders = orders_df[orders_df['demand_type'] == 'AO'].copy()
     if not ao_orders.empty:
         ao_orders = ao_orders.sort_values(
@@ -391,7 +388,7 @@ def _apply_orders_consumption(
         )
         _apply_fast_consumption(ao_orders, quantities, idx_map, offsets)
 
-    # Normal消耗
+    # 普通订单消耗
     normal_orders = orders_df[orders_df['demand_type'] == 'normal'].copy()
     if not normal_orders.empty:
         normal_orders = normal_orders.sort_values(

@@ -33,13 +33,13 @@ def _lookup_moq_rv(
     2. 回退按(material, sending)匹配
     3. 默认返回(1, 1)
 
-    Args:
+    参数：
         deploy_cfg: DeployConfig DataFrame
         material: 物料编码
         sending: 发送端编码
         receiving: 接收端编码
 
-    Returns:
+    返回：
         tuple: (moq, rv)
     """
     try:
@@ -91,7 +91,7 @@ def _collect_sdl_demands(
     """
     收集SupplyDemandLog需求。
 
-    Args:
+    参数：
         supply_demand_log: SDL DataFrame
         material: 物料编码
         location: 位置编码
@@ -101,7 +101,7 @@ def _collect_sdl_demands(
         leadtime_for_row: 行级lead time
         sdl_index: SDL预建索引（可选）
 
-    Returns:
+    返回：
         list: 需求行列表
     """
     demand_rows = []
@@ -171,8 +171,8 @@ def _collect_safety_stock_demands(
     """
     收集安全库存需求（仅horizon_end当天）。
 
-    Args:
-        safety_stock: SafetyStock DataFrame
+    参数：
+        safety_stock: `SafetyStock` DataFrame
         material: 物料编码
         location: 位置编码
         upstream: 上游位置
@@ -181,7 +181,7 @@ def _collect_safety_stock_demands(
         leadtime_for_row: 行级lead time
         ss_index: SafetyStock预建索引（可选）
 
-    Returns:
+    返回：
         list: 需求行列表
     """
     demand_rows = []
@@ -245,8 +245,8 @@ def _collect_order_demands(
     """
     收集订单需求（AO/normal）。
 
-    Args:
-        order_df: OrderLog DataFrame
+    参数：
+        order_df: `OrderLog` DataFrame
         material: 物料编码
         location: 位置编码
         upstream: 上游位置
@@ -255,7 +255,7 @@ def _collect_order_demands(
         leadtime_for_row: 行级lead time
         order_index: OrderLog预建索引（可选）
 
-    Returns:
+    返回：
         list: 需求行列表
     """
     demand_rows = []
@@ -330,7 +330,7 @@ def _collect_gap_demands(
     """
     收集GAP传递需求（上游下发的净需求）。
 
-    Args:
+    参数：
         up_gap_buffer: 上游缺口缓冲区
         deploy_cfg: DeployConfig DataFrame
         material: 物料编码
@@ -340,7 +340,7 @@ def _collect_gap_demands(
         horizon_end: 窗口结束日期
         leadtime_for_row: 行级lead time
 
-    Returns:
+    返回：
         list: 需求行列表
     """
     demand_rows = []
@@ -404,12 +404,12 @@ def collect_node_demands(
     收集节点在当天窗口内的需求。
 
     需求来源：
-    - SupplyDemandLog（forecast/others）
-    - SafetyStock（仅horizon_end当天）
-    - OrderLog（AO/normal）
+    - `SupplyDemandLog`（forecast/others）
+    - `SafetyStock`（仅horizon_end当天）
+    - `OrderLog`（AO/normal）
     - 上游up_gap_buffer（净需求）
 
-    Args:
+    参数：
         material: 物料编码
         location: 位置编码
         sim_date: 仿真日期
@@ -423,7 +423,7 @@ def collect_node_demands(
         order_index: OrderLog预建索引
         deploy_config_index: DeployConfig预建索引
 
-    Returns:
+    返回：
         list: 需求行列表
     """
     supply_demand_log = config['SupplyDemandLog']
@@ -558,7 +558,7 @@ def collect_node_demands_fast(
     
     与collect_node_demands逻辑完全一致，但使用预计算的horizon参数。
     
-    Args:
+    参数：
         material: 物料编码
         location: 位置编码
         sim_date: 仿真日期
@@ -569,7 +569,7 @@ def collect_node_demands_fast(
         ss_index: SafetyStock预建索引
         order_index: OrderLog预建索引
     
-    Returns:
+    返回：
         list: 需求行列表
     """
     mat_str = str(material)

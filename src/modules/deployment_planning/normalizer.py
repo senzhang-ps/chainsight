@@ -15,10 +15,10 @@ def normalize_location(location_str) -> str:
 
     作用：统一 location/sending/receiving/sourcing 字段格式，避免匹配失败。
 
-    Args:
+    参数：
         location_str: 地点编码，可以是字符串、数字或None
 
-    Returns:
+    返回：
         str: 规范化后的4位地点编码字符串
     """
     if location_str is None or pd.isna(location_str):
@@ -36,10 +36,10 @@ def normalize_material(material_str) -> str:
     作用：统一 material 字段格式，与code_v0保持一致。
     注意：直接转换为字符串，不做额外处理，以确保与code_v0输出一致。
 
-    Args:
+    参数：
         material_str: 物料编码，可以是字符串、数字或None
 
-    Returns:
+    返回：
         str: 规范化后的物料编码字符串
     """
     if material_str is None or pd.isna(material_str):
@@ -55,10 +55,10 @@ def normalize_identifiers(df: pd.DataFrame) -> pd.DataFrame:
     
     使用向量化操作提升性能。
 
-    Args:
+    参数：
         df: 需要规范化的DataFrame
 
-    Returns:
+    返回：
         pd.DataFrame: 规范化后的DataFrame
     """
     if df.empty:

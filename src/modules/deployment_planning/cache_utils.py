@@ -26,7 +26,7 @@ def _try_duckdb_build_index(
     """
     尝试使用 DuckDB 构建索引。
     
-    Returns:
+    返回：
         索引字典，如果失败则返回 None
     """
     if not USE_DUCKDB_INDEX:
@@ -63,11 +63,11 @@ def build_dataframe_index(
     """
     构建DataFrame的GroupBy索引，实现O(1)查找。
 
-    Args:
+    参数：
         df: 源DataFrame
         key_columns: 索引列名列表
 
-    Returns:
+    返回：
         dict: key_tuple -> 对应的DataFrame子集
     """
     if df.empty:
@@ -90,10 +90,10 @@ def build_sdl_index(
     """
     构建SupplyDemandLog的(material, location)索引。
 
-    Args:
+    参数：
         supply_demand_log: SDL DataFrame
 
-    Returns:
+    返回：
         dict: (material, location) -> 对应记录
     """
     if supply_demand_log.empty:
@@ -113,10 +113,10 @@ def build_safety_stock_index(
     """
     构建SafetyStock的(material, location)索引。
 
-    Args:
-        safety_stock: SafetyStock DataFrame
+    参数：
+        safety_stock: `SafetyStock` DataFrame
 
-    Returns:
+    返回：
         dict: (material, location) -> 对应记录
     """
     if safety_stock.empty:
@@ -135,10 +135,10 @@ def build_order_log_index(
     """
     构建OrderLog的(material, location)索引。
 
-    Args:
-        order_log: OrderLog DataFrame
+    参数：
+        order_log: `OrderLog` DataFrame
 
-    Returns:
+    返回：
         dict: (material, location) -> 对应记录
     """
     if order_log.empty:
@@ -157,10 +157,10 @@ def build_deploy_config_index(
     """
     构建DeployConfig的(material, sending)索引。
 
-    Args:
+    参数：
         deploy_config: DeployConfig DataFrame
 
-    Returns:
+    返回：
         dict: (material, sending) -> 对应记录
     """
     if deploy_config.empty:
@@ -180,11 +180,11 @@ def get_from_index(
     """
     从索引中获取数据，不存在则返回空DataFrame。
 
-    Args:
+    参数：
         index: 索引字典
         key: 查找键
 
-    Returns:
+    返回：
         pd.DataFrame: 匹配的记录或空DataFrame
     """
     return index.get(key, pd.DataFrame())
@@ -198,10 +198,10 @@ def build_ptf_lsk_cache(
 
     用途：为Plant口径的lead time计算提供PTF/LSK值。
 
-    Args:
+    参数：
         m4_mlcfg_df: M4_MaterialLocationLineCfg DataFrame
 
-    Returns:
+    返回：
         dict: (material, location) -> (ptf, lsk)
     """
     cache = {}
@@ -240,13 +240,13 @@ def get_ptf_lsk(
     """
     获取指定(material, site)的PTF/LSK。
 
-    Args:
+    参数：
         material: 物料编码
         site: 站点编码
         m4_mlcfg_df: M4_MaterialLocationLineCfg DataFrame
         cache: PTF/LSK缓存
 
-    Returns:
+    返回：
         tuple: (ptf, lsk)
     """
     # 使用缓存
@@ -288,10 +288,10 @@ def build_lead_time_cache(
     """
     构建LeadTime基础参数缓存（PDT/GR/MCT）。
 
-    Args:
+    参数：
         lead_time_df: LeadTime DataFrame
 
-    Returns:
+    返回：
         dict: (sending, receiving) -> (PDT, GR, MCT)
     """
     cache = {}
@@ -319,10 +319,10 @@ def build_active_network_cache(
     """
     构建Network活动行缓存。
 
-    Args:
+    参数：
         network_df: Network DataFrame
 
-    Returns:
+    返回：
         dict: (material, location, eff_from, eff_to) -> row
     """
     cache = {}
@@ -354,14 +354,14 @@ def get_active_network(
     """
     获取(material, location)在sim_date的活动Network行。
 
-    Args:
+    参数：
         network_df: Network DataFrame
         material: 物料编码
         location: 位置编码
         sim_date: 仿真日期
         cache: Network缓存
 
-    Returns:
+    返回：
         pd.DataFrame: 匹配的Network行
     """
     if cache is not None:
@@ -396,14 +396,14 @@ def get_upstream(
     """
     查找(material, location)的上游sourcing。
 
-    Args:
+    参数：
         location: 位置编码
         material: 物料编码
         network_df: Network DataFrame
         sim_date: 仿真日期
         active_network_cache: Network缓存
 
-    Returns:
+    返回：
         str or None: 上游位置编码
     """
     row = get_active_network(
@@ -422,17 +422,17 @@ def assign_location_layers(network_df: pd.DataFrame) -> pd.DataFrame:
     每个物料单独建图并做BFS，得到该物料下各location的layer。
     返回包含material/location/layer的DataFrame，供后续按(material, location)查询。
 
-    Args:
+    参数：
         network_df: Network DataFrame
 
-    Returns:
+    返回：
         pd.DataFrame: 包含material, location和layer的DataFrame
     """
     if network_df.empty:
         return pd.DataFrame({'material': [], 'location': [], 'layer': []})
 
     layer_rows = []
-    # dropna=False 保留 NaN material，尽量与原始数据一致
+    # 使用 `dropna=False` 保留 NaN 物料键，尽量与原始数据保持一致
     for material, mat_df in network_df.groupby('material', dropna=False):
         if mat_df.empty:
             continue
@@ -484,7 +484,7 @@ def assign_location_layers(network_df: pd.DataFrame) -> pd.DataFrame:
                 layer_dict[loc] = max_layer + 1
 
         for loc, layer in layer_dict.items():
-            # Handle NaN material from groupby
+            # 处理 groupby 产生的 NaN material
             try:
                 is_na = material is None or pd.isna(material)  # type: ignore[arg-type]
             except (ValueError, TypeError):
@@ -519,7 +519,7 @@ def determine_lead_time(
     Plant: lead_time = max(MCT, PDT+GR) + PTF + LSK - 1
     DC: lead_time = PDT + GR
 
-    Args:
+    参数：
         sending: 发送端编码
         receiving: 接收端编码
         location_type: 位置类型（Plant/DC）
@@ -529,7 +529,7 @@ def determine_lead_time(
         lead_time_cache: LeadTime缓存
         ptf_lsk_cache: PTF/LSK缓存
 
-    Returns:
+    返回：
         tuple: (lead_time, error_message)
     """
     # 使用缓存
@@ -591,14 +591,14 @@ def get_sending_location_type(
     2) 若为根层（layer=0），视为Plant
     3) 否则默认DC
 
-    Args:
+    参数：
         material: 物料编码
         sending: 发送端编码
         sim_date: 仿真日期
         network_df: Network DataFrame
         location_layer_map: 位置层级映射 dict[(material, location): layer]
 
-    Returns:
+    返回：
         str: 'Plant' 或 'DC'
     """
     if not sending or pd.isna(sending) or str(sending).strip() == "":
@@ -609,7 +609,7 @@ def get_sending_location_type(
         return str(row.iloc[0].get('location_type', 'DC') or 'DC')
 
     # 未维护但被识别为根节点 → Plant
-    # Use (material, sending) key - matching baseline
+    # 使用 (material, sending) 键，与基线保持一致
     layer_key = (str(material), str(sending))
     if location_layer_map.get(layer_key, None) == 0:
         return 'Plant'
@@ -621,12 +621,12 @@ def is_review_day(dt: pd.Timestamp, lsk: str, day: int) -> bool:
     """
     判断是否为回顾日。
 
-    Args:
+    参数：
         dt: 日期
         lsk: 回顾类型（daily/weekly/monthly）
         day: 日期参数
 
-    Returns:
+    返回：
         bool: 是否为回顾日
     """
     if lsk == 'daily':

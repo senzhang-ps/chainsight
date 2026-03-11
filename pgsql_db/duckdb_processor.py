@@ -16,9 +16,9 @@ class DuckDBProcessor:
     
     def __init__(self, db_path: str = ":memory:"):
         """
-        初始化DuckDB处理器
+        初始化DuckDB 处理器
         
-        Args:
+        参数：
             db_path: DuckDB数据库路径，默认使用内存数据库
         """
         self.db_path = db_path
@@ -46,7 +46,7 @@ class DuckDBProcessor:
         """
         将DataFrame注册为DuckDB表
         
-        Args:
+        参数：
             df: Pandas DataFrame
             table_name: 表名
         """
@@ -79,10 +79,10 @@ class DuckDBProcessor:
         """
         转换需求预测数据 - 周度到日度拆分
         
-        Args:
+        参数：
             df: 原始需求预测DataFrame (week, material, location, quantity)
         
-        Returns:
+        返回：
             日度需求预测DataFrame
         """
         self.register_dataframe(df, 'demand_forecast')
@@ -129,12 +129,12 @@ class DuckDBProcessor:
         """
         计算净需求
         
-        Args:
+        参数：
             gross_demand: 毛需求 (material, location, date, quantity)
             inventory: 库存 (material, location, quantity)
             safety_stock: 安全库存 (material, location, date, safety_stock_qty)
         
-        Returns:
+        返回：
             净需求DataFrame
         """
         self.register_dataframe(gross_demand, 'gross_demand')
@@ -171,11 +171,11 @@ class DuckDBProcessor:
         """
         聚合订单数据
         
-        Args:
+        参数：
             orders: 订单DataFrame
             group_by: 分组字段列表
         
-        Returns:
+        返回：
             聚合后的DataFrame
         """
         self.register_dataframe(orders, 'orders')
@@ -206,12 +206,12 @@ class DuckDBProcessor:
         """
         关联配置表
         
-        Args:
+        参数：
             network: 网络配置
             leadtime: 前置时间配置
             deploy_config: 部署配置
         
-        Returns:
+        返回：
             关联后的配置DataFrame
         """
         self.register_dataframe(network, 'network')
@@ -251,12 +251,12 @@ class DuckDBProcessor:
         """
         计算部署分配（Module5核心逻辑）
         
-        Args:
+        参数：
             demand: 需求数据
             supply: 供应数据
             priority_config: 优先级配置
         
-        Returns:
+        返回：
             分配结果DataFrame
         """
         self.register_dataframe(demand, 'demand')
@@ -334,13 +334,13 @@ class DuckDBProcessor:
         """
         计算库存变化
         
-        Args:
+        参数：
             initial_inventory: 期初库存
             shipments: 发货记录
             receipts: 收货记录
             date: 日期
         
-        Returns:
+        返回：
             库存变化记录
         """
         self.register_dataframe(initial_inventory, 'initial_inv')
@@ -393,11 +393,11 @@ class DuckDBProcessor:
         """
         应用MOQ和RV规则
         
-        Args:
+        参数：
             quantities: 数量数据 (material, location, quantity)
             config: MOQ/RV配置 (material, location, moq, rv)
         
-        Returns:
+        返回：
             调整后的数量
         """
         self.register_dataframe(quantities, 'quantities')
@@ -435,11 +435,11 @@ class DuckDBProcessor:
         """
         批量数据转换
         
-        Args:
+        参数：
             dataframes: 表名到DataFrame的映射
             sql: SQL查询语句
         
-        Returns:
+        返回：
             转换结果DataFrame
         """
         # 注册所有表
@@ -459,11 +459,11 @@ class DuckDBProcessor:
         """
         直接用DuckDB读取Excel（通过Pandas中转）
         
-        Args:
+        参数：
             excel_path: Excel文件路径
             sheet_name: Sheet名称
         
-        Returns:
+        返回：
             DataFrame
         """
         df = pd.read_excel(excel_path, sheet_name=sheet_name)
@@ -473,10 +473,10 @@ class DuckDBProcessor:
         """
         使用DuckDB直接读取CSV（更高效）
         
-        Args:
+        参数：
             csv_path: CSV文件路径
         
-        Returns:
+        返回：
             DataFrame
         """
         return self.query(f"SELECT * FROM read_csv_auto('{csv_path}')")
@@ -485,7 +485,7 @@ class DuckDBProcessor:
         """
         导出DataFrame到Parquet格式
         
-        Args:
+        参数：
             df: DataFrame
             output_path: 输出路径
             table_name: 临时表名
@@ -496,14 +496,14 @@ class DuckDBProcessor:
 
 
 class DuckDBToPostgres:
-    """DuckDB到PostgreSQL的数据传输器"""
+    """DuckDB 到 PostgreSQL 的数据传输器"""
     
     def __init__(self, duckdb_processor: DuckDBProcessor, pg_connection):
         """
         初始化
         
-        Args:
-            duckdb_processor: DuckDB处理器
+        参数：
+            duckdb_processor: DuckDB 处理器
             pg_connection: PostgreSQL连接（DatabaseConnection实例）
         """
         self.duck = duckdb_processor
@@ -518,12 +518,12 @@ class DuckDBToPostgres:
         """
         将DataFrame传输到PostgreSQL
         
-        Args:
+        参数：
             df: 要传输的DataFrame
             table_name: 目标表名
             if_exists: 如果表存在的处理方式
         
-        Returns:
+        返回：
             写入的行数
         """
         if df.empty:
@@ -543,16 +543,16 @@ class DuckDBToPostgres:
         """
         处理数据并传输到PostgreSQL
         
-        Args:
+        参数：
             source_dfs: 源数据表字典
             sql: 处理SQL
             target_table: 目标表名
             if_exists: 如果表存在的处理方式
         
-        Returns:
+        返回：
             写入的行数
         """
-        # DuckDB处理
+        # DuckDB 处理
         result_df = self.duck.bulk_transform(source_dfs, sql)
         
         # 传输到PostgreSQL
@@ -560,7 +560,7 @@ class DuckDBToPostgres:
 
 
 def test_duckdb_processor():
-    """测试DuckDB处理器"""
+    """测试DuckDB 处理器"""
     print("=" * 60)
     print("DuckDB处理器测试")
     print("=" * 60)

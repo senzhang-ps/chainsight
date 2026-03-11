@@ -10,6 +10,7 @@ import time
 import os
 from datetime import datetime
 
+from psycopg import sql
 from .db_connection import DatabaseConnection
 from .table_schemas import MODULE6_OUTPUT_SCHEMAS, get_columns
 
@@ -21,7 +22,7 @@ class ModuleDataWriter:
         """
         初始化模块数据写入器
         
-        Args:
+        参数：
             db: 数据库连接实例
             config_name: 配置名称（如 BC_S5, BC_S9），用于区分不同配置的数据
         """
@@ -36,10 +37,10 @@ class ModuleDataWriter:
         使用 DELETE WHERE run_id = %s 而非 TRUNCATE，确保不同场景（BC/OC）
         的历史数据互不干扰。若 run_id 为 None，则跳过删除并发出警告。
 
-        Args:
+        参数：
             run_id: 本次运行的唯一标识符（必须提供）
 
-        Returns:
+        返回：
             int: 成功删除数据的表数量
         """
         if not run_id:
@@ -52,32 +53,32 @@ class ModuleDataWriter:
 
         # 定义所有需要按 run_id 删除的输出表
         output_tables = [
-            # Module1 输出表
+            # Module1输出表
             'module1_output_orderlog',
             'module1_output_shipmentlog',
             'module1_output_cutlog',
             'module1_output_supplydemandlog',
             'module1_output_summary',
-            # Module3 输出表
+            # Module3输出表
             'module3_output_netdemand',
-            # Module4 输出表
+            # Module4输出表
             'module4_output_productionplan',
             'module4_output_capacityexceed',
             'module4_output_validation',
             'module4_output_changeoverlog',
-            # Module5 输出表
+            # Module5输出表
             'module5_output_deploymentplan',
             'module5_output_unfulfilledlog',
             'module5_output_stockonhandlog',
             'module5_output_validation',
-            # Module6 输出表
+            # Module6输出表
             'module6_output_deliveryplan',
             'module6_output_vehiclelog',
             'module6_output_truckusagelog',
             'module6_output_unsatisfiedmdqlog',
             'module6_output_validationlog',
             'module6_output_bypassrulehitlog',
-            # Summary 输出表
+            # 汇总输出表
             'summary_output_ordershipmentcutsummary',
             'summary_output_fullchangeoverlog',
             'summary_output_fullcapacityexceed',
@@ -85,7 +86,7 @@ class ModuleDataWriter:
             'summary_output_fulldeploymentplan',
             'summary_output_fulldeliveryplan',
             'summary_output_fulltruckusage',
-            # Orchestrator 状态表
+            # 编排器状态表
             'orchestrator_unrestricted_inventory',
             'orchestrator_open_deployment',
             'orchestrator_open_deployment_pastdue_cleanup',
@@ -101,6 +102,89 @@ class ModuleDataWriter:
         ]
 
         deleted_count = 0
+
+    # 所有输出表的完整列表（类级别常量，供预建表和清理复用）
+    ALL_OUTPUT_TABLES = [
+        # Module1输出表
+        'module1_output_orderlog',
+        'module1_output_shipmentlog',
+        'module1_output_cutlog',
+        'module1_output_supplydemandlog',
+        'module1_output_summary',
+        # Module3输出表
+        'module3_output_netdemand',
+        # Module4输出表
+        'module4_output_productionplan',
+        'module4_output_capacityexceed',
+        'module4_output_validation',
+        'module4_output_changeoverlog',
+        # Module5输出表
+        'module5_output_deploymentplan',
+        'module5_output_unfulfilledlog',
+        'module5_output_stockonhandlog',
+        'module5_output_validation',
+        # Module6输出表
+        'module6_output_deliveryplan',
+        'module6_output_vehiclelog',
+        'module6_output_truckusagelog',
+        'module6_output_unsatisfiedmdqlog',
+        'module6_output_validationlog',
+        'module6_output_bypassrulehitlog',
+        # 汇总输出表
+        'summary_output_ordershipmentcutsummary',
+        'summary_output_fullchangeoverlog',
+        'summary_output_fullcapacityexceed',
+        'summary_output_fullproductionplan',
+        'summary_output_fulldeploymentplan',
+        'summary_output_fulldeliveryplan',
+        'summary_output_fulltruckusage',
+        # 编排器状态表
+        'orchestrator_unrestricted_inventory',
+        'orchestrator_open_deployment',
+        'orchestrator_open_deployment_pastdue_cleanup',
+        'orchestrator_planning_intransit',
+        'orchestrator_space_quota',
+        'orchestrator_delivery_gr',
+        'orchestrator_production_gr',
+        'orchestrator_production_plan_backlog',
+        'orchestrator_shipment_log',
+        'orchestrator_delivery_shipment_log',
+        'orchestrator_inventory_change_log',
+        'orchestrator_daily_logs',
+    ]
+
+    def ensure_output_tables_exist(self) -> int:
+        """在仿真开始前预建所有输出表的空结构。
+
+        每张表至少包含公共列 run_id, sim_date, config_name, db_write_time，
+        后续 COPY 写入时若 DataFrame 带有更多列，会自动 ALTER TABLE ADD COLUMN。
+
+        返回：
+            int: 新创建的表数量
+        """
+        common_columns = [
+            '"run_id" TEXT',
+            '"sim_date" TEXT',
+            '"config_name" TEXT',
+            '"db_write_time" TIMESTAMP',
+        ]
+        cols_sql = ", ".join(common_columns)
+        created = 0
+        with self.db.get_cursor() as cur:
+            for table_name in self.ALL_OUTPUT_TABLES:
+                cur.execute(
+                    "SELECT EXISTS(SELECT 1 FROM information_schema.tables "
+                    "WHERE table_schema = 'public' AND table_name = %s)",
+                    (table_name,),
+                )
+                if not cur.fetchone()[0]:
+                    cur.execute(f'CREATE TABLE "{table_name}" ({cols_sql})')
+                    created += 1
+        if created > 0:
+            print(f"  📋 预建输出表: 新建 {created} 张（共 {len(self.ALL_OUTPUT_TABLES)} 张）")
+        else:
+            print(f"  ✅ 所有 {len(self.ALL_OUTPUT_TABLES)} 张输出表已存在")
+        return created
 
         try:
             with self.db.get_cursor() as cursor:
@@ -132,6 +216,62 @@ class ModuleDataWriter:
             print(f"\n[ERROR] 删除表数据时出错: {e}")
 
         return deleted_count
+
+    def prepare_orchestrator_day_dataframes(
+        self,
+        orchestrator_dir: str,
+        run_id: str | None,
+        sim_date: str,
+    ) -> Dict[str, tuple[pd.DataFrame, List[str]]]:
+        """预处理单个仿真日的 Orchestrator CSV 数据，供数据库 COPY 使用。
+
+        这样可以让 Orchestrator 的当日状态写入与模块批量写入在同一事务内提交，
+        保证批次结果的一致性与可回滚性。
+        """
+        orch_path = Path(orchestrator_dir)
+        if not orch_path.exists():
+            return {}
+
+        date_key = pd.to_datetime(sim_date).strftime("%Y%m%d")
+        file_patterns = [
+            "unrestricted_inventory",
+            "open_deployment",
+            "open_deployment_pastdue_cleanup",
+            "planning_intransit",
+            "space_quota",
+            "delivery_gr",
+            "production_gr",
+            "production_plan_backlog",
+            "shipment_log",
+            "delivery_shipment_log",
+            "inventory_change_log",
+            "daily_logs",
+        ]
+
+        prepared: Dict[str, tuple[pd.DataFrame, List[str]]] = {}
+        for base_name in file_patterns:
+            csv_file = orch_path / f"{base_name}_{date_key}.csv"
+            if not csv_file.exists():
+                continue
+
+            df = pd.read_csv(csv_file)
+            if df.empty:
+                continue
+
+            df = df.copy()
+            df["file_date"] = date_key
+            df["sim_date"] = pd.to_datetime(sim_date).strftime("%Y-%m-%d")
+            if run_id:
+                df["run_id"] = run_id
+            if self.config_name:
+                df["config_name"] = self.config_name
+            df["db_write_time"] = datetime.now()
+
+            clean_columns = [self._clean_name(str(col)) for col in df.columns]
+            df.columns = clean_columns
+            prepared[f"orchestrator_{base_name}"] = (df, clean_columns)
+
+        return prepared
     
     def write_summary_only(
         self,
@@ -150,12 +290,12 @@ class ModuleDataWriter:
         - 避免重复数据：不再写入每天的模块输出（summary已包含汇总）
         - 预计提升：写入时间从~54秒降至~15秒
         
-        Args:
+        参数：
             output_dir: 运行输出根目录
             run_id: 运行ID
             if_exists: 如果表存在的处理方式 ('replace'推荐，确保干净数据)
         
-        Returns:
+        返回：
             dict: 每个表的写入行数
         """
         import time
@@ -213,7 +353,7 @@ class ModuleDataWriter:
         summary_path = Path(summary_dir)
         results = {}
         
-        # Summary文件到表名的映射
+        # 汇总文件到表名的映射
         file_table_mapping = {
             "full_changeover_report.xlsx": "summary_output_fullchangeoverlog",
             "full_delivery_plan_report.xlsx": "summary_output_fulldeliveryplan",
@@ -265,7 +405,7 @@ class ModuleDataWriter:
         """
         写入单个模块的输出数据
         
-        Args:
+        参数：
             module_name: 模块名称 (module1, module3, module4, module5, module6)
             output_dir: 模块输出目录
             run_id: 运行ID（用于区分不同运行）
@@ -274,7 +414,7 @@ class ModuleDataWriter:
                 - 'replace': 第一个文件替换表，后续文件追加
                 - 'append': 所有文件追加
         
-        Returns:
+        返回：
             dict: 每个输出文件的写入行数
         """
         output_path = Path(output_dir)
@@ -386,7 +526,7 @@ class ModuleDataWriter:
         
         对于空表，如果有预定义的列名结构则使用，否则保持空表。
         
-        Args:
+        参数：
             tables_written: 已写入表的字典，用于跟踪 replace 模式下哪些表已经被写入
         """
         import re
@@ -475,12 +615,12 @@ class ModuleDataWriter:
         """
         写入所有模块的输出数据
         
-        Args:
+        参数：
             run_output_dir: 运行输出根目录
             run_id: 运行ID
             if_exists: 如果表存在的处理方式
         
-        Returns:
+        返回：
             dict: 所有模块的写入结果
         """
         base_path = Path(run_output_dir)
@@ -542,13 +682,13 @@ class ModuleDataWriter:
         """
         写入Orchestrator输出的CSV数据
         
-        Args:
+        参数：
             orchestrator_dir: Orchestrator输出目录
             run_id: 运行ID
             sim_date: 仿真日期（格式：YYYYMMDD）
             if_exists: 如果表存在的处理方式
         
-        Returns:
+        返回：
             dict: 每个文件的写入行数
         """
         orch_path = Path(orchestrator_dir)
@@ -598,9 +738,15 @@ class ModuleDataWriter:
                                 df['run_id'] = pd.Series(dtype='string')
                         else:
                             df['file_date'] = date_part
-                            # 对于 Orchestrator 数据，文件名中的日期就是仿真日期
-                            # 如果没有传入 sim_date 参数，使用文件名中的日期
-                            df['sim_date'] = sim_date if sim_date else date_part
+                            # [FIX-风险6] 统一 sim_date 格式为 YYYY-MM-DD
+                            # 文件名日期可能为 YYYYMMDD，需要转换
+                            if sim_date:
+                                df['sim_date'] = sim_date
+                            elif len(date_part) == 8 and date_part.isdigit():
+                                # YYYYMMDD -> YYYY-MM-DD
+                                df['sim_date'] = f"{date_part[:4]}-{date_part[4:6]}-{date_part[6:8]}"
+                            else:
+                                df['sim_date'] = date_part
                             if run_id:
                                 df['run_id'] = run_id
                         dfs.append(df)
@@ -619,6 +765,251 @@ class ModuleDataWriter:
         
         return results
     
+    def delete_batch_data(self, run_id: str, batch_start_date: str) -> None:
+        """
+        删除指定批次起始日期及之后的模块输出数据（幂等保障）。
+        用于续跑时清理上次中断批次的残留数据，再重写。
+
+        [FIX-风险3] 区分可跳过异常与真正错误
+        [FIX-风险4] 覆盖 汇总与编排器 表
+        [FIX-风险5] 添加 run_id 过滤
+
+        参数：
+            run_id: 运行ID，用于按 run_id 过滤删除
+            batch_start_date: 批次第一天 (YYYY-MM-DD)，删除 sim_date >= 此值的行
+        """
+        # [FIX-风险4] 完整表列表，与 truncate_output_tables 保持一致
+        output_tables = [
+            # 模块输出表
+            'module1_output_orderlog',
+            'module1_output_shipmentlog',
+            'module1_output_cutlog',
+            'module1_output_supplydemandlog',
+            'module1_output_summary',
+            'module3_output_netdemand',
+            'module4_output_productionplan',
+            'module4_output_capacityexceed',
+            'module4_output_validation',
+            'module4_output_changeoverlog',
+            'module5_output_deploymentplan',
+            'module5_output_unfulfilledlog',
+            'module5_output_stockonhandlog',
+            'module5_output_validation',
+            'module6_output_deliveryplan',
+            'module6_output_vehiclelog',
+            'module6_output_truckusagelog',
+            'module6_output_unsatisfiedmdqlog',
+            'module6_output_validationlog',
+            'module6_output_bypassrulehitlog',
+            # 汇总输出表
+            'summary_output_ordershipmentcutsummary',
+            'summary_output_fullchangeoverlog',
+            'summary_output_fullcapacityexceed',
+            'summary_output_fullproductionplan',
+            'summary_output_fulldeploymentplan',
+            'summary_output_fulldeliveryplan',
+            'summary_output_fulltruckusage',
+            # 编排器状态表
+            'orchestrator_unrestricted_inventory',
+            'orchestrator_open_deployment',
+            'orchestrator_open_deployment_pastdue_cleanup',
+            'orchestrator_planning_intransit',
+            'orchestrator_space_quota',
+            'orchestrator_delivery_gr',
+            'orchestrator_production_gr',
+            'orchestrator_production_plan_backlog',
+            'orchestrator_shipment_log',
+            'orchestrator_delivery_shipment_log',
+            'orchestrator_inventory_change_log',
+            'orchestrator_daily_logs',
+        ]
+        deleted_total = 0
+        for table_name in output_tables:
+            try:
+                # 检查表是否存在
+                rows = self.db.execute_query(
+                    "SELECT EXISTS(SELECT 1 FROM information_schema.tables "
+                    "WHERE table_schema = 'public' AND table_name = %s)",
+                    (table_name,)
+                )
+                if not rows or not rows[0][0]:
+                    continue
+                # 检查是否有 sim_date 列
+                sim_date_check = self.db.execute_query(
+                    "SELECT EXISTS(SELECT 1 FROM information_schema.columns "
+                    "WHERE table_name = %s AND column_name = 'sim_date')",
+                    (table_name,)
+                )
+                if not sim_date_check or not sim_date_check[0][0]:
+                    continue
+                # [FIX-风险5] 检查是否有 run_id 列，按 sim_date + run_id 删除
+                run_id_check = self.db.execute_query(
+                    "SELECT EXISTS(SELECT 1 FROM information_schema.columns "
+                    "WHERE table_name = %s AND column_name = 'run_id')",
+                    (table_name,)
+                )
+                has_run_id = run_id_check and run_id_check[0][0]
+                if has_run_id and run_id:
+                    self.db.execute_non_query(
+                        sql.SQL('DELETE FROM {} WHERE sim_date >= %s AND run_id = %s').format(
+                            sql.Identifier(table_name)
+                        ),
+                        (batch_start_date, run_id)
+                    )
+                else:
+                    self.db.execute_non_query(
+                        sql.SQL('DELETE FROM {} WHERE sim_date >= %s').format(
+                            sql.Identifier(table_name)
+                        ),
+                        (batch_start_date,)
+                    )
+                deleted_total += 1
+            except Exception as e:
+                # [FIX-风险3] 区分可跳过异常与真正错误
+                err_str = str(e).lower()
+                if 'does not exist' in err_str or 'column' in err_str:
+                    continue  # 表或列不存在，合理跳过
+                else:
+                    import logging
+                    logging.error(f"delete_batch_data: 表 {table_name} 删除失败: {e}")
+                    raise  # 真正的错误（连接中断、锁超时等），上报
+        if deleted_total > 0:
+            print(f"  🗑️  已清理批次 {batch_start_date} 起的旧数据（{deleted_total} 张表）")
+
+    def _filter_module1_orders_for_day(
+        self,
+        df: pd.DataFrame,
+        day_sim_date: str | None,
+    ) -> pd.DataFrame:
+        """仅保留当前仿真日新生成的 Module1 订单。
+
+        集成模式下的 `orders_df` 为累计口径，后续日期会包含前序日期已生成的订单。
+        但数据库对账与本地 Excel 比对都按行级 `simulation_date` 视为“当日 `OrderLog`”，
+        因此在写库前必须先将累计结果切回当前仿真日口径，再补充 `sim_date`。
+        """
+        if df.empty or not day_sim_date or 'simulation_date' not in df.columns:
+            return df
+
+        config_name = (self.config_name or '').upper()
+        if not config_name.startswith('OC'):
+            return df
+
+        filtered = df.copy()
+        sim_dates = pd.to_datetime(filtered['simulation_date'], errors='coerce').dt.strftime('%Y-%m-%d')
+        return filtered[sim_dates == day_sim_date].copy()
+
+    def prepare_batch_dataframes(
+        self,
+        all_results: Dict[str, Any],
+        run_id: str = None,
+    ) -> Dict[str, tuple]:
+        """
+        预处理批次数据为可写入的 DataFrames（不涉及 DB 操作）。
+
+        用于 _flush_batch_to_db 在事务外预处理数据，
+        然后在事务内通过 _atomic_copy_batch 写入。
+
+        参数：
+            all_results: 模块运行结果字典
+            run_id: 运行ID
+
+        返回：
+            dict: {table_name: (combined_df, clean_columns_list)}
+        """
+        prepared = {}
+
+        module_df_mapping = {
+            'module1': {
+                'orders_df': 'module1_output_orderlog',
+                'shipment_df': 'module1_output_shipmentlog',
+                'cut_df': 'module1_output_cutlog',
+                'supply_demand_df': 'module1_output_supplydemandlog',
+                'summary_df': 'module1_output_summary',
+            },
+            'module3': {
+                'net_demand_df': 'module3_output_netdemand',
+            },
+            'module4': {
+                'production_df': 'module4_output_productionplan',
+                'exceed_log': 'module4_output_capacityexceed',
+                'issues_df': 'module4_output_validation',
+                'changeover_log': 'module4_output_changeoverlog',
+            },
+            'module5': {
+                'deployment_plan': 'module5_output_deploymentplan',
+                'unfulfilled_log': 'module5_output_unfulfilledlog',
+                'stock_on_hand_log': 'module5_output_stockonhandlog',
+                'validation_log': 'module5_output_validation',
+            },
+            'module6': {
+                'delivery_plan': 'module6_output_deliveryplan',
+                'vehicle_log': 'module6_output_vehiclelog',
+                'truck_usage': 'module6_output_truckusagelog',
+                'unsatisfied_log': 'module6_output_unsatisfiedmdqlog',
+                'validation_log': 'module6_output_validationlog',
+                'bypass_log': 'module6_output_bypassrulehitlog',
+            },
+        }
+
+        for module_name, df_mapping in module_df_mapping.items():
+            module_results = all_results.get(module_name, [])
+            if not module_results:
+                continue
+
+            table_data = {tn: [] for tn in df_mapping.values()}
+
+            for day_result in module_results:
+                if not isinstance(day_result, dict):
+                    continue
+                # 提取仿真日期
+                day_sim_date = None
+                if 'simulation_date' in day_result:
+                    sim_date_obj = day_result['simulation_date']
+                    if hasattr(sim_date_obj, 'strftime'):
+                        day_sim_date = sim_date_obj.strftime('%Y-%m-%d')
+
+                for df_key, table_name in df_mapping.items():
+                    df = day_result.get(df_key)
+                    if df is not None and isinstance(df, pd.DataFrame):
+                        df = df.copy()
+                        if module_name == 'module1' and df_key == 'orders_df':
+                            df = self._filter_module1_orders_for_day(df, day_sim_date)
+                        if day_sim_date:
+                            if df.empty:
+                                df['sim_date'] = pd.Series(dtype='string')
+                            else:
+                                df['sim_date'] = day_sim_date
+                        else:
+                            df['sim_date'] = pd.Series(dtype='string') if df.empty else None
+                        table_data[table_name].append(df)
+
+            for table_name, dfs in table_data.items():
+                if not dfs:
+                    continue
+                combined_df = pd.concat(dfs, ignore_index=True)
+                if 'sim_date' not in combined_df.columns:
+                    combined_df['sim_date'] = pd.Series(dtype='string')
+                if run_id:
+                    if combined_df.empty:
+                        combined_df['run_id'] = pd.Series(dtype='string')
+                    else:
+                        combined_df['run_id'] = run_id
+                # 添加 config_name
+                if self.config_name and not combined_df.empty:
+                    combined_df['config_name'] = self.config_name
+                # 添加写入时间
+                from datetime import datetime
+                if not combined_df.empty:
+                    combined_df['db_write_time'] = datetime.now()
+                else:
+                    combined_df['db_write_time'] = pd.Series(dtype='datetime64[ns]')
+                # 清理列名
+                clean_columns = [self._clean_name(str(col)) for col in combined_df.columns]
+                combined_df.columns = clean_columns
+                prepared[table_name] = (combined_df, clean_columns)
+
+        return prepared
+
     def write_module_results_from_dict(
         self,
         all_results: Dict[str, Any],
@@ -632,7 +1023,7 @@ class ModuleDataWriter:
         
         这个方法用于数据库模式，绕过文件系统直接将DataFrame写入数据库。
         
-        Args:
+        参数：
             all_results: 模块运行结果字典，结构为:
                 {
                     'module1': [{'orders_df': df, 'shipment_df': df, 'cut_df': df, ...}, ...],
@@ -646,7 +1037,7 @@ class ModuleDataWriter:
             if_exists: 如果表存在的处理方式
             truncate_first: 是否在写入前先清空所有输出表（默认True）
         
-        Returns:
+        返回：
             dict: 每个表的写入行数
         """
         results = {}
@@ -664,8 +1055,8 @@ class ModuleDataWriter:
         # 键名必须与模块返回的字典键名一致
         module_df_mapping = {
             'module1': {
-                # orders_df 是当天新增订单（today_orders_df），与比对脚本从 xlsx 过滤
-                # simulation_date == 当天的口径一致
+                # `orders_df` 是当天新增订单（`today_orders_df`），与比对脚本从 xlsx 过滤后的口径一致
+                # `simulation_date` 与当天口径一致
                 'orders_df': 'module1_output_orderlog',
                 'shipment_df': 'module1_output_shipmentlog',
                 'cut_df': 'module1_output_cutlog',
@@ -739,7 +1130,7 @@ class ModuleDataWriter:
                 if 'simulation_date' in day_result:
                     sim_date_obj = day_result['simulation_date']
                     if hasattr(sim_date_obj, 'strftime'):
-                        day_sim_date = sim_date_obj.strftime('%Y%m%d')
+                        day_sim_date = sim_date_obj.strftime('%Y-%m-%d')
                 
                 for df_key, table_name in df_mapping.items():
                     df = day_result.get(df_key)
@@ -754,6 +1145,8 @@ class ModuleDataWriter:
                     if df is not None and isinstance(df, pd.DataFrame):
                         # 为每一天的数据添加 sim_date（包括空 DataFrame）
                         df = df.copy()  # 避免修改原始数据
+                        if module_name == 'module1' and df_key == 'orders_df':
+                            df = self._filter_module1_orders_for_day(df, day_sim_date)
                         if day_sim_date:
                             if df.empty:
                                 df['sim_date'] = pd.Series(dtype='string')
@@ -787,7 +1180,6 @@ class ModuleDataWriter:
                         results[table_name] = -1
                     continue
                 
-                # 合并所有天的数据
                 combined_df = pd.concat(dfs, ignore_index=True)
                 
                 # 确保 sim_date 列存在（即使是空表）
@@ -876,13 +1268,13 @@ class ModuleDataWriter:
         6. summary_output_fulldeliveryplan - 交付计划
         7. summary_output_fulltruckusage - 卡车使用
         
-        Args:
+        参数：
             run_id: 运行ID，用于筛选数据
             start_date: 开始日期 (YYYY-MM-DD)，用于过滤数据
             end_date: 结束日期 (YYYY-MM-DD)，用于过滤数据
             if_exists: 如果表存在的处理方式 ('replace'推荐)
         
-        Returns:
+        返回：
             dict: 每个表的写入行数
         """
         import time
@@ -1070,12 +1462,15 @@ class ModuleDataWriter:
             print(f"  [WARN] {table_name}: 无数据")
             return 0
         
-        # 填充缺失值
+        # 填充缺失值（与本地版本 SummaryReportGenerator 保持一致）
         for col in ['order_qty', 'shipment_qty', 'cut_qty']:
             if col in summary.columns:
                 summary[col] = summary[col].fillna(0).astype(int)
             else:
                 summary[col] = 0
+        
+        # [FIX] 与本地版本保持一致：用计算值覆盖 cut_qty，确保 cut_qty = max(0, order_qty - shipment_qty)
+        summary['cut_qty'] = (summary['order_qty'] - summary['shipment_qty']).clip(lower=0)
         
         # 按日期过滤
         if end_date_dt is not None and 'date' in summary.columns:
@@ -1402,7 +1797,7 @@ def write_run_data_to_db(
     2. 完成所有写入后，批量创建所有索引
     3. 显著提升总体性能（避免写入期间的I/O竞争）
     
-    Args:
+    参数：
         run_output_dir: 运行输出目录
         db_host: 数据库主机
         db_port: 数据库端口
@@ -1410,7 +1805,7 @@ def write_run_data_to_db(
         db_user: 用户名
         db_password: 密码
     
-    Returns:
+    返回：
         bool: 是否成功
     """
     # 创建数据库连接

@@ -1,4 +1,4 @@
-# modules/mrp_planning — MRP计划模块文档
+# `src/modules/mrp_planning` — MRP 计划模块文档
 
 ## 模块概述
 

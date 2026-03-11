@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Module 5 主流程模块
+Module5 主流程模块
 
 提供多层级部署规划的主入口函数。
 
@@ -67,7 +67,7 @@ def _validate_deployment_shipment_constraint(
     """
     验证部署计划约束：deployed_qty 不超过 shipment_qty。
     
-    Args:
+    参数：
         deployment_plan_df: 部署计划 DataFrame
         config: 配置字典
         orchestrator: Orchestrator 实例
@@ -126,12 +126,12 @@ def _initialize_soh_dict(
     """
     初始化库存字典。
 
-    Args:
+    参数：
         config: 配置字典
         inventory_log: 库存日志DataFrame
         actual_sim_start: 仿真开始日期
 
-    Returns:
+    返回：
         dict: (material, location) -> 库存量
     """
     ol_df = config.get('OrderLog', pd.DataFrame())
@@ -193,7 +193,7 @@ def _process_layer_demands(
     """
     并行收集层内所有节点的需求。
 
-    Args:
+    参数：
         layer: 层级
         all_pairs: (material, location)对集合
         sim_date: 仿真日期
@@ -207,7 +207,7 @@ def _process_layer_demands(
         order_index: OrderLog预建索引
         deploy_config_index: DeployConfig预建索引
 
-    Returns:
+    返回：
         dict: (material, location) -> 需求行列表
     """
     node_demands_map: Dict[tuple, list] = {}
@@ -324,7 +324,7 @@ def _allocate_pipeline_sources(
     """
     用pipeline supply覆盖剩余gap（向量化优化版）。
 
-    Args:
+    参数：
         demand_rows: 需求行列表（会被修改）
         adjusted_qtys: 调整后的数量
         loc: 位置编码
@@ -459,7 +459,7 @@ def _process_gaps_and_create_plans(
     """
     处理GAP和生成调拨计划。
 
-    Args:
+    参数：
         demand_rows: 需求行列表
         adjusted_qtys: 调整后的数量
         mat: 物料编码
@@ -662,7 +662,7 @@ def _update_soh_dict(
     """
     更新库存字典为下一日的期初库存。
 
-    Args:
+    参数：
         soh_dict: 库存字典（会被修改）
         deployment_plan_rows: 计划行列表
         sim_date: 仿真日期
@@ -738,13 +738,13 @@ def main(
     module4_result: dict = None
 ) -> dict:
     """
-    Module 5 主入口：多层级部署规划。
+    Module5 主入口：多层级部署规划。
 
     支持两种运行模式：
     - 独立模式：使用Excel文件
     - 集成模式：使用各模块/Orchestrator视图
 
-    Args:
+    参数：
         input_path: 输入Excel路径（独立模式）
         output_path: 输出Excel路径
         sim_start: 仿真开始日期（独立模式）
@@ -758,7 +758,7 @@ def main(
         module1_result: Module1运行结果（内存数据）
         module4_result: Module4运行结果（内存数据），优先使用此参数获取生产计划
 
-    Returns:
+    返回：
         dict: 运行结果，包含deployment_plan等
     """
     # 判断运行模式
@@ -926,13 +926,13 @@ def main(
         # 按层级处理
         for layer in layer_list:
             # 计算当前层级的pairs - 与基准版本一致
-            # location_to_layer keys are (material, location) tuples
+            # `location_to_layer` 的键为 `(material, location)` 元组
             base_pairs = set(
                 (mat, loc)
                 for (mat, loc), lyr in location_to_layer.items()
                 if lyr == layer
             )
-            # gap buffer补充
+            # 补充 gap 缓冲中的节点
             gap_pairs = set(
                 (mat, loc)
                 for (mat, loc) in up_gap_buffer
@@ -1005,7 +1005,7 @@ def main(
                     d.setdefault('deploy_from_open_deployment_inbound', 0)
                     d.setdefault('deploy_from_future_production', 0)
 
-                # Pipeline分配
+                # Pipeline 供给分配
                 _allocate_pipeline_sources(
                     demand_rows, adjusted_qtys, loc, mat,
                     demand_priority_map, future_intransit,
@@ -1031,7 +1031,7 @@ def main(
             f"{time.perf_counter()-demand_collect_total_start:.3f}s"
         )
 
-        # Push/Soft-push分配
+        # Push/Soft-push 分配
         dynamic_soh_for_push = dynamic_soh.copy()
         plan_push = push_softpush_allocation(
             deployment_plan_rows, config, dynamic_soh_for_push, sim_date,

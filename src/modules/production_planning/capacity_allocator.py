@@ -14,7 +14,7 @@ from .constants import DEFAULT_CHANGEOVER_TIME
 from .utils import compute_planning_window, safe_float_conversion
 from .plan_builder import optimal_changeover_sequence
 
-# Try to import DuckDB optimizations
+# 尝试导入 DuckDB 优化实现
 try:
     from .duckdb_batch_calculator import (
         simulate_production_batch_duckdb,
@@ -39,7 +39,7 @@ def centralized_capacity_allocation_with_changeover(
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """集中式产能分配（含跨天换产连续性）。
 
-    Args:
+    参数：
         uncon: 无约束计划DataFrame
         cap_df: 产能DataFrame
         rate_map: 产率映射
@@ -51,7 +51,7 @@ def centralized_capacity_allocation_with_changeover(
         previously_allocated_capacity: 历史已分配产能
         issues: 问题列表
 
-    Returns:
+    返回：
         Tuple[pd.DataFrame, pd.DataFrame]: (计划日志, 超额日志)
     """
     if issues is None:
@@ -90,7 +90,7 @@ class CapacityAllocator:
     ):
         """初始化分配器。
 
-        Args:
+        参数：
             cap_df: 产能DataFrame
             rate_map: 产率映射
             co_mat: 换产矩阵
@@ -118,10 +118,10 @@ class CapacityAllocator:
     def _build_capacity_map(self, cap_df: pd.DataFrame) -> Dict:
         """构建产能映射。
 
-        Args:
+        参数：
             cap_df: 产能DataFrame
 
-        Returns:
+        返回：
             Dict: 产能映射
         """
         cap_df = cap_df.copy()
@@ -140,10 +140,10 @@ class CapacityAllocator:
     ) -> Tuple[pd.DataFrame, pd.DataFrame]:
         """执行产能分配。
 
-        Args:
+        参数：
             uncon: 无约束计划
 
-        Returns:
+        返回：
             Tuple[pd.DataFrame, pd.DataFrame]: (计划日志, 超额日志)
         """
         plans_log = []
@@ -175,12 +175,12 @@ class CapacityAllocator:
     ) -> Tuple[List[Dict], List[Dict]]:
         """为单个产线分组分配产能。
 
-        Args:
+        参数：
             line: 产线
             sim_date: 仿真日期
             group: 计划分组
 
-        Returns:
+        返回：
             Tuple[List[Dict], List[Dict]]: (计划列表, 超额列表)
         """
         batch_list = group.to_dict(orient='records')
@@ -209,10 +209,10 @@ class CapacityAllocator:
     def _init_line_state(self, line: str) -> Dict[str, Any]:
         """初始化产线状态。
 
-        Args:
+        参数：
             line: 产线
 
-        Returns:
+        返回：
             Dict[str, Any]: 状态字典
         """
         state = {
@@ -260,14 +260,14 @@ class CapacityAllocator:
     ) -> Tuple[List[Dict], Optional[Dict]]:
         """为单个批次分配产能。
 
-        Args:
+        参数：
             line: 产线
             sim_date: 仿真日期
             batch: 批次信息
             batch_idx: 批次索引
             state: 产线状态
 
-        Returns:
+        返回：
             Tuple[List[Dict], Optional[Dict]]: (计划列表, 超额记录)
         """
         material = batch['material']
@@ -302,13 +302,13 @@ class CapacityAllocator:
     ) -> Dict[str, Any]:
         """计算换产信息。
 
-        Args:
+        参数：
             batch_idx: 批次索引
             material: 物料
             state: 产线状态
             line: 产线
 
-        Returns:
+        返回：
             Dict[str, Any]: 换产信息
         """
         if batch_idx == 0 and state['has_incomplete_changeover']:
@@ -339,12 +339,12 @@ class CapacityAllocator:
     ) -> Tuple[Optional[str], float]:
         """查找换产定义。
 
-        Args:
+        参数：
             from_mat: 源物料
             to_mat: 目标物料
             line: 产线
 
-        Returns:
+        返回：
             Tuple[Optional[str], float]: (换产ID, 换产时间)
         """
         try:
@@ -399,7 +399,7 @@ class CapacityAllocator:
     ) -> Tuple[List[Dict], Optional[Dict]]:
         """在计划窗口内分配产能。
 
-        Args:
+        参数：
             line: 产线
             sim_date: 仿真日期
             batch: 批次信息
@@ -409,7 +409,7 @@ class CapacityAllocator:
             window_end: 窗口结束
             changeover: 换产信息
 
-        Returns:
+        返回：
             Tuple[List[Dict], Optional[Dict]]: (计划列表, 超额记录)
         """
         plans = []
@@ -466,7 +466,7 @@ class CapacityAllocator:
     ) -> Dict[str, Any]:
         """在单日分配产能。
 
-        Args:
+        参数：
             line: 产线
             sim_date: 仿真日期
             batch: 批次信息
@@ -478,7 +478,7 @@ class CapacityAllocator:
             coid_to_log: 换产ID
             is_first_co_day: 是否首个换产日
 
-        Returns:
+        返回：
             Dict[str, Any]: 分配结果
         """
         cap_key = self._get_capacity_key(location, line, day_dt)
@@ -551,12 +551,12 @@ class CapacityAllocator:
     ) -> tuple:
         """获取产能映射键。
 
-        Args:
+        参数：
             location: 地点
             line: 产线
             day_dt: 日期
 
-        Returns:
+        返回：
             tuple: 产能键
         """
         if self.has_location:
@@ -572,13 +572,13 @@ class CapacityAllocator:
     ) -> float:
         """调整已分配产能。
 
-        Args:
+        参数：
             current_cap: 当前产能
             location: 地点
             line: 产线
             day_dt: 日期
 
-        Returns:
+        返回：
             float: 调整后的产能
         """
         if not self.previously_allocated:
@@ -596,11 +596,11 @@ class CapacityAllocator:
     ) -> Tuple[float, float, float, bool]:
         """消耗换产时间。
 
-        Args:
+        参数：
             co_remain: 剩余换产时间
             today_cap: 今日产能
 
-        Returns:
+        返回：
             Tuple[float, float, float, bool]:
                 (使用的换产时间, 剩余换产, 剩余产能, 是否完成)
         """
@@ -622,12 +622,12 @@ def extract_allocated_capacity_from_plan(
 ) -> Dict[str, float]:
     """从生产计划提取已分配产能信息。
 
-    Args:
+    参数：
         plan_df: 生产计划DataFrame
         rate_map: 产率映射
         changeover_def: 换产定义
 
-    Returns:
+    返回：
         Dict[str, float]: 已分配产能字典
     """
     allocated = {}
@@ -659,13 +659,13 @@ def _calculate_group_hours(
 ) -> float:
     """计算分组的总小时数。
 
-    Args:
+    参数：
         group: 分组DataFrame
         rate_map: 产率映射
         changeover_def: 换产定义
         line: 产线
 
-    Returns:
+    返回：
         float: 总小时数
     """
     total = 0
@@ -694,14 +694,14 @@ def validate_capacity_allocation(
 ) -> List[Dict[str, Any]]:
     """校验产能分配。
 
-    Args:
+    参数：
         plan_log: 当前生产计划
         previously_allocated: 历史已分配产能
         simulation_date: 当前仿真日期
         rate_map: 产率映射
         changeover_def: 换产定义
 
-    Returns:
+    返回：
         List[Dict[str, Any]]: 校验记录列表
     """
     issues = []
@@ -752,14 +752,14 @@ def extract_line_states_from_plan(
 ) -> Dict[str, Any]:
     """从生产计划提取产线状态。
 
-    Args:
+    参数：
         plan_df: 生产计划
         cap_df: 产能数据
         co_def: 换产定义
         simulation_date: 仿真日期
         rate_map: 产率映射
 
-    Returns:
+    返回：
         Dict[str, Any]: 产线状态字典
     """
     if plan_df.empty:
@@ -789,11 +789,11 @@ def _build_line_state(
 ) -> Dict[str, Any]:
     """构建产线状态。
 
-    Args:
+    参数：
         last_prod: 最后生产记录
         co_state: 换产状态
 
-    Returns:
+    返回：
         Dict[str, Any]: 产线状态
     """
     base_state = {
@@ -823,14 +823,14 @@ def _analyze_end_of_day_changeover(
 ) -> Dict[str, Any]:
     """分析日末换产状态。
 
-    Args:
+    参数：
         plan_df: 生产计划
         cap_df: 产能数据
         co_def: 换产定义
         simulation_date: 仿真日期
         rate_map: 产率映射
 
-    Returns:
+    返回：
         Dict[str, Any]: 换产状态字典
     """
     states = {}
@@ -863,7 +863,7 @@ def _check_line_changeover(
 ) -> Optional[Dict[str, Any]]:
     """检查产线换产状态。
 
-    Args:
+    参数：
         line: 产线
         prod_date: 生产日期
         prod_group: 生产分组
@@ -872,7 +872,7 @@ def _check_line_changeover(
         rate_map: 产率映射
         typical_co_time: 典型换产时间
 
-    Returns:
+    返回：
         Optional[Dict[str, Any]]: 换产状态或None
     """
     day_cap = cap_df[cap_df['date'] == prod_date]
@@ -927,11 +927,11 @@ def calculate_changeover_metrics(
 ) -> pd.DataFrame:
     """计算换产指标。
 
-    Args:
+    参数：
         production_plan: 生产计划
         changeover_def: 换产定义
 
-    Returns:
+    返回：
         pd.DataFrame: 换产日志
     """
     if production_plan.empty or changeover_def.empty:
@@ -957,10 +957,10 @@ def calculate_changeover_metrics(
 def _group_changeovers(plan: pd.DataFrame) -> pd.DataFrame:
     """分组换产记录。
 
-    Args:
+    参数：
         plan: 生产计划
 
-    Returns:
+    返回：
         pd.DataFrame: 分组统计
     """
     filtered = plan[plan['changeover_id'].notna()]
@@ -974,10 +974,10 @@ def _prepare_changeover_def(
 ) -> pd.DataFrame:
     """准备换产定义索引。
 
-    Args:
+    参数：
         changeover_def: 换产定义
 
-    Returns:
+    返回：
         pd.DataFrame: 索引后的定义
     """
     clean = changeover_def.drop_duplicates(
@@ -993,11 +993,11 @@ def _create_changeover_record(
 ) -> Optional[Dict[str, Any]]:
     """创建换产记录。
 
-    Args:
+    参数：
         row: 汇总行（namedtuple 或 Series）
         def_indexed: 索引后的定义
 
-    Returns:
+    返回：
         Optional[Dict[str, Any]]: 换产记录
     """
     # 兼容 itertuples() 返回的 namedtuple
@@ -1052,22 +1052,22 @@ def simulate_production(
 ) -> pd.DataFrame:
     """仿真生产可靠性。
 
-    Args:
+    参数：
         plan: 生产计划
         pr_cfg: 生产可靠性配置
         seed: 随机种子
 
-    Returns:
+    返回：
         pd.DataFrame: 增加produced_qty的计划表
     """
-    # Try DuckDB optimization first
+    # 优先尝试 DuckDB 优化路径
     if DUCKDB_AVAILABLE and is_duckdb_available():
         try:
             return simulate_production_batch_duckdb(plan, pr_cfg, seed)
         except Exception as e:
             print(f"[M4] DuckDB optimization failed, using pandas: {e}")
     
-    # Original pandas implementation
+    # 原始 Pandas 实现
     if plan.empty or 'con_planned_qty' not in plan.columns:
         plan['produced_qty'] = []
         return plan

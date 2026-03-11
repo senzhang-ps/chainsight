@@ -8,7 +8,7 @@
 - 部署计划验证
 - 卡车配置验证
 
-Typical usage example:
+典型用法示例:
     df = check_and_deduplicate(df, 'material', 'MaterialMD', log)
     generate_validation_report(validation_log, 'output.xlsx')
 """
@@ -32,13 +32,13 @@ def check_and_deduplicate(
     基于指定的键列检查重复，保留第一条记录，
     并将重复信息记录到验证日志。
     
-    Args:
+    参数：
         df: 要检查的 DataFrame
         key_column: 用于检查重复的列名
         sheet_name: 配置表名称（用于日志）
         validation_log: 验证日志列表
         
-    Returns:
+    返回：
         去重后的 DataFrame
     """
     if df.empty:
@@ -68,11 +68,11 @@ def _analyze_duplicates(
     """
     分析重复数据的统计信息。
     
-    Args:
+    参数：
         df: DataFrame
         key_column: 键列名
         
-    Returns:
+    返回：
         包含重复统计的字典
     """
     dup_mask = df.duplicated(subset=[key_column], keep=False)
@@ -91,7 +91,7 @@ def _log_duplicate_warning(
     """
     记录重复数据警告到验证日志。
     
-    Args:
+    参数：
         sheet_name: 表名
         key_column: 键列名
         dup_info: 重复统计信息
@@ -118,7 +118,7 @@ def generate_validation_report(
     """
     生成验证报告文件。
     
-    Args:
+    参数：
         validation_log: 验证日志列表
         output_file: 输出文件路径
     """
@@ -137,10 +137,10 @@ def _get_validation_file_path(output_file: str) -> str:
     """
     生成验证报告文件路径。
     
-    Args:
+    参数：
         output_file: 原始输出文件路径
         
-    Returns:
+    返回：
         验证报告文件路径
     """
     output_dir = os.path.dirname(output_file)
@@ -154,10 +154,10 @@ def _categorize_issues(
     """
     按严重程度分类验证问题。
     
-    Args:
+    参数：
         validation_log: 验证日志列表
         
-    Returns:
+    返回：
         (errors, warnings) 元组
     """
     errors = [log for log in validation_log if log.get('severity') == 'ERROR']
@@ -174,7 +174,7 @@ def _write_report_header(
     """
     写入报告头部信息。
     
-    Args:
+    参数：
         f: 文件对象
         validation_log: 验证日志
         errors: 错误列表
@@ -194,7 +194,7 @@ def _write_errors_section(f, errors: List[Dict]) -> None:
     """
     写入错误部分。
     
-    Args:
+    参数：
         f: 文件对象
         errors: 错误列表
     """
@@ -213,7 +213,7 @@ def _write_error_detail(f, index: int, error: Dict) -> None:
     """
     写入单条错误详情。
     
-    Args:
+    参数：
         f: 文件对象
         index: 错误序号
         error: 错误信息字典
@@ -233,7 +233,7 @@ def _write_warnings_section(f, warnings: List[Dict]) -> None:
     """
     写入警告部分。
     
-    Args:
+    参数：
         f: 文件对象
         warnings: 警告列表
     """
@@ -258,7 +258,7 @@ def _write_success_section(
     """
     写入成功部分（无错误和警告时）。
     
-    Args:
+    参数：
         f: 文件对象
         errors: 错误列表
         warnings: 警告列表
@@ -281,7 +281,7 @@ def _write_recommendations(
     """
     写入建议部分。
     
-    Args:
+    参数：
         f: 文件对象
         errors: 错误列表
         warnings: 警告列表
@@ -330,11 +330,11 @@ def validate_deployment_plan(
     """
     验证部署计划并补充缺失列。
     
-    Args:
+    参数：
         dp: 部署计划 DataFrame
         validation_log: 验证日志列表
         
-    Returns:
+    返回：
         验证并补充后的 DataFrame
     """
     if dp.empty:
@@ -365,11 +365,11 @@ def validate_truck_config(
     """
     验证卡车配置并补充缺失列。
     
-    Args:
+    参数：
         truck_con: 卡车配置 DataFrame
         validation_log: 验证日志列表
         
-    Returns:
+    返回：
         验证并补充后的 DataFrame
     """
     if truck_con.empty:
@@ -400,12 +400,12 @@ def validate_priority_mapping(
     """
     验证优先级映射并过滤缺失配置的记录。
     
-    Args:
+    参数：
         dp: 部署计划 DataFrame
         prio_map: 优先级映射字典
         validation_log: 验证日志列表
         
-    Returns:
+    返回：
         过滤后的 DataFrame
     """
     missing_prio = dp[~dp['demand_element'].isin(prio_map.keys())]
@@ -430,7 +430,7 @@ def _log_missing_priority(
     """
     记录缺失的优先级配置。
     
-    Args:
+    参数：
         missing_prio: 缺失优先级的记录
         missing_elements: 缺失的元素列表
         validation_log: 验证日志列表
@@ -457,10 +457,10 @@ def _get_route_info(records: pd.DataFrame) -> str:
     """
     获取路线类型统计信息。
     
-    Args:
+    参数：
         records: 记录 DataFrame
         
-    Returns:
+    返回：
         路线统计字符串
     """
     if 'sending' not in records.columns or 'receiving' not in records.columns:
@@ -481,7 +481,7 @@ def validate_threshold_config(
     """
     验证阈值配置（WFR/VFR > 1.0 的告警）。
     
-    Args:
+    参数：
         truck_con: 卡车配置 DataFrame
         validation_log: 验证日志列表
     """
@@ -519,7 +519,7 @@ def validate_truck_specs(
     """
     验证车型规格是否完整。
     
-    Args:
+    参数：
         truck_con: 卡车配置 DataFrame
         spec_map: 车型规格映射
         validation_log: 验证日志列表

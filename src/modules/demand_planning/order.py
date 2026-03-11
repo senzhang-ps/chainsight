@@ -1,4 +1,4 @@
-"""Module 1 订单生成与管理。
+"""Module1 订单生成与管理。
 
 本模块提供订单生成相关功能。
 
@@ -173,7 +173,7 @@ def _generate_ao_orders(
     if ao_config.empty or ml_avg_demand.empty:
         return pd.DataFrame(columns=empty_cols)
 
-    # AO配置去重
+    # AO 配置去重
     ao_cols = ['material', 'location', 'advance_days', 'ao_percent']
     ao_cfg = ao_config[ao_cols].drop_duplicates()
     # 🔧 标准化AO配置中的标识符以确保merge键类型一致

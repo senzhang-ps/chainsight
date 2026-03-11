@@ -1,4 +1,4 @@
-# services — 服务层模块文档
+# `src/services` — 服务层模块文档
 
 本文档覆盖 `src/services/` 目录下的所有文件：`performance_profiler.py` 和 `summary_report_generator.py`。
 

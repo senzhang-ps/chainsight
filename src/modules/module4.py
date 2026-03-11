@@ -2,7 +2,7 @@
 module4.py
 
 整体目的：
-- 模块4负责工业级 APS 生产计划的日度执行逻辑：读取净需求，依据产线配置、
+- Module4负责工业级 APS 生产计划的日度执行逻辑：读取净需求，依据产线配置、
   产能与换产矩阵进行无约束计划与集中产能分配，跟踪跨天换产连续性，
   并输出生产与校验日志。
 
@@ -133,14 +133,14 @@ def analyze_end_of_day_changeover_state(
     通过重建分配逻辑，检测即便未产生生产记录也可能已启动但未完成的换产，
     并推断剩余时间。
 
-    Args:
+    参数：
         plan_df: 当日生产计划
         cap_df: 产能数据
         co_def: 换产定义字典
         simulation_date: 当前仿真日期
         rate_map: 产率映射，用于计算生产时间
 
-    Returns:
+    返回：
         Dict[str, Any]: 产线换产状态字典
     """
     return _analyze_end_of_day_changeover(

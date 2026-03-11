@@ -3,10 +3,10 @@
 配置加载器模块
 
 提供 Module6 物流模块的配置数据加载功能，支持两种模式：
-- 独立模式（Standalone）：从 Excel 文件读取配置
-- 集成模式（Integrated）：从 Orchestrator 和配置字典读取配置
+- 独立模式：从 Excel 文件读取配置
+- 集成模式：从 Orchestrator 和配置字典读取配置
 
-Typical usage example:
+典型用法示例:
     # 独立模式
     config = load_standalone_config('input.xlsx')
     
@@ -46,13 +46,13 @@ def load_standalone_config(input_excel: str) -> Dict[str, pd.DataFrame]:
     """
     加载独立模式的配置数据（从 Excel 文件）。
     
-    Args:
+    参数：
         input_excel: 输入 Excel 文件路径
         
-    Returns:
+    返回：
         配置数据字典，键为配置名称，值为 DataFrame
         
-    Raises:
+    异常：
         Exception: 读取 Excel 文件失败时抛出
     """
     try:
@@ -68,10 +68,10 @@ def _read_excel_sheets(input_excel: str) -> Dict[str, pd.DataFrame]:
     """
     读取 Excel 文件中的各配置表。
     
-    Args:
+    参数：
         input_excel: Excel 文件路径
         
-    Returns:
+    返回：
         配置数据字典
     """
     sheet_names = [
@@ -90,7 +90,7 @@ def _apply_random_seed_from_file(input_excel: str) -> None:
     """
     从 Excel 文件中读取并应用随机种子。
     
-    Args:
+    参数：
         input_excel: Excel 文件路径
     """
     xl = pd.ExcelFile(input_excel)
@@ -114,12 +114,12 @@ def load_integrated_config(
     """
     加载集成配置数据，替代原来的 Excel 文件输入。
     
-    Args:
+    参数：
         config_dict: 配置数据字典
         orchestrator: Orchestrator 实例
         current_date: 当前日期
         
-    Returns:
+    返回：
         集成配置数据字典
     """
     config: Dict[str, Any] = {}
@@ -154,11 +154,11 @@ def _load_deployment_plan(
     """
     从 Orchestrator 加载 OpenDeployment。
     
-    Args:
+    参数：
         orchestrator: Orchestrator 实例
         current_date: 当前日期
         
-    Returns:
+    返回：
         部署计划 DataFrame
     """
     open_deployment = orchestrator.get_open_deployment(current_date)
@@ -184,7 +184,7 @@ def _log_route_statistics(deployment_df: pd.DataFrame) -> None:
     """
     记录路线类型统计信息。
     
-    Args:
+    参数：
         deployment_df: 部署计划 DataFrame
     """
     deployment_df['route_type'] = np.where(
@@ -202,7 +202,7 @@ def _ensure_date_format(deployment_df: pd.DataFrame) -> None:
     """
     确保日期字段格式正确。
     
-    Args:
+    参数：
         deployment_df: 部署计划 DataFrame
     """
     if 'planned_deployment_date' in deployment_df.columns:
@@ -219,7 +219,7 @@ def _load_m6_configs(
     """
     加载 M6_ 开头的配置数据。
     
-    Args:
+    参数：
         config_dict: 源配置字典
         config: 目标配置字典
         validation_log: 验证日志列表
@@ -241,7 +241,7 @@ def _normalize_config_columns(
     """
     标准化配置表的列名。
     
-    Args:
+    参数：
         config: 配置字典
         config_key: 配置键名
         validation_log: 验证日志列表
@@ -269,7 +269,7 @@ def _find_and_map_column(
     """
     查找并映射列名变体。
     
-    Args:
+    参数：
         df: DataFrame
         col: 目标列名
         sheet_name: 表名（用于日志）
@@ -294,10 +294,10 @@ def _get_column_variants(col: str) -> List[str]:
     """
     获取列名的可能变体。
     
-    Args:
+    参数：
         col: 列名
         
-    Returns:
+    返回：
         可能的列名变体列表
     """
     variants = [
@@ -327,7 +327,7 @@ def _load_global_configs(
     """
     加载 Global_ 开头的共享配置数据。
     
-    Args:
+    参数：
         config_dict: 源配置字典
         config: 目标配置字典
         validation_log: 验证日志列表
@@ -349,7 +349,7 @@ def _normalize_leadtime_columns(
     """
     标准化 LeadTime 表的列名。
     
-    Args:
+    参数：
         df: LeadTime DataFrame
         validation_log: 验证日志列表
     """
@@ -368,7 +368,7 @@ def _log_missing_config(
     """
     记录缺失的配置表。
     
-    Args:
+    参数：
         sheet_name: 表名
         validation_log: 验证日志列表
         is_global: 是否为全局配置
@@ -385,7 +385,7 @@ def _process_date_fields(config: Dict[str, Any]) -> None:
     """
     处理配置中的日期字段。
     
-    Args:
+    参数：
         config: 配置字典
     """
     date_fields = {
@@ -410,7 +410,7 @@ def _convert_date_column(df: pd.DataFrame, field: str) -> None:
     """
     转换 DataFrame 中的日期列。
     
-    Args:
+    参数：
         df: DataFrame
         field: 字段名
     """
@@ -426,7 +426,7 @@ def _ensure_default_config(config: Dict[str, Any]) -> None:
     """
     确保配置中包含所有必需的空 DataFrame。
     
-    Args:
+    参数：
         config: 配置字典
     """
     required_keys = [

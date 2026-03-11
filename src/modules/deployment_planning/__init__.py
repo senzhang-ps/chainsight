@@ -13,7 +13,7 @@ Deployment Planning Module (部署规划模块)
 - DeployConfig：按 (material, sending) 维护 moq/rv/lsk/day
 - PushPullModel：按 (material, sending) 维护 model ∈ {push, soft push, pull}
 - LeadTime：按 (sending, receiving) 维护 PDT/GR/MCT
-- SafetyStock：按 (material, location, date) 维护安全库存目标量
+- `SafetyStock`：按 (material, location, date) 维护安全库存目标量
 - DemandPriority：维护 demand_element -> priority
 - ReceivingSpace：按 (receiving, date) 维护 max_qty
 - Network：按 (material, location) 维护 sourcing

@@ -1,4 +1,4 @@
-"""Module 1 订单消耗处理。
+"""Module1 订单消耗处理。
 
 本模块提供订单消耗预测的功能。
 
@@ -50,7 +50,7 @@ def consume_orders(
     use_parallel = DEFAULT_USE_PARALLEL_AO_CONSUME
     max_workers = DEFAULT_PARALLEL_MAX_WORKERS
 
-    # AO消耗
+    # AO 订单消耗
     ao_consume = orders_df[orders_df['demand_type'] == 'AO'].copy()
     if not ao_consume.empty:
         ao_consume = ao_consume.sort_values(
@@ -67,7 +67,7 @@ def consume_orders(
             )
         print(f"[M1] AO消耗完成，耗时: {time.perf_counter()-t3:.3f}s")
 
-    # Normal消耗
+    # 普通订单消耗
     normal_consume = orders_df[orders_df['demand_type'] == 'normal'].copy()
     inherit_flag = DEFAULT_USE_PARALLEL_NORMAL_CONSUME
     use_parallel_normal = (

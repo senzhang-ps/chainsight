@@ -27,11 +27,11 @@ def validate_config_before_run(config: dict, validation_log: list) -> list:
 
     与code_vo保持一致：每行都记录（不去重）。
 
-    Args:
+    参数：
         config: 配置字典
         validation_log: 校验日志列表
 
-    Returns:
+    返回：
         list: 更新后的校验日志
     """
     deploy_cfg = config['DeployConfig']
@@ -127,7 +127,7 @@ def log_outputs(output_path: str, outputs: Dict[str, pd.DataFrame]) -> None:
     🔧 修复：输出前按确定性排序，确保不同运行产生相同的输出顺序。
     排序规则与Dev版本对比时使用的排序键一致。
 
-    Args:
+    参数：
         output_path: 输出文件路径
         outputs: 输出表字典
     """

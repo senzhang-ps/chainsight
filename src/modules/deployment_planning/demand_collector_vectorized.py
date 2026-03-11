@@ -36,7 +36,7 @@ def collect_demands_batch_vectorized(
     
     使用向量化操作替代逐节点循环，大幅提升性能。
     
-    Args:
+    参数：
         pairs: (material, location) 对的集合
         sim_date: 仿真日期
         config: 配置字典
@@ -45,7 +45,7 @@ def collect_demands_batch_vectorized(
         lead_time_cache: LeadTime缓存
         active_network_cache: Network缓存
         
-    Returns:
+    返回：
         dict: (material, location) -> 需求行列表
     """
     if not pairs:

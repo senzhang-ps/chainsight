@@ -18,7 +18,7 @@ USE_DUCKDB_BATCH_CALCULATION: bool = True  # Re-enabled with detailed tracing
 # 批量计算阈值（层内节点数超过此值时使用批量处理）
 BATCH_CALCULATION_THRESHOLD: int = 50
 
-# MOQ/RV默认值
+# MOQ / RV 默认值
 DEFAULT_MOQ = 1
 DEFAULT_RV = 1
 
@@ -27,7 +27,7 @@ DEFAULT_HORIZON = 1
 DEFAULT_PTF = 0
 DEFAULT_LSK = 1
 
-# DataFrame列名常量
+# DataFrame 列名常量
 COL_MATERIAL = 'material'
 COL_LOCATION = 'location'
 COL_SENDING = 'sending'
@@ -63,7 +63,7 @@ LOCATION_TYPE_COLUMNS = [
     COL_RECEIVING,
 ]
 
-# Sheet名称映射
+# 工作表名称映射
 SHEET_MAPPING = {
     'M3_SafetyStock': ('safety_stock', None),
     'Global_Network': ('network_config', None),

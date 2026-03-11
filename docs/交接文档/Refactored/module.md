@@ -1,4 +1,4 @@
-# ChainSight 模块规格文档（Module Specification）
+# ChainSight 模块规格说明文档
 
 ## 文档信息
 
@@ -111,7 +111,7 @@ result = run_daily_order_generation(
 2. 标识符需规范化（material 去 `.0`，location 补零）；
 3. 无库存时发货会退化为全缺货。
 
-### 1.7 本地版 vs DB版差异
+### 1.7 本地版与 DB 版差异
 
 | 维度 | 本地版 | DB版 |
 |---|---|---|
@@ -223,7 +223,7 @@ ao_gap, fc_gap, ss_gap = calculate_daily_net_demand(
 2. `Global_LeadTime` 缺失时会回退默认 horizon；
 3. 上游层级缺失会影响缺口传递精度。
 
-### 2.7 本地版 vs DB版差异
+### 2.7 本地版与 DB 版差异
 
 | 维度 | 本地版 | DB版 |
 |---|---|---|
@@ -327,7 +327,7 @@ plan_log, exceed_log = centralized_capacity_allocation_with_changeover(
 2. 换型矩阵键类型不一致会导致换型失败；
 3. `material/location/line` 类型不统一会产生 merge 风险。
 
-### 3.7 本地版 vs DB版差异
+### 3.7 本地版与 DB 版差异
 
 | 维度 | 本地版 | DB版 |
 |---|---|---|
@@ -439,7 +439,7 @@ m5_result = main(
 2. `DeployConfig` 缺失会影响 MOQ/RV 和 LSK 逻辑；
 3. 网络层级不完整会影响上游缺口传导。
 
-### 4.7 本地版 vs DB版差异
+### 4.7 本地版与 DB 版差异
 
 | 维度 | 本地版 | DB版 |
 |---|---|---|
@@ -543,7 +543,7 @@ delays = batch_sample_delivery_delays_duckdb(
 2. MDQ 旁路表达式必须通过安全表达式校验；
 3. 车型参数缺失时会影响装载结果可靠性。
 
-### 5.7 本地版 vs DB版差异
+### 5.7 本地版与 DB 版差异
 
 | 维度 | 本地版 | DB版 |
 |---|---|---|

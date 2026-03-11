@@ -41,14 +41,14 @@ class DataIndexer:
         """
         构建 (material, location) 索引。
         
-        Args:
+        参数：
             name: 索引名称
             df: 数据 DataFrame
             material_col: 物料列名
             location_col: 位置列名
             extra_filter: 额外的过滤条件 {列名: 值}
             
-        Returns:
+        返回：
             self: 支持链式调用
         """
         if df is None or df.empty or material_col not in df.columns:
@@ -83,13 +83,13 @@ class DataIndexer:
         """
         构建 (material, receiving) 索引。
         
-        Args:
+        参数：
             name: 索引名称
             df: 数据 DataFrame
             material_col: 物料列名
             receiving_col: 接收位置列名
             
-        Returns:
+        返回：
             self: 支持链式调用
         """
         if df is None or df.empty or material_col not in df.columns:
@@ -117,14 +117,14 @@ class DataIndexer:
         构建 (material, sending) 索引（用于调拨出库）。
         排除 sending == receiving 的记录。
         
-        Args:
+        参数：
             name: 索引名称
             df: 数据 DataFrame
             material_col: 物料列名
             sending_col: 发送位置列名
             receiving_col: 接收位置列名
             
-        Returns:
+        返回：
             self: 支持链式调用
         """
         if df is None or df.empty or material_col not in df.columns:
@@ -151,12 +151,12 @@ class DataIndexer:
         """
         获取 (material, location) 过滤后的数据。
         
-        Args:
+        参数：
             name: 索引名称
             material: 物料编码
             location: 位置编码
             
-        Returns:
+        返回：
             pd.DataFrame: 过滤后的数据，如果不存在返回空 DataFrame
         """
         index = self._ml_index.get(name, {})
@@ -171,12 +171,12 @@ class DataIndexer:
         """
         获取 (material, receiving) 过滤后的数据。
         
-        Args:
+        参数：
             name: 索引名称
             material: 物料编码
             receiving: 接收位置编码
             
-        Returns:
+        返回：
             pd.DataFrame: 过滤后的数据
         """
         index = self._mr_index.get(name, {})
@@ -191,12 +191,12 @@ class DataIndexer:
         """
         获取 (material, sending) 过滤后的数据（调拨出库）。
         
-        Args:
+        参数：
             name: 索引名称
             material: 物料编码
             sending: 发送位置编码
             
-        Returns:
+        返回：
             pd.DataFrame: 过滤后的数据
         """
         index = self._ms_index.get(name, {})
@@ -206,11 +206,11 @@ class DataIndexer:
         """
         获取索引中的所有键。
         
-        Args:
+        参数：
             name: 索引名称
             index_type: 索引类型 ('ml', 'mr', 'ms')
             
-        Returns:
+        返回：
             Set[Tuple[str, str]]: 所有键的集合
         """
         if index_type == 'ml':
@@ -236,7 +236,7 @@ def create_simulation_indexer(
     """
     为 MRP 模拟创建数据索引器。
     
-    Args:
+    参数：
         beginning_inventory_df: 期初库存数据
         in_transit_df: 在途数据
         delivery_gr_df: 收货数据
@@ -248,7 +248,7 @@ def create_simulation_indexer(
         order_df: 订单数据
         delivery_shipment_df: 发运记录
         
-    Returns:
+    返回：
         DataIndexer: 配置好的数据索引器
     """
     indexer = DataIndexer()

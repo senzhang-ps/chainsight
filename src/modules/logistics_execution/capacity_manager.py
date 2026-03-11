@@ -7,7 +7,7 @@
 - 车辆容量查询
 - 容量分配计算
 
-Typical usage example:
+典型用法示例:
     cap_daily = normalize_capacity_plan(truck_cap, sim_start, sim_end)
     capacity = get_truck_capacity(cap_map, date, route, truck_type)
 """
@@ -31,12 +31,12 @@ def normalize_capacity_plan(
     
     展开并聚合为日粒度，重叠区间会求和。
     
-    Args:
+    参数：
         truck_cap_df: 容量计划 DataFrame
         sim_start: 仿真开始日期
         sim_end: 仿真结束日期
         
-    Returns:
+    返回：
         标准化后的日粒度容量计划 DataFrame
     """
     df = truck_cap_df.copy()
@@ -64,12 +64,12 @@ def _process_daily_capacity(
     """
     处理逐日格式的容量数据。
     
-    Args:
+    参数：
         df: 原始容量 DataFrame
         sim_start: 仿真开始日期
         sim_end: 仿真结束日期
         
-    Returns:
+    返回：
         处理后的日粒度容量数据，如果无数据则返回 None
     """
     if 'date' not in df.columns:
@@ -90,12 +90,12 @@ def _process_range_capacity(
     """
     处理区间格式的容量数据。
     
-    Args:
+    参数：
         df: 原始容量 DataFrame
         sim_start: 仿真开始日期
         sim_end: 仿真结束日期
         
-    Returns:
+    返回：
         展开后的日粒度容量数据，如果无数据则返回 None
     """
     required_cols = {'eff_from', 'eff_to'}
@@ -117,12 +117,12 @@ def _prepare_range_data(
     """
     准备区间数据并裁剪到仿真范围。
     
-    Args:
+    参数：
         df: 原始容量 DataFrame
         sim_start: 仿真开始日期
         sim_end: 仿真结束日期
         
-    Returns:
+    返回：
         裁剪后的区间数据
     """
     cols = ['eff_from', 'eff_to', 'sending', 'receiving', 'truck_type', 'truck_number']
@@ -141,10 +141,10 @@ def _expand_ranges_to_daily(range_df: pd.DataFrame) -> Optional[pd.DataFrame]:
     """
     将区间数据展开为逐日数据。
     
-    Args:
+    参数：
         range_df: 裁剪后的区间数据
         
-    Returns:
+    返回：
         展开后的日粒度数据
     """
     if range_df.empty:
@@ -165,10 +165,10 @@ def _aggregate_capacity(cap_daily: pd.DataFrame) -> pd.DataFrame:
     """
     聚合日粒度容量（相同键的车辆数量求和）。
     
-    Args:
+    参数：
         cap_daily: 日粒度容量数据
         
-    Returns:
+    返回：
         聚合后的容量数据
     """
     return cap_daily.groupby(
@@ -181,7 +181,7 @@ def _empty_capacity_dataframe() -> pd.DataFrame:
     """
     创建空的容量 DataFrame。
     
-    Returns:
+    返回：
         具有正确列结构的空 DataFrame
     """
     return pd.DataFrame(
@@ -200,7 +200,7 @@ def get_truck_capacity(
     """
     获取指定日期和路线的车辆容量。
     
-    Args:
+    参数：
         cap_map: 容量映射字典
         date: 日期
         sending: 发送地点
@@ -208,7 +208,7 @@ def get_truck_capacity(
         truck_type: 车型
         default_capacity: 默认容量（未配置时使用）
         
-    Returns:
+    返回：
         可用车辆数量
     """
     key = (date, sending, receiving, truck_type)
@@ -221,10 +221,10 @@ def build_capacity_map(
     """
     构建容量查询映射。
     
-    Args:
+    参数：
         cap_daily: 日粒度容量 DataFrame
         
-    Returns:
+    返回：
         容量映射字典 {(date, sending, receiving, truck_type): truck_number}
     """
     if cap_daily.empty:
@@ -242,11 +242,11 @@ def get_truck_spec(
     """
     获取车型规格。
     
-    Args:
+    参数：
         spec_map: 车型规格映射
         truck_type: 车型名称
         
-    Returns:
+    返回：
         车型规格字典，不存在则返回 None
     """
     return spec_map.get(truck_type)
@@ -260,12 +260,12 @@ def get_truck_config(
     """
     获取指定路线的卡车配置。
     
-    Args:
+    参数：
         truck_con: 卡车配置 DataFrame
         sending: 发送地点
         receiving: 接收地点
         
-    Returns:
+    返回：
         该路线的卡车配置子集
     """
     return truck_con[
@@ -281,10 +281,10 @@ def get_optimal_truck_sequence(truck_cfgs: pd.DataFrame) -> list:
     优先使用标记为 optimal_type='Y' 的车型，
     其余车型按原顺序排列。
     
-    Args:
+    参数：
         truck_cfgs: 卡车配置 DataFrame
         
-    Returns:
+    返回：
         按优先级排序的车型列表
     """
     if truck_cfgs.empty:
@@ -292,7 +292,7 @@ def get_optimal_truck_sequence(truck_cfgs: pd.DataFrame) -> list:
     
     all_types = truck_cfgs['truck_type'].tolist()
     
-    # optimal_type 列可能不存在（如 DB 模式下全 NaN 被 dropna 移除）
+    # `optimal_type` 列可能不存在（如数据库模式下全空值列被 `dropna` 移除）
     if 'optimal_type' in truck_cfgs.columns:
         optimal_types = truck_cfgs[
             truck_cfgs['optimal_type'] == 'Y'

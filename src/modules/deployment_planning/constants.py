@@ -89,7 +89,7 @@ REQUIRED_SHEETS: List[str] = [
     'DeployConfig'
 ]
 
-# SupplyDemandLog必需列
+# ``SupplyDemandLog`` 必需列
 SDL_REQUIRED_COLUMNS: List[str] = [
     'date',
     'material',

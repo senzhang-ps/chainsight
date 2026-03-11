@@ -1,5 +1,11 @@
 # -*- coding: utf-8 -*-
-"""Module4 DuckDB optimization"""
+"""Module4 DuckDB 批量生产抽样工具。
+
+作用：
+- 为生产计划结果提供批量化产出抽样能力。
+- 在满足阈值时走 DuckDB/NumPy 加速路径，不满足时回退到 Pandas 逐行处理。
+- 保持与原始生产可靠率抽样逻辑一致的顺序与结果口径。
+"""
 import time
 from typing import Dict, List, Optional, Tuple, Any
 import pandas as pd
@@ -16,6 +22,17 @@ except ImportError:
     DUCKDB_INTEGRATION_AVAILABLE = False
 
 def simulate_production_batch_duckdb(plan, pr_cfg, seed=None, run_id=None):
+    """按生产可靠率批量模拟产出数量。
+
+    参数：
+        plan: 生产计划 DataFrame，需包含 `con_planned_qty` 等字段。
+        pr_cfg: 生产可靠率配置表。
+        seed: 随机种子。
+        run_id: 运行批次标识，用于性能统计。
+
+    返回：
+        增补 `produced_qty` 列后的生产计划 DataFrame。
+    """
     if plan.empty or 'con_planned_qty' not in plan.columns:
         plan['produced_qty'] = []
         return plan
@@ -37,7 +54,7 @@ def simulate_production_batch_duckdb(plan, pr_cfg, seed=None, run_id=None):
         n_vals = plan_df['con_planned_qty'].astype(int).values
         p_vals = plan_df['pr'].values
         
-        # Vectorized binomial sampling using NumPy
+        # 使用 NumPy 向量化执行二项分布抽样
         rng = np.random.RandomState(seed)
         produced = np.array([rng.binomial(int(n), float(p)) if n > 0 else 0 for n, p in zip(n_vals, p_vals)])
         
@@ -54,6 +71,10 @@ def simulate_production_batch_duckdb(plan, pr_cfg, seed=None, run_id=None):
         raise
 
 def _simulate_production_pandas(plan, pr_cfg, seed=None, run_id=None):
+    """使用 Pandas 路径回退执行产出抽样。
+
+    该实现保持与原始逐行处理逻辑一致，作为 DuckDB/向量化路径的保底方案。
+    """
     if plan.empty or 'con_planned_qty' not in plan.columns:
         plan['produced_qty'] = []
         return plan
@@ -75,9 +96,11 @@ def _simulate_production_pandas(plan, pr_cfg, seed=None, run_id=None):
     return plan
 
 def is_duckdb_available():
+    """检查 DuckDB 集成是否可用且已启用。"""
     return DUCKDB_INTEGRATION_AVAILABLE and DuckDBConfig.enabled
 
 def get_duckdb_config():
+    """返回当前 DuckDB 集成配置摘要。"""
     if not DUCKDB_INTEGRATION_AVAILABLE:
         return {'available': False}
     return {'available': True, 'enabled': DuckDBConfig.enabled}

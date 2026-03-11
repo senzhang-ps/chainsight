@@ -19,7 +19,7 @@ class ExcelImporter:
         """
         初始化Excel导入器
         
-        Args:
+        参数：
             db: 数据库连接实例
         """
         self.db = db
@@ -47,13 +47,13 @@ class ExcelImporter:
         """
         导入单个Excel文件的所有sheet到数据库
         
-        Args:
+        参数：
             excel_path: Excel文件路径
             prefix: 表名前缀（默认使用文件名）
             if_exists: 如果表存在的处理方式
             config_name: 配置文件标识（如 BC_S5, BC_S9），将添加到每个表中
         
-        Returns:
+        返回：
             dict: 每个sheet导入的行数
         """
         path = Path(excel_path)
@@ -132,11 +132,11 @@ class ExcelImporter:
         """
         导入多个Excel文件
         
-        Args:
+        参数：
             excel_paths: Excel文件路径列表
             if_exists: 如果表存在的处理方式
         
-        Returns:
+        返回：
             dict: 每个文件每个sheet的导入行数
         """
         all_results = {}
@@ -222,14 +222,14 @@ def import_config_files(
     """
     导入所有配置文件到数据库
     
-    Args:
+    参数：
         db_host: 数据库主机
         db_port: 数据库端口
         db_name: 数据库名称
         db_user: 用户名
         db_password: 密码
     
-    Returns:
+    返回：
         bool: 是否成功
     """
     # 配置文件列表

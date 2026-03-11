@@ -16,10 +16,10 @@ def assign_location_layers(network_df: pd.DataFrame) -> pd.DataFrame:
     """
     按物料维度分配网络层级（与 Module5 逻辑一致）。
 
-    Args:
+    参数：
         network_df: 网络配置数据，必须包含 material, location, sourcing 列
 
-    Returns:
+    返回：
         pd.DataFrame: 包含 material, location, layer 列的映射DataFrame
     """
     _t_func = time.perf_counter()
@@ -83,7 +83,7 @@ def assign_location_layers(network_df: pd.DataFrame) -> pd.DataFrame:
                 layer_dict[loc] = max_layer + 1
 
         for loc, layer in layer_dict.items():
-            # Handle NaN material from groupby (dropna=False)
+            # 处理 groupby 产生的 NaN material (dropna=False)
             try:
                 is_na = material is None or pd.isna(material)  # type: ignore[arg-type]
             except (ValueError, TypeError):

@@ -32,7 +32,7 @@ def _calculate_receiving_ss_data(
     """
     计算接收端安全库存数据。
 
-    Args:
+    参数：
         mat: 物料编码
         sending: 发送端编码
         recs: 接收端列表
@@ -41,7 +41,7 @@ def _calculate_receiving_ss_data(
         lead_time_cache: LeadTime缓存
         ptf_lsk_cache: PTF/LSK缓存
 
-    Returns:
+    返回：
         list: 接收端安全库存数据列表
     """
     safety = config['SafetyStock']
@@ -109,7 +109,7 @@ def _calculate_commitments(
     """
     计算接收端的承诺消耗。
 
-    Args:
+    参数：
         mat: 物料编码
         receiving_ss_data: 接收端安全库存数据
         sim_date: 仿真日期
@@ -118,7 +118,7 @@ def _calculate_commitments(
         ptf_lsk_cache: PTF/LSK缓存
         lead_time_cache: LeadTime缓存
 
-    Returns:
+    返回：
         dict: 接收端 -> 承诺消耗量
     """
     commitments_map: Dict[str, float] = {}
@@ -174,13 +174,13 @@ def _select_push_level(
     """
     选择最高可行挡位。
 
-    Args:
+    参数：
         receiving_ss_data: 接收端安全库存数据
         pi_map: 接收端库存基线映射
         available_soh: 可用库存
         push_levels: 挡位列表
 
-    Returns:
+    返回：
         float: 选中的挡位
     """
     feasible_level = None
@@ -214,13 +214,13 @@ def _allocate_push_quantities(
     """
     按比例分配push数量。
 
-    Args:
+    参数：
         receiving_ss_data: 接收端安全库存数据
         pi_map: 接收端库存基线映射
         feasible_level: 选中的挡位
         available_soh: 可用库存
 
-    Returns:
+    返回：
         list: (接收端数据, 分配数量) 元组列表
     """
     needs = []
@@ -263,7 +263,7 @@ def push_softpush_allocation(
     在当日所有非push需求已满足的前提下，使用剩余可用库存执行补货分配。
     采用"挡位（bucket）+ 比例兜底"的方法。
 
-    Args:
+    参数：
         deployment_plan_rows: 当日已生成的分配计划
         config: 配置字典
         dynamic_soh: 当日真实可用库存
@@ -273,7 +273,7 @@ def push_softpush_allocation(
         projected_soh: 接收端当日预测库存
         node_demands_map: 节点需求映射
 
-    Returns:
+    返回：
         list: push/soft-push计划行列表
     """
     t0 = time.perf_counter()
@@ -369,7 +369,7 @@ def push_softpush_allocation(
         ]
         lsk = int(row_cfg.iloc[0]['lsk']) if not row_cfg.empty else 1
 
-        # soft-push需先保留本节点当日safety
+        # soft-push 策略需先保留本节点当日安全库存
         sending_ss = 0
         if model == 'soft push':
             ss_self = safety[

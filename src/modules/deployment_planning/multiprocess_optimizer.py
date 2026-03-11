@@ -88,7 +88,7 @@ def process_layer_multiprocess(
     """
     使用多进程并行处理层内所有节点。
     
-    Args:
+    参数：
         all_pairs: (material, location) 对集合
         sim_date: 仿真日期
         config: 配置字典
@@ -102,7 +102,7 @@ def process_layer_multiprocess(
         deploy_config_index: DeployConfig预建索引
         max_workers: 最大工作进程数
         
-    Returns:
+    返回：
         dict: (material, location) -> 需求行列表
     """
     if not all_pairs:

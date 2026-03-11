@@ -7,7 +7,7 @@
 - 装载记录创建
 - 装载比例计算
 
-Typical usage example:
+典型用法示例:
     packer = VehiclePacker(cap_weight=1000, cap_volume=100)
     packer.add_demand(demand_row, available_qty, inventory_limit)
     wfr, vfr = packer.get_load_ratios()
@@ -62,12 +62,12 @@ class VehiclePacker:
         """
         尝试将需求添加到车辆。
         
-        Args:
+        参数：
             idx: 需求行索引
             demand_row: 需求行数据
             inventory_limit: 库存限制（可选）
             
-        Returns:
+        返回：
             实际装载数量
         """
         qty_pending = float(demand_row['deployed_qty'])
@@ -105,14 +105,14 @@ class VehiclePacker:
         """
         计算可装载数量。
         
-        Args:
+        参数：
             qty_pending: 待装载数量
             unit_weight: 单位重量
             unit_volume: 单位体积
             material: 物料
             inventory_limit: 库存限制
             
-        Returns:
+        返回：
             可装载数量
         """
         cap_w_rem = max(0.0, self.cap_weight - self.current_weight)
@@ -139,7 +139,7 @@ class VehiclePacker:
         """
         更新装载状态。
         
-        Args:
+        参数：
             qty: 装载数量
             unit_weight: 单位重量
             unit_volume: 单位体积
@@ -156,7 +156,7 @@ class VehiclePacker:
         """
         获取装载比例。
         
-        Returns:
+        返回：
             (重量填充率, 体积填充率) 元组
         """
         wfr = (self.current_weight / self.cap_weight) if self.cap_weight > 0 else 0.0
@@ -167,7 +167,7 @@ class VehiclePacker:
         """
         检查车辆是否已满。
         
-        Returns:
+        返回：
             是否已满（任一维度达到容量）
         """
         return (self.current_weight >= self.cap_weight or 
@@ -177,7 +177,7 @@ class VehiclePacker:
         """
         检查是否有装载内容。
         
-        Returns:
+        返回：
             是否有装载
         """
         return len(self.load_records) > 0
@@ -186,7 +186,7 @@ class VehiclePacker:
         """
         获取已装载的需求索引集合。
         
-        Returns:
+        返回：
             索引集合
         """
         return {r['idx'] for r in self.load_records}
@@ -195,10 +195,10 @@ class VehiclePacker:
         """
         获取指定物料已装载数量。
         
-        Args:
+        参数：
             material: 物料名称
             
-        Returns:
+        返回：
             已装载数量
         """
         return self.material_loaded.get(material, 0)
@@ -220,12 +220,12 @@ def create_load_record(
     """
     创建装载记录字典。
     
-    Args:
+    参数：
         idx: 需求行索引
         load_qty: 装载数量
         demand_row: 需求行数据
         
-    Returns:
+    返回：
         装载记录字典
     """
     return {
@@ -244,13 +244,13 @@ def calculate_load_ratios(
     """
     计算装载比例。
     
-    Args:
+    参数：
         weight_sum: 总重量
         volume_sum: 总体积
         cap_weight: 重量容量
         cap_volume: 体积容量
         
-    Returns:
+    返回：
         (重量填充率, 体积填充率) 元组
     """
     wfr = (weight_sum / cap_weight) if cap_weight > 0 else 0.0
@@ -269,7 +269,7 @@ def calculate_addable_quantity(
     """
     计算可添加的数量。
     
-    Args:
+    参数：
         qty_pending: 待装载数量
         unit_weight: 单位重量
         unit_volume: 单位体积
@@ -277,7 +277,7 @@ def calculate_addable_quantity(
         cap_volume_remaining: 剩余体积容量
         inventory_limit: 库存限制（可选）
         
-    Returns:
+    返回：
         可装载数量
     """
     limits = [qty_pending]
@@ -304,7 +304,7 @@ def create_vehicle_log_entry(
     """
     创建车辆日志条目。
     
-    Args:
+    参数：
         sim_date: 仿真日期
         sending: 发送地点
         receiving: 接收地点
@@ -313,7 +313,7 @@ def create_vehicle_log_entry(
         packer: 装载器实例
         trigger_cause: 触发原因
         
-    Returns:
+    返回：
         车辆日志字典
     """
     wfr, vfr = packer.get_load_ratios()
@@ -341,10 +341,10 @@ def get_representative_context(
     """
     获取代表性上下文（优先级最高的需求）。
     
-    Args:
+    参数：
         load_records: 装载记录列表
         
-    Returns:
+    返回：
         (需求类型, 等待天数) 元组
     """
     if not load_records:
@@ -377,7 +377,7 @@ def determine_trigger_cause(
     """
     确定发运触发原因。
     
-    Args:
+    参数：
         has_load: 是否有装载
         wfr: 重量填充率
         vfr: 体积填充率
@@ -387,7 +387,7 @@ def determine_trigger_cause(
         max_wait_in_load: 当前装载中的最大等待天数
         max_wait_days: 最大等待天数限制
         
-    Returns:
+    返回：
         触发原因字符串，未触发返回 None
     """
     if not has_load:

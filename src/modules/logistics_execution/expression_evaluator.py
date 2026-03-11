@@ -5,7 +5,7 @@
 提供安全的布尔表达式解析功能，用于评估MDQ旁路规则等业务逻辑。
 仅支持受控的变量名和有限的操作符，防止代码注入。
 
-Typical usage example:
+典型用法示例:
     evaluator = SafeExpressionEvaluator(['waiting_days', 'deployed_qty_ratio'])
     result = evaluator.eval('waiting_days > 5', {'waiting_days': 7})
 """
@@ -29,7 +29,7 @@ class SafeExpressionEvaluator:
         """
         初始化解析器。
         
-        Args:
+        参数：
             allowed_names: 允许在表达式中使用的变量名列表
         """
         self.allowed_names: Set[str] = set(allowed_names)
@@ -38,14 +38,14 @@ class SafeExpressionEvaluator:
         """
         解析并执行布尔表达式。
         
-        Args:
+        参数：
             expr: 布尔表达式字符串
             context: 变量上下文字典
             
-        Returns:
+        返回：
             表达式的布尔结果
             
-        Raises:
+        异常：
             ValueError: 当表达式语法不支持时
         """
         expr = self._normalize_expression(expr)
@@ -59,10 +59,10 @@ class SafeExpressionEvaluator:
         """
         标准化表达式：替换SQL风格的逻辑操作符。
         
-        Args:
+        参数：
             expr: 原始表达式字符串
             
-        Returns:
+        返回：
             标准化后的Python风格表达式
         """
         expr = (expr or '').strip()
@@ -75,14 +75,14 @@ class SafeExpressionEvaluator:
         """
         递归解析AST节点。
         
-        Args:
+        参数：
             node: AST节点对象
             context: 变量上下文字典
             
-        Returns:
+        返回：
             节点计算结果
             
-        Raises:
+        异常：
             ValueError: 当遇到不支持的语法时
         """
         if isinstance(node, ast.BoolOp):
@@ -102,14 +102,14 @@ class SafeExpressionEvaluator:
         """
         解析布尔运算节点（and/or）。
         
-        Args:
+        参数：
             node: 布尔运算AST节点
             context: 变量上下文字典
             
-        Returns:
+        返回：
             布尔运算结果
             
-        Raises:
+        异常：
             ValueError: 当遇到不支持的布尔操作符时
         """
         values = [self._eval_node(v, context) for v in node.values]
@@ -127,14 +127,14 @@ class SafeExpressionEvaluator:
         """
         解析比较运算节点。
         
-        Args:
+        参数：
             node: 比较运算AST节点
             context: 变量上下文字典
             
-        Returns:
+        返回：
             比较运算结果
             
-        Raises:
+        异常：
             ValueError: 当遇到不支持的比较操作符时
         """
         left = self._eval_node(node.left, context)
@@ -157,15 +157,15 @@ class SafeExpressionEvaluator:
         """
         执行值比较。
         
-        Args:
+        参数：
             op: 比较操作符
             left: 左操作数
             right: 右操作数
             
-        Returns:
+        返回：
             比较结果
             
-        Raises:
+        异常：
             ValueError: 当遇到不支持的比较操作符时
         """
         comparison_ops = {
@@ -187,14 +187,14 @@ class SafeExpressionEvaluator:
         """
         解析变量名节点。
         
-        Args:
+        参数：
             node: 变量名AST节点
             context: 变量上下文字典
             
-        Returns:
+        返回：
             变量值
             
-        Raises:
+        异常：
             ValueError: 当变量名不在允许列表或上下文中不存在时
         """
         if node.id not in self.allowed_names:

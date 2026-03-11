@@ -1,4 +1,4 @@
-# modules_compat — 兼容层模块文档
+# `src/modules` 兼容层模块文档
 
 本文档覆盖 `src/modules/` 目录下的 5 个兼容层包装器文件：`module1.py`、`module3.py`、`module4.py`、`module5.py`，以及核心物流执行模块 `module6.py`。
 
@@ -17,7 +17,7 @@
 
 ## 概述
 
-`module1.py`、`module3.py`、`module4.py`、`module5.py` 均为**向后兼容薄包装层（thin wrapper）**，其职责是：
+`module1.py`、`module3.py`、`module4.py`、`module5.py` 均为**向后兼容轻量包装层**，其职责是：
 
 - 从对应子包（`demand_planning`、`mrp_planning`、`production_planning`、`deployment_planning`）导入所有公开接口
 - 通过 `from <subpackage> import *` 或显式重导出，保证调用方无需修改即可使用
@@ -97,7 +97,7 @@
 
 所有 `production_planning` 子包公开接口。
 
-#### Dataclass 类型（5 个）
+#### 数据类类型（5 个）
 
 | 类型名 | 说明 |
 |--------|------|

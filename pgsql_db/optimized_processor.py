@@ -45,7 +45,7 @@ class OptimizedDataProcessor:
         """
         初始化处理器
         
-        Args:
+        参数：
             pg_connection_string: PostgreSQL连接字符串
             cache_dir: Parquet缓存目录
             memory_limit: DuckDB内存限制 (默认: 系统90%内存)
@@ -138,12 +138,12 @@ class OptimizedDataProcessor:
         """
         预建GroupBy索引，避免重复过滤
         
-        Args:
+        参数：
             df: 源DataFrame
             key_columns: 索引键列
             index_name: 索引名称（用于缓存）
         
-        Returns:
+        返回：
             键到DataFrame的映射字典
         """
         if index_name in self._index_cache:
@@ -187,13 +187,13 @@ class OptimizedDataProcessor:
         """
         构建快速查找字典
         
-        Args:
+        参数：
             df: 源DataFrame
             key_columns: 键列
             value_column: 值列
             index_name: 索引名称
         
-        Returns:
+        返回：
             键到值的映射字典
         """
         cache_key = f"{index_name}_lookup"

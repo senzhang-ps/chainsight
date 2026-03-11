@@ -1,9 +1,9 @@
-"""Demand Planning Module (需求规划模块)
+"""需求规划模块 (需求规划模块)
 
 本模块负责需求预测与订单生成：
 - 加载并处理需求预测配置
 - 将周度预测拆分为日度预测
-- 生成AO（提前订单）与Normal（普通订单）
+- 生成AO（提前订单）与普通订单
 - 计算发货与缺货
 - 生成供需日志
 
@@ -97,7 +97,7 @@ __all__ = [
     'load_config',
     'validate_m1_config',
     '_validate_m1_config',
-    # DPS
+    # DPS 处理
     'apply_dps',
     'apply_supply_choice',
     # 预测
@@ -119,7 +119,7 @@ __all__ = [
     # 集成
     'run_daily_order_generation',
     'generate_supply_demand_log_for_integration',
-    # IO
+    # 输入输出
     'load_previous_orders',
     'save_module1_output_with_supply_demand',
 ]

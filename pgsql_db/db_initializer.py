@@ -24,7 +24,7 @@ class DatabaseInitializer:
         """
         初始化数据库初始化器
         
-        Args:
+        参数：
             host: 数据库主机
             port: 数据库端口
             database: 数据库名称
@@ -85,7 +85,7 @@ class DatabaseInitializer:
         """
         检测数据库是否存在
         
-        Returns:
+        返回：
             bool: 数据库是否存在
         """
         return self.db.database_exists()
@@ -94,7 +94,7 @@ class DatabaseInitializer:
         """
         如果数据库不存在则创建
         
-        Returns:
+        返回：
             Tuple[bool, str]: (是否成功, 消息)
         """
         if self.check_database_exists():
@@ -110,10 +110,10 @@ class DatabaseInitializer:
         """
         检测配置表是否存在
         
-        Args:
+        参数：
             config_name: 配置名称（如 BC_S5）
             
-        Returns:
+        返回：
             Tuple[bool, int]: (是否存在, 表数量)
         """
         # 按“同结构同表”规则：不再以配置前缀分表，改为检查是否存在包含该 config_name 的数据
@@ -126,11 +126,11 @@ class DatabaseInitializer:
         
         通过检查表中的 config_name 字段来确定数据归属
         
-        Args:
+        参数：
             config_name: 配置名称（如 BC_S5, BC_S9）
             table_name: 可选，指定检查的表名，不指定则检查所有配置表
             
-        Returns:
+        返回：
             Tuple[bool, int]: (是否存在, 数据行数)
         """
         existing_tables = self.db.get_all_tables()
@@ -175,7 +175,7 @@ class DatabaseInitializer:
         按“同结构同表”规则：配置数据都在统一表中，通过列 `config_name` 区分。
         这里会扫描所有非输出表，收集其中出现过的 config_name。
         
-        Returns:
+        返回：
             List[str]: 配置名称列表
         """
         existing_tables = self.db.get_all_tables()
@@ -210,10 +210,10 @@ class DatabaseInitializer:
         """
         查找配置文件
         
-        Args:
+        参数：
             config_name: 配置名称
             
-        Returns:
+        返回：
             Path or None: 配置文件路径，未找到返回None
         """
         # 尝试多种文件名格式
@@ -240,12 +240,12 @@ class DatabaseInitializer:
         """
         从Excel导入配置到数据库
         
-        Args:
+        参数：
             config_name: 配置名称
             config_file: 配置文件路径（可选，不提供则自动查找）
             if_exists: 表存在时的处理方式 ('replace', 'append', 'skip')
             
-        Returns:
+        返回：
             Tuple[bool, Dict]: (是否成功, 导入结果字典)
         """
         # 查找配置文件
@@ -277,12 +277,12 @@ class DatabaseInitializer:
         """
         完整初始化流程：检测数据库、创建数据库、检测配置表、导入配置
         
-        Args:
+        参数：
             config_name: 配置名称（如 BC_S5），如果提供则检测并导入配置
             auto_import_config: 是否自动导入缺失的配置
             verbose: 是否输出详细信息
             
-        Returns:
+        返回：
             Dict: 初始化结果
         """
         result = {
@@ -324,6 +324,15 @@ class DatabaseInitializer:
             result["success"] = False
             return result
         log(f"✅ 数据库连接成功 (版本: {conn_result['version'][:40]}...)")
+        
+        # ========== 步骤2.5: 初始化 checkpoint 表 ==========
+        log("🔍 初始化 checkpoint 表...")
+        from pgsql_db.checkpoint import ensure_checkpoint_table
+        try:
+            ensure_checkpoint_table(self.db)
+            log("✅ checkpoint 表已就绪")
+        except Exception as e:
+            log(f"⚠️ 初始化 checkpoint 表时出现警告: {e}")
         
         # ========== 步骤3: 检测配置表（如果提供配置名） ==========
         if config_name:
@@ -370,10 +379,10 @@ class DatabaseInitializer:
         """
         获取数据库状态报告
         
-        Args:
+        参数：
             config_name: 配置名称（可选）
             
-        Returns:
+        返回：
             str: 状态报告
         """
         lines = []
@@ -436,7 +445,7 @@ def initialize_database(
     """
     便捷函数：初始化数据库
     
-    Args:
+    参数：
         config_name: 配置名称（如 BC_S5）
         host: 数据库主机
         port: 数据库端口
@@ -446,7 +455,7 @@ def initialize_database(
         auto_import: 是否自动导入缺失的配置
         verbose: 是否输出详细信息
         
-    Returns:
+    返回：
         Dict: 初始化结果
     """
     initializer = DatabaseInitializer(

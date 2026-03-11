@@ -18,13 +18,13 @@ def load_config(config_path: str) -> Dict[str, pd.DataFrame]:
     """
     从Excel文件加载配置数据。
 
-    Args:
+    参数：
         config_path: 配置Excel文件路径
 
-    Returns:
+    返回：
         Dict[str, pd.DataFrame]: 配置数据字典
 
-    Raises:
+    异常：
         RuntimeError: 配置文件加载失败
     """
     try:
@@ -50,12 +50,12 @@ def _load_sheet(
     """
     加载单个Excel sheet。
 
-    Args:
+    参数：
         xl: Excel文件对象
         sheet_name: sheet名称
         key: 配置键名
 
-    Returns:
+    返回：
         pd.DataFrame: 加载的数据
     """
     if sheet_name not in xl.sheet_names:
@@ -86,11 +86,11 @@ def load_module1_daily_outputs(
     """
     读取Module1当天版本的输出。
 
-    Args:
+    参数：
         module1_output_dir: Module1输出目录
         simulation_date: 模拟日期
 
-    Returns:
+    返回：
         Dict[str, pd.DataFrame]: Module1输出数据字典
     """
     t_start = time.perf_counter()
@@ -199,10 +199,10 @@ def load_excel_with_sheets(filepath: str) -> Dict[str, pd.DataFrame]:
     """
     加载Excel文件的所有sheet。
 
-    Args:
+    参数：
         filepath: Excel文件路径
 
-    Returns:
+    返回：
         Dict[str, pd.DataFrame]: sheet名称到DataFrame的映射
     """
     xl = pd.ExcelFile(filepath)

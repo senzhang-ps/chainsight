@@ -2,8 +2,8 @@
 module1.py
 
 整体目的：
-- 模块1负责需求预测与订单生成的日度执行逻辑：加载并处理需求预测配置、
-  将周度预测拆分为日度预测、生成AO（提前订单）与Normal（普通订单）、
+- Module1负责需求预测与订单生成的日度执行逻辑：加载并处理需求预测配置、
+  将周度预测拆分为日度预测、生成AO（提前订单）与普通订单、
   计算发货与缺货、生成供需日志。
 
 功能点：
@@ -70,7 +70,7 @@ from .demand_planning.config import (
     validate_m1_config as _validate_m1_config,
 )
 
-# DPS与供应选择
+# DPS 处理与供应选择
 from .demand_planning.dps import (
     apply_dps,
     apply_supply_choice,
@@ -109,7 +109,7 @@ from .demand_planning.integration import (
     generate_supply_demand_log_for_integration,
 )
 
-# IO工具
+# 输入输出工具
 from .demand_planning.io_utils import (
     load_previous_orders as _load_previous_orders,
     save_module1_output_with_supply_demand,
@@ -140,7 +140,7 @@ __all__ = [
     # 配置
     'load_config',
     '_validate_m1_config',
-    # DPS
+    # DPS 处理
     'apply_dps',
     'apply_supply_choice',
     # 预测
@@ -161,7 +161,7 @@ __all__ = [
     # 集成
     'run_daily_order_generation',
     'generate_supply_demand_log_for_integration',
-    # IO
+    # 输入输出
     '_load_previous_orders',
     'save_module1_output_with_supply_demand',
 ]

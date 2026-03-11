@@ -241,21 +241,21 @@ def calculate_net_demand_duckdb(
     # 按优先级计算缺口（AO > Forecast > Safety Stock）
     remaining = total_supply
     
-    # AO gap
+    # AO 缺口
     if total_ao > 0:
         ao_gap = max(0, total_ao - remaining)
         remaining = max(0, remaining - total_ao)
     else:
         ao_gap = 0
     
-    # Forecast gap
+    # 预测缺口
     if total_fc > 0:
         fc_gap = max(0, total_fc - remaining)
         remaining = max(0, remaining - total_fc)
     else:
         fc_gap = 0
     
-    # Safety Stock gap
+    # 安全库存缺口
     if total_ss > 0:
         ss_gap = max(0, total_ss - remaining)
     else:
@@ -271,7 +271,7 @@ def calculate_net_demand_batch_duckdb(
     """
     批量计算净需求（DuckDB SQL 向量化实现）
     
-    Args:
+    参数：
         nodes_df: 节点数据，包含以下列:
             - material, location
             - beginning_inventory, in_transit, delivery_gr
@@ -281,7 +281,7 @@ def calculate_net_demand_batch_duckdb(
             - downstream_ao_gap, downstream_fc_gap, downstream_ss_gap
         run_id: 运行ID（用于性能统计）
     
-    Returns:
+    返回：
         包含 ao_gap, fc_gap, ss_gap 的 DataFrame
     """
     calculator = get_duckdb_calculator()
@@ -414,7 +414,7 @@ def apply_moq_rv_batch_duckdb(
     """
     批量应用 MOQ/RV 约束（DuckDB SQL 向量化实现）
     
-    Args:
+    参数：
         demand_df: 需求数据，包含:
             - material, sending, receiving
             - quantity (原始需求量)
@@ -423,7 +423,7 @@ def apply_moq_rv_batch_duckdb(
             - moq, rv
         run_id: 运行ID（用于性能统计）
     
-    Returns:
+    返回：
         包含 adjusted_qty 的 DataFrame
     """
     calculator = get_duckdb_calculator()
@@ -540,7 +540,7 @@ def priority_allocation_batch_duckdb(
     """
     批量优先级分配（DuckDB SQL 向量化实现）
     
-    Args:
+    参数：
         demand_df: 需求数据，包含:
             - material, sending, receiving
             - demand_element (需求类型)
@@ -553,7 +553,7 @@ def priority_allocation_batch_duckdb(
             - priority (数字越小优先级越高)
         run_id: 运行ID（用于性能统计）
     
-    Returns:
+    返回：
         包含 allocated_qty, unmet_qty 的 DataFrame
     """
     calculator = get_duckdb_calculator()
@@ -770,14 +770,14 @@ def run_ab_comparison(
     """
     运行 A/B 性能对比测试
     
-    Args:
+    参数：
         func_a: 方案A（通常是 DuckDB）
         func_b: 方案B（通常是 Pandas）
         test_data: 测试数据
         iterations: 迭代次数
         warmup: 预热次数
     
-    Returns:
+    返回：
         对比结果
     """
     results = {'a': [], 'b': []}

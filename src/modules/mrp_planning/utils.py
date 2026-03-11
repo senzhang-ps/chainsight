@@ -27,16 +27,16 @@ def apply_moq_rv(
     """
     应用MOQ/RV约束调整补货数量。
 
-    Args:
+    参数：
         qty: 需求数量
         moq: 最小订货量
         rv: 重订量
         is_cross_node: 是否为跨节点调运
 
-    Returns:
+    返回：
         int: 调整后的补货数量
 
-    Examples:
+    示例：
         >>> apply_moq_rv(50, 100, 20)
         100
         >>> apply_moq_rv(150, 100, 20)
@@ -57,10 +57,10 @@ def normalize_location(location_str: Union[str, int, float, None]) -> str:
     """
     将地点标识符规范化为4位前导零字符串。
 
-    Args:
+    参数：
         location_str: 地点标识符
 
-    Returns:
+    返回：
         str: 规范化后的地点字符串
     """
     if location_str is None or pd.isna(location_str):
@@ -78,10 +78,10 @@ def normalize_material(material_str: Union[str, int, float, None]) -> str:
     作用：统一 material 字段格式，与code_v0保持一致。
     注意：直接转换为字符串，不做额外处理，以确保与code_v0输出一致。
 
-    Args:
+    参数：
         material_str: 物料标识符
 
-    Returns:
+    返回：
         str: 规范化后的物料字符串
     """
     if material_str is None or pd.isna(material_str):
@@ -95,10 +95,10 @@ def normalize_identifiers(df: pd.DataFrame) -> pd.DataFrame:
     
     使用向量化操作提升性能。
 
-    Args:
+    参数：
         df: 需要规范化的DataFrame
 
-    Returns:
+    返回：
         pd.DataFrame: 规范化后的DataFrame副本
     """
     if df.empty:
@@ -142,13 +142,13 @@ def lookup_moq_rv_three_keys(
 
     优先级: (material, sending, receiving) > (material, sending) > 默认值
 
-    Args:
+    参数：
         deploy_config_df: 部署配置DataFrame
         material: 物料编码
         sending: 发送节点
         receiving: 接收节点
 
-    Returns:
+    返回：
         Tuple[int, int]: (moq, rv) 元组
     """
     try:
@@ -193,11 +193,11 @@ def apportion_largest_remainder(
     """
     使用最大余数法进行保和分配。
 
-    Args:
+    参数：
         values: 非负浮点数列表
         target: 目标总和
 
-    Returns:
+    返回：
         List[int]: 分配结果列表
     """
     n = len(values)
@@ -251,10 +251,10 @@ def build_ptf_lsk_cache(
     """
     构建PTF/LSK查询缓存。
 
-    Args:
+    参数：
         m4_mlcfg_df: M4配置DataFrame
 
-    Returns:
+    返回：
         Dict: (material, location) -> (ptf, lsk) 缓存
     """
     cache = {}
@@ -298,13 +298,13 @@ def get_ptf_lsk(
     """
     从M4配置读取PTF/LSK值。
 
-    Args:
+    参数：
         material: 物料编码
         site: 地点编码
         m4_mlcfg_df: M4配置DataFrame
         cache: PTF/LSK缓存
 
-    Returns:
+    返回：
         Tuple[int, int]: (ptf, lsk) 元组
     """
     if cache is not None:

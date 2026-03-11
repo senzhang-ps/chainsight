@@ -17,13 +17,13 @@ def normalize_location(location_str: str) -> str:
 
     将纯数字地点左补零至4位，非数字地点保持原样。
 
-    Args:
+    参数：
         location_str: 地点字符串（如 "386"/"0386"/"A888"）
 
-    Returns:
+    返回：
         str: 标准化后的地点字符串
 
-    Examples:
+    示例：
         >>> normalize_location("386")
         '0386'
         >>> normalize_location("A888")
@@ -45,11 +45,11 @@ def cast_identifiers_to_str(
 ) -> pd.DataFrame:
     """将标识符列转换为字符串类型并标准化地点。
 
-    Args:
+    参数：
         df: 待处理的DataFrame
         cols: 要转换的列名列表，默认使用IDENTIFIER_COLS
 
-    Returns:
+    返回：
         pd.DataFrame: 处理后的DataFrame副本
     """
     if df is None or df.empty:
@@ -73,12 +73,12 @@ def validate_merge_keys(
 ) -> None:
     """校验两个DataFrame合并键的dtype一致性。
 
-    Args:
+    参数：
         df1: 第一个DataFrame
         df2: 第二个DataFrame
         keys: 合并键列表
 
-    Raises:
+    异常：
         TypeError: 当合并键dtype不一致时
     """
     for key in keys:
@@ -99,15 +99,15 @@ def compute_planning_window(
 
     根据计划冻结期(PTF)和批量周期键(LSK)计算计划窗口。
 
-    Args:
+    参数：
         simulation_date: 当前仿真日期（审查日）
         ptf: 计划冻结期（天）
         lsk: 批量周期键（规划视窗天数）
 
-    Returns:
+    返回：
         Tuple[pd.Timestamp, pd.Timestamp]: (窗口起始日, 窗口结束日)
 
-    Examples:
+    示例：
         >>> compute_planning_window(pd.Timestamp('2024-01-01'), 2, 7)
         (Timestamp('2024-01-03'), Timestamp('2024-01-09'))
     """
@@ -126,13 +126,13 @@ def is_review_day(
 
     基于LSK周期和首次审查偏移判断当前日期是否为审查日。
 
-    Args:
+    参数：
         simulation_date: 当前仿真日期
         simulation_start: 仿真起始日期
         lsk: 审查间隔天数
         day: 首次审查相对起始的偏移天数
 
-    Returns:
+    返回：
         bool: 若是审查日返回True
     """
     days_since_start = (simulation_date - simulation_start).days
@@ -147,10 +147,10 @@ def is_review_day(
 def dedup_issues(issues: List[dict]) -> List[dict]:
     """去重校验问题记录。
 
-    Args:
+    参数：
         issues: 问题记录列表
 
-    Returns:
+    返回：
         List[dict]: 去重后的问题列表
     """
     if not issues:
@@ -168,12 +168,12 @@ def round_up_to_batch(
 ) -> int:
     """按最小批量和舍入量向上取整。
 
-    Args:
+    参数：
         quantity: 原始数量
         min_batch: 最小批量
         rounding_volume: 舍入量
 
-    Returns:
+    返回：
         int: 取整后的数量
     """
     base = max(quantity, min_batch)
@@ -189,10 +189,10 @@ def safe_float_conversion(value: Any) -> float:
 
     处理numpy数值类型，确保JSON序列化兼容。
 
-    Args:
+    参数：
         value: 待转换的值
 
-    Returns:
+    返回：
         float: 转换后的浮点数
     """
     if isinstance(value, (np.integer, np.int64)):
@@ -210,11 +210,11 @@ def ensure_dataframe_columns(
 
     如果DataFrame为空或缺少列，则创建/添加空列。
 
-    Args:
+    参数：
         df: 待处理的DataFrame
         columns: 必需的列名列表
 
-    Returns:
+    返回：
         pd.DataFrame: 包含所有指定列的DataFrame
     """
     if df is None or df.empty:

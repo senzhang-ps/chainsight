@@ -1,7 +1,7 @@
 """
 Module3 净需求计算模块。
 
-负责计算每日净需求（AO gap、forecast gap和safety gap）。
+负责计算每日净需求（AO 缺口、forecast gap和safety gap）。
 
 优化历史:
 - v1.0: 基础实现
@@ -39,9 +39,9 @@ def calculate_daily_net_demand(
     downstream_ao_gap: float = 0.0
 ) -> Tuple[float, float, float]:
     """
-    计算每日净需求（AO gap、forecast gap和safety gap）。
+    计算每日净需求（AO 缺口、forecast gap和safety gap）。
 
-    Args:
+    参数：
         material: 物料编码
         location: 地点编码
         date: 计算日期
@@ -60,7 +60,7 @@ def calculate_daily_net_demand(
         order_df: 订单数据
         downstream_ao_gap: 下游AO缺口
 
-    Returns:
+    返回：
         Tuple[float, float, float]: (ao_gap, fc_gap, ss_gap)
     """
     date = _ensure_timestamp(date)
@@ -352,7 +352,7 @@ def _get_ao_demand(
     date: pd.Timestamp,
     horizon_end: pd.Timestamp
 ) -> float:
-    """获取AO需求。"""
+    """获取AO 需求。"""
     if order_df is None or order_df.empty or 'date' not in order_df.columns:
         return 0.0
 
@@ -427,17 +427,17 @@ def _calculate_gaps(
     """计算缺口（AO → forecast → safety）。"""
     available = float(total_available)
 
-    # AO缺口
+    # AO 缺口
     ao_total = ao_local + float(downstream_ao_gap or 0.0)
     ao_gap = max(ao_total - available, 0.0)
     available = max(available - min(available, ao_total), 0.0)
 
-    # Forecast缺口
+    # 预测缺口
     fc_total = fc_local + float(downstream_forecast_gap or 0.0)
     fc_gap = max(fc_total - available, 0.0)
     available = max(available - min(available, fc_total), 0.0)
 
-    # Safety缺口
+    # 安全库存缺口
     ss_total = ss_local + float(downstream_safety_gap or 0.0)
     ss_gap = max(ss_total - available, 0.0)
 
@@ -469,7 +469,7 @@ def calculate_daily_net_demand_indexed(
     相比 calculate_daily_net_demand，此函数使用预构建的 DataIndexer
     进行 O(1) 字典查找，而非 O(n) 的 DataFrame 过滤。
     
-    Args:
+    参数：
         material: 物料编码
         location: 地点编码
         date: 计算日期
@@ -484,7 +484,7 @@ def calculate_daily_net_demand_indexed(
         delivery_shipment_df: 发运记录
         downstream_ao_gap: 下游AO缺口
 
-    Returns:
+    返回：
         Tuple[float, float, float]: (ao_gap, fc_gap, ss_gap)
     """
     date = _ensure_timestamp(date)

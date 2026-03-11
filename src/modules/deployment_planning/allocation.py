@@ -20,14 +20,14 @@ def apply_moq_rv(
     """
     应用最小订货量/重订量约束。
 
-    Args:
+    参数：
         qty: 原始数量
         moq: 最小订货量
         rv: 重订量
         is_cross_node: 是否跨节点
         max_qty: 最大允许数量（保留参数兼容性但不使用，与code_v0一致）
 
-    Returns:
+    返回：
         int: 调整后的数量
     """
     if qty <= 0:
@@ -57,12 +57,12 @@ def apply_grouped_moq_rv(
     
     注：shipment_qty_limit参数保留接口兼容性但不使用，与code_v0一致。
 
-    Args:
+    参数：
         demand_rows: 需求行列表
         location: 当前位置
         shipment_qty_limit: 保留参数兼容性但不使用
 
-    Returns:
+    返回：
         dict: 索引 -> 调整后数量
     """
     # 路径级分组
@@ -150,13 +150,13 @@ def apply_priority_allocation_vectorized(
 
     高优先级需求先满足，最后一个被部分满足的优先级按比例分配。
 
-    Args:
+    参数：
         demand_rows: 需求行列表
         adjusted_qtys: 调整后的需求量字典
         current_stock: 当前可用库存
         demand_priority_map: 需求类型优先级映射
 
-    Returns:
+    返回：
         int: 剩余库存量
     """
     if not demand_rows:
@@ -241,7 +241,7 @@ def allocate_pipeline_supply(
 
     按优先级分配在途、开放调拨入库和未来生产。
 
-    Args:
+    参数：
         demand_rows: 需求行列表（会被修改）
         adjusted_qtys: 调整后的需求量字典
         location: 当前位置
@@ -263,7 +263,7 @@ def allocate_pipeline_supply(
     ndr_df = pd.DataFrame(demand_rows).copy()
     ndr_df['idx'] = np.arange(len(demand_rows))
 
-    # receiving 解析
+    # `receiving` 字段解析
     rec_arr = [
         r.get('from_location', r.get('receiving', location))
         for r in demand_rows
@@ -386,13 +386,13 @@ def apply_receiving_space_quota(
     """
     应用接收端空间/能力配额。
 
-    Args:
+    参数：
         deployment_plan_rows: 部署计划行列表
         receiving_space: 接收空间DataFrame
         sim_date: 仿真日期
         demand_priority_map: 需求类型优先级映射
 
-    Returns:
+    返回：
         tuple: (结果DataFrame, 未满足日志列表)
     """
     import time

@@ -599,7 +599,7 @@ class Module6Optimizer(BaseModuleOptimizer):
         """
         批量更新状态
         
-        Returns:
+        返回：
             更新的记录数
         """
         if not self.duckdb_conn or not updates:
@@ -618,10 +618,10 @@ def create_module_optimizer(module_name: str) -> BaseModuleOptimizer:
     """
     创建模块优化器
     
-    Args:
+    参数：
         module_name: 模块名称 (Module3, Module5, Module6)
     
-    Returns:
+    返回：
         对应的优化器实例
     """
     optimizers = {

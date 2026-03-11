@@ -7,7 +7,7 @@
 - MDQ 旁路规则判断
 - 交货时间计算
 
-Typical usage example:
+典型用法示例:
     delay = sample_delivery_delay('WH1', 'WH2', delay_dist_df)
     bypass, rule_id = should_bypass_mdq(context, rules, evaluator)
     lead_time = calculate_lead_time(lead_time_df, 'WH1', 'WH2')
@@ -34,12 +34,12 @@ def sample_delivery_delay(
     2. 全局兜底规则（sending=ALL & receiving=ALL）
     3. 默认 0 天
     
-    Args:
+    参数：
         sending: 发送地点
         receiving: 接收地点
         dist_df: 延迟分布 DataFrame
         
-    Returns:
+    返回：
         采样的延迟天数
     """
     if not _is_valid_delay_distribution(dist_df):
@@ -57,10 +57,10 @@ def _is_valid_delay_distribution(dist_df: pd.DataFrame) -> bool:
     """
     检查延迟分布数据是否有效。
     
-    Args:
+    参数：
         dist_df: 延迟分布 DataFrame
         
-    Returns:
+    返回：
         是否有效
     """
     if dist_df is None or dist_df.empty:
@@ -78,12 +78,12 @@ def _get_delay_distribution(
     """
     获取延迟分布数据。
     
-    Args:
+    参数：
         dist_df: 延迟分布 DataFrame
         sending: 发送地点
         receiving: 接收地点
         
-    Returns:
+    返回：
         (延迟天数数组, 概率数组) 元组，无数据时返回 (None, None)
     """
     # 尝试精确路线匹配
@@ -115,11 +115,11 @@ def _sample_from_distribution(
     """
     从分布中采样延迟天数。
     
-    Args:
+    参数：
         delays: 延迟天数数组
         probs: 概率数组
         
-    Returns:
+    返回：
         采样的延迟天数
     """
     probs = np.array(probs, dtype=float)
@@ -141,12 +141,12 @@ def should_bypass_mdq(
     
     遍历规则表，检查是否有匹配的旁路规则。
     
-    Args:
+    参数：
         context: 上下文变量字典
         rules: 旁路规则 DataFrame
         evaluator: 表达式解析器
         
-    Returns:
+    返回：
         (是否绕过, 命中的规则ID) 元组
     """
     for rule in rules.itertuples(index=False):
@@ -163,11 +163,11 @@ def _rule_matches_context(rule, context: Dict[str, Any]) -> bool:
     """
     检查规则是否匹配上下文。
     
-    Args:
+    参数：
         rule: 规则行 (namedtuple 或 Series)
         context: 上下文字典
         
-    Returns:
+    返回：
         是否匹配
     """
     match_cols = ['sending', 'receiving', 'truck_type', 'demand_element']
@@ -192,12 +192,12 @@ def _evaluate_rule_condition(
     """
     评估规则条件表达式。
     
-    Args:
+    参数：
         rule: 规则行 (namedtuple 或 Series)
         context: 上下文字典
         evaluator: 表达式解析器
         
-    Returns:
+    返回：
         条件是否满足
     """
     try:
@@ -222,15 +222,15 @@ def calculate_lead_time(
     """
     计算交货时间参数。
     
-    Args:
+    参数：
         lead_time_df: 交货时间配置 DataFrame
         sending: 发送地点
         receiving: 接收地点
         
-    Returns:
+    返回：
         包含 PDT, OTD, GR 的字典
         
-    Raises:
+    异常：
         ValueError: 当缺少路线配置时
     """
     lt_rows = lead_time_df[
@@ -255,11 +255,11 @@ def _get_time_value(
     """
     从 LeadTime 行获取时间值。
     
-    Args:
+    参数：
         lt_rows: LeadTime 行
         col_name: 列名
         
-    Returns:
+    返回：
         时间值（天数）
     """
     # 尝试多种列名变体
@@ -282,13 +282,13 @@ def calculate_actual_delivery_date(
     
     actual_delivery_date = actual_ship_date + OTD + GR + delay
     
-    Args:
+    参数：
         ship_date: 发运日期
         otd: 在途时间（天）
         gr: 收货处理时间（天）
         delay: 采样的延迟天数
         
-    Returns:
+    返回：
         实际交货日期
     """
     return ship_date + pd.Timedelta(days=otd + gr + delay)
@@ -308,7 +308,7 @@ def create_delivery_record(
     """
     创建发货记录。
     
-    Args:
+    参数：
         vehicle_uid: 车辆唯一标识
         uid: 部署计划唯一标识
         demand_row: 需求行数据
@@ -319,7 +319,7 @@ def create_delivery_record(
         wfr: 重量填充率
         vfr: 体积填充率
         
-    Returns:
+    返回：
         发货记录字典
     """
     return {
@@ -349,14 +349,14 @@ def create_bypass_record(
     """
     创建旁路规则命中记录。
     
-    Args:
+    参数：
         uid: 部署计划唯一标识
         rule_id: 规则ID
         sim_date: 仿真日期
         context: 上下文快照
         vehicle_uid: 车辆唯一标识
         
-    Returns:
+    返回：
         旁路记录字典
     """
     return {
@@ -382,7 +382,7 @@ def create_unsatisfied_record(
     """
     创建未满足需求记录。
     
-    Args:
+    参数：
         uid: 部署计划唯一标识
         row: 需求行数据
         sending: 发送地点
@@ -393,7 +393,7 @@ def create_unsatisfied_record(
         min_mdq: 最小发货量
         reason: 原因
         
-    Returns:
+    返回：
         未满足记录字典
     """
     return {

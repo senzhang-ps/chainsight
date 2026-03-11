@@ -13,17 +13,17 @@ from .utils import cast_identifiers_to_str, validate_merge_keys
 
 
 def load_config(filepath: str) -> Dict[str, Any]:
-    """加载模块4配置文件。
+    """加载Module4配置文件。
 
     读取必需工作表，转换标识符类型，兼容可选工作表。
 
-    Args:
+    参数：
         filepath: 配置Excel文件路径
 
-    Returns:
+    返回：
         Dict[str, Any]: 配置字典
 
-    Raises:
+    异常：
         KeyError: 缺少必需工作表时
     """
     xl = pd.ExcelFile(filepath)
@@ -38,11 +38,11 @@ def load_config(filepath: str) -> Dict[str, Any]:
 def _load_required_sheets(xl: pd.ExcelFile, cfg: Dict[str, Any]) -> None:
     """加载必需的配置工作表。
 
-    Args:
+    参数：
         xl: Excel文件对象
         cfg: 配置字典（会被修改）
 
-    Raises:
+    异常：
         KeyError: 缺少必需工作表时
     """
     for sheet_name in REQUIRED_CONFIG_SHEETS:
@@ -61,7 +61,7 @@ def _load_optional_sheets(
 ) -> None:
     """加载可选的配置工作表。
 
-    Args:
+    参数：
         xl: Excel文件对象
         filepath: 文件路径
         cfg: 配置字典（会被修改）
@@ -73,7 +73,7 @@ def _load_optional_sheets(
 def _load_net_demand_sheet(xl: pd.ExcelFile, cfg: Dict[str, Any]) -> None:
     """加载可选的NetDemand工作表。
 
-    Args:
+    参数：
         xl: Excel文件对象
         cfg: 配置字典（会被修改）
     """
@@ -91,7 +91,7 @@ def _load_seed_sheet(
 ) -> None:
     """加载可选的Global_seed工作表。
 
-    Args:
+    参数：
         xl: Excel文件对象
         filepath: 文件路径
         cfg: 配置字典（会被修改）
@@ -108,10 +108,10 @@ def validate_config(cfg: Dict[str, Any]) -> List[Dict[str, str]]:
     检查NetDemand与MaterialLocationLineCfg的可合并性，
     提示缺少线配置或一物料地点多线情况。
 
-    Args:
+    参数：
         cfg: 配置字典
 
-    Returns:
+    返回：
         List[Dict[str, str]]: 问题列表（非致命）
     """
     issues = []
@@ -128,7 +128,7 @@ def _validate_net_demand(
 ) -> None:
     """校验NetDemand配置。
 
-    Args:
+    参数：
         cfg: 配置字典
         issues: 问题列表（会被修改）
     """
@@ -156,7 +156,7 @@ def _collect_missing_line_issues(
 ) -> None:
     """收集缺少产线配置的问题。
 
-    Args:
+    参数：
         merged: 合并后的DataFrame
         issues: 问题列表（会被修改）
     """
@@ -181,7 +181,7 @@ def _validate_line_config(
 ) -> None:
     """校验产线配置的唯一性。
 
-    Args:
+    参数：
         cfg: 配置字典
         issues: 问题列表（会被修改）
     """

@@ -1,4 +1,4 @@
-"""Module 1 预测拆分与处理。
+"""Module1 预测拆分与处理。
 
 本模块提供周度预测到日度预测的转换功能。
 
@@ -109,11 +109,11 @@ def prepare_daily_forecasts(
     if 'week' not in demand_forecast.columns:
         return demand_forecast.copy(), demand_forecast.copy()
 
-    # DPS后基线（用于订单）
+    # DPS 处理后基线（用于订单）
     dps_cfg = dps_config if dps_config is not None else pd.DataFrame()
     demand_dps = apply_dps(demand_forecast, dps_cfg)
 
-    # DPS+SupplyChoice基线（用于供需日志）
+    # DPS 处理+SupplyChoice基线（用于供需日志）
     sc_cfg = supply_choice if supply_choice is not None else pd.DataFrame()
     demand_dps_sc = apply_supply_choice(demand_dps, sc_cfg)
 

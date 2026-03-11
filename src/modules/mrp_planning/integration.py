@@ -50,7 +50,7 @@ def run_integrated_mode(
     """
     Module3集成模式运行函数。
 
-    Args:
+    参数：
         module1_output_dir: Module1输出目录
         orchestrator: Orchestrator实例
         config_dict: 配置数据字典
@@ -60,7 +60,7 @@ def run_integrated_mode(
         skip_file_output: 是否跳过写入Excel文件
         module1_result: Module1内存数据
 
-    Returns:
+    返回：
         dict: 包含输出结果的字典
     """
     print("🔄 Module3 运行于集成模式")
@@ -98,7 +98,7 @@ def run_integrated_mode(
 def _load_static_configs(config_dict: Dict[str, pd.DataFrame], skip_normalize: bool = False) -> dict:
     """加载并预处理静态配置。
     
-    Args:
+    参数：
         config_dict: 配置字典
         skip_normalize: 是否跳过规范化（当config_dict来自main_integration时已被规范化）
     """
@@ -183,8 +183,8 @@ def _load_module1_data(
     try:
         if module1_result is not None:
             # 🔧 修复：使用累积订单(all_orders_for_next_day)而非仅当日订单(orders_df)
-            # AO gap计算需要包含历史订单（与Dev版本一致）
-            # Dev版本的OrderLog包含所有历史生成但未来到期的订单
+            # AO 缺口计算需要包含历史订单（与 Dev 基线版本一致）
+            # Dev 基线版本的 `OrderLog` 包含所有历史生成但未来到期的订单
             order_df = module1_result.get('all_orders_for_next_day')
             if order_df is None or (hasattr(order_df, 'empty') and order_df.empty):
                 # 回退到orders_df（兼容旧接口）

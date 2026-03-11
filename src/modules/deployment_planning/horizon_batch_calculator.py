@@ -49,7 +49,7 @@ def build_horizon_cache(
         }
     }
     
-    Args:
+    参数：
         all_pairs: 所有(material, location)对的集合
         sim_date: 仿真日期
         network_df: Network配置
@@ -60,7 +60,7 @@ def build_horizon_cache(
         active_network_cache: 活动Network缓存
         location_layer_map: 位置层级映射
     
-    Returns:
+    返回：
         dict: (material, location) -> horizon参数字典
     """
     horizon_cache = {}
@@ -155,11 +155,11 @@ def _build_network_index(
     """
     构建Network快速查找索引（按sim_date过滤后）。
     
-    Args:
+    参数：
         network_df: Network DataFrame
         sim_date: 仿真日期
     
-    Returns:
+    返回：
         dict: (material, location) -> row dict
     """
     if network_df.empty:
@@ -196,12 +196,12 @@ def _get_upstream_from_index(
     """
     从预构建索引获取上游sourcing。
     
-    Args:
+    参数：
         network_index: Network索引
         material: 物料编码
         location: 位置编码
     
-    Returns:
+    返回：
         str or None: 上游位置
     """
     row = network_index.get((material, location))
@@ -222,14 +222,14 @@ def _infer_location_type(
     """
     推断发送端位置类型（与原始get_sending_location_type一致）。
     
-    Args:
+    参数：
         material: 物料编码
         sending: 发送端编码
         sim_date: 仿真日期（未使用但保持接口一致）
         network_index: Network索引
         location_layer_map: 位置层级映射
     
-    Returns:
+    返回：
         str: 'Plant' 或 'DC'
     """
     if not sending or pd.isna(sending) or str(sending).strip() == "":
@@ -241,7 +241,7 @@ def _infer_location_type(
         return str(row.get('location_type', 'DC') or 'DC')
     
     # 未维护但被识别为根节点 → Plant
-    # Use (material, location) tuple key to match baseline
+    # 使用 (material, location) 元组键，与基线保持一致
     if location_layer_map.get((str(material), str(sending)), None) == 0:
         return 'Plant'
     

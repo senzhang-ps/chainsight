@@ -23,7 +23,7 @@ class DataPipeline:
         """
         初始化数据处理管道
         
-        Args:
+        参数：
             pg_host: PostgreSQL主机
             pg_port: PostgreSQL端口
             pg_database: PostgreSQL数据库名

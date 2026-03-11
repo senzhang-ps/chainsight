@@ -41,7 +41,7 @@ class NodeProcessor:
         """
         初始化节点处理器。
 
-        Args:
+        参数：
             ctx: 模拟上下文
             downstream_gaps: 下游缺口字典
             current_layer: 当前层级
@@ -58,10 +58,10 @@ class NodeProcessor:
         """
         处理单个节点。
 
-        Args:
+        参数：
             ml_row: material-location行数据
 
-        Returns:
+        返回：
             Tuple: (记录列表, 父节点键, 父节点缺口)
         """
         material = str(ml_row.material)

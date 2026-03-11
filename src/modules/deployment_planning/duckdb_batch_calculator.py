@@ -47,7 +47,7 @@ def apply_moq_rv_batch_duckdb(
     
     这是 deployment_planning/allocation.py 中 apply_grouped_moq_rv 的优化版本。
     
-    Args:
+    参数：
         demand_rows: 需求行列表，每行包含:
             - material: 物料
             - from_location / receiving: 接收位置
@@ -59,7 +59,7 @@ def apply_moq_rv_batch_duckdb(
         location: 当前发送位置（sending）
         run_id: 运行ID（用于性能统计）
     
-    Returns:
+    返回：
         {index: adjusted_qty} 字典
     """
     if not demand_rows:
@@ -219,14 +219,14 @@ def apply_priority_allocation_duckdb(
     
     这是 deployment_planning/allocation.py 中 apply_priority_allocation_vectorized 的优化版本。
     
-    Args:
+    参数：
         demand_rows: 需求行列表
         adjusted_qtys: 调整后的需求量字典 {index: adjusted_qty}
         current_stock: 当前可用库存
         demand_priority_map: 需求类型优先级映射 {demand_element: priority}
         run_id: 运行ID（用于性能统计）
     
-    Returns:
+    返回：
         剩余库存量
     """
     if not demand_rows:
@@ -349,7 +349,7 @@ def batch_inventory_allocation_duckdb(
     
     当有多个节点需要进行库存分配时，使用此函数可以显著提升性能。
     
-    Args:
+    参数：
         nodes_data: 节点数据列表，每个元素包含:
             - material: 物料
             - location: 位置
@@ -359,7 +359,7 @@ def batch_inventory_allocation_duckdb(
             - moq_rv_config: MOQ/RV 配置（可选）
         run_id: 运行ID
     
-    Returns:
+    返回：
         分配结果列表
     """
     if not nodes_data:

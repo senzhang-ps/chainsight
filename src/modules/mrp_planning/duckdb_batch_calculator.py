@@ -61,7 +61,7 @@ def batch_calculate_net_demand_duckdb(
     """
     使用 DuckDB 批量计算多个节点的净需求
     
-    Args:
+    参数：
         nodes: 节点列表 [(material, location), ...]
         sim_date: 模拟日期
         beginning_inventory_df: 期初库存
@@ -78,7 +78,7 @@ def batch_calculate_net_demand_duckdb(
         delivery_shipment_df: 发运记录
         run_id: 运行ID（用于性能统计）
     
-    Returns:
+    返回：
         节点缺口字典 {(material, location): (ao_gap, fc_gap, ss_gap)}
     """
     if not DUCKDB_INTEGRATION_AVAILABLE or not DuckDBConfig.enabled:
@@ -147,7 +147,7 @@ def batch_calculate_net_demand_duckdb(
         # 发运
         ds_agg = _agg_delivery_shipment(delivery_shipment_df, sim_date)
         
-        # AO需求
+        # AO 需求
         ao_agg = _agg_ao_demand(order_df, sim_date)
         # 预测需求
         fc_agg = _agg_forecast_demand(supply_demand_df, sim_date)
@@ -502,9 +502,9 @@ def _agg_open_deployment_out(df: pd.DataFrame) -> pd.DataFrame:
 def _agg_open_deployment_in(df: pd.DataFrame, date: pd.Timestamp) -> pd.DataFrame:
     """聚合开放调拨入库（未来）
     
-    Note: Must match Pandas behavior in net_demand.py _get_open_deployment_inbound()
-    - Filter for rows where date > sim_date (future only)
-    - If no date column found, return empty (Pandas returns 0 when 'date' not in columns)
+    说明： 必须与 Pandas 行为保持一致 in net_demand.py _get_open_deployment_inbound()
+    - Filter for rows where date > sim_date (仅未来数据)
+    - 若未找到日期列，则返回空结果 (Pandas returns 0 when 'date' not in columns)
     """
     if df is None or df.empty or 'receiving' not in df.columns:
         return _empty_df_mr()
@@ -513,7 +513,7 @@ def _agg_open_deployment_in(df: pd.DataFrame, date: pd.Timestamp) -> pd.DataFram
     df['material'] = df['material'].astype(str)
     df['receiving'] = df['receiving'].astype(str)
     
-    # Find date column - check both 'date' and 'planned_deployment_date'
+    # 查找日期列：同时检查 `date` 与 `planned_deployment_date`
     date_col = None
     for col in ['date', 'planned_deployment_date']:
         if col in df.columns:
@@ -521,11 +521,11 @@ def _agg_open_deployment_in(df: pd.DataFrame, date: pd.Timestamp) -> pd.DataFram
             break
     
     if date_col is None:
-        # No date column found - match Pandas behavior which returns 0
+        # 未找到日期列时按 Pandas 行为返回空结果
         return _empty_df_mr()
     
     df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
-    df = df[df[date_col] > date]  # Only future dates
+    df = df[df[date_col] > date]  # 仅保留未来日期
     
     if df.empty:
         return _empty_df_mr()
@@ -569,7 +569,7 @@ def _agg_delivery_shipment(df: pd.DataFrame, date: pd.Timestamp) -> pd.DataFrame
 
 
 def _agg_ao_demand(df: pd.DataFrame, date: pd.Timestamp) -> pd.DataFrame:
-    """聚合AO需求 - 保留日期维度用于后续horizon_end过滤"""
+    """聚合AO 需求 - 保留日期维度用于后续horizon_end过滤"""
     if df is None or df.empty:
         return _empty_df_with_date()
     

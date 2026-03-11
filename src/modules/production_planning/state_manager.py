@@ -20,14 +20,14 @@ def get_or_init_simulation_start(
     首次运行时将提供的开始日期写入状态文件；
     后续运行读取持久化值，保证审查日计算一致。
 
-    Args:
-        output_dir: 模块4输出/状态目录
+    参数：
+        output_dir: Module4输出/状态目录
         provided_start: 用户提供的开始日期（首次必需）
 
-    Returns:
+    返回：
         pd.Timestamp: 持久化的仿真开始日期
 
-    Raises:
+    异常：
         ValueError: 当状态文件不存在且未提供开始日期时
     """
     state_file = os.path.join(output_dir, "simulation_start.txt")
@@ -46,13 +46,13 @@ def get_or_init_simulation_start(
 def _read_start_from_file(state_file: str) -> pd.Timestamp:
     """从文件读取仿真开始日期。
 
-    Args:
+    参数：
         state_file: 状态文件路径
 
-    Returns:
+    返回：
         pd.Timestamp: 仿真开始日期
 
-    Raises:
+    异常：
         ValueError: 读取失败时
     """
     try:
@@ -69,12 +69,12 @@ def _write_start_to_file(
 ) -> pd.Timestamp:
     """将仿真开始日期写入文件。
 
-    Args:
+    参数：
         output_dir: 输出目录
         state_file: 状态文件路径
         start_date: 开始日期
 
-    Returns:
+    返回：
         pd.Timestamp: 写入的开始日期
     """
     os.makedirs(output_dir, exist_ok=True)
@@ -90,7 +90,7 @@ def save_line_state(
 ) -> None:
     """保存产线状态用于跨天连续性。
 
-    Args:
+    参数：
         output_dir: 输出/状态目录
         simulation_date: 当前仿真日期
         line_states: 产线状态字典
@@ -109,11 +109,11 @@ def load_line_state(
 ) -> Dict[str, Any]:
     """加载前一日的产线状态。
 
-    Args:
+    参数：
         output_dir: 输出/状态目录
         simulation_date: 当前仿真日期
 
-    Returns:
+    返回：
         Dict[str, Any]: 前一日产线状态，不存在则返回空字典
     """
     prev_date = simulation_date - pd.Timedelta(days=1)
@@ -138,7 +138,7 @@ def save_allocated_capacity(
 ) -> None:
     """保存已分配产能用于跨日跟踪。
 
-    Args:
+    参数：
         output_dir: 输出/状态目录
         simulation_date: 当前仿真日期
         allocated_capacity: 已分配产能字典（小时）
@@ -160,11 +160,11 @@ def load_allocated_capacity(
 ) -> Dict[str, float]:
     """加载当前仿真日的已分配产能。
 
-    Args:
+    参数：
         output_dir: 输出/状态目录
         simulation_date: 当前仿真日期
 
-    Returns:
+    返回：
         Dict[str, float]: 已分配产能字典，不存在则返回空字典
     """
     date_str = simulation_date.strftime('%Y%m%d')
@@ -190,11 +190,11 @@ def load_all_previous_capacity(
 ) -> Dict[str, float]:
     """汇总所有历史仿真日的已分配产能。
 
-    Args:
+    参数：
         output_dir: 输出/状态目录
         simulation_date: 当前仿真日期
 
-    Returns:
+    返回：
         Dict[str, float]: 合并后的历史产能分配字典
     """
     consolidated = {}
@@ -219,10 +219,10 @@ def load_all_previous_capacity(
 def _is_capacity_file(file_name: str) -> bool:
     """检查是否为产能文件。
 
-    Args:
+    参数：
         file_name: 文件名
 
-    Returns:
+    返回：
         bool: 是否为产能文件
     """
     return (
@@ -234,10 +234,10 @@ def _is_capacity_file(file_name: str) -> bool:
 def _extract_date_from_filename(file_name: str) -> Optional[pd.Timestamp]:
     """从文件名提取日期。
 
-    Args:
+    参数：
         file_name: 文件名
 
-    Returns:
+    返回：
         Optional[pd.Timestamp]: 提取的日期，失败返回None
     """
     try:
@@ -255,11 +255,11 @@ def _load_capacity_file(
 ) -> Dict[str, float]:
     """加载单个产能文件。
 
-    Args:
+    参数：
         output_dir: 目录路径
         file_name: 文件名
 
-    Returns:
+    返回：
         Dict[str, float]: 产能字典
     """
     try:
@@ -277,11 +277,11 @@ def _merge_capacity(
 ) -> Dict[str, float]:
     """合并产能字典。
 
-    Args:
+    参数：
         target: 目标字典
         source: 源字典
 
-    Returns:
+    返回：
         Dict[str, float]: 合并后的字典
     """
     for key, value in source.items():

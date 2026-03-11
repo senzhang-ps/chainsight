@@ -27,7 +27,7 @@ def batch_prefilter_layer_data(
     使用 DuckDB 一次性过滤所有 (material, location) 对的数据，
     减少 Python 层面的 DataFrame 过滤操作。
     
-    Args:
+    参数：
         all_pairs: (material, location) 对集合
         sim_date: 仿真日期
         horizon_days: 展望天数
@@ -35,7 +35,7 @@ def batch_prefilter_layer_data(
         safety_stock: 安全库存 DataFrame
         order_log: 订单日志 DataFrame
         
-    Returns:
+    返回：
         dict: {
             'sdl': {(mat, loc): df, ...},
             'ss': {(mat, loc): df, ...},
@@ -57,7 +57,7 @@ def batch_prefilter_layer_data(
     if not pairs_list:
         return result
     
-    # 1. 过滤 SupplyDemandLog
+    # 1. 过滤 `SupplyDemandLog`
     if not supply_demand_log.empty:
         # 首先按日期范围过滤
         sdl_filtered = supply_demand_log[
@@ -69,7 +69,7 @@ def batch_prefilter_layer_data(
                 sdl_filtered, pairs_list, 'material', 'location'
             )
     
-    # 2. 过滤 SafetyStock (仅 horizon_end 当天)
+    # 2. 过滤 `SafetyStock` (仅 horizon_end 当天)
     if not safety_stock.empty:
         ss_filtered = safety_stock[
             safety_stock['date'] == horizon_end
@@ -79,7 +79,7 @@ def batch_prefilter_layer_data(
                 ss_filtered, pairs_list, 'material', 'location'
             )
     
-    # 3. 过滤 OrderLog
+    # 3. 过滤 `OrderLog`
     if not order_log.empty:
         order_filtered = order_log[
             (order_log['date'] >= sim_date) &
@@ -91,7 +91,7 @@ def batch_prefilter_layer_data(
             )
     
     elapsed = time.perf_counter() - t_start
-    # print(f"[M5 Batch] Prefiltered {len(pairs_list)} pairs in {elapsed:.3f}s")
+    # print(f"[M5] 批量预过滤 {len(pairs_list)} 个 pair，用时 {elapsed:.3f}s")
     
     return result
 
@@ -109,14 +109,14 @@ def batch_build_indices_for_layer(
     在层处理开始前，预先构建所有节点的数据索引，
     后续处理时直接从索引中获取数据，避免重复过滤。
     
-    Args:
+    参数：
         all_pairs: (material, location) 对集合
         supply_demand_log: 供需日志 DataFrame
         safety_stock: 安全库存 DataFrame
         order_log: 订单日志 DataFrame
         deploy_config: 部署配置 DataFrame
         
-    Returns:
+    返回：
         dict: 各数据源的索引字典
     """
     accel = get_accelerator()
@@ -148,7 +148,7 @@ def batch_build_indices_for_layer(
             order_log, pairs_list, 'material', 'location'
         )
     
-    # DeployConfig 使用 (material, sending) 作为键
+    # `DeployConfig` 使用 `(material, sending)` 作为键
     if not deploy_config.empty:
         deploy_pairs = [
             (mat, loc) for mat, loc in pairs_list

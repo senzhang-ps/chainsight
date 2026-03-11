@@ -7,22 +7,22 @@
 
 # Module6 输出表的列定义 - 与module6.py中_write_excel_output保持一致
 MODULE6_OUTPUT_SCHEMAS = {
-    # DeliveryPlan - 空表不带列名（与基线一致）
+    # `DeliveryPlan` - 空表不带列名（与基线一致）
     'DeliveryPlan': None,  
-    # VehicleLog - 空表带列名
+    # `VehicleLog` - 空表带列名
     'VehicleLog': [
         'date', 'sending', 'receiving', 'truck_type', 'vehicle_no', 'vehicle_uid',
         'total_units', 'total_weight', 'total_volume', 'WFR', 'VFR', 'trigger'
     ],
-    # TruckUsageLog - 空表带列名
+    # `TruckUsageLog` - 空表带列名
     'TruckUsageLog': [
         'date', 'sending', 'receiving', 'truck_type', 'truck_used'
     ],
-    # UnsatisfiedMDQLog - 空表不带列名（与基线一致）
+    # `UnsatisfiedMDQLog` - 空表不带列名（与基线一致）
     'UnsatisfiedMDQLog': None,
-    # ValidationLog - 空表不带列名（与基线一致）  
+    # `ValidationLog` - 空表不带列名（与基线一致）  
     'ValidationLog': None,
-    # BypassRuleHitLog - 空表不带列名（与基线一致）
+    # `BypassRuleHitLog` - 空表不带列名（与基线一致）
     'BypassRuleHitLog': None
 }
 
@@ -53,11 +53,11 @@ MODULE5_OUTPUT_SCHEMAS = {
 def get_columns(module_name: str, sheet_name: str) -> list:
     """获取指定模块和sheet的列名列表
     
-    Args:
+    参数：
         module_name: 模块名称 (module1, module3, module4, module5, module6)
         sheet_name: Excel sheet名称
         
-    Returns:
+    返回：
         list: 列名列表，如果未定义则返回None
     """
     schemas = {
@@ -77,7 +77,7 @@ def get_columns(module_name: str, sheet_name: str) -> list:
 def get_all_module_tables() -> dict:
     """获取所有模块的表定义
     
-    Returns:
+    返回：
         dict: {module_name: {table_name: [columns]}}
     """
     return {

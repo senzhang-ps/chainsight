@@ -60,7 +60,7 @@ def run_mrp_layered_simulation_daily(
     """
     运行单日MRP模拟。
 
-    Args:
+    参数：
         sim_date: 模拟日期
         daily_supply_demand_df: 当日供需数据
         daily_order_df: 当日订单数据
@@ -77,7 +77,7 @@ def run_mrp_layered_simulation_daily(
         delivery_shipment_df: 发运记录
         deploy_config_df: MOQ/RV配置
 
-    Returns:
+    返回：
         pd.DataFrame: 当日净需求记录
     """
     t_start = time.perf_counter()
@@ -111,7 +111,7 @@ def run_mrp_layered_simulation_daily(
         delivery_shipment_df=delivery_shipment_df,
     )
     ctx['data_indexer'] = data_indexer
-    # print(f"[M3] DataIndexer built in {time.perf_counter() - t_index:.3f}s")
+    # print(f"[M3] DataIndexer 构建完成，用时 {time.perf_counter() - t_index:.3f}s")
 
     # 按层级处理
     all_records = []
@@ -171,7 +171,7 @@ def _init_simulation_context(
 
     location_layer_df = assign_location_layers(active_network)
     
-    # Build location_layer_map as {(material, location): layer} - matching baseline
+    # 构建 `location_layer_map`，其结构为 `{(material, location): layer}`，并与基线保持一致
     location_layer_map: dict[tuple[str, str], int] = {}
     for row in location_layer_df.itertuples(index=False):
         mat = getattr(row, 'material', '')  # type: ignore[attr-defined]
@@ -221,9 +221,9 @@ def _process_layer(
     """处理单个层级（支持批量和并行两种模式）。"""
     parent_accum = defaultdict(lambda: {'AO': 0.0, 'FC': 0.0, 'SS': 0.0})
 
-    # Build layer nodes using original logic:
-    # 1. Base nodes from location_layer_df at this layer
-    # 2. Gap nodes from downstream_gaps at this layer
+    # 按原始逻辑构建层级节点：
+    # 1. 从 `location_layer_df` 中提取当前层级的基础节点
+    # 2. 从 `downstream_gaps` 中补充当前层级的缺口节点
     location_layer_df = ctx['location_layer_df']
     location_layer_map = ctx['location_layer_map']
     

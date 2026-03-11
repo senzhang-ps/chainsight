@@ -1,5 +1,5 @@
 """
-Business modules - Individual supply chain planning modules
+业务模块 - 供应链计划各独立模块
 """
 
 from . import module1

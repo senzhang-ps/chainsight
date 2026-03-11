@@ -22,11 +22,11 @@ def load_daily_net_demand(
     按数据流规范读取前一日输出，筛选layer=0下游需求，
     数量取绝对值，保证requirement_date为日期类型。
 
-    Args:
+    参数：
         module3_output_dir: Module3每日输出目录
         simulation_date: 当前仿真日期
 
-    Returns:
+    返回：
         pd.DataFrame: 处理后的净需求数据
     """
     empty_columns = _get_net_demand_columns()
@@ -51,7 +51,7 @@ def load_daily_net_demand(
 def _get_net_demand_columns() -> List[str]:
     """获取净需求数据的列名。
 
-    Returns:
+    返回：
         List[str]: 列名列表
     """
     return [
@@ -72,11 +72,11 @@ def _get_net_demand_file_path(
 
     Module4读取前一天的Module3输出。
 
-    Args:
+    参数：
         output_dir: Module3输出目录
         simulation_date: 当前仿真日期
 
-    Returns:
+    返回：
         str: 文件路径
     """
     prev_date = simulation_date - pd.Timedelta(days=1)
@@ -90,11 +90,11 @@ def _load_and_process_net_demand(
 ) -> pd.DataFrame:
     """加载并处理净需求文件。
 
-    Args:
+    参数：
         file_path: 文件路径
         empty_columns: 空DataFrame的列名
 
-    Returns:
+    返回：
         pd.DataFrame: 处理后的净需求数据
     """
     xl = pd.ExcelFile(file_path)
@@ -115,10 +115,10 @@ def _load_and_process_net_demand(
 def _filter_and_normalize_demand(net_demand: pd.DataFrame) -> pd.DataFrame:
     """筛选并规范化净需求数据。
 
-    Args:
+    参数：
         net_demand: 原始净需求数据
 
-    Returns:
+    返回：
         pd.DataFrame: 处理后的数据
     """
     layer0_demand = _filter_layer_zero(net_demand)
@@ -131,10 +131,10 @@ def _filter_and_normalize_demand(net_demand: pd.DataFrame) -> pd.DataFrame:
 def _filter_layer_zero(df: pd.DataFrame) -> pd.DataFrame:
     """筛选layer=0的记录。
 
-    Args:
+    参数：
         df: 原始DataFrame
 
-    Returns:
+    返回：
         pd.DataFrame: 筛选后的DataFrame
     """
     if 'layer' in df.columns:
@@ -147,10 +147,10 @@ def _filter_layer_zero(df: pd.DataFrame) -> pd.DataFrame:
 def _normalize_quantity(df: pd.DataFrame) -> pd.DataFrame:
     """规范化数量（取绝对值）。
 
-    Args:
+    参数：
         df: DataFrame
 
-    Returns:
+    返回：
         pd.DataFrame: 处理后的DataFrame
     """
     if 'quantity' in df.columns:
@@ -161,10 +161,10 @@ def _normalize_quantity(df: pd.DataFrame) -> pd.DataFrame:
 def _normalize_date(df: pd.DataFrame) -> pd.DataFrame:
     """规范化日期列。
 
-    Args:
+    参数：
         df: DataFrame
 
-    Returns:
+    返回：
         pd.DataFrame: 处理后的DataFrame
     """
     if 'requirement_date' in df.columns:

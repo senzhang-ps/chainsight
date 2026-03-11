@@ -6,10 +6,10 @@
 from typing import Dict, List
 
 # ==================== 配置表映射 ====================
-# Excel Sheet名称 -> 数据库表名（不含前缀）
+# Excel 工作表名称 -> 数据库表名（不含前缀）
 
 CONFIG_TABLE_MAPPING = {
-    # Global配置
+    # 全局配置
     "Config Guide": "config_guide",
     "Global_Network": "global_network",
     "Global_Network_old": "global_network_old",
@@ -58,7 +58,7 @@ CONFIG_TABLE_MAPPING = {
     "LocationValidation": "location_validation",
     "MatLocValidation": "matloc_validation",
     
-    # SIT设计
+    # SIT 设计
     "SIT Design": "sit_design",
     
     # 汇总表
@@ -112,7 +112,7 @@ OUTPUT_TABLE_MAPPING = {
         "bypass_log": "module6_output_bypassrulehitlog",
     },
     
-    # Orchestrator 输出
+    # 编排器输出
     "orchestrator": {
         "unrestricted_inventory_*.csv": "orchestrator_unrestricted_inventory",
         "open_deployment_*.csv": "orchestrator_open_deployment",
@@ -126,7 +126,7 @@ OUTPUT_TABLE_MAPPING = {
         "daily_logs_*.csv": "orchestrator_daily_logs",
     },
     
-    # Summary 输出
+    # 汇总输出
     "summary": {
         "historical_inventory_record.csv": "summary_historical_inventory_record",
         "full_order_shipment_cut_report.xlsx": "summary_full_order_shipment_cut_report",
@@ -174,11 +174,11 @@ def get_config_table_name(sheet_name: str, prefix: str = None) -> str:
     注意：采用"同结构同表"规则，所有配置使用统一表名，通过 config_name 字段区分不同配置。
     不再为每个配置创建独立的表（如 bc_s5_xxx, bc_s9_xxx）。
     
-    Args:
+    参数：
         sheet_name: Excel Sheet名称
         prefix: 配置前缀（已废弃，保留参数兼容性但不再使用）
     
-    Returns:
+    返回：
         str: 统一的数据库表名（带 cfg_ 前缀）
     """
     # 查找映射
@@ -196,11 +196,11 @@ def get_output_table_name(module: str, file_pattern: str) -> str:
     """
     获取输出表的数据库表名
     
-    Args:
+    参数：
         module: 模块名称
         file_pattern: 文件模式
     
-    Returns:
+    返回：
         str: 数据库表名，如果没找到则返回None
     """
     if module in OUTPUT_TABLE_MAPPING:
@@ -217,7 +217,7 @@ def get_all_output_tables() -> List[str]:
     """
     获取所有输出表名列表
     
-    Returns:
+    返回：
         List[str]: 所有输出表名
     """
     tables = []

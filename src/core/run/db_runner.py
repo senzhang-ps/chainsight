@@ -126,7 +126,13 @@ def _run_with_database(ns: argparse.Namespace) -> int:
         
         # 预建所有输出表（确保中断时表结构已存在）
         pre_writer = ModuleDataWriter(db, config_name=config_name)
-        pre_writer.ensure_output_tables_exist()
+        if hasattr(pre_writer, "ensure_output_tables_exist"):
+            pre_writer.ensure_output_tables_exist()
+        else:
+            logger.warning(
+                "[WARN] 当前 ModuleDataWriter 不包含 ensure_output_tables_exist，"
+                "已跳过预建输出表；请同步 `pgsql_db/module_data_writer.py` 与当前运行代码版本。"
+            )
 
         # [FIX-#7] 并发保护（最佳努力）：尝试避免同一 config_name 被多个进程同时运行
         from pgsql_db.checkpoint import try_acquire_run_lock, release_run_lock

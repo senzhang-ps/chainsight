@@ -17,7 +17,7 @@ from .simulation_file import run_integrated_simulation
 from .simulation_db import run_integrated_simulation_from_dict
 
 # 配置加载
-from .config_loader import load_configuration, load_configuration_from_dict
+from .config_loader import load_configuration, load_configuration_from_dict, load_csv_overrides
 
 # 断点续跑函数
 from .resume import check_resume_capability
@@ -42,6 +42,7 @@ __all__ = [
     "run_integrated_simulation_from_dict",
     "load_configuration",
     "load_configuration_from_dict",
+    "load_csv_overrides",
     "check_resume_capability",
     "_normalize_identifiers",
     "_normalize_material",

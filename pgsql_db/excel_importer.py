@@ -30,12 +30,30 @@ class ExcelImporter:
         """根据 config_name 推导配置类型 (OC / BC / OTHER)"""
         if not config_name:
             return 'OTHER'
-        name_upper = config_name.upper()
+        # 去掉可能的路径前缀，只取文件名部分
+        basename = config_name.split('/')[-1].split('\\')[-1]
+        name_upper = basename.upper()
         if name_upper.startswith('OC'):
             return 'OC'
         elif name_upper.startswith('BC'):
             return 'BC'
         return 'OTHER'
+
+    @staticmethod
+    def _scan_csv_overrides(excel_path: str) -> Dict[str, pd.DataFrame]:
+        """扫描 Excel 同目录下的 CSV 文件作为配置表覆盖"""
+        overrides = {}
+        try:
+            config_dir = Path(excel_path).parent
+            for csv_file in sorted(config_dir.glob('*.csv')):
+                sheet_name = csv_file.stem
+                try:
+                    overrides[sheet_name] = pd.read_csv(str(csv_file))
+                except Exception as e:
+                    print(f"  ⚠️ CSV 文件读取失败: {csv_file.name} - {e}")
+        except Exception as e:
+            print(f"  ⚠️ CSV 覆盖扫描失败: {e}")
+        return overrides
 
     def import_excel_file(
         self,
@@ -117,7 +135,44 @@ class ExcelImporter:
             except Exception as e:
                 print(f"  ❌ Sheet [{sheet_name}] 导入失败: {e}")
                 results[sheet_name] = -1
-        
+
+        # 扫描并导入 CSV 覆盖文件
+        csv_overrides = self._scan_csv_overrides(excel_path)
+        if csv_overrides:
+            print(f"\n  {'─' * 50}")
+            print(f"  📄 发现 {len(csv_overrides)} 个 CSV 覆盖文件:")
+        for csv_sheet_name, csv_df in csv_overrides.items():
+            try:
+                csv_table_name = table_mapping.get_config_table_name(csv_sheet_name)
+                is_override = csv_sheet_name in results
+
+                if csv_df.empty and len(csv_df.columns) > 0:
+                    if is_override:
+                        print(f"  🔄 [CSV 覆盖] {csv_sheet_name} 为空表，创建表结构 ({len(csv_df.columns)} 列)")
+                    else:
+                        print(f"  ➕ [CSV 新增] {csv_sheet_name} 为空表，创建表结构 ({len(csv_df.columns)} 列)")
+                    self.db.create_table_from_df(csv_df, csv_table_name, if_exists, config_name=config_name, config_type=config_type)
+                    results[csv_sheet_name] = 0
+                elif not csv_df.empty:
+                    self.db.create_table_from_df(csv_df, csv_table_name, if_exists, config_name=config_name, config_type=config_type)
+                    results[csv_sheet_name] = len(csv_df)
+                    self.imported_tables[csv_table_name] = {
+                        "source_file": str(Path(excel_path).parent / f"{csv_sheet_name}.csv"),
+                        "sheet_name": csv_sheet_name,
+                        "row_count": len(csv_df),
+                        "column_count": len(csv_df.columns),
+                        "config_name": config_name
+                    }
+                    if is_override:
+                        print(f"  🔄 [CSV 覆盖] {csv_sheet_name} → {csv_table_name} ({len(csv_df)} 行) ← 替代Excel版本")
+                    else:
+                        print(f"  ➕ [CSV 新增] {csv_sheet_name} → {csv_table_name} ({len(csv_df)} 行)")
+            except Exception as e:
+                print(f"  ❌ CSV [{csv_sheet_name}] 导入失败: {e}")
+                results[csv_sheet_name] = -1
+        if csv_overrides:
+            print(f"  {'─' * 50}")
+
         elapsed = time.time() - start_time
         total_rows = sum(r for r in results.values() if r > 0)
         print(f"✅ 文件导入完成: {len(results)} 个sheet, {total_rows} 行数据, 耗时 {elapsed:.2f}s")

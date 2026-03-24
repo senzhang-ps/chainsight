@@ -4,9 +4,45 @@ config_loader.py
 配置加载与标准化模块。
 """
 
+import os
+
 import pandas as pd
 
 from .normalize import _normalize_identifiers
+
+
+def load_csv_overrides(excel_path: str) -> dict:
+    """扫描 Excel 配置文件所在目录中的 CSV 文件，作为配置表覆盖。
+
+    当某些配置表行数超过 Excel 行数上限（~100万行）时，允许用户将该表导出为 CSV
+    放在 Excel 同目录下。CSV 文件名（不含扩展名）即为对应的 Excel 工作表名称。
+
+    Args:
+        excel_path: Excel 配置文件的完整路径。
+
+    Returns:
+        dict: {sheet_name: DataFrame}，所有找到的 CSV 覆盖数据。
+              如果目录中无 CSV 文件或路径无效，返回空字典。
+    """
+    csv_overrides = {}
+    try:
+        config_dir = os.path.dirname(os.path.abspath(excel_path))
+        if not os.path.isdir(config_dir):
+            return csv_overrides
+
+        for filename in sorted(os.listdir(config_dir)):
+            if not filename.lower().endswith('.csv'):
+                continue
+            sheet_name = os.path.splitext(filename)[0]
+            csv_path = os.path.join(config_dir, filename)
+            try:
+                df = pd.read_csv(csv_path)
+                csv_overrides[sheet_name] = df
+            except Exception as e:
+                print(f"  ⚠️ CSV 文件读取失败: {filename} - {e}")
+    except Exception as e:
+        print(f"  ⚠️ CSV 覆盖扫描失败: {e}")
+    return csv_overrides
 
 
 def load_configuration_from_dict(config_data: dict, config_name: str = "DB_Config") -> dict:
@@ -230,16 +266,44 @@ def load_configuration(config_path: str) -> dict:
         - 加载→补齐必要表→标准化标识符→检验并去重 Changeover 配置→映射关键表→返回字典。
     """
     print(f"📋 加载配置文件: {config_path}")
-    
+
     try:
         xl = pd.ExcelFile(config_path)
         config_dict = {}
-        
+
         # 加载所有配置表
         for sheet_name in xl.sheet_names:
             config_dict[sheet_name] = xl.parse(sheet_name)
-            print(f"  ✅ 加载配置表: {sheet_name} ({len(config_dict[sheet_name])} 行)")
-        
+            print(f"  ✅ [Excel] {sheet_name} ({len(config_dict[sheet_name])} 行)")
+
+        # 扫描并应用 CSV 覆盖（同目录下的 CSV 文件优先于 Excel 工作表）
+        csv_overrides = load_csv_overrides(config_path)
+        csv_override_count = 0
+        csv_new_count = 0
+        if csv_overrides:
+            print(f"\n  {'─' * 50}")
+            print(f"  📄 发现 {len(csv_overrides)} 个 CSV 覆盖文件:")
+            for sheet_name, df in csv_overrides.items():
+                if sheet_name in config_dict:
+                    csv_override_count += 1
+                    config_dict[sheet_name] = df
+                    print(f"  🔄 [CSV 覆盖] {sheet_name} ({len(df)} 行) ← 替代Excel版本")
+                else:
+                    csv_new_count += 1
+                    config_dict[sheet_name] = df
+                    print(f"  ➕ [CSV 新增] {sheet_name} ({len(df)} 行)")
+            print(f"  {'─' * 50}")
+
+        # 汇总
+        excel_count = len(xl.sheet_names) - csv_override_count
+        total_count = excel_count + csv_override_count + csv_new_count
+        summary_parts = [f"Excel: {excel_count}"]
+        if csv_override_count:
+            summary_parts.append(f"CSV覆盖: {csv_override_count}")
+        if csv_new_count:
+            summary_parts.append(f"CSV新增: {csv_new_count}")
+        print(f"📊 配置加载汇总: 共 {total_count} 个配置表 ({', '.join(summary_parts)})")
+
         # 确保必要的配置表存在
         required_sheets = [
             'M1_InitialInventory',

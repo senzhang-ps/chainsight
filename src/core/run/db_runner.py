@@ -14,6 +14,83 @@ from .db_config import _load_config_from_database
 from .local_writer import _write_results_to_local_dev_format
 
 
+def _apply_csv_overrides_for_db(config_data: dict, config_name: str, logger, db=None) -> None:
+    """扫描 config/ 目录下的 CSV 文件，覆盖从数据库加载的配置数据并回写 DB。
+
+    数据库模式下 DB 初始化器在检测到已有配置数据时会跳过 Excel 导入，
+    导致 ExcelImporter 中的 CSV 覆盖逻辑不会执行。
+    因此需要在从 DB 加载配置后，直接在内存中应用 CSV 覆盖，并同步写入数据库。
+
+    config_data 的 key 是小写 DB 表名（如 m1_demandforecast），
+    CSV 文件名使用 Excel sheet 名（如 M1_DemandForecast.csv），
+    匹配时通过小写化文件名进行对应。
+    """
+    import pandas as pd
+
+    # 搜索 CSV 文件的目录列表
+    project_root = Path(__file__).parent.parent.parent.parent
+    search_dirs = [
+        project_root / "config",
+        project_root / "test_files",
+        project_root,
+    ]
+
+    csv_files = {}
+    for search_dir in search_dirs:
+        if not search_dir.is_dir():
+            continue
+        for f in sorted(search_dir.iterdir()):
+            if f.suffix.lower() == '.csv':
+                # CSV 文件名 -> 小写 DB key（如 M4_MaterialLocationLineCfg.csv -> m4_materiallocationlinecfg）
+                db_key = f.stem.lower()
+                if db_key not in csv_files:
+                    csv_files[db_key] = f
+
+    if not csv_files:
+        return
+
+    # 推导 config_type (OC / BC / OTHER)，使用 basename 去掉路径前缀
+    config_basename = config_name.split('/')[-1] if '/' in config_name else config_name
+    config_type = 'OTHER'
+    if config_basename:
+        name_upper = config_basename.upper()
+        if name_upper.startswith('OC'):
+            config_type = 'OC'
+        elif name_upper.startswith('BC'):
+            config_type = 'BC'
+
+    logger.info(f"\n  {'─' * 50}")
+    logger.info(f"  📄 发现 {len(csv_files)} 个 CSV 覆盖文件:")
+    for db_key, csv_path in csv_files.items():
+        try:
+            df = pd.read_csv(str(csv_path))
+            is_override = db_key in config_data
+            config_data[db_key] = df
+
+            # 同步写入数据库（使用 basename 作为 config_name，与原始导入保持一致）
+            table_name = f"cfg_{db_key}"
+            if db is not None:
+                try:
+                    deleted = db.delete_config_data(table_name, config_basename)
+                    db.create_table_from_df(
+                        df, table_name, if_exists="append",
+                        config_name=config_basename, config_type=config_type
+                    )
+                    db_status = f"(DB已更新, 删除{deleted}行旧数据)"
+                except Exception as db_err:
+                    db_status = f"(DB写入失败: {db_err})"
+            else:
+                db_status = "(仅内存覆盖)"
+
+            if is_override:
+                logger.info(f"  🔄 [CSV 覆盖] {csv_path.stem} ({len(df)} 行) ← 替代DB版本 {db_status}")
+            else:
+                logger.info(f"  ➕ [CSV 新增] {csv_path.stem} ({len(df)} 行) {db_status}")
+        except Exception as e:
+            logger.warning(f"  ⚠️ CSV 文件读取失败: {csv_path.name} - {e}")
+    logger.info(f"  {'─' * 50}")
+
+
 def _build_db_log_dir(
     config_name: str,
     timestamp: str,
@@ -36,7 +113,10 @@ def _run_with_database(ns: argparse.Namespace) -> int:
     import time
     import shutil
     
-    config_name = ns.config  # 配置名称，如 BC_S5
+    # 规范化配置名称：去掉路径前缀和 .xlsx 后缀，确保纯名称如 BC_S5
+    # 用户可能传入 "config/BC_S5"、"config/BC_S5.xlsx" 或 "BC_S5"
+    _raw_config = ns.config
+    config_name = Path(_raw_config).stem  # 去掉目录和后缀
     start_date = ns.start_date
     end_date = ns.end_date
     
@@ -107,17 +187,60 @@ def _run_with_database(ns: argparse.Namespace) -> int:
     logger.info(f"📅 程序开始时间: {program_start_datetime.strftime('%Y-%m-%d %H:%M:%S')}")
     
     try:
+        # ========== 步骤0.5: 强制从Excel刷新配置到DB ==========
+        # DB模式下initialize()检测到已有配置数据时会跳过重新导入，
+        # 导致Excel更新后DB仍为旧数据。每次运行时先清除旧数据再重新导入，
+        # 确保DB配置始终与本地Excel/CSV文件一致。
+        logger.info("\n" + "=" * 60)
+        logger.info("🔄 步骤0.5: 刷新配置到数据库（确保与本地Excel/CSV同步）")
+        logger.info("=" * 60)
+        try:
+            config_file = initializer.find_config_file(config_name)
+            if config_file:
+                logger.info(f"📁 找到配置文件: {config_file}")
+                # 先删除该 config_name 下的旧配置数据
+                all_tables = db.get_all_tables()
+                deleted_tables = 0
+                for tbl in all_tables:
+                    if not tbl.startswith('cfg_'):
+                        continue
+                    try:
+                        deleted = db.delete_config_data(tbl, config_name)
+                        if deleted > 0:
+                            deleted_tables += 1
+                            logger.info(f"  🗑️ {tbl}: 删除 {deleted} 行旧数据")
+                    except Exception:
+                        pass
+                if deleted_tables > 0:
+                    logger.info(f"  ✅ 已清除 {deleted_tables} 个表的旧数据")
+                # 重新从Excel导入
+                success, import_results = initializer.import_config_from_excel(
+                    config_name, config_file
+                )
+                if success:
+                    imported_count = len([r for r in import_results.values() if r >= 0])
+                    logger.info(f"  ✅ 已重新导入 {imported_count} 个配置表")
+                else:
+                    logger.warning(f"  ⚠️ 配置重新导入失败，将使用数据库中已有数据")
+            else:
+                logger.info(f"  ℹ️ 未找到本地配置文件 {config_name}.xlsx，使用数据库中已有数据")
+        except Exception as refresh_err:
+            logger.warning(f"  ⚠️ 配置刷新异常（将使用数据库中已有数据）: {refresh_err}")
+
         # ========== 步骤1: 从数据库获取配置 ==========
         logger.info("\n" + "=" * 60)
         logger.info("📥 步骤1: 从数据库加载配置")
         logger.info("=" * 60)
-        
+
         config_data = _load_config_from_database(db, config_name)
         if not config_data:
             logger.error(f"[ERROR] 未在数据库中找到配置: {config_name}")
             return 1
-        
+
         logger.info(f"[OK] 已加载 {len(config_data)} 个配置表")
+
+        # 扫描 config/ 目录下的 CSV 覆盖文件（DB 模式下 Excel 导入可能被跳过，CSV 需在此处直接覆盖内存数据并回写DB）
+        _apply_csv_overrides_for_db(config_data, config_name, logger, db)
         
         # ========== 步骤2: 使用DuckDB处理并运行仿真 ==========
         logger.info("\n" + "=" * 60)

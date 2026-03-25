@@ -22,4 +22,7 @@ if __name__ == "__main__":
     except SystemExit as e:
         raise e
     except Exception as exc:
+        import traceback
+        print(f"\n[FATAL] 未捕获的异常: {type(exc).__name__}: {exc}", file=sys.stderr)
+        traceback.print_exc()
         raise SystemExit(1) from exc

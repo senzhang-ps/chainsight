@@ -24,7 +24,25 @@ class ExcelImporter:
         """
         self.db = db
         self.imported_tables: Dict[str, Dict] = {}
-    
+
+    @staticmethod
+    def _patch_openpyxl_font_family():
+        """修补 openpyxl 字体 family 校验，允许超出上限14的值（钳位到2）"""
+        import openpyxl.styles.fonts as _fonts
+        _orig = _fonts.Font.__init__
+        if getattr(_orig, '_patched', False):
+            return
+        def _patched_init(self, *args, **kwargs):
+            if 'family' in kwargs and kwargs['family'] is not None:
+                try:
+                    if float(kwargs['family']) > 14:
+                        kwargs['family'] = 2
+                except (ValueError, TypeError):
+                    pass
+            _orig(self, *args, **kwargs)
+        _patched_init._patched = True
+        _fonts.Font.__init__ = _patched_init
+
     @staticmethod
     def _derive_config_type(config_name: str) -> str:
         """根据 config_name 推导配置类型 (OC / BC / OTHER)"""
@@ -95,7 +113,15 @@ class ExcelImporter:
         print("-" * 50)
         
         # 读取所有sheet
-        xl = pd.ExcelFile(excel_path)
+        print(f"  ⏳ 正在读取Excel文件...", end="", flush=True)
+        try:
+            xl = pd.ExcelFile(excel_path)
+        except ValueError:
+            # openpyxl 对某些Excel样式不兼容（如字体family值超出上限14），
+            # 临时放宽校验后重试
+            self._patch_openpyxl_font_family()
+            xl = pd.ExcelFile(excel_path)
+        print(f" 完成 ({len(xl.sheet_names)} 个sheet)")
         results = {}
         
         start_time = time.time()

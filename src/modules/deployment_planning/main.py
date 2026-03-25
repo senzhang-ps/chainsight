@@ -144,16 +144,21 @@ def _initialize_soh_dict(
         if 'location' in ol_df.columns and not ol_df.empty else set()
     )
 
-    all_mats = (
-        set(config['SupplyDemandLog']['material'].unique()) |
-        set(config['SafetyStock']['material'].unique()) |
-        mats_from_ol
-    )
-    all_locs = (
-        set(config['SupplyDemandLog']['location'].unique()) |
-        set(config['SafetyStock']['location'].unique()) |
-        locs_from_ol
-    )
+    all_mats = set()
+    sdl = config['SupplyDemandLog']
+    ss = config['SafetyStock']
+    if 'material' in sdl.columns and not sdl.empty:
+        all_mats |= set(sdl['material'].unique())
+    if 'material' in ss.columns and not ss.empty:
+        all_mats |= set(ss['material'].unique())
+    all_mats |= mats_from_ol
+
+    all_locs = set()
+    if 'location' in sdl.columns and not sdl.empty:
+        all_locs |= set(sdl['location'].unique())
+    if 'location' in ss.columns and not ss.empty:
+        all_locs |= set(ss['location'].unique())
+    all_locs |= locs_from_ol
 
     inv_df = inventory_log[inventory_log['date'] == actual_sim_start]
     if inv_df.empty:

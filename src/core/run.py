@@ -849,9 +849,12 @@ def _load_config_from_database(db, config_name: str) -> dict:
                      or c.startswith('unnamed') or c.startswith('Unnamed')]
         if drop_cols:
             filtered = filtered.drop(columns=drop_cols, errors='ignore')
-        # 删除全为 NULL 的列（来自其他配置的表结构残留）
+        # 删除全为 NULL 的列（来自其他配置的表结构残留），但保留原有列结构
+        cols_before = set(filtered.columns)
         filtered = filtered.dropna(axis=1, how='all')
-        
+        for col in cols_before - set(filtered.columns):
+            filtered[col] = pd.NA
+
         # 去掉 cfg_ 前缀，作为配置数据的 key
         clean_table_name = table_name[4:]
         

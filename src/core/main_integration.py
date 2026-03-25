@@ -1261,9 +1261,12 @@ def load_configuration_from_dict(config_data: dict, config_name: str = "DB_Confi
                      or (not c.isascii() and c not in column_mapping.values())]
         if drop_cols:
             df_copy = df_copy.drop(columns=drop_cols, errors='ignore')
-        # 删除全为 NULL 的列（来自其他配置的表结构残留）
+        # 删除全为 NULL 的列（来自其他配置的表结构残留），但保留原有列结构
+        cols_before = set(df_copy.columns)
         df_copy = df_copy.dropna(axis=1, how='all')
-        
+        for col in cols_before - set(df_copy.columns):
+            df_copy[col] = pd.NA
+
         config_dict[sheet_name] = df_copy
         print(f"  ✅ 加载配置表: {sheet_name} ({len(df_copy)} 行)")
     

@@ -67,3 +67,6 @@ ChainSight_Dev/**/run_*/
 
 # Claude
 .claude/
+
+# csv
+*.csv

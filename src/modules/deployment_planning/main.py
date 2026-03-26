@@ -920,9 +920,10 @@ def main(
         global_node_demands_map: Dict[tuple, list] = {}
 
         # 预计算materials_union
+        sdl = config['SupplyDemandLog']
         materials_union = set(
-            config['SupplyDemandLog']['material'].unique()
-        )
+            sdl['material'].unique()
+        ) if 'material' in sdl.columns and not sdl.empty else set()
         if 'OrderLog' in config and not config['OrderLog'].empty:
             materials_union |= set(config['OrderLog']['material'].unique())
         if not config['SafetyStock'].empty:

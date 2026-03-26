@@ -171,7 +171,11 @@ def _validate_config(config_dict: dict) -> tuple:
         raise ValueError("缺少必需的配置数据：M1_ForecastError")
 
     order_calendar['date'] = pd.to_datetime(order_calendar['date'])
-    
+
+    # 🔧 将 DemandForecast 中的负值 quantity 修正为 0
+    if 'quantity' in demand_forecast.columns:
+        demand_forecast['quantity'] = demand_forecast['quantity'].clip(lower=0)
+
     # 🔧 确保所有配置的material列为string类型，避免merge时类型不匹配
     demand_forecast = normalize_identifiers(demand_forecast)
     forecast_error = normalize_identifiers(forecast_error)

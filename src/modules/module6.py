@@ -862,7 +862,7 @@ def _process_single_route(
     
     type_seq = get_optimal_truck_sequence(truck_cfgs)
     remaining_demands = route_demands.copy()
-    route_mdq = truck_cfgs['MDQ'].min() if not truck_cfgs.empty else np.nan
+    route_mdq = truck_cfgs['MDQ'].min() if (not truck_cfgs.empty and 'MDQ' in truck_cfgs.columns) else 0.0
     
     # 尝试每种车型
     for truck_type in type_seq:
@@ -922,7 +922,7 @@ def _process_truck_type(
     
     # 配置参数
     wfr_th, vfr_th = float(conf['WFR']), float(conf['VFR'])
-    mdq = float(conf['MDQ']) if pd.notna(conf['MDQ']) else 0.0
+    mdq = float(conf['MDQ']) if ('MDQ' in conf.index and pd.notna(conf['MDQ'])) else 0.0
     cap_w = float(spec['capacity_qty_in_weight'])
     cap_v = float(spec['capacity_qty_in_volume'])
     

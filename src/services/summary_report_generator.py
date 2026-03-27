@@ -653,7 +653,10 @@ class SummaryReportGenerator:
                 location = self._normalize_location_value(str(row['location']))
                 key = (material, location)
                 # 使用最新的safety stock值（如果有多个日期）
-                safety_stock_dict[key] = int(row.get('safety_stock_qty', 0))
+                raw_ss_qty = row.get('safety_stock_qty', 0)
+                if pd.isna(raw_ss_qty):
+                    raw_ss_qty = 0
+                safety_stock_dict[key] = int(float(raw_ss_qty))
         
         all_records = []
         

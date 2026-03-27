@@ -45,17 +45,21 @@ class ExcelImporter:
 
     @staticmethod
     def _derive_config_type(config_name: str) -> str:
-        """根据 config_name 推导配置类型 (OC / BC / OTHER)"""
+        """根据 config_name 推导配置类型。
+
+        规则：
+        - 统一使用配置名本身（去掉路径和扩展名）作为 config_type
+          例如 config/BC_S9.xlsx -> BC_S9
+        """
         if not config_name:
-            return 'OTHER'
-        # 去掉可能的路径前缀，只取文件名部分
-        basename = config_name.split('/')[-1].split('\\')[-1]
-        name_upper = basename.upper()
-        if name_upper.startswith('OC'):
-            return 'OC'
-        elif name_upper.startswith('BC'):
-            return 'BC'
-        return 'OTHER'
+            return 'UNKNOWN'
+
+        # 去掉可能的路径前缀和扩展名，只保留配置标识
+        basename = Path(config_name).stem
+        if not basename:
+            return 'UNKNOWN'
+
+        return basename
 
     @staticmethod
     def _scan_csv_overrides(excel_path: str) -> Dict[str, pd.DataFrame]:

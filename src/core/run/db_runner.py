@@ -10,8 +10,120 @@ import sys
 from pathlib import Path
 from typing import Optional
 
+import pandas as pd
+
+from pgsql_db import table_mapping
 from .db_config import _load_config_from_database
 from .local_writer import _write_results_to_local_dev_format
+
+
+def _normalize_for_compare(df: pd.DataFrame) -> pd.DataFrame:
+    """配置表比较前标准化：列排序、缺失统一、转字符串并排序行。"""
+    if df is None:
+        return pd.DataFrame()
+
+    norm = df.copy()
+    norm.columns = [str(c) for c in norm.columns]
+    norm = norm.reindex(sorted(norm.columns), axis=1)
+    norm = norm.where(pd.notna(norm), None)
+    norm = norm.astype(str)
+    if len(norm.columns) > 0 and not norm.empty:
+        norm = norm.sort_values(by=list(norm.columns), kind="mergesort").reset_index(drop=True)
+    else:
+        norm = norm.reset_index(drop=True)
+    return norm
+
+
+def _build_expected_local_config(config_name: str) -> dict:
+    """构建本地期望配置（Excel + 同目录CSV覆盖）。返回 key 为不带 cfg_ 的小写表名。"""
+    config_basename = Path(config_name).stem
+    project_root = Path(__file__).parent.parent.parent.parent
+    search_dirs = [project_root / "config", project_root / "test_files", project_root]
+
+    config_file = None
+    for d in search_dirs:
+        candidate = d / f"{config_basename}.xlsx"
+        if candidate.exists():
+            config_file = candidate
+            break
+    if config_file is None:
+        return {}
+
+    try:
+        xl = pd.ExcelFile(str(config_file))
+    except ValueError:
+        # 与 ExcelImporter 保持一致：兼容 openpyxl 对部分字体 family 的严格校验
+        from pgsql_db.excel_importer import ExcelImporter
+        ExcelImporter._patch_openpyxl_font_family()
+        xl = pd.ExcelFile(str(config_file))
+
+    expected = {}
+
+    for sheet_name in xl.sheet_names:
+        df = xl.parse(sheet_name)
+        table_name = table_mapping.get_config_table_name(sheet_name)
+        db_key = table_name[4:] if table_name.startswith("cfg_") else table_name
+        expected[db_key] = df
+
+    # CSV 覆盖（同目录）
+    for csv_file in sorted(config_file.parent.glob("*.csv")):
+        db_key = csv_file.stem.lower()
+        expected[db_key] = pd.read_csv(str(csv_file))
+
+    return expected
+
+
+def _diff_local_vs_db_config(expected_config: dict, db_config: dict) -> dict:
+    """比较本地期望配置与DB配置，返回差异分类。"""
+    expected_keys = set(expected_config.keys())
+    db_keys = set(db_config.keys())
+
+    new_tables = sorted(expected_keys - db_keys)
+    deleted_tables = sorted(db_keys - expected_keys)
+
+    unchanged_tables = []
+    changed_tables = []
+
+    for key in sorted(expected_keys & db_keys):
+        left = _normalize_for_compare(expected_config.get(key, pd.DataFrame()))
+        right = _normalize_for_compare(db_config.get(key, pd.DataFrame()))
+        if left.equals(right):
+            unchanged_tables.append(key)
+        else:
+            changed_tables.append(key)
+
+    return {
+        "new_tables": new_tables,
+        "deleted_tables": deleted_tables,
+        "changed_tables": changed_tables,
+        "unchanged_tables": sorted(unchanged_tables),
+    }
+
+
+def _sync_config_by_diff(db, config_name: str, expected_config: dict, diff_result: dict, logger) -> None:
+    """按差异最小化同步：仅更新新增/变更表，并删除本地已不存在的表数据。"""
+    config_basename = Path(config_name).stem
+
+    to_upsert = sorted(set(diff_result["new_tables"] + diff_result["changed_tables"]))
+    to_delete = diff_result["deleted_tables"]
+
+    for db_key in to_upsert:
+        table_name = f"cfg_{db_key}"
+        df = expected_config.get(db_key, pd.DataFrame())
+        deleted = db.delete_config_data(table_name, config_basename)
+        db.create_table_from_df(
+            df,
+            table_name,
+            if_exists="append",
+            config_name=config_basename,
+            config_type=config_basename,
+        )
+        logger.info(f"  🔄 同步配置表 {table_name}: 删除 {deleted} 行，写入 {len(df)} 行")
+
+    for db_key in to_delete:
+        table_name = f"cfg_{db_key}"
+        deleted = db.delete_config_data(table_name, config_basename)
+        logger.info(f"  🗑️ 删除本地已不存在配置表数据 {table_name}: 删除 {deleted} 行")
 
 
 def _apply_csv_overrides_for_db(config_data: dict, config_name: str, logger, db=None) -> None:
@@ -49,15 +161,8 @@ def _apply_csv_overrides_for_db(config_data: dict, config_name: str, logger, db=
     if not csv_files:
         return
 
-    # 推导 config_type (OC / BC / OTHER)，使用 basename 去掉路径前缀
-    config_basename = config_name.split('/')[-1] if '/' in config_name else config_name
-    config_type = 'OTHER'
-    if config_basename:
-        name_upper = config_basename.upper()
-        if name_upper.startswith('OC'):
-            config_type = 'OC'
-        elif name_upper.startswith('BC'):
-            config_type = 'BC'
+    # 推导 config_basename：用于 config_name 过滤/删除（与运行配置一致）
+    config_basename = Path(config_name).stem
 
     logger.info(f"\n  {'─' * 50}")
     logger.info(f"  📄 发现 {len(csv_files)} 个 CSV 覆盖文件:")
@@ -67,14 +172,17 @@ def _apply_csv_overrides_for_db(config_data: dict, config_name: str, logger, db=
             is_override = db_key in config_data
             config_data[db_key] = df
 
-            # 同步写入数据库（使用 basename 作为 config_name，与原始导入保持一致）
+            # 同步写入数据库：
+            # - config_name: 仍使用当前运行配置（如 BC_S9 / PDS1）
+            # - config_type: 按用户要求使用 CSV 文件名（如 M3_SafetyStock）
             table_name = f"cfg_{db_key}"
+            csv_config_type = csv_path.stem
             if db is not None:
                 try:
                     deleted = db.delete_config_data(table_name, config_basename)
                     db.create_table_from_df(
                         df, table_name, if_exists="append",
-                        config_name=config_basename, config_type=config_type
+                        config_name=config_basename, config_type=csv_config_type
                     )
                     db_status = f"(DB已更新, 删除{deleted}行旧数据)"
                 except Exception as db_err:
@@ -187,45 +295,46 @@ def _run_with_database(ns: argparse.Namespace) -> int:
     logger.info(f"📅 程序开始时间: {program_start_datetime.strftime('%Y-%m-%d %H:%M:%S')}")
     
     try:
-        # ========== 步骤0.5: 强制从Excel刷新配置到DB ==========
-        # DB模式下initialize()检测到已有配置数据时会跳过重新导入，
-        # 导致Excel更新后DB仍为旧数据。每次运行时先清除旧数据再重新导入，
-        # 确保DB配置始终与本地Excel/CSV文件一致。
+        # ========== 步骤0.5: 同名配置比对并按需同步 ==========
         logger.info("\n" + "=" * 60)
-        logger.info("🔄 步骤0.5: 刷新配置到数据库（确保与本地Excel/CSV同步）")
+        logger.info("🔄 步骤0.5: 检查同名配置并按差异同步数据库")
         logger.info("=" * 60)
-        try:
-            config_file = initializer.find_config_file(config_name)
-            if config_file:
-                logger.info(f"📁 找到配置文件: {config_file}")
-                # 先删除该 config_name 下的旧配置数据
-                all_tables = db.get_all_tables()
-                deleted_tables = 0
-                for tbl in all_tables:
-                    if not tbl.startswith('cfg_'):
-                        continue
-                    try:
-                        deleted = db.delete_config_data(tbl, config_name)
-                        if deleted > 0:
-                            deleted_tables += 1
-                            logger.info(f"  🗑️ {tbl}: 删除 {deleted} 行旧数据")
-                    except Exception:
-                        pass
-                if deleted_tables > 0:
-                    logger.info(f"  ✅ 已清除 {deleted_tables} 个表的旧数据")
-                # 重新从Excel导入
-                success, import_results = initializer.import_config_from_excel(
-                    config_name, config_file
-                )
-                if success:
-                    imported_count = len([r for r in import_results.values() if r >= 0])
-                    logger.info(f"  ✅ 已重新导入 {imported_count} 个配置表")
-                else:
-                    logger.warning(f"  ⚠️ 配置重新导入失败，将使用数据库中已有数据")
+
+        # 构建本地期望配置（Excel + CSV覆盖）
+        expected_config = _build_expected_local_config(config_name)
+        if not expected_config:
+            logger.info(f"  ℹ️ 未找到本地配置文件 {Path(config_name).stem}.xlsx，直接使用数据库配置")
+        else:
+            exists, _ = initializer.check_config_data_exists(config_name)
+            if not exists:
+                logger.info("  ℹ️ 数据库中不存在同名配置，执行首次导入")
+                config_file = initializer.find_config_file(config_name)
+                if not config_file:
+                    logger.error(f"[ERROR] 未找到本地配置文件: {Path(config_name).stem}.xlsx")
+                    return 1
+                success, import_results = initializer.import_config_from_excel(config_name, config_file)
+                if not success:
+                    logger.error("[ERROR] 首次导入配置失败")
+                    return 1
+                imported_count = len([r for r in import_results.values() if r >= 0])
+                logger.info(f"  ✅ 首次导入完成: {imported_count} 个配置表")
             else:
-                logger.info(f"  ℹ️ 未找到本地配置文件 {config_name}.xlsx，使用数据库中已有数据")
-        except Exception as refresh_err:
-            logger.warning(f"  ⚠️ 配置刷新异常（将使用数据库中已有数据）: {refresh_err}")
+                logger.info("  ℹ️ 检测到数据库存在同名配置，开始比对本地与数据库")
+                db_snapshot = _load_config_from_database(db, config_name) or {}
+                diff_result = _diff_local_vs_db_config(expected_config, db_snapshot)
+
+                changed_count = len(diff_result["changed_tables"])
+                new_count = len(diff_result["new_tables"])
+                deleted_count = len(diff_result["deleted_tables"])
+
+                if changed_count == 0 and new_count == 0 and deleted_count == 0:
+                    logger.info("  ✅ 本地配置与数据库无差异，直接读取数据库配置")
+                else:
+                    logger.info(
+                        f"  🔍 差异检测结果: 变更 {changed_count}，新增 {new_count}，删除 {deleted_count}"
+                    )
+                    _sync_config_by_diff(db, config_name, expected_config, diff_result, logger)
+                    logger.info("  ✅ 差异同步完成")
 
         # ========== 步骤1: 从数据库获取配置 ==========
         logger.info("\n" + "=" * 60)
@@ -238,9 +347,6 @@ def _run_with_database(ns: argparse.Namespace) -> int:
             return 1
 
         logger.info(f"[OK] 已加载 {len(config_data)} 个配置表")
-
-        # 扫描 config/ 目录下的 CSV 覆盖文件（DB 模式下 Excel 导入可能被跳过，CSV 需在此处直接覆盖内存数据并回写DB）
-        _apply_csv_overrides_for_db(config_data, config_name, logger, db)
         
         # ========== 步骤2: 使用DuckDB处理并运行仿真 ==========
         logger.info("\n" + "=" * 60)

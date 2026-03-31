@@ -325,6 +325,6 @@ CLI ──► 选择运行策略
 本文档应与实际代码保持同步，每次架构调整后及时更新。
 
 **参考文档**:
-- [ARCHITECTURE.md](ARCHITECTURE.md) - 详细架构设计
+- [交接文档/Refactored/ARCHITECTURE.md](交接文档/Refactored/ARCHITECTURE.md) - 当前交接包中的详细架构设计
 - [README_CN.md](../README_CN.md) - 项目说明
-- [OPTIMIZATION_SUMMARY.md](OPTIMIZATION_SUMMARY.md) - 优化总结
+- [_archive/OPTIMIZATION_SUMMARY.md](_archive/OPTIMIZATION_SUMMARY.md) - 历史优化过程总结（已归档）

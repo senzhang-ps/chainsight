@@ -202,17 +202,22 @@ outputs/
 
 ```
 docs/
-├── ARCHITECTURE.md                 # 架构设计文档
+├── INDEX.md                        # docs 总导航
+├── 用户使用入口说明.md              # 运行与交付入口说明
 ├── ARCHITECTURE_DIAGRAM.md         # 架构可视化图
 ├── QUICK_REFERENCE.md              # 快速参考（本文档）
-├── MODULE1_DESIGN.md               # M1 模块设计
 ├── MODULE3_DESIGN.md               # M3 模块设计
 ├── MODULE5_DESIGN.md               # M5 模块设计
-├── OPTIMIZATION_SUMMARY.md         # 优化总结
 ├── DUCKDB_OPTIMIZATION_GUIDE.md    # DuckDB 优化指南
+├── PERFORMANCE_OPTIMIZATION_REPORT.md # 性能优化报告
+├── CYTHON_OPTIMIZATION_REPORT.md   # Cython 优化报告
 ├── MIGRATION.md                    # 迁移指南
-└── 算法优化测试报告.md               # 算法优化报告
+├── README_REFACTORING_MAP.md       # 重构映射说明
+├── ORI_DEPLOYMENT_UID_ANALYSIS.md  # 兼容性问题分析
+└── 交接文档/Refactored/             # 正式交接文档主目录
 ```
+
+> 历史过程性优化/重构材料已统一归档到 `docs/_archive/`。
 
 ## 🐍 Python 代码片段
 

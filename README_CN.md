@@ -40,9 +40,6 @@ py -3.12 -m venv .venv
 
 # 激活虚拟环境
 Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope Process -Force; . .\.venv\Scripts\Activate.ps1
---- 
-.\.venv\Scripts\Activate.ps1
---- 
 ```
 
 **Windows (CMD):**
@@ -68,10 +65,12 @@ source .venv/bin/activate
 ```bash
 # 安装所有依赖
 pip install -r requirements.txt
-
-# 编译 Cython 扩展模块（可选，用于性能优化）
-python setup.py build_ext --inplace
 ```
+
+如需了解当前仓库的性能优化与专项方案，请优先参考：
+- `docs/CYTHON_OPTIMIZATION_REPORT.md`
+- `docs/DUCKDB_OPTIMIZATION_GUIDE.md`
+- `docs/PERFORMANCE_OPTIMIZATION_REPORT.md`
 
 **核心依赖说明:**
 | 依赖 | 版本 | 用途 |
@@ -92,9 +91,6 @@ python setup.py build_ext --inplace
 # 首次运行（需指定起始日期）
 python run.py --config config/BC_S5.xlsx --start-date 2025-10-06 --end-date 2025-10-10
 
-# 或使用测试配置
-python run.py --config test_files/BC_S5.xlsx --start-date 2025-10-06 --end-date 2025-10-10
-
 # 续跑模式
 python run.py --config config/BC_S5.xlsx --end-date 2025-10-15 --resume
 ```
@@ -102,7 +98,7 @@ python run.py --config config/BC_S5.xlsx --end-date 2025-10-15 --resume
 **数据库模式:**
 ```bash
 # 使用数据库读写配置和输出
-python run.py --config config/OC_Paste_S1_20251224 --start-date 2025-12-15 --end-date 2026-02-28 --use-db
+python run.py --config BC_S5 --start-date 2025-10-06 --end-date 2025-10-10 --use-db
 
 # 指定数据库参数
 python run.py --config BC_S5 --start-date 2025-10-06 --end-date 2025-10-10 \
@@ -110,14 +106,13 @@ python run.py --config BC_S5 --start-date 2025-10-06 --end-date 2025-10-10 \
   --db-user postgres --db-password 123456
 ```
 
-### 5. 导出表映射关系
+### 5. 查看表映射与接口说明
 
-如果您需要查看 Excel 配置表、模块输出与数据库表名之间的详细对应关系，可以运行以下命令生成映射表：
+当前仓库未保留独立的 `tools/export_mapping.py` 脚本。若需查看配置表、模块输出与数据库表名/文件格式的对应关系，请直接参考：
 
-```bash
-python tools/export_mapping.py
-```
-该命令会在项目根目录下生成 `database_table_mapping.xlsx` 文件。
+- `docs/交接文档/Refactored/函数级接口与文件格式总表.md`
+- `docs/交接文档/Refactored/API.md`
+- `docs/QUICK_REFERENCE.md`
 
 ---
 
@@ -130,7 +125,7 @@ python tools/export_mapping.py
 - 适合开发和测试
 
 ```bash
-python run.py --config test_files/BC_S5.xlsx --start-date 2025-10-06 --end-date 2025-10-10
+python run.py --config config/BC_S5.xlsx --start-date 2025-10-06 --end-date 2025-10-10
 ```
 
 ### 数据库模式 (`--use-db`)
@@ -164,20 +159,18 @@ python run.py --config BC_S5 --start-date 2025-10-06 --end-date 2025-10-10 --use
 ### 目录结构
 
 ```
-chainsight_cpython/
+chainsight/
 ├── run.py                              # 🚀 主入口 CLI
 ├── run.ps1                             # PowerShell 运行脚本  
-├── setup.py                            # Cython 扩展编译配置
 ├── requirements.txt                    # 依赖声明
 ├── README_CN.md / README_EN.md         # 中英文文档
-├── CYTHON_OPTIMIZATION_REPORT.md       # Cython 优化报告
 │
 ├── src/                                # 📦 核心源代码包
 │   ├── core/                           #    编排引擎
-│   │   ├── main_integration.py         #    主集成调度器（日循环 M1→M4→M5→M6→M3）
-│   │   ├── orchestrator.py             #    统一状态管理中枢
-│   │   ├── parallel_executor.py        #    并行执行框架（ThreadPoolExecutor）
-│   │   └── run.py                      #    CLI 解析（被根 run.py 调用）
+│   │   ├── main_integration.py /       #    主集成调度与运行入口
+│   │   ├── orchestrator.py /           #    状态管理中枢
+│   │   ├── parallel_executor.py /      #    并行执行支持
+│   │   └── run.py /                    #    CLI 解析
 │   │
 │   ├── modules/                        #    业务模块层
 │   │   ├── module1.py                  #    M1: 需求规划 (Demand Planning)
@@ -190,11 +183,6 @@ chainsight_cpython/
 │   │   ├── production_planning/        #    M4 子模块（plan_builder, capacity_allocator）
 │   │   ├── deployment_planning/        #    M5 子模块（allocation, inventory, push）
 │   │   └── logistics_execution/        #    M6 子模块（vehicle_packer, delivery）
-│   │
-│   ├── cython_kernels/                 #    Cython 性能优化内核（编译后生成 .pyd/.so）
-│   │   ├── production_kernels.pyx      #    生产计算内核
-│   │   ├── logistics_kernels.pyx       #    物流计算内核
-│   │   └── aggregation_kernels.pyx     #    聚合计算内核
 │   │
 │   ├── utils/                          #    工具库
 │   │   ├── config_validator.py         #    配置校验
@@ -223,59 +211,25 @@ chainsight_cpython/
 │   ├── module_engine.py                #    模块执行引擎
 │   ├── module_optimizers.py            #    模块优化器
 │   ├── incremental_processor.py        #    增量处理器
-│   ├── test_engine.py                  #    测试引擎
-│   ├── test_optimization_validation.py #    优化验证测试
 │   └── performance_dashboard.py        #    性能监控面板
-│
-├── tools/                              # 🔧 辅助工具脚本
-│   ├── init_database.py                #    数据库初始化
-│   ├── compare_outputs.py              #    输出对比工具
-│   ├── compare_all_versions.py         #    版本对比工具
-│   ├── benchmark_duckdb_vs_pandas.py   #    性能基准测试
-│   ├── performance_benchmark.py        #    性能基准测试
-│   ├── generate_docx_report.py         #    生成 Word 报告
-│   ├── generate_report_charts.py       #    生成报告图表
-│   └── migrate_config_tables.py        #    配置表迁移工具
-│
-├── tests/                              # 🧪 测试模块
-│   ├── e2e_integration_test.py         #    端到端集成测试
-│   └── test_logger.py                  #    日志测试
-│
-├── test_files/                         # 📋 测试数据与对比工具
-│   ├── BC_S5.xlsx                      #    主测试配置
-│   ├── BC_S9.xlsx                      #    备用测试配置
-│   ├── compare_all_outputs.py          #    输出对比工具（主工具）
-│   ├── compare_db_vs_local.py          #    数据库与本地对比
-│   ├── compare_db_vs_chainsight_dev.py #    与 ChainSight_Dev 对比
-│   ├── compare_dev_refactored.py       #    开发版与重构版对比
-│   ├── compare_orchestrator.py         #    Orchestrator 状态对比
-│   ├── compare_outputs_detail.py       #    详细输出对比
-│   ├── debug_m3_difference.py          #    M3 差异调试工具
-│   ├── quick_check.py                  #    快速检查工具
-│   ├── test_config_consistency.py      #    配置一致性测试
-│   ├── test_duckdb_performance.py      #    DuckDB 性能测试
-│   ├── TESTING_GUIDE.md                #    测试指南
-│   ├── DATA_COMPARISON_TOOLS_GUIDE.md  #    对比工具指南
-│   ├── Data_Type.md                    #    类型说明
-│   └── Python_former.md                #    Python 编码规范
 │
 ├── config/                             # ⚙️ 配置文件
 │   ├── BC_S5.xlsx                      #    测试配置 S5
 │   ├── BC_S9.xlsx                      #    测试配置 S9
-│   ├── OC_Paste_S1_20251224/           #    生产配置 OC Paste S1
+│   ├── OC_Paste_S1_20251224.xlsx       #    OC 配置样例
 │   ├── ChainSight 1st SIT.xlsx         #    SIT 样例配置
+│   ├── database.json                   #    数据库连接配置
 │   └── config_guide.xlsx               #    配置指南
 │
 ├── docs/                               # 📚 设计文档
-│   ├── ARCHITECTURE.md                 #    架构设计
-│   ├── MODULE*_DESIGN.md               #    模块设计文档（M1, M3, M5）
-│   ├── OPTIMIZATION_*.md               #    优化相关文档
-│   ├── MIGRATION.md                    #    迁移指南
-│   ├── REFACTORING_*.md                #    重构相关文档
-│   ├── PERFORMANCE_*.md                #    性能优化报告
-│   ├── DUCKDB_OPTIMIZATION_GUIDE.md    #    DuckDB 优化指南
-│   ├── 算法优化测试报告.md              #    算法优化测试报告
-│   └── 20260127变更版本与修复.md        #    最新变更记录
+│   ├── INDEX.md                        #    文档总导航
+│   ├── 用户使用入口说明.md              #    用户操作入口说明
+│   ├── ARCHITECTURE_DIAGRAM.md         #    架构图谱
+│   ├── MODULE3_DESIGN.md               #    M3 设计文档
+│   ├── MODULE5_DESIGN.md               #    M5 设计文档
+│   ├── QUICK_REFERENCE.md              #    快速参考
+│   ├── 交接文档/Refactored/            #    当前交接文档主入口
+│   └── _archive/                       #    历史过程/阶段性文档归档
 │
 ├── ChainSight_Dev/                     # 🔬 开发版本（保留用于对比和参考）
 │   ├── module*.py                      #    开发版模块实现
@@ -284,15 +238,9 @@ chainsight_cpython/
 │   ├── BC_S5/                          #    开发版测试输出
 │   └── *.md                            #    开发文档
 │
-├── build/                              # 🏗️ Cython 编译输出（自动生成）
-│   ├── lib.win-amd64-cpython-314/      #    编译的库文件
-│   └── temp.win-amd64-cpython-314/     #    临时编译文件
-│
 └── outputs/                            # 📤 运行输出（自动生成，已加入 .gitignore）
-    ├── {config_name}/                  #    本地文件模式输出
-    │   └── run_YYYYMMDD_HHMMSS/        #    按运行时间戳组织
-    └── db_config/                      #    数据库模式输出
-        └── {config_name}_YYYYMMDD_HHMMSS/  #    按配置和时间戳组织
+    └── {config_stem}/                  #    按配置名组织
+        └── run_YYYYMMDD_HHMMSS/        #    按运行时间戳组织
 ```
 
 ### CLI 参数说明
@@ -501,58 +449,60 @@ main_integration.run_integrated_simulation()
 
 ## 📊 输出目录
 
-每次运行生成一个唯一的输出目录：
+每次运行会在 `outputs/<config_stem>/run_YYYYMMDD_HHMMSS/` 下生成唯一目录：
 ```
-outputs/runs/
-└── run_20240115_143022/
-    ├── module1/          # 各模块输出
-    ├── module3/
-    ├── module4/
-    ├── module5/
-    ├── module6/
-    ├── orchestrator/     # 中枢状态输出
-    ├── summary/          # 汇总报告
-    ├── logs/             # 日志文件
-    └── validation_report.txt
+outputs/
+└── BC_S5/
+    └── run_20240115_143022/
+        ├── module1/          # 各模块输出
+        ├── module3/
+        ├── module4/
+        ├── module5/
+        ├── module6/
+        ├── orchestrator/     # 中枢状态输出
+        ├── summary/          # 汇总报告
+        └── validation_report.txt
 ```
+
+数据库模式的详细输出与日志约定，请以 `docs/交接文档/Refactored/setup.md` 为准。
 
 ## 🧪 测试
 
-```bash
-# 运行所有测试
-pytest tests/
+当前仓库未提供顶层 `tests/` 自动化测试目录。验证与测试结果请优先参考：
 
-# 运行特定测试
-pytest tests/e2e_integration_test.py
-
-# 显示详细输出
-pytest -v tests/
-```
+- `docs/交接文档/Refactored/BC算法优化测试报告.md`
+- `docs/交接文档/Refactored/OC算法优化测试报告.md`
+- `docs/PERFORMANCE_OPTIMIZATION_REPORT.md`
 
 ## 📚 文档
 
 详细文档位于 `docs/` 目录：
 
 ### 核心文档
-- [ARCHITECTURE.md](docs/ARCHITECTURE.md) - 完整架构设计文档
+- [INDEX.md](docs/INDEX.md) - docs 总导航
+- [用户使用入口说明.md](docs/用户使用入口说明.md) - 用户操作入口说明
+- [项目交接文档.md](docs/交接文档/Refactored/项目交接文档.md) - 交接总说明
+- [ARCHITECTURE.md](docs/交接文档/Refactored/ARCHITECTURE.md) - 完整架构设计文档
 - [ARCHITECTURE_DIAGRAM.md](docs/ARCHITECTURE_DIAGRAM.md) - 架构可视化图谱
 - [QUICK_REFERENCE.md](docs/QUICK_REFERENCE.md) - 快速参考指南（命令速查）
 
 ### 模块设计
-- [MODULE1_DESIGN.md](docs/MODULE1_DESIGN.md) - M1: 需求规划模块设计
 - [MODULE3_DESIGN.md](docs/MODULE3_DESIGN.md) - M3: MRP 计划模块设计
 - [MODULE5_DESIGN.md](docs/MODULE5_DESIGN.md) - M5: 部署规划模块设计
+- [module.md](docs/交接文档/Refactored/module.md) - 模块总览与交接说明
 
 ### 优化文档
-- [OPTIMIZATION_SUMMARY.md](docs/OPTIMIZATION_SUMMARY.md) - 优化总结
 - [DUCKDB_OPTIMIZATION_GUIDE.md](docs/DUCKDB_OPTIMIZATION_GUIDE.md) - DuckDB 优化指南
-- [CYTHON_OPTIMIZATION_REPORT.md](CYTHON_OPTIMIZATION_REPORT.md) - Cython 优化报告
-- [算法优化测试报告.md](docs/算法优化测试报告.md) - 算法优化测试报告
+- [CYTHON_OPTIMIZATION_REPORT.md](docs/CYTHON_OPTIMIZATION_REPORT.md) - Cython 优化报告
+- [PERFORMANCE_OPTIMIZATION_REPORT.md](docs/PERFORMANCE_OPTIMIZATION_REPORT.md) - 性能优化报告
+- [BC算法优化测试报告.md](docs/交接文档/Refactored/BC算法优化测试报告.md) - BC 场景优化测试报告
+- [OC算法优化测试报告.md](docs/交接文档/Refactored/OC算法优化测试报告.md) - OC 场景优化测试报告
 
 ### 其他文档
 - [MIGRATION.md](docs/MIGRATION.md) - 版本迁移指南
-- [REFACTORING_SUMMARY.md](docs/REFACTORING_SUMMARY.md) - 重构总结
+- [README_REFACTORING_MAP.md](docs/README_REFACTORING_MAP.md) - 重构映射与代码定位
 - [20260127变更版本与修复.md](docs/20260127变更版本与修复.md) - 最新变更日志
+- 历史过程/阶段性文档已归档至 `docs/_archive/`
 
 ## 🔗 导入约定
 
@@ -654,15 +604,14 @@ python -c "from pgsql_db import DatabaseConnection; db = DatabaseConnection(); p
 ## 🗂️ 项目维护
 
 ### 目录清洁度
-- ✅ 根目录仅保留必要文件（run.py, README.md, requirements.txt 等）
+- ✅ 根目录保留必要入口文件（run.py, README_CN.md, README_EN.md, requirements.txt 等）
 - ✅ 临时文档已移至 docs/ 或删除
-- ✅ 工具脚本已整理至 tools/
 - ✅ 样例配置已归档至 config/
 - ✅ 运行输出自动存储在 outputs/ (本地和数据库模式统一)
 
 ### 代码风格
-- 遵循 [test_files/Python_former.md](test_files/Python_former.md) 编码规范
-- 类型说明参考 [test_files/Data_Type.md](test_files/Data_Type.md)
+- 注释与维护约定参考 [中文注释规范与维护约定.md](docs/交接文档/Refactored/中文注释规范与维护约定.md)
+- 模块/文件定位参考 [README_REFACTORING_MAP.md](docs/README_REFACTORING_MAP.md)
 
 ---
 

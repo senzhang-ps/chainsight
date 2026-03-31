@@ -1,6 +1,6 @@
 # ChainSight - Supply Chain Planning Simulation System
 
-[中文版](README.md) | **English**
+[中文版](README_CN.md) | **English**
 
 ## 📋 Table of Contents
 
@@ -38,14 +38,14 @@ cd chainsight
 # Create virtual environment with Python 3.12
 py -3.12 -m venv .venv
 Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope Process -Force
-.\venv\Scripts\Activate.ps1
+.\.venv\Scripts\Activate.ps1
 ```
 
 **Windows (CMD):**
 ```cmd
 # Create virtual environment with Python 3.12
 py -3.12 -m venv .venv
-.\venv\Scripts\activate.bat
+.\.venv\Scripts\activate.bat
 ```
 
 **Linux / macOS:**
@@ -59,10 +59,12 @@ source .venv/bin/activate
 
 ```bash
 pip install -r requirements.txt
-
-# Compile Cython extension modules (optional, for performance optimization)
-python setup.py build_ext --inplace
 ```
+
+For current performance and optimization notes, use these repository docs instead:
+- `docs/CYTHON_OPTIMIZATION_REPORT.md`
+- `docs/DUCKDB_OPTIMIZATION_GUIDE.md`
+- `docs/PERFORMANCE_OPTIMIZATION_REPORT.md`
 
 **Core Dependencies:**
 | Package | Version | Purpose |
@@ -78,8 +80,16 @@ python setup.py build_ext --inplace
 | python-docx | 1.2.0 | Word report generation |
 | tqdm | 4.67.3 | Progress display |
 | Cython | 3.0+ | Performance optimization (optional) |
+
+### 4. Run Simulation
+
+**Local File Mode (default):**
+```bash
+# First run
+python run.py --config config/BC_S5.xlsx --start-date 2025-10-06 --end-date 2025-10-10
+
 # Resume mode
-python run.py --config test_files/BC_S5.xlsx --end-date 2025-10-15 --resume
+python run.py --config config/BC_S5.xlsx --end-date 2025-10-15 --resume
 ```
 
 **Database Mode:**
@@ -93,12 +103,13 @@ python run.py --config BC_S5 --start-date 2025-10-06 --end-date 2025-10-10 \
   --db-user postgres --db-password 123456
 ```
 
-### 5. Export Table Mapping
+### 5. Check Table Mapping and Interfaces
 
-```bash
-python tools/export_mapping.py
-```
-This generates `database_table_mapping.xlsx` showing Excel-to-database table mapping.
+The repository no longer ships a standalone `tools/export_mapping.py` script. For current Excel/config/module-output/database mapping and interface details, use:
+
+- `docs/交接文档/Refactored/函数级接口与文件格式总表.md`
+- `docs/交接文档/Refactored/API.md`
+- `docs/QUICK_REFERENCE.md`
 
 ---
 
@@ -114,9 +125,6 @@ This generates `database_table_mapping.xlsx` showing Excel-to-database table map
 # First run
 python run.py --config config/BC_S5.xlsx --start-date 2025-10-06 --end-date 2025-10-10
 
-# Or use test configuration
-python run.py --config test_files/BC_S5.xlsx --start-date 2025-10-06 --end-date 2025-10-10
-
 # Resume mode
 python run.py --config config/BC_S5.xlsx --end-date 2025-10-15 --resume
 ```
@@ -130,7 +138,7 @@ python run.py --config config/BC_S5.xlsx --end-date 2025-10-15 --resume
 - Best for production and data persistence
 
 ```bash
-python run.py --config config/OC_Paste_S1_20251224 --start-date 2025-12-15 --end-date 2026-02-28 --use-db
+python run.py --config BC_S5 --start-date 2025-10-06 --end-date 2025-10-10 --use-db
 
 # With custom database parameters
 python run.py --config BC_S5 --start-date 2025-10-06 --end-date 2025-10-10 \
@@ -157,20 +165,18 @@ The project follows a standard layered architecture for maintainability and exte
 ### Directory Structure
 
 ```
-chainsight_cpython/
+chainsight/
 ├── run.py                              # 🚀 Main CLI entry point
 ├── run.ps1                             # PowerShell run script
-├── setup.py                            # Cython extension build configuration
 ├── requirements.txt                    # Dependency declaration
 ├── README_CN.md / README_EN.md         # Chinese/English documentation
-├── CYTHON_OPTIMIZATION_REPORT.md       # Cython optimization report
 │
 ├── src/                                # 📦 Core source code package
 │   ├── core/                           #    Orchestration engine
-│   │   ├── main_integration.py         #    Main integration scheduler (daily loop M1→M4→M5→M6→M3)
-│   │   ├── orchestrator.py             #    Unified state management hub
-│   │   ├── parallel_executor.py        #    Parallel execution framework (ThreadPoolExecutor)
-│   │   └── run.py                      #    CLI parser (called by root run.py)
+│   │   ├── main_integration.py /       #    Main integration and run orchestration
+│   │   ├── orchestrator.py /           #    State management hub
+│   │   ├── parallel_executor.py /      #    Parallel execution support
+│   │   └── run.py /                    #    CLI parser
 │   │
 │   ├── modules/                        #    Business module layer
 │   │   ├── module1.py                  #    M1: Demand Planning
@@ -183,11 +189,6 @@ chainsight_cpython/
 │   │   ├── production_planning/        #    M4 submodules (plan_builder, capacity_allocator)
 │   │   ├── deployment_planning/        #    M5 submodules (allocation, inventory, push)
 │   │   └── logistics_execution/        #    M6 submodules (vehicle_packer, delivery)
-│   │
-│   ├── cython_kernels/                 #    Cython performance kernels (compiled to .pyd/.so)
-│   │   ├── production_kernels.pyx      #    Production computation kernels
-│   │   ├── logistics_kernels.pyx       #    Logistics computation kernels
-│   │   └── aggregation_kernels.pyx     #    Aggregation computation kernels
 │   │
 │   ├── utils/                          #    Utility library
 │   │   ├── config_validator.py         #    Configuration validation
@@ -216,59 +217,25 @@ chainsight_cpython/
 │   ├── module_engine.py                #    Module execution engine
 │   ├── module_optimizers.py            #    Module optimizers
 │   ├── incremental_processor.py        #    Incremental processor
-│   ├── test_engine.py                  #    Test engine
-│   ├── test_optimization_validation.py #    Optimization validation tests
 │   └── performance_dashboard.py        #    Performance monitoring dashboard
-│
-├── tools/                              # 🔧 Utility scripts
-│   ├── init_database.py                #    Database initialization
-│   ├── compare_outputs.py              #    Output comparison tool
-│   ├── compare_all_versions.py         #    Version comparison tool
-│   ├── benchmark_duckdb_vs_pandas.py   #    Performance benchmarks
-│   ├── performance_benchmark.py        #    Performance benchmarks
-│   ├── generate_docx_report.py         #    Generate Word reports
-│   ├── generate_report_charts.py       #    Generate report charts
-│   └── migrate_config_tables.py        #    Config table migration tool
-│
-├── tests/                              # 🧪 Test modules
-│   ├── e2e_integration_test.py         #    End-to-end integration test
-│   └── test_logger.py                  #    Logger tests
-│
-├── test_files/                         # 📋 Test data & comparison tools
-│   ├── BC_S5.xlsx                      #    Main test configuration
-│   ├── BC_S9.xlsx                      #    Alternate test configuration
-│   ├── compare_all_outputs.py          #    Output comparison tool (main)
-│   ├── compare_db_vs_local.py          #    Database vs local comparison
-│   ├── compare_db_vs_chainsight_dev.py #    Compare with ChainSight_Dev
-│   ├── compare_dev_refactored.py       #    Dev vs refactored comparison
-│   ├── compare_orchestrator.py         #    Orchestrator state comparison
-│   ├── compare_outputs_detail.py       #    Detailed output comparison
-│   ├── debug_m3_difference.py          #    M3 difference debugging tool
-│   ├── quick_check.py                  #    Quick check tool
-│   ├── test_config_consistency.py      #    Config consistency test
-│   ├── test_duckdb_performance.py      #    DuckDB performance test
-│   ├── TESTING_GUIDE.md                #    Testing guide
-│   ├── DATA_COMPARISON_TOOLS_GUIDE.md  #    Comparison tools guide
-│   ├── Data_Type.md                    #    Type specifications
-│   └── Python_former.md                #    Python coding conventions
 │
 ├── config/                             # ⚙️ Configuration files
 │   ├── BC_S5.xlsx                      #    Test config S5
 │   ├── BC_S9.xlsx                      #    Test config S9
-│   ├── OC_Paste_S1_20251224/           #    Production config OC Paste S1
+│   ├── OC_Paste_S1_20251224.xlsx       #    OC config sample
 │   ├── ChainSight 1st SIT.xlsx         #    SIT sample config
+│   ├── database.json                   #    Database connection config
 │   └── config_guide.xlsx               #    Configuration guide
 │
 ├── docs/                               # 📚 Design documents
-│   ├── ARCHITECTURE.md                 #    Architecture design
-│   ├── MODULE*_DESIGN.md               #    Module design documents (M1, M3, M5)
-│   ├── OPTIMIZATION_*.md               #    Optimization related docs
-│   ├── MIGRATION.md                    #    Migration guide
-│   ├── REFACTORING_*.md                #    Refactoring related docs
-│   ├── PERFORMANCE_*.md                #    Performance optimization reports
-│   ├── DUCKDB_OPTIMIZATION_GUIDE.md    #    DuckDB optimization guide
-│   ├── 算法优化测试报告.md                 #    Algorithm optimization test report
-│   └── 20260127变更版本与修复.md           #    Latest change log
+│   ├── INDEX.md                        #    Documentation index
+│   ├── 用户使用入口说明.md                 #    Operator entry guide
+│   ├── ARCHITECTURE_DIAGRAM.md         #    Architecture diagrams
+│   ├── MODULE3_DESIGN.md               #    M3 design doc
+│   ├── MODULE5_DESIGN.md               #    M5 design doc
+│   ├── QUICK_REFERENCE.md              #    Quick reference
+│   ├── 交接文档/Refactored/            #    Canonical handoff package
+│   └── _archive/                       #    Archived process/stage docs
 │
 ├── ChainSight_Dev/                     # 🔬 Dev version (for comparison & reference)
 │   ├── module*.py                      #    Dev version module implementations
@@ -277,15 +244,9 @@ chainsight_cpython/
 │   ├── BC_S5/                          #    Dev version test outputs
 │   └── *.md                            #    Dev documentation
 │
-├── build/                              # 🏗️ Cython build outputs (auto-generated)
-│   ├── lib.win-amd64-cpython-314/      #    Compiled library files
-│   └── temp.win-amd64-cpython-314/     #    Temporary build files
-│
 └── outputs/                            # 📤 Run outputs (auto-generated, in .gitignore)
-    ├── {config_name}/                  #    Local file mode outputs
-    │   └── run_YYYYMMDD_HHMMSS/        #    Organized by run timestamp
-    └── db_config/                      #    Database mode outputs
-        └── {config_name}_YYYYMMDD_HHMMSS/  #    Organized by config and timestamp
+    └── {config_stem}/                  #    Organized by config name
+        └── run_YYYYMMDD_HHMMSS/        #    Organized by run timestamp
 ```
 
 ### CLI Parameters
@@ -307,7 +268,7 @@ chainsight_cpython/
 
 ---
 
-## � Output Directory Description
+## 📤 Output Directory Description
 
 ### outputs/ Directory Structure
 
@@ -326,31 +287,9 @@ outputs/
 │       ├── summary/                    # Summary reports
 │       ├── performance/                # Performance analysis
 │       └── validation_report.txt       # Data consistency validation
-│
-├── db_BC_S5_YYYYMMDD_HHMMSS/          # Database mode outputs (--use-db flag)
-│   ├── simulation_log_YYYYMMDD_HHMMSS.txt  # Run logs
-│   └── [Other txt log files]
-│
-├── db_duckdb_BC_S5_YYYYMMDD_HHMMSS/  # DuckDB enhanced mode (run_with_duckdb.py)
-│   ├── run_log_*.txt                   # Run logs
-│   └── [Processed data tables]
-│
-├── db_optimized/                       # Optimized simulation outputs (run_optimized_example.py)
-│   ├── cache/                          # Cached data
-│   ├── performance/                    # Performance analysis
-│   └── orchestrator/                   # State outputs
-│
-├── db_optimized_cache/                 # Optimized processing cache (run_optimized.py)
-│   └── [Parquet cache files]
-│
-└── integrated_output/                  # Integrated module outputs (test_write_output.py)
-    ├── module1/
-    ├── module3/
-    ├── module4/
-    ├── module5/
-    ├── module6/
-    └── orchestrator/
 ```
+
+For database-mode output and log conventions, use `docs/交接文档/Refactored/setup.md` as the source of truth.
 
 ---
 
@@ -469,16 +408,11 @@ Config tables use a "same-structure-same-table" rule. All configuration files wi
 
 ## 🧪 Testing
 
-```bash
-# Run all tests
-pytest tests/
+The current repository does not ship a top-level `tests/` automation directory. For validated test and verification artifacts, use:
 
-# Run specific test
-pytest tests/e2e_integration_test.py
-
-# Verbose output
-pytest -v tests/
-```
+- `docs/交接文档/Refactored/BC算法优化测试报告.md`
+- `docs/交接文档/Refactored/OC算法优化测试报告.md`
+- `docs/PERFORMANCE_OPTIMIZATION_REPORT.md`
 
 ---
 
@@ -487,25 +421,30 @@ pytest -v tests/
 Detailed documentation is located in the `docs/` directory:
 
 ### Core Documentation
-- [ARCHITECTURE.md](docs/ARCHITECTURE.md) - Complete architecture design document
+- [INDEX.md](docs/INDEX.md) - Central docs navigation
+- [用户使用入口说明.md](docs/用户使用入口说明.md) - Operator entry guide
+- [项目交接文档.md](docs/交接文档/Refactored/项目交接文档.md) - Handoff overview
+- [ARCHITECTURE.md](docs/交接文档/Refactored/ARCHITECTURE.md) - Complete architecture design document
 - [ARCHITECTURE_DIAGRAM.md](docs/ARCHITECTURE_DIAGRAM.md) - Architecture visualization diagrams
 - [QUICK_REFERENCE.md](docs/QUICK_REFERENCE.md) - Quick reference guide (command cheat sheet)
 
 ### Module Design
-- [MODULE1_DESIGN.md](docs/MODULE1_DESIGN.md) - M1: Demand Planning module design
 - [MODULE3_DESIGN.md](docs/MODULE3_DESIGN.md) - M3: MRP Planning module design
 - [MODULE5_DESIGN.md](docs/MODULE5_DESIGN.md) - M5: Deployment Planning module design
+- [module.md](docs/交接文档/Refactored/module.md) - Module handoff overview
 
 ### Optimization Documentation
-- [OPTIMIZATION_SUMMARY.md](docs/OPTIMIZATION_SUMMARY.md) - Optimization summary
 - [DUCKDB_OPTIMIZATION_GUIDE.md](docs/DUCKDB_OPTIMIZATION_GUIDE.md) - DuckDB optimization guide
-- [CYTHON_OPTIMIZATION_REPORT.md](CYTHON_OPTIMIZATION_REPORT.md) - Cython optimization report
-- [算法优化测试报告.md](docs/算法优化测试报告.md) - Algorithm optimization test report
+- [CYTHON_OPTIMIZATION_REPORT.md](docs/CYTHON_OPTIMIZATION_REPORT.md) - Cython optimization report
+- [PERFORMANCE_OPTIMIZATION_REPORT.md](docs/PERFORMANCE_OPTIMIZATION_REPORT.md) - Performance optimization report
+- [BC算法优化测试报告.md](docs/交接文档/Refactored/BC算法优化测试报告.md) - BC scenario optimization test report
+- [OC算法优化测试报告.md](docs/交接文档/Refactored/OC算法优化测试报告.md) - OC scenario optimization test report
 
 ### Other Documentation
 - [MIGRATION.md](docs/MIGRATION.md) - Version migration guide
-- [REFACTORING_SUMMARY.md](docs/REFACTORING_SUMMARY.md) - Refactoring summary
+- [README_REFACTORING_MAP.md](docs/README_REFACTORING_MAP.md) - Refactoring map and code locator
 - [20260127变更版本与修复.md](docs/20260127变更版本与修复.md) - Latest change log
+- Historical process/stage documents are archived under `docs/_archive/`
 
 ---
 
@@ -555,15 +494,14 @@ python -c "from pgsql_db import DatabaseConnection; db = DatabaseConnection(); p
 ## 🗂️ Project Maintenance
 
 ### Directory Cleanliness
-- ✅ Root directory contains only essential files (run.py, README.md, requirements.txt, etc.)
+- ✅ Root directory keeps essential entry files (run.py, README_CN.md, README_EN.md, requirements.txt, etc.)
 - ✅ Temporary documents moved to docs/ or deleted
-- ✅ Tool scripts organized in tools/
 - ✅ Sample configs archived in config/
 - ✅ Run outputs auto-stored in outputs/ (local and database modes unified)
 
 ### Code Style
-- Follow [test_files/Python_former.md](test_files/Python_former.md) coding standards
-- Type specifications in [test_files/Data_Type.md](test_files/Data_Type.md)
+- Comment and maintenance rules: [中文注释规范与维护约定.md](docs/交接文档/Refactored/中文注释规范与维护约定.md)
+- Module/file lookup: [README_REFACTORING_MAP.md](docs/README_REFACTORING_MAP.md)
 
 ---
 

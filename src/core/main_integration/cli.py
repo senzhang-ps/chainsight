@@ -1,0 +1,125 @@
+"""
+cli.py
+
+命令行接口入口点模块。
+"""
+
+import sys
+import os
+import argparse
+import io
+
+# Windows UTF-8 编码设置 - 解决emoji和中文输出问题
+if sys.platform == 'win32':
+    # 设置stdout/stderr为UTF-8编码
+    if hasattr(sys.stdout, 'buffer'):
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    if hasattr(sys.stderr, 'buffer'):
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+
+from .simulation_file import run_integrated_simulation
+from .resume import check_resume_capability
+
+
+def main():
+    """主函数 - 命令行入口执行集成仿真
+
+    目的：
+    - 解析命令行参数，进行存在性检查与默认值处理，支持仅检查断点续跑状态或执行完整仿真。
+
+    输入/输出/逻辑：
+    - 解析参数→检查配置文件→构造默认输出目录→可选断点续跑检查→调用 `run_integrated_simulation` 并打印结果或错误。
+    """
+    # 配置文件路径（可以通过命令行参数或环境变量指定）
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="运行供应链集成仿真")
+    parser.add_argument("--config", "-c", 
+                       default="./config/integration_config.json",
+                       help="配置文件路径 (默认: ./config/integration_config.json)")
+    parser.add_argument("--start-date", "-s", 
+                       default="2024-01-01",
+                       help="仿真开始日期 (默认: 2024-01-01)")
+    parser.add_argument("--end-date", "-e", 
+                       default="2024-01-05",
+                       help="仿真结束日期 (默认: 2024-01-05)")
+    parser.add_argument("--output", "-o", 
+                       default=None,
+                       help="输出目录 (默认: 根据配置文件名生成)")
+    parser.add_argument("--force-restart", 
+                       action="store_true",
+                       help="强制从头开始，忽略断点续跑状态 (默认: False)")
+    parser.add_argument("--check-resume", 
+                       action="store_true",
+                       help="仅检查断点续跑状态，不执行仿真 (默认: False)")
+    
+    args = parser.parse_args()
+    
+    # 检查配置文件是否存在
+    if not os.path.exists(args.config):
+        print(f"❌ 配置文件不存在: {args.config}")
+        print("请提供有效的配置文件路径，或使用测试脚本生成配置")
+        sys.exit(1)
+    
+    # 如果没有指定输出目录，根据配置文件名生成
+    if args.output is None:
+        config_name = os.path.splitext(os.path.basename(args.config))[0]
+        args.output = f"./{config_name}_output"
+        print(f"💫 使用默认输出目录: {args.output}")
+    
+    # 处理断点续跑检查选项
+    if args.check_resume:
+        print(f"🔍 检查断点续跑状态...")
+        resume_info = check_resume_capability(args.output, args.start_date, args.end_date)
+        
+        print(f"\n📊 断点续跑状态报告:")
+        print(f"  输出目录: {args.output}")
+        print(f"  原始日期范围: {args.start_date} 到 {args.end_date}")
+        
+        if resume_info.get('already_completed', False):
+            print(f"  ✅ 仿真已完成！")
+            print(f"     最后处理日期: {resume_info['last_complete_date']}")
+            print(f"     总处理天数: {resume_info['days_completed']}")
+        elif resume_info['can_resume']:
+            print(f"  🔄 可以断点续跑！")
+            print(f"     已完成: {resume_info['days_completed']} 天 (到 {resume_info['last_complete_date']})")
+            print(f"     剩余: {resume_info['days_remaining']} 天 (从 {resume_info['resume_from_date']} 开始)")
+        else:
+            print(f"  📝 无法断点续跑，需要从头开始")
+            print(f"     需要处理: {resume_info['days_remaining']} 天")
+        
+        return  # 仅检查，不执行
+    
+    # 处理强制重启选项
+    if args.force_restart:
+        print(f"🔄 强制重启模式：将从头开始，忽略任何现有状态")
+        # 通过参数透传给仿真入口，显式要求忽略已有断点续跑状态
+    
+    try:
+        # 向仿真入口透传 force_restart 参数
+        result = run_integrated_simulation(
+            config_path=args.config,
+            start_date=args.start_date,
+            end_date=args.end_date,
+            output_base_dir=args.output,
+            force_restart=args.force_restart
+        )
+        
+        print(f"\n✅ 仿真结果:")
+        if result.get('is_resuming', False):
+            print(f"  断点续跑模式: 是")
+            print(f"  本次处理天数: {result.get('dates_processed_this_run', 0)}")
+            print(f"  总处理天数: {result.get('total_dates_processed', 0)}")
+        else:
+            print(f"  全新运行: 是")  
+            print(f"  处理天数: {result.get('dates_processed_this_run', 0)}")
+        print(f"  输出目录: {result.get('output_directory', 'Unknown')}")
+        
+        if result.get('already_completed', False):
+            print(f"  📝 注意: 仿真之前已完成，无需处理")
+        
+    except Exception as e:
+        print(f"❌ 集成仿真失败: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)

@@ -7,12 +7,7 @@ from .logger_config import setup_logging
 from .validation_manager import ValidationManager
 from .inventory_balance_checker import InventoryBalanceChecker
 from .time_manager import SimulationTimeManager, initialize_time_manager
-from .simulation_cache import (
-    SimulationCache,
-    initialize_simulation_cache,
-    get_simulation_cache,
-    clear_simulation_cache,
-)
+from .normalization import normalize_location, normalize_material, normalize_identifiers
 
 __all__ = [
     'run_pre_simulation_validation',
@@ -21,8 +16,7 @@ __all__ = [
     'InventoryBalanceChecker',
     'SimulationTimeManager',
     'initialize_time_manager',
-    'SimulationCache',
-    'initialize_simulation_cache',
-    'get_simulation_cache',
-    'clear_simulation_cache',
+    'normalize_location',
+    'normalize_material',
+    'normalize_identifiers',
 ]

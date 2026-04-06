@@ -17,12 +17,14 @@ ChainSight 的业务计算主链包含 M1、M3、M4、M5、M6 五个公开模块
 
 | 模块 | 公开入口 | 核心职责 |
 |---|---|---|
-| M1 | `module1.run_daily_order_generation` | 需求展开、订单生成、发货与缺货 |
+| M1 | `demand_planning.run_daily_order_generation` | 需求展开、订单生成、发货与缺货 |
 | M2（内嵌） | `apply_dps` / `apply_supply_choice` | 供给策略和地点拆分 |
-| M3 | `module3.run_integrated_mode` | 净需求与分层 MRP 计算 |
-| M4 | `module4.run_daily_production_planning` | 生产计划与产能/换型约束 |
-| M5 | `module5.main` | 多层级调拨规划 |
-| M6 | `module6.run_daily_physical_flow` | 物流装载、发运与到货 |
+| M3 | `mrp_planning.run_integrated_mode` | 净需求与分层 MRP 计算 |
+| M4 | `production_planning.run_daily_production_planning` | 生产计划与产能/换型约束 |
+| M5 | `deployment_planning.main` | 多层级调拨规划 |
+| M6 | `logistics_execution.run_daily_physical_flow` | 物流装载、发运与到货 |
+
+> **v2.0 变更**：原有的 `module1`~`module6` 别名仍可使用（通过 `src/modules/__init__.py` 向后兼容），但推荐在新代码中使用子包名称。
 
 ---
 

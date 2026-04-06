@@ -6,6 +6,8 @@
 - 性能优化参数：并行计算开关与并发度
 - 业务参数：最大AO提前天数
 - 日志参数：错误日志路径
+
+共享参数从 config.yaml 读取。
 """
 
 import os
@@ -13,19 +15,25 @@ from typing import Optional
 
 # 导入统一的 CPU 配置
 from src.utils.cpu_config import MAX_WORKERS
+from src.config import get_module_config
+
+
+def _module():
+    return get_module_config('demand_planning')
+
 
 # ----------- 性能优化参数 -----------
 
-# 最大AO提前天数（从配置中动态获取，此为后备值）
-DEFAULT_MAX_ADVANCE_DAYS: int = 10
+# 最大AO提前天数（从配置读取）
+DEFAULT_MAX_ADVANCE_DAYS: int = _module().get('max_advance_days', 10)
 
-# 并行计算开关（默认关闭以确保与旧版输出一致）
-DEFAULT_USE_PARALLEL_AO_CONSUME: bool = True
-DEFAULT_USE_PARALLEL_FILE_LOAD: bool = True
+# 并行计算开关
+DEFAULT_USE_PARALLEL_AO_CONSUME: bool = _module().get('use_parallel_ao_consume', True)
+DEFAULT_USE_PARALLEL_FILE_LOAD: bool = _module().get('use_parallel_file_load', True)
 DEFAULT_USE_PARALLEL_NORMAL_CONSUME: Optional[bool] = None
 
 # 使用优化版消耗（向量化+字典索引）
-DEFAULT_USE_OPTIMIZED_CONSUME: bool = True
+DEFAULT_USE_OPTIMIZED_CONSUME: bool = _module().get('use_optimized_consume', True)
 
 # 并发工作进程/线程数（动态配置：使用 90% CPU 核心）
 DEFAULT_PARALLEL_MAX_WORKERS: int = MAX_WORKERS

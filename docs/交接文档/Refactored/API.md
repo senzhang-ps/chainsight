@@ -23,8 +23,8 @@ ChainSight 本地版 API 采用“编排层 API + 业务模块 API + 工具层 A
 
 | 分类 | 主要文件 | 核心能力 |
 |---|---|---|
-| Core 编排 API | `src/core/main_integration.py`、`src/core/orchestrator.py` | 运行仿真、维护全局状态、断点续跑 |
-| 业务模块 API | `src/modules/module1.py` ~ `module6.py` | 需求、MRP、生产、调拨、物流算法 |
+| Core 编排 API | `src/core/main_integration/`、`src/core/orchestrator/` | 运行仿真、维护全局状态、断点续跑 |
+| 业务模块 API | `src/modules/demand_planning/` ~ `logistics_execution/` | 需求、MRP、生产、调拨、物流算法 |
 | 工具与服务 API | `src/utils/*`、`src/services/*` | DuckDB加速、内存数据、校验、性能分析、日志 |
 
 ### 1.2 调用流程图
@@ -226,7 +226,7 @@ class ParallelExecutor:
 
 ### 3.1 Module1（需求与订单）
 
-**文件**：`src/modules/module1.py`（兼容层） + `src/modules/demand_planning/*`
+**文件**：`src/modules/demand_planning/`
 
 #### API-1 `run_daily_order_generation()`
 
@@ -283,7 +283,7 @@ def simulate_shipment_for_single_day(
 
 ### 3.2 Module3（MRP）
 
-**文件**：`src/modules/module3.py`（兼容层） + `src/modules/mrp_planning/*`
+**文件**：`src/modules/mrp_planning/`
 
 #### API-1 `run_integrated_mode()`
 
@@ -349,7 +349,7 @@ def determine_lead_time(
 
 ### 3.3 Module4（生产计划）
 
-**文件**：`src/modules/module4.py`（兼容层） + `src/modules/production_planning/*`
+**文件**：`src/modules/production_planning/`
 
 #### API-1 `run_daily_production_planning()`
 
@@ -404,7 +404,7 @@ def centralized_capacity_allocation_with_changeover(
 
 ### 3.4 Module5（调拨规划）
 
-**文件**：`src/modules/module5.py`（兼容层） + `src/modules/deployment_planning/*`
+**文件**：`src/modules/deployment_planning/`
 
 #### API-1 `main()`
 
@@ -477,7 +477,7 @@ def push_softpush_allocation(
 
 ### 3.5 Module6（物流执行）
 
-**文件**：`src/modules/module6.py` + `src/modules/logistics_execution/*`
+**文件**：`src/modules/logistics_execution/`
 
 #### API-1 `run_daily_physical_flow()`
 
@@ -679,7 +679,7 @@ class SimulationResult(TypedDict, total=False):
 
 | 维度 | 兼容情况 | 说明 |
 |---|---|---|
-| 模块入口文件 | 高 | `module1.py`~`module6.py` 作为兼容层保留对外接口 |
+| 模块入口文件 | 高 | v2.0 已删除 module*.py 兼容层，统一通过 `__init__.py` 别名 (`module1 = demand_planning` 等) 保留向后兼容 |
 | 执行语义 | 高 | 仍按 M1->M4->M5->M6->M3 顺序执行 |
 | 输出形态 | 中高 | 本地模式保持 Excel/CSV 产出，内部可切换内存路径 |
 | 参数命名 | 中高 | 大部分关键参数兼容，新增了 `skip_file_output` 等增强参数 |
@@ -688,7 +688,7 @@ class SimulationResult(TypedDict, total=False):
 
 1. **入口迁移**：将旧入口改为 `run_integrated_simulation()`；
 2. **编排迁移**：统一使用 `Orchestrator` 作为状态读写中心；
-3. **模块迁移**：优先通过 `src/modules/moduleX.py` 访问 API，不直接依赖子包内部私有函数；
+3. **模块迁移**：优先通过 `src/modules/<module_name>/` 子包公开 API 访问，不直接依赖内部私有函数；
 4. **性能迁移**：逐步启用 DuckDB 与缓存，不建议一次性替换全部路径；
 5. **回归验证**：对关键报表（订单、生产、调拨、物流）做逐日对比。
 
@@ -1335,7 +1335,7 @@ print(cnt)
 | API 类别 | 本地版实现 | 数据库版实现 |
 |---|---|---|
 | Core 编排 API | `run_integrated_simulation()`、`Orchestrator` | `run_integrated_simulation_from_dict()`、`DatabaseInitializer` |
-| 业务模块 API | `module1.py`~`module6.py` | 保持兼容，通过 `ModuleDataWriter` 落库 |
+| 业务模块 API | `demand_planning/` ~ `logistics_execution/` 子包 | 保持兼容，通过 `ModuleDataWriter` 落库 |
 | 工具层 API | `DuckDBAccelerator`、`MemoryDataStore`、`PerformanceProfiler` | `DuckDBProcessor`、`OptimizedDataProcessor`、`PerformanceDashboard` |
 | 数据操作 API | pandas DataFrame 操作 | `DatabaseConnection`、`execute_query()`、`create_table_from_df()` |
 

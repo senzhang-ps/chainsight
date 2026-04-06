@@ -23,8 +23,11 @@ from .constants import (
     EXCEED_COLUMNS,
     VALIDATION_COLUMNS,
     CHANGEOVER_LOG_COLUMNS,
+    UNCONSTRAINED_PLAN_COLUMNS,
+    REQUIRED_CONFIG_SHEETS,
+    SHEET_KEY_MAPPING,
 )
-from .types import LineState, ChangeoverInfo, PlanRecord, ExceedRecord
+from .types import LineState, ChangeoverInfo, PlanRecord, ExceedRecord, ValidationIssue
 from .utils import (
     normalize_location,
     cast_identifiers_to_str,
@@ -32,6 +35,9 @@ from .utils import (
     compute_planning_window,
     is_review_day,
     dedup_issues,
+    round_up_to_batch,
+    safe_float_conversion,
+    ensure_dataframe_columns,
 )
 from .state_manager import (
     get_or_init_simulation_start,
@@ -57,7 +63,7 @@ from .capacity_allocator import (
     _analyze_end_of_day_changeover,
 )
 from .output_writer import write_output, generate_consolidated_output
-from .main import run_daily_production_planning, main
+from .main import run_daily_production_planning, main, DailyProductionPlanner
 
 __all__ = [
     # 常量
@@ -67,18 +73,26 @@ __all__ = [
     'EXCEED_COLUMNS',
     'VALIDATION_COLUMNS',
     'CHANGEOVER_LOG_COLUMNS',
+    'UNCONSTRAINED_PLAN_COLUMNS',
+    'REQUIRED_CONFIG_SHEETS',
+    'SHEET_KEY_MAPPING',
     # 类型
     'LineState',
     'ChangeoverInfo',
     'PlanRecord',
     'ExceedRecord',
+    'ValidationIssue',
     # 工具函数
     'normalize_location',
     'cast_identifiers_to_str',
+    '_cast_identifiers_to_str',
     'validate_merge_keys',
     'compute_planning_window',
     'is_review_day',
     'dedup_issues',
+    'round_up_to_batch',
+    'safe_float_conversion',
+    'ensure_dataframe_columns',
     # 状态管理
     'get_or_init_simulation_start',
     'save_line_state',
@@ -107,4 +121,10 @@ __all__ = [
     # 主入口
     'run_daily_production_planning',
     'main',
+    'DailyProductionPlanner',
+    '_analyze_end_of_day_changeover',
 ]
+
+# 向后兼容别名
+analyze_end_of_day_changeover_state = _analyze_end_of_day_changeover
+_cast_identifiers_to_str = cast_identifiers_to_str

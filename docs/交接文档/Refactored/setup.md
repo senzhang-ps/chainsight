@@ -57,12 +57,14 @@ pip install -r requirements.txt
 |---|---|---|
 | `pandas` | 3.0.1 | 数据处理 |
 | `numpy` | 2.4.2 | 数值计算 |
+| `pyyaml` | >= 6.0 | YAML 配置文件加载（v2.0 新增，`src/config` 依赖） |
 | `duckdb` | 1.4.4 | 向量化与高速查询 |
 | `openpyxl` | 3.1.5 | 读取 Excel 配置 |
 | `xlsxwriter` | 3.2.9 | 输出 Excel 报告 |
 | `psycopg` / `psycopg-binary` | 3.3.3 | PostgreSQL 连接 |
 | `scipy` | 1.17.1 | 统计与分布计算 |
 | `matplotlib` | 3.10.8 | 图表生成 |
+| `tqdm` | >= 4.0 | 进度条显示 |
 
 ### 2.4 安装验证
 

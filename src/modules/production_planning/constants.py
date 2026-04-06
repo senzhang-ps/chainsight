@@ -2,9 +2,17 @@
 常量定义模块
 
 定义Module4中使用的所有常量，包括列名、默认值等。
+
+共享参数从 config.yaml 读取。
 """
 
 from typing import List
+from src.config import get_module_config
+
+
+def _module():
+    return get_module_config('production_planning')
+
 
 # 标识符列名列表
 IDENTIFIER_COLS: List[str] = [
@@ -16,8 +24,8 @@ IDENTIFIER_COLS: List[str] = [
     'to_material',
 ]
 
-# 默认换产时间（小时）
-DEFAULT_CHANGEOVER_TIME: float = 24.0
+# 默认换产时间（从配置读取）
+DEFAULT_CHANGEOVER_TIME: float = _module().get('changeover_time_default', 24.0)
 
 # 生产计划表列名
 PLAN_COLUMNS: List[str] = [

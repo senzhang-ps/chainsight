@@ -17,6 +17,13 @@ from .constants import (
     COL_MATERIAL,
 )
 
+# 标识符规范化 — 统一使用共享实现
+from src.utils.normalization import (
+    normalize_location,
+    normalize_material,
+    normalize_identifiers,
+)
+
 
 def apply_moq_rv(
     qty: float,
@@ -51,84 +58,6 @@ def apply_moq_rv(
     if qty < moq:
         return moq
     return int(np.ceil(qty / rv)) * rv
-
-
-def normalize_location(location_str: Union[str, int, float, None]) -> str:
-    """
-    将地点标识符规范化为4位前导零字符串。
-
-    参数：
-        location_str: 地点标识符
-
-    返回：
-        str: 规范化后的地点字符串
-    """
-    if location_str is None or pd.isna(location_str):
-        return ""
-    try:
-        return str(int(location_str)).zfill(4)
-    except (ValueError, TypeError):
-        return str(location_str).zfill(4)
-
-
-def normalize_material(material_str: Union[str, int, float, None]) -> str:
-    """
-    将物料标识符规范化为字符串。
-
-    作用：统一 material 字段格式，与code_v0保持一致。
-    注意：直接转换为字符串，不做额外处理，以确保与code_v0输出一致。
-
-    参数：
-        material_str: 物料标识符
-
-    返回：
-        str: 规范化后的物料字符串
-    """
-    if material_str is None or pd.isna(material_str):
-        return ""
-    return str(material_str)
-
-
-def normalize_identifiers(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    规范化DataFrame中的标识符列。
-    
-    使用向量化操作提升性能。
-
-    参数：
-        df: 需要规范化的DataFrame
-
-    返回：
-        pd.DataFrame: 规范化后的DataFrame副本
-    """
-    if df.empty:
-        return df
-
-    df = df.copy()
-    
-    # 向量化处理 material 列
-    if COL_MATERIAL in df.columns:
-        df[COL_MATERIAL] = df[COL_MATERIAL].astype(str)
-        df[COL_MATERIAL] = df[COL_MATERIAL].replace(['nan', 'None', '<NA>', 'NaN'], '')
-        # 移除数字的 .0 后缀
-        df[COL_MATERIAL] = df[COL_MATERIAL].str.replace(r'\.0$', '', regex=True)
-    
-    # 向量化处理 location 类列
-    for col in LOCATION_TYPE_COLUMNS:
-        if col in df.columns:
-            df[col] = df[col].astype(str).str.strip()
-            df[col] = df[col].replace(['nan', 'None', '<NA>', 'NaN'], '')
-            # 识别纯数字的行并补齐4位
-            is_numeric = df[col].str.match(r'^\d+$', na=False)
-            df.loc[is_numeric, col] = df.loc[is_numeric, col].str.zfill(4)
-    
-    # 其他标识符列
-    other_cols = [c for c in IDENTIFIER_COLUMNS if c not in LOCATION_TYPE_COLUMNS and c != COL_MATERIAL]
-    for col in other_cols:
-        if col in df.columns:
-            df[col] = df[col].fillna('').astype(str)
-
-    return df
 
 
 def lookup_moq_rv_three_keys(

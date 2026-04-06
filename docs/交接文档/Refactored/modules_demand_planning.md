@@ -4,8 +4,8 @@
 
 | 项 | 内容 |
 |---|---|
-| 文档版本 | v1.0 |
-| 最后更新 | 2026-03-05 |
+| 文档版本 | v2.0 |
+| 最后更新 | 2026-04-06 |
 | 适用范围 | `src/modules/demand_planning/` 目录 |
 | 目标读者 | 算法工程师、测试工程师、业务分析师 |
 
@@ -53,7 +53,7 @@
 | `order.py` | `generate_daily_orders()` | 每日订单生成 |
 | `consume.py` | 消耗计算 |
 | `dps.py` | DPS 与供给选择应用 |
-| `normalization.py` | 标识符标准化 |
+| `normalization.py` | 标识符标准化 (v2.0: re-export from `src/utils/normalization.py`) |
 | `io_utils.py` | 输入输出工具函数 |
 | `constants.py` | 常量定义 |
 | `consume_optimized.py` | 优化版消耗计算 |
@@ -289,12 +289,12 @@ shipment_df, cut_df, updated_inv = simulate_shipment_for_single_day(
 
 ### 3.6 normalization.py 标准化模块
 
-**主要函数**:
+> **v2.0 变更**：此文件现为薄代理（re-export），实际实现已统一至 `src/utils/normalization.py`（SSOT）。
+
+**主要函数**（均从 `src/utils/normalization.py` re-export）:
 - `normalize_identifiers()`: DataFrame 级标识符标准化
 - `normalize_material()`: 物料编码标准化（去小数）
 - `normalize_location()`: 地点编号标准化（补零）
-- `normalize_sending()`: 发送地标准化
-- `normalize_receiving()`: 接收地标准化
 
 **标准化规则**:
 
@@ -323,9 +323,11 @@ shipment_df, cut_df, updated_inv = simulate_shipment_for_single_day(
 
 ### 3.9 constants.py 常量定义
 
+> **v2.0 变更**：常量现通过 `src/config/` YAML 配置系统加载，使用 `get_module_config('demand_planning')` 读取模块专属配置。
+
 **常量**:
 ```python
-DEFAULT_MAX_ADVANCE_DAYS = 14  # 默认最大提前天数
+DEFAULT_MAX_ADVANCE_DAYS = _module().get('max_advance_days', 14)  # 从 YAML 配置读取
 ```
 
 ---
@@ -334,7 +336,7 @@ DEFAULT_MAX_ADVANCE_DAYS = 14  # 默认最大提前天数
 
 ### 4.1 标识符标准化
 
-所有标识符标准化函数统一在 `normalization.py` 中定义。
+所有标识符标准化函数的唯一实现在 `src/utils/normalization.py` 中，本模块的 `normalization.py` 为 re-export 代理。
 
 ### 4.2 日期处理
 

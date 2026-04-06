@@ -1,7 +1,7 @@
 """
-module4_runner.py
+production_planning_runner.py
 
-Module4 集成运行函数模块。
+生产计划（M4）集成运行函数模块。
 """
 
 import pandas as pd
@@ -9,7 +9,7 @@ import os
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from ...modules import module4
+from ...modules import production_planning as module4
 from .normalize import _normalize_material
 
 

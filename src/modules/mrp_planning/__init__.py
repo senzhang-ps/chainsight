@@ -72,24 +72,7 @@ __all__ = [
     'run_integrated_mode',
 ]
 
-__all__ = [
-    # 常量
-    'DEFAULT_MOQ',
-    'DEFAULT_RV',
-    'DEFAULT_HORIZON',
-    # 工具函数
-    'apply_moq_rv',
-    'normalize_location',
-    'normalize_material',
-    'normalize_identifiers',
-    'apportion_largest_remainder',
-    # 配置加载
-    'load_config',
-    'load_module1_daily_outputs',
-    'load_excel_with_sheets',
-    # 核心功能
-    'calculate_daily_net_demand',
-    'run_mrp_layered_simulation_daily',
-    'assign_location_layers',
-    'run_integrated_mode',
-]
+# 向后兼容别名
+_normalize_location = normalize_location
+_normalize_material = normalize_material
+_normalize_identifiers = normalize_identifiers

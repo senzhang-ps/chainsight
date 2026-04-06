@@ -4,20 +4,28 @@
 
 定义Module 5使用的各类常量，包括默认配置值、列名、优先级等。
 
-优化历史:
-- v3.0: 添加 USE_VECTORIZED_DEMAND_COLLECTION 开关
-- v3.1: 添加 USE_DUCKDB_ACCELERATION 开关，提升并行度
+共享参数从 config.yaml 读取。
 """
 from typing import List
 
 # 使用统一的 CPU 配置
 from src.utils.cpu_config import CPU_COUNT, MAX_WORKERS
+from src.config import get_module_config, get_shared_config
+
+
+def _shared():
+    return get_shared_config()
+
+
+def _module():
+    return get_module_config('deployment_planning')
+
 
 # 性能优化开关
 USE_VECTORIZED_DEMAND_COLLECTION: bool = False  # 暂时关闭，需要修复horizon计算问题
 USE_MULTIPROCESS_DEMAND_COLLECTION: bool = False  # 暂时关闭，pickle问题
 USE_HORIZON_CACHE: bool = True  # 启用horizon预计算缓存优化
-USE_DUCKDB_ACCELERATION: bool = True  # 启用DuckDB加速
+USE_DUCKDB_ACCELERATION: bool = _module().get('use_duckdb_acceleration', True)
 
 # 并行工作线程数 - 使用统一的90%配置
 DEFAULT_MAX_WORKERS: int = MAX_WORKERS
@@ -31,19 +39,19 @@ DEFAULT_AO_PRIORITY: int = 1
 DEFAULT_NORMAL_PRIORITY: int = 2
 DEFAULT_OTHER_PRIORITY: int = 9
 
-# 默认MOQ/RV值
-DEFAULT_MOQ: int = 1
-DEFAULT_RV: int = 1
+# 默认MOQ/RV值（从共享配置读取）
+DEFAULT_MOQ: int = _shared().get('default_moq', 1)
+DEFAULT_RV: int = _shared().get('default_rv', 1)
 
-# 默认PTF/LSK值
-DEFAULT_PTF: int = 0
-DEFAULT_LSK: int = 1
+# 默认PTF/LSK值（从共享配置读取）
+DEFAULT_PTF: int = _shared().get('default_ptf', 0)
+DEFAULT_LSK: int = _shared().get('default_lsk', 1)
 
-# 默认lead time
-DEFAULT_LEAD_TIME: int = 1
+# 默认lead time（从模块配置读取）
+DEFAULT_LEAD_TIME: int = _module().get('default_lead_time', 1)
 
-# 默认push levels
-DEFAULT_PUSH_LEVELS: List[float] = [1.2, 1.5, 2.0, 2.5, 3.0]
+# 默认push levels（从模块配置读取）
+DEFAULT_PUSH_LEVELS: List[float] = _module().get('push_levels', [1.2, 1.5, 2.0, 2.5, 3.0])
 
 # 标识符列名
 IDENTIFIER_COLUMNS: List[str] = [

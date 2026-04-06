@@ -41,6 +41,11 @@ from .vehicle_packer import (
     create_load_record,
     calculate_load_ratios
 )
+from .main import (
+    run_daily_physical_flow,
+    run_physical_flow_module,
+    main,
+)
 
 __all__ = [
     'SafeExpressionEvaluator',
@@ -60,4 +65,7 @@ __all__ = [
     'VehiclePacker',
     'create_load_record',
     'calculate_load_ratios',
+    'run_daily_physical_flow',
+    'run_physical_flow_module',
+    'main',
 ]

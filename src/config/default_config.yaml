@@ -1,0 +1,62 @@
+# ChainSight 仿真系统默认配置
+# 使用环境变量 CHAINSIGHT_CONFIG 指定自定义配置文件覆盖此默认值
+
+simulation:
+  random_seed: null
+  max_wait_days: 30
+
+# 跨模块共享参数
+shared:
+  default_moq: 1
+  default_rv: 1
+  default_ptf: 0
+  default_lsk: 1
+  identifier_columns:
+    - material
+    - location
+    - sending
+    - receiving
+    - sourcing
+
+# Module1: 需求规划
+demand_planning:
+  max_advance_days: 10
+  use_parallel_ao_consume: true
+  use_parallel_file_load: true
+  use_optimized_consume: true
+  use_parallel_normal_consume: null
+
+# Module3: MRP 计划
+mrp_planning:
+  default_horizon: 1
+  use_duckdb_batch: true
+  batch_threshold: 50
+
+# Module4: 生产计划
+production_planning:
+  changeover_time_default: 24.0
+
+# Module5: 部署规划
+deployment_planning:
+  push_levels:
+    - 1.2
+    - 1.5
+    - 2.0
+    - 2.5
+    - 3.0
+  default_lead_time: 1
+  use_duckdb_acceleration: true
+  use_vectorized_demand_collection: false
+  use_multiprocess_demand_collection: false
+  use_horizon_cache: true
+
+# Module6: 物流执行
+logistics_execution:
+  allowed_expression_vars:
+    - waiting_days
+    - deployed_qty_ratio
+    - exception_MDQ
+    - sending
+    - receiving
+    - truck_type
+    - demand_element

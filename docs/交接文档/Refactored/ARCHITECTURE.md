@@ -4,8 +4,8 @@
 
 | 项 | 内容 |
 |---|---|
-| 文档版本 | v3.1 (合并版) |
-| 最后更新 | 2026-03-05 |
+| 文档版本 | v4.0 (合并版) |
+| 最后更新 | 2026-04-06 |
 | 适用代码库 | `src/`（本地版）+ `pgsql_db/`（数据库版） |
 | 目标读者 | 架构师、后端开发、DBA、算法工程师、测试工程师、交付团队 |
 | 关联文档 | `docs/00_文档编写指南和计划.md`、`README_CN.md` |
@@ -46,11 +46,12 @@ flowchart TB
 
 | 层级 | 代表组件 | 核心职责 | 关键非功能特性 |
 |---|---|---|---|
-| CLI 层 | `src/core/run.py` | 参数解析、模式选择、入口调用 | 低耦合、无业务逻辑 |
-| Core 层 | `main_integration.py`、`orchestrator.py`、`parallel_executor.py` | 日度主循环、跨模块编排、全局状态维护 | 可恢复、可追踪、可重放 |
-| Modules 层 | `src/modules/*` + 五大子包 | 需求/生产/MRP/调拨/物流等业务算法 | 可替换、可扩展、可独立测试 |
+| CLI 层 | `src/core/run/` | 参数解析、模式选择、入口调用 | 低耦合、无业务逻辑 |
+| Core 层 | `src/core/main_integration/`、`src/core/orchestrator/` | 日度主循环、跨模块编排、全局状态维护 | 可恢复、可追踪、可重放 |
+| Config 层 | `src/config/` (loader.py + default_config.yaml) | 集中化配置管理，YAML 加载与环境变量覆盖 | 单一配置源、可扩展 |
+| Modules 层 | `src/modules/` 五大子包（demand_planning, mrp_planning, production_planning, deployment_planning, logistics_execution） | 需求/生产/MRP/调拨/物流等业务算法 | 可替换、可扩展、可独立测试 |
 | Services 层 | `performance_profiler.py`、`summary_report_generator.py`、`logger_config.py` | 诊断、报告、日志治理 | 透明观测、标准输出 |
-| Utils 层 | `memory_data_store.py`、`duckdb_accelerator.py`、`simulation_cache.py` 等 | 性能加速、校验、缓存、时间管理 | 高吞吐、低延迟、线程安全 |
+| Utils 层 | `normalization.py`、`date_helpers.py`、`memory_data_store.py`、`duckdb_accelerator.py` 等 | 标识符规范化、日期处理、性能加速、校验、时间管理 | 高吞吐、低延迟、线程安全 |
 | Storage 层 | Excel 文件、内存字典/列表、DuckDB 内存库 | 配置输入、状态快照、过程与结果持久化 | 可审计、可恢复、格式兼容 |
 
 ### 1.3 架构设计原则
@@ -61,11 +62,489 @@ flowchart TB
 4. **性能优先但不破坏可读性**：优先使用向量化、DuckDB、缓存；保留可解释执行轨迹。
 5. **本地模式可迁移**：设计上保留与数据库版对齐的数据边界和接口语义。
 
+### 1.4 程序设计流程图
+
+#### 1.4.1 程序总体执行流程
+
+```mermaid
+flowchart TD
+    START([用户启动 run.py]) --> PARSE[解析命令行参数<br/>--config / --start-date / --end-date<br/>--use-db / --resume / --force-restart]
+
+    PARSE --> MODE{运行模式?}
+
+    MODE -->|--use-db| DB_INIT[数据库初始化<br/>DatabaseInitializer.initialize]
+    MODE -->|本地文件| LOCAL_LOAD[加载 Excel 配置<br/>load_configuration]
+
+    DB_INIT --> DB_IMPORT[导入配置到 cfg_* 表<br/>_load_config_from_database]
+    DB_IMPORT --> DB_SIM[run_integrated_simulation_from_dict]
+    DB_SIM --> VALIDATION
+
+    LOCAL_LOAD --> CHECK_LIST{--list-runs?}
+    CHECK_LIST -->|是| LIST_RUNS[显示历史运行目录] --> END_EXIT([退出])
+    CHECK_LIST -->|否| VALIDATION
+
+    VALIDATION[预仿真配置校验<br/>run_pre_simulation_validation] --> VALID{校验通过?}
+    VALID -->|否| FAIL([退出: 校验失败])
+    VALID -->|是| RESUME_CHECK
+
+    RESUME_CHECK{检查续跑能力<br/>check_resume_capability} -->|已完成| DONE([退出: 仿真已完成])
+    RESUME_CHECK -->|可续跑| RESTORE[恢复历史状态<br/>restore_orchestrator_state] --> INIT_ORCH
+    RESUME_CHECK -->|不可续跑/强制重启| INIT_NEW[新建 Orchestrator<br/>初始化库存状态] --> INIT_ORCH
+
+    INIT_ORCH[初始化 Orchestrator<br/>+ 时间管理器 + 随机种子] --> DAY_LOOP
+
+    DAY_LOOP[/按日仿真循环<br/>for date in sim_dates/]
+
+    DAY_LOOP --> DAY_START[每日开始处理]
+    DAY_START --> SAVE_BOI[Step 0: 保存期初库存快照]
+    SAVE_BOI --> CLEANUP[超期 OpenDeployment 清理]
+    CLEANUP --> DELIVERY_GR[Step 1: 处理当日 Delivery GR 到货入库<br/>in-transit → inventory]
+    DELIVERY_GR --> PROD_GR[Step 2: 处理历史生产当日入库<br/>production backlog → inventory]
+
+    PROD_GR --> RUN_M1
+
+    subgraph MODULES [每日模块执行序列]
+        direction TB
+        RUN_M1[1️⃣ M1 demand_planning<br/>run_daily_order_generation<br/>订单生成 + 发货模拟]
+        RUN_M1 -->|shipment_df| M1_WRITE[回写 Orchestrator<br/>process_module1_shipments<br/>扣减发货库存]
+
+        M1_WRITE --> RUN_M4[2️⃣ M4 production_planning<br/>run_module4_integrated<br/>净需求→无约束计划→产能约束→生产]
+        RUN_M4 -->|production_df| M4_WRITE[回写 Orchestrator<br/>process_module4_production<br/>持久化未来生产计划]
+
+        M4_WRITE --> RUN_M5[3️⃣ M5 deployment_planning<br/>main<br/>多层级调拨规划]
+        RUN_M5 -->|deployment_plan| M5_WRITE[回写 Orchestrator<br/>process_module5_deployment<br/>更新 open deployment]
+
+        M5_WRITE --> RUN_M6[4️⃣ M6 logistics_execution<br/>run_daily_physical_flow<br/>两轮装载 + 发运]
+        RUN_M6 -->|delivery_plan| M6_WRITE[回写 Orchestrator<br/>process_module6_delivery<br/>扣库存 + 更新在途]
+
+        M6_WRITE --> RUN_M3[5️⃣ M3 mrp_planning<br/>run_integrated_mode<br/>净需求 + 层级传播]
+    end
+
+    RUN_M3 --> DAY_END[每日结束处理]
+    DAY_END --> SAVE_EOI[保存期末库存快照]
+    SAVE_EOI --> SAVE_STATE[保存 Orchestrator 每日状态<br/>save_daily_state → CSV 快照]
+    SAVE_STATE --> NEXT_DAY{还有下一天?}
+    NEXT_DAY -->|是| DAY_LOOP
+    NEXT_DAY -->|否| FINAL
+
+    FINAL[最终处理] --> BALANCE[库存平衡校验<br/>InventoryBalanceChecker]
+    BALANCE --> SUMMARY[生成汇总报告<br/>SummaryReportGenerator]
+    SUMMARY --> DB_WRITE{数据库模式?}
+    DB_WRITE -->|是| WRITE_DB[写入 module*_output_* 表<br/>+ orchestrator_* 表<br/>+ summary_output_* 表]
+    DB_WRITE -->|否| END_OK
+    WRITE_DB --> END_OK([仿真完成])
+```
+
+#### 1.4.2 M6 物流执行内部流程（v2.0 拆分后）
+
+```mermaid
+flowchart TD
+    ENTRY([run_daily_physical_flow]) --> INIT[initializer.py<br/>initialize_run_params<br/>合并配置默认值]
+
+    INIT --> MODE_CHECK{集成/独立模式?}
+    MODE_CHECK -->|integrated| INT_PARAM[_init_integrated_params<br/>从 shared_state 提取<br/>部署计划 + 库存状态]
+    MODE_CHECK -->|standalone| STD_PARAM[_init_standalone_params<br/>从文件读取输入数据]
+
+    INT_PARAM --> PREPARE
+    STD_PARAM --> PREPARE
+
+    PREPARE[data_preparer.py<br/>prepare_data] --> VALIDATE[验证输入数据完整性]
+    VALIDATE --> DEDUP[_handle_uid_duplicates<br/>UID 去重]
+    DEDUP --> BUILD_MAP[构建查找映射<br/>priority_map / material_map<br/>spec_map / route_config]
+
+    BUILD_MAP --> SIM_LOOP[/simulation_engine.py<br/>run_simulation_loop<br/>按日期迭代/]
+
+    SIM_LOOP --> INIT_AGG[_init_aggregation_status<br/>初始化每个 UID 聚合状态]
+    INIT_AGG --> DAILY[_process_daily_demands<br/>收集当日 pending 需求]
+
+    DAILY --> ROUTES[route_processor.py<br/>process_routes<br/>按路线遍历]
+
+    ROUTES --> SINGLE[_process_single_route<br/>遍历可用车型]
+
+    SINGLE --> TRUCK[_process_truck_type<br/>核心两轮装载]
+
+    subgraph LOADING [两轮装载机制]
+        direction TB
+        FIRST[第一轮 _first_pass_loading<br/>按优先级装载<br/>不超容量上限]
+        FIRST --> TRIGGER{触发条件?}
+        TRIGGER -->|WFR 超阈值| SECOND[第二轮 _second_pass_loading<br/>补充装载至满载]
+        TRIGGER -->|VFR 超阈值| SECOND
+        TRIGGER -->|MDQ bypass 命中| SECOND
+        TRIGGER -->|等待超 max_wait_days| SECOND
+        TRIGGER -->|未触发| SKIP[跳过第二轮]
+    end
+
+    TRUCK --> LOADING
+
+    SECOND --> SHIP[_generate_shipment_records<br/>生成发运记录<br/>计算到货日期<br/>更新 agg_status]
+    SKIP --> REMAINING
+
+    SHIP --> REMAINING[_handle_remaining_demands<br/>超期需求 → unsat_log]
+
+    REMAINING --> NEXT_ROUTE{还有下一条路线?}
+    NEXT_ROUTE -->|是| ROUTES
+    NEXT_ROUTE -->|否| NEXT_SIM_DAY{还有下一个仿真日?}
+    NEXT_SIM_DAY -->|是| DAILY
+    NEXT_SIM_DAY -->|否| OUTPUT
+
+    OUTPUT[output_builder.py<br/>generate_outputs] --> BUILD_DF[构建 6 个 DataFrame]
+
+    subgraph OUTPUTS [6 个输出 Sheet]
+        DP[DeliveryPlan<br/>交付计划]
+        VL[VehicleLog<br/>车辆日志]
+        TU[TruckUsageLog<br/>使用统计]
+        UM[UnsatisfiedMDQLog<br/>未满足需求]
+        VA[ValidationLog<br/>约束验证]
+        BY[BypassRuleHitLog<br/>MDQ bypass 命中]
+    end
+
+    BUILD_DF --> OUTPUTS
+    OUTPUTS --> WRITE[_write_excel_output<br/>写入 Excel 文件]
+    WRITE --> RETURN([返回结果字典])
+```
+
+#### 1.4.3 Orchestrator 状态管理流程
+
+```mermaid
+flowchart LR
+    subgraph STATE [Orchestrator 全局状态 - 单一事实源 SSOT]
+        INV[unrestricted_inventory<br/>非限制库存]
+        OD[open_deployment<br/>开放调拨]
+        IT[planning_intransit<br/>计划在途]
+        PGR[production_gr<br/>生产入库]
+        DGR[delivery_gr<br/>交付入库]
+        SL[shipment_log<br/>发货日志]
+        SQ[space_quota<br/>接收空间配额]
+    end
+
+    M1_IN([M1 发货]) -->|扣减库存| INV
+    M4_IN([M4 生产]) -->|未来计划持久化| PGR
+    M5_IN([M5 调拨]) -->|新增 open deployment| OD
+    M6_IN([M6 发运]) -->|扣发送库存<br/>关闭 open deployment<br/>新增 in-transit| INV & OD & IT
+    GR_IN([每日 GR 入库]) -->|in-transit 到货<br/>production 入库| INV & DGR
+
+    INV -->|读取可用库存| M1_OUT([M1 发货模拟])
+    INV -->|读取可用库存| M5_OUT([M5 库存分配])
+    OD -->|读取未执行调拨| M6_OUT([M6 待发运需求])
+    IT -->|读取在途供给| M3_OUT([M3 净需求计算])
+
+    STATE -->|save_daily_state| CSV[(每日 CSV 快照<br/>支持续跑恢复)]
+```
+
+#### 1.4.4 配置加载与参数传递流程
+
+```mermaid
+flowchart TD
+    EXCEL[Excel 配置文件<br/>config/*.xlsx] -->|load_configuration| CONFIG_DICT[config_dict<br/>全局配置字典]
+
+    YAML[src/config/default_config.yaml<br/>集中化默认参数] -->|get_config| CONFIG_OBJ[配置对象<br/>shared / module 分段]
+
+    ENV[环境变量<br/>CHAINSIGHT_CONFIG] -->|覆盖| YAML
+
+    CONFIG_OBJ -->|_shared / _module| CONST[各模块 constants.py<br/>DEFAULT_MOQ / DEFAULT_RV<br/>DEFAULT_PTF / DEFAULT_LSK<br/>DEFAULT_CHANGEOVER_TIME<br/>DEFAULT_LEAD_TIME ...]
+
+    CONFIG_DICT -->|传入各模块| M1[M1 demand_planning]
+    CONFIG_DICT --> M3[M3 mrp_planning]
+    CONFIG_DICT --> M4[M4 production_planning]
+    CONFIG_DICT --> M5[M5 deployment_planning]
+    CONFIG_DICT --> M6[M6 logistics_execution]
+
+    CONST -->|模块内部读取| M1 & M3 & M4 & M5 & M6
+```
+
+### 1.5 模块级时序图
+
+> 来源：原独立文档 `模块级时序图文档.md`，v2.0 合并入本文档。
+
+#### 1.5.1 每日总时序
+
+```mermaid
+sequenceDiagram
+    participant CLI as run.py / core.run
+    participant MAIN as main_integration
+    participant ORC as Orchestrator
+    participant M1 as Module1
+    participant M4 as Module4
+    participant M5 as Module5
+    participant M6 as Module6
+    participant M3 as Module3
+    participant SUM as Summary/Checker
+
+    CLI->>MAIN: 解析参数, 加载配置, 决定本次 run
+    MAIN->>ORC: 初始化或恢复状态
+
+    loop 每个 simulation_date
+        MAIN->>ORC: save_beginning_inventory(date)
+        MAIN->>ORC: cleanup_past_due_open_deployments(date)
+        MAIN->>ORC: _process_delivery_arrivals(date)
+        MAIN->>ORC: load_current_date_production_gr(...)
+
+        MAIN->>M1: run_daily_order_generation(...)
+        M1-->>MAIN: orders/shipment/cut/supply_demand
+        MAIN->>ORC: process_module1_shipments(shipment_df)
+
+        MAIN->>M4: run_module4_integrated(...)
+        M4-->>MAIN: production/exceed/validation/changeover
+        MAIN->>ORC: process_module4_production(production_df)
+
+        MAIN->>M5: module5.main(...)
+        M5-->>MAIN: deployment/unfulfilled/soh/validation
+        MAIN->>ORC: process_module5_deployment(deployment_plan)
+
+        MAIN->>M6: run_daily_physical_flow(...)
+        M6-->>MAIN: delivery/vehicle/truck_usage/unsatisfied/validation/bypass
+        MAIN->>ORC: process_module6_delivery(delivery_plan)
+
+        MAIN->>M3: run_integrated_mode(...)
+        M3-->>MAIN: net_demand
+
+        MAIN->>ORC: save_ending_inventory(date)
+        MAIN->>ORC: save_daily_state(date)
+    end
+
+    MAIN->>SUM: InventoryBalanceChecker
+    MAIN->>SUM: SummaryReportGenerator
+```
+
+**一句话理解每天在干什么：** 日初先把"之前已经在路上、今天该到的货"入库 → M1 看客户侧决定订单和发货 → M4 看生产排产 → M5 看网络调拨 → M6 把调拨变成实际发运 → M3 反推全网还缺什么。
+
+#### 1.5.2 日初状态处理时序
+
+```mermaid
+sequenceDiagram
+    participant MAIN as main_integration
+    participant ORC as Orchestrator
+    participant INV as Inventory Snapshots
+    participant TRANSIT as InTransit
+    participant OPEN as OpenDeployment
+
+    MAIN->>ORC: save_beginning_inventory(date)
+    ORC->>INV: 保存期初库存快照
+
+    MAIN->>ORC: cleanup_past_due_open_deployments(date)
+    ORC->>OPEN: 清理超期开放调拨
+    ORC->>OPEN: 输出 cleanup 审计文件
+
+    MAIN->>ORC: _process_delivery_arrivals(date)
+    ORC->>TRANSIT: 找到今天到达的在途记录
+    ORC->>INV: 增加 receiving 库存
+    ORC->>ORC: 追加 delivery_gr
+    ORC->>TRANSIT: 删除已完成在途
+```
+
+#### 1.5.3 M1 内部时序
+
+```mermaid
+sequenceDiagram
+    participant MAIN as main_integration
+    participant M1 as run_daily_order_generation
+    participant FC as forecast/order/consume
+    participant SHIP as shipment
+    participant ORC as Orchestrator
+    participant XLSX as module1_output_YYYYMMDD.xlsx
+
+    MAIN->>M1: run_daily_order_generation(config, date, output_dir, orchestrator)
+    M1->>FC: 校验配置
+    M1->>FC: prepare_daily_forecasts()
+    M1->>FC: generate_daily_orders()
+    M1->>FC: consume_orders_vectorized()
+    M1->>ORC: get_current_unrestricted_inventory()
+    M1->>SHIP: simulate_shipment_for_single_day()
+    M1->>M1: generate_supply_demand_log_for_integration()
+    M1->>XLSX: 保存 OrderLog/ShipmentLog/CutLog/SupplyDemandLog/Summary
+    M1-->>MAIN: orders_df/shipment_df/cut_df/supply_demand_df
+    MAIN->>ORC: process_module1_shipments(shipment_df)
+```
+
+#### 1.5.4 M4 内部时序
+
+```mermaid
+sequenceDiagram
+    participant MAIN as main_integration
+    participant M4 as run_module4_integrated
+    participant M4MAIN as DailyProductionPlanner
+    participant M3OUT as Module3Output_(prev day)
+    participant STATE as M4 state_manager
+    participant ORC as Orchestrator
+    participant XLSX as Module4Output_YYYYMMDD.xlsx
+
+    MAIN->>M4: run_module4_integrated(...)
+    M4->>M4MAIN: run()
+    M4MAIN->>M3OUT: load_daily_net_demand()
+    M4MAIN->>STATE: get_or_init_simulation_start()
+    M4MAIN->>STATE: load_line_state()
+    M4MAIN->>STATE: load_all_previous_capacity()
+    M4MAIN->>M4MAIN: build_unconstrained_plan_for_single_day()
+    M4MAIN->>M4MAIN: centralized_capacity_allocation_with_changeover()
+    M4MAIN->>M4MAIN: simulate_production()
+    M4MAIN->>M4MAIN: calculate_changeover_metrics()
+    M4MAIN->>STATE: save_line_state()
+    M4MAIN->>STATE: save_allocated_capacity()
+    M4MAIN->>XLSX: 保存 ProductionPlan/CapacityExceed/Validation/ChangeoverLog
+    M4-->>MAIN: production_df/exceed_log/issues_df/changeover_log
+    MAIN->>ORC: process_module4_production(production_df)
+```
+
+#### 1.5.5 M5 内部时序
+
+```mermaid
+sequenceDiagram
+    participant MAIN as main_integration
+    participant M5 as module5.main
+    participant LOADER as load_integrated_config
+    participant ORC as Orchestrator
+    participant ALLOC as allocation/pipeline/push
+    participant XLSX as Module5Output_YYYYMMDD.xlsx
+
+    MAIN->>M5: module5.main(...)
+    M5->>LOADER: 装配 M1/M4/Orchestrator/Config 输入
+    M5->>M5: validate_config_before_run()
+    M5->>M5: build caches/indexes
+    M5->>M5: _initialize_soh_dict()
+
+    loop 每个 layer
+        M5->>M5: _process_layer_demands()
+        M5->>ALLOC: apply_grouped_moq_rv()
+        M5->>ALLOC: apply_priority_allocation_vectorized()
+        M5->>ALLOC: _allocate_pipeline_sources()
+        M5->>ALLOC: _process_gaps_and_create_plans()
+    end
+
+    M5->>ALLOC: push_softpush_allocation()
+    M5->>M5: _update_soh_dict()
+    M5->>ALLOC: apply_receiving_space_quota()
+    M5->>M5: _validate_deployment_shipment_constraint()
+    M5->>XLSX: 保存 DeploymentPlan/UnfulfilledLog/StockOnHandLog/Validation
+    M5-->>MAIN: deployment_plan/unfulfilled_log/stock_on_hand_log/validation_log
+    MAIN->>ORC: process_module5_deployment(deployment_plan)
+```
+
+#### 1.5.6 M6 内部时序
+
+```mermaid
+sequenceDiagram
+    participant MAIN as main_integration
+    participant M6 as run_daily_physical_flow
+    participant PREP as _prepare_data
+    participant ORC as Orchestrator
+    participant PACK as VehiclePacker
+    participant XLSX as Module6Output_YYYYMMDD.xlsx
+
+    MAIN->>M6: run_daily_physical_flow(config, orchestrator, date)
+    M6->>PREP: load_integrated_config()
+    M6->>PREP: validate + deduplicate + build maps
+    M6->>M6: _prepare_deployment_plan()
+    M6->>M6: _handle_uid_duplicates()
+    M6->>ORC: calculate_physical_inventory()
+
+    loop 每个 sim_date
+        M6->>M6: _collect_pending_demands()
+        M6->>M6: _process_routes()
+        loop 每条 route
+            M6->>M6: _process_single_route()
+            loop 每种 truck_type
+                M6->>PACK: _first_pass_loading()
+                M6->>M6: should_bypass_mdq() / determine_trigger_cause()
+                alt 触发发车
+                    M6->>PACK: _second_pass_loading()
+                    M6->>M6: _generate_shipment_records()
+                else 不触发
+                    M6->>M6: break
+                end
+            end
+            M6->>M6: _handle_remaining_demands()
+        end
+    end
+
+    M6->>M6: _validate_shipment_delivery_constraint()
+    M6->>XLSX: 保存 DeliveryPlan/VehicleLog/TruckUsageLog/UnsatisfiedMDQLog/ValidationLog/BypassRuleHitLog
+    M6-->>MAIN: delivery_plan/vehicle_log/truck_usage/unsatisfied_log/validation_log/bypass_log
+    MAIN->>ORC: process_module6_delivery(delivery_plan)
+```
+
+#### 1.5.7 M3 内部时序
+
+```mermaid
+sequenceDiagram
+    participant MAIN as main_integration
+    participant M3 as run_integrated_mode
+    participant M1OUT as Module1 output / memory
+    participant ORC as Orchestrator
+    participant SIM as run_mrp_layered_simulation_daily
+    participant XLSX as Module3Output_YYYYMMDD.xlsx
+
+    MAIN->>M3: run_integrated_mode(...)
+    M3->>M3: _load_static_configs()
+    M3->>M1OUT: _load_module1_data()
+    M3->>ORC: _load_orchestrator_data()
+    M3->>SIM: run_mrp_layered_simulation_daily()
+    SIM->>SIM: assign_location_layers()
+    SIM->>SIM: create_simulation_indexer()
+    loop layer 0 -> max
+        SIM->>SIM: _process_layer()
+        alt 节点多
+            SIM->>SIM: DuckDB 批量计算
+        else 节点少
+            SIM->>SIM: NodeProcessor 并行处理
+        end
+    end
+    M3->>XLSX: 保存 NetDemand
+    M3-->>MAIN: net_demand_df
+```
+
+#### 1.5.8 日末状态保存时序
+
+```mermaid
+sequenceDiagram
+    participant MAIN as main_integration
+    participant ORC as Orchestrator
+    participant CSV as orchestrator/*.csv
+    participant BAL as InventoryBalanceChecker
+    participant SUM as SummaryReportGenerator
+
+    MAIN->>ORC: save_ending_inventory(date)
+    MAIN->>ORC: save_daily_state(date)
+    ORC->>CSV: 输出 inventory/open_deployment/intransit/GR/logs/change_log
+    MAIN->>BAL: 校验库存平衡
+    MAIN->>SUM: 生成汇总报表
+```
+
+#### 1.5.9 DB 模式端到端时序
+
+```mermaid
+sequenceDiagram
+    participant CLI as run.py / core.run
+    participant DBINIT as DatabaseInitializer
+    participant DB as PostgreSQL
+    participant MAIN as run_integrated_simulation_from_dict
+    participant WRITER as ModuleDataWriter
+
+    CLI->>DBINIT: _run_with_database(...)
+    DBINIT->>DB: 检查数据库是否存在
+    DBINIT->>DB: 检查 cfg_* 表是否存在
+    alt 配置缺失
+        DBINIT->>DB: 从 Excel 导入 cfg_* 表
+    end
+
+    CLI->>DB: _load_config_from_database(config_name)
+    DB-->>CLI: config_dict
+    CLI->>MAIN: run_integrated_simulation_from_dict(config_dict)
+    MAIN-->>CLI: all_results + orchestrator output dir
+    CLI->>WRITER: write_module_results_from_dict(all_results, run_id)
+    WRITER->>DB: 写 module*_output_* 表
+    CLI->>WRITER: write_orchestrator_data(orchestrator_dir, run_id)
+    WRITER->>DB: 写 orchestrator_* 表
+    CLI->>WRITER: generate_summary_reports_from_db(run_id)
+    WRITER->>DB: 写 summary_output_* 表
+```
+
 ---
 
 ## 2. 第1层：Core 核心编排层
 
-Core 层是本地版架构的控制中枢，核心文件为 `src/core/main_integration.py`、`src/core/orchestrator.py`、`src/core/parallel_executor.py`。
+Core 层是本地版架构的控制中枢，核心包为 `src/core/main_integration/`、`src/core/orchestrator/`、`src/core/run/`。
+
+> **v2.0 变更**：原有的单体文件 `main_integration.py`（2610 行）、`orchestrator.py`（1512 行）、`parallel_executor.py`（338 行）、`run.py`（1406 行）已删除。对应功能已分散到各自的子包中。
 
 ### 2.1 `main_integration.py`：主流程编排
 
@@ -594,12 +1073,13 @@ def run_daily_new_module(
 
 | 层级 | 文件 |
 |---|---|
-| Core | `src/core/main_integration.py` |
-| Core | `src/core/orchestrator.py` |
-| Core | `src/core/parallel_executor.py` |
-| Modules | `src/modules/module1.py`、`src/modules/module3.py`、`src/modules/module4.py`、`src/modules/module5.py`、`src/modules/module6.py` |
+| Core | `src/core/main_integration/` (simulation_file.py, simulation_db.py, production_planning_runner.py, normalize.py, config_loader.py, resume.py, cli.py) |
+| Core | `src/core/orchestrator/` (orchestrator_main.py, daily_ops.py, processors.py, persistence.py, models.py, views.py, normalize.py) |
+| Core | `src/core/run/` (run_main.py, db_runner.py, local_writer.py, output_dir.py) |
+| Config | `src/config/` (__init__.py, loader.py, default_config.yaml) |
+| Modules | `src/modules/demand_planning/`、`src/modules/mrp_planning/`、`src/modules/production_planning/`、`src/modules/deployment_planning/`、`src/modules/logistics_execution/` |
 | Services | `src/services/performance_profiler.py`、`src/services/summary_report_generator.py` |
-| Utils | `src/utils/memory_data_store.py`、`src/utils/duckdb_accelerator.py`、`src/utils/simulation_cache.py`、`src/utils/config_validator.py`、`src/utils/time_manager.py` |
+| Utils | `src/utils/normalization.py`、`src/utils/date_helpers.py`、`src/utils/memory_data_store.py`、`src/utils/duckdb_accelerator.py`、`src/utils/config_validator.py`、`src/utils/time_manager.py` |
 
 ## 附录 B：术语
 
@@ -1094,12 +1574,13 @@ flowchart LR
 
 | 层级 | 文件 |
 |---|---|
-| Core | `src/core/main_integration.py` |
-| Core | `src/core/orchestrator.py` |
-| Core | `src/core/parallel_executor.py` |
-| Modules | `src/modules/module1.py`、`src/modules/module3.py`、`src/modules/module4.py`、`src/modules/module5.py`、`src/modules/module6.py` |
+| Core | `src/core/main_integration/` (simulation_file.py, simulation_db.py, production_planning_runner.py, normalize.py, config_loader.py, resume.py, cli.py) |
+| Core | `src/core/orchestrator/` (orchestrator_main.py, daily_ops.py, processors.py, persistence.py, models.py, views.py, normalize.py) |
+| Core | `src/core/run/` (run_main.py, db_runner.py, local_writer.py, output_dir.py) |
+| Config | `src/config/` (__init__.py, loader.py, default_config.yaml) |
+| Modules | `src/modules/demand_planning/`、`src/modules/mrp_planning/`、`src/modules/production_planning/`、`src/modules/deployment_planning/`、`src/modules/logistics_execution/` |
 | Services | `src/services/performance_profiler.py`、`src/services/summary_report_generator.py` |
-| Utils | `src/utils/memory_data_store.py`、`src/utils/duckdb_accelerator.py`、`src/utils/simulation_cache.py`、`src/utils/config_validator.py`、`src/utils/time_manager.py` |
+| Utils | `src/utils/normalization.py`、`src/utils/date_helpers.py`、`src/utils/memory_data_store.py`、`src/utils/duckdb_accelerator.py`、`src/utils/config_validator.py`、`src/utils/time_manager.py` |
 
 ### 数据库版文件索引
 

@@ -6,6 +6,7 @@
 - 为本地输出、人工排查与回归对比提供标准执行入口。
 """
 
+import logging
 import pandas as pd
 import time
 from datetime import datetime
@@ -20,12 +21,18 @@ from ...utils.config_validator import run_pre_simulation_validation
 from ...utils.inventory_balance_checker import InventoryBalanceChecker
 from ...services.summary_report_generator import SummaryReportGenerator
 from ...services.performance_profiler import PerformanceProfiler
-from ...modules import module1, module3, module4, module5, module6
+from ...modules import (
+    demand_planning as module1,
+    mrp_planning as module3,
+    production_planning as module4,
+    deployment_planning as module5,
+    logistics_execution as module6,
+)
 
 from .normalize import _normalize_identifiers
 from .resume import check_resume_capability, restore_orchestrator_state
 from .seed import set_module_seeds
-from .module4_runner import run_module4_integrated, load_current_date_production_gr
+from .production_planning_runner import run_module4_integrated, load_current_date_production_gr
 from .config_loader import load_configuration
 
 

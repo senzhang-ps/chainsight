@@ -6,26 +6,38 @@ Module3 常量定义。
 优化历史:
 - v1.0: 基础常量定义
 - v2.0: 添加批量处理配置开关
+- v3.0: 共享参数从 config.yaml 读取
 """
+
+from src.config import get_module_config, get_shared_config
+
+
+def _shared():
+    return get_shared_config()
+
+
+def _module():
+    return get_module_config('mrp_planning')
+
 
 # ============================================================================
 # 性能优化开关
 # ============================================================================
 
 # 启用 DuckDB 批量计算（当层内节点数 > 阈值时使用批量处理）
-USE_DUCKDB_BATCH_CALCULATION: bool = True  # Re-enabled with detailed tracing
+USE_DUCKDB_BATCH_CALCULATION: bool = _module().get('use_duckdb_batch', True)
 
 # 批量计算阈值（层内节点数超过此值时使用批量处理）
-BATCH_CALCULATION_THRESHOLD: int = 50
+BATCH_CALCULATION_THRESHOLD: int = _module().get('batch_threshold', 50)
 
-# MOQ / RV 默认值
-DEFAULT_MOQ = 1
-DEFAULT_RV = 1
+# MOQ / RV 默认值（从共享配置读取）
+DEFAULT_MOQ = _shared().get('default_moq', 1)
+DEFAULT_RV = _shared().get('default_rv', 1)
 
-# 时间窗口默认值
-DEFAULT_HORIZON = 1
-DEFAULT_PTF = 0
-DEFAULT_LSK = 1
+# 时间窗口默认值（从共享配置读取）
+DEFAULT_HORIZON = _module().get('default_horizon', 1)
+DEFAULT_PTF = _shared().get('default_ptf', 0)
+DEFAULT_LSK = _shared().get('default_lsk', 1)
 
 # DataFrame 列名常量
 COL_MATERIAL = 'material'

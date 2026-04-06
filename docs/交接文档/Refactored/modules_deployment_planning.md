@@ -4,8 +4,8 @@
 
 | 项 | 内容 |
 |---|---|
-| 文档版本 | v1.0 |
-| 最后更新 | 2026-03-05 |
+| 文档版本 | v2.0 |
+| 最后更新 | 2026-04-06 |
 | 适用范围 | `src/modules/deployment_planning/` 目录 |
 | 目标读者 | 算法工程师、测试工程师、业务分析师 |
 
@@ -78,16 +78,16 @@
 
 ### 2.4 constants.py - 常量定义
 
+> **v2.0 变更**：常量现通过 `src/config/` YAML 配置系统加载，使用 `get_shared_config()` 和 `get_module_config('deployment_planning')` 读取配置。
+
 **常量**:
 ```python
+# 通过 YAML 配置加载
+DEFAULT_LEAD_TIME = _shared().get('default_lead_time', 1)
 # 优先级常量
 PRIORITY_HIGH = 1
 PRIORITY_MEDIUM = 2
 PRIORITY_LOW = 3
-
-# 调拨模式
-MODE_PUSH = "push"
-MODE_PULL = "pull"
 ```
 
 ### 2.5 data_loader.py - 数据加载
@@ -206,9 +206,12 @@ result = main(
 
 ### 2.14 normalizer.py - 标准化
 
-**主要函数**:
-- 标识符标准化
-- 数据格式转换
+> **v2.0 变更**：此文件现为薄代理（re-export），实际实现已统一至 `src/utils/normalization.py`（SSOT）。
+
+**主要函数**（均从 `src/utils/normalization.py` re-export）:
+- `normalize_location()`: 地点编号标准化
+- `normalize_material()`: 物料编码标准化
+- `normalize_identifiers()`: DataFrame 批量标准化
 
 ---
 
@@ -273,8 +276,7 @@ flowchart TB
 - 依赖 configuration 模块
 
 **依赖的外部模块**:
-- `src/core/orchestrator.py` - 库存状态管理
-- `src/core/parallel_executor.py` - 并行执行（可选）
+- `src/core/orchestrator/` - 库存状态管理（v2.0 已重构为子包）
 
 ---
 

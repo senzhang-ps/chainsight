@@ -11,32 +11,8 @@ from typing import List, Tuple, Optional, Any
 
 from .constants import IDENTIFIER_COLS
 
-
-def normalize_location(location_str: str) -> str:
-    """标准化地点字符串。
-
-    将纯数字地点左补零至4位，非数字地点保持原样。
-
-    参数：
-        location_str: 地点字符串（如 "386"/"0386"/"A888"）
-
-    返回：
-        str: 标准化后的地点字符串
-
-    示例：
-        >>> normalize_location("386")
-        '0386'
-        >>> normalize_location("A888")
-        'A888'
-    """
-    if pd.isna(location_str) or location_str is None:
-        return ""
-
-    location_str = str(location_str).strip()
-
-    if location_str.isdigit():
-        return str(int(location_str)).zfill(4)
-    return location_str
+# 标识符规范化 — 统一使用共享实现
+from src.utils.normalization import normalize_location
 
 
 def cast_identifiers_to_str(

@@ -13,6 +13,12 @@ normalize.py
 
 import pandas as pd
 
+from src.utils.normalization_common import (
+    normalize_identifiers_scalar,
+    normalize_location_preserve_non_numeric,
+    normalize_material_numeric_token_cleanup,
+)
+
 
 def _normalize_location(location_str) -> str:
     """规范化库位标识符
@@ -25,20 +31,7 @@ def _normalize_location(location_str) -> str:
     入参：`location_str` 任意类型标识符
     出参：规范化后的字符串库位标识符
     """
-    if pd.isna(location_str) or location_str is None:
-        return ""
-    
-    location_str = str(location_str).strip()
-    
-    try:
-        # 判断是否为纯数字字符串
-        if location_str.isdigit():
-            return str(int(location_str)).zfill(4)
-        else:
-            # 非数字库位（如 A888），原样返回，不补零
-            return location_str
-    except (ValueError, TypeError):
-        return str(location_str)
+    return normalize_location_preserve_non_numeric(location_str)
 
 
 def _normalize_material(material_str) -> str:
@@ -53,21 +46,7 @@ def _normalize_material(material_str) -> str:
     入参：`material_str` 任意类型标识符
     出参：规范化后的字符串物料编码
     """
-    if material_str is None or material_str == '' or str(
-        material_str).lower() in ['nan', 'none', '<na>']:
-        return ""
-
-    try:
-        # 若为数值类型（int 或 float），转为整数字符串以移除 .0 后缀
-        if isinstance(material_str, (int, float)) or str(
-            material_str).replace('.', '').replace('-', '').isdigit():
-            return str(int(float(material_str)))
-        else:
-            # 非数字物料编码，原样转字符串返回
-            return str(material_str).strip()
-    except (ValueError, TypeError):
-        # 转换失败时，原样转字符串返回
-        return str(material_str).strip()
+    return normalize_material_numeric_token_cleanup(material_str)
 
 
 def _normalize_sending(sending_str) -> str:
@@ -81,20 +60,7 @@ def _normalize_sending(sending_str) -> str:
     入参：`sending_str`
     出参：规范化后的字符串
     """
-    if pd.isna(sending_str) or sending_str is None:
-        return ""
-    
-    sending_str = str(sending_str).strip()
-    
-    try:
-        # 判断是否为纯数字字符串
-        if sending_str.isdigit():
-            return str(int(sending_str)).zfill(4)
-        else:
-            # 非数字发货库位（如 A888），原样返回，不补零
-            return sending_str
-    except (ValueError, TypeError):
-        return str(sending_str)
+    return normalize_location_preserve_non_numeric(sending_str)
 
 
 def _normalize_receiving(receiving_str) -> str:
@@ -104,20 +70,7 @@ def _normalize_receiving(receiving_str) -> str:
     入参：`receiving_str`
     出参：规范化后的字符串
     """
-    if pd.isna(receiving_str) or receiving_str is None:
-        return ""
-    
-    receiving_str = str(receiving_str).strip()
-    
-    try:
-        # 判断是否为纯数字字符串
-        if receiving_str.isdigit():
-            return str(int(receiving_str)).zfill(4)
-        else:
-            # 非数字收货库位（如 A888），原样返回，不补零
-            return receiving_str
-    except (ValueError, TypeError):
-        return str(receiving_str)
+    return normalize_location_preserve_non_numeric(receiving_str)
 
 
 def _normalize_identifiers(df: pd.DataFrame) -> pd.DataFrame:
@@ -144,39 +97,23 @@ def _normalize_identifiers(df: pd.DataFrame) -> pd.DataFrame:
           因此前置为空值的内容在该路径下会先转为字符串，再交由列级规则处理。
         - 空表直接原样返回。
     """
-    if df.empty:
-        return df
-    
-    # 定义需要字符串转换的标识符列
-    identifier_cols = [
-        'material', 'location', 'sending', 'receiving', 'sourcing',
-        'dps_location', 'from_material', 'to_material', 'line',
-        'delegate_line', 'changeover_id'
-    ]
-    
-    df = df.copy()
-    for col in identifier_cols:
-        if col in df.columns:
-            # 关键修复：使用 object dtype（Python str）而非 pandas StringDtype，
-            # 确保与后续 astype(str) 的一致性
-            df[col] = df[col].astype(str)
-            # 对库位类字段执行专项规范化
-            if col in ['location', 'dps_location']:
-                df[col] = df[col].apply(_normalize_location)
-            elif col == 'sending':
-                df[col] = df[col].apply(_normalize_sending)
-            elif col == 'receiving':
-                df[col] = df[col].apply(_normalize_receiving)
-            # 对物料类字段执行专项规范化
-            elif col in ['material', 'from_material', 'to_material']:
-                df[col] = df[col].apply(_normalize_material)
-            # changeover_id 和 line 仅需字符串转换，无需特殊格式化
-            # 其他标识符列（line、delegate_line 等）确保正确字符串格式
-            elif col in ['changeover_id', 'line', 'delegate_line']:
-                # 这些字段只需保持字符串类型，无需额外处理
-                pass
-            else:
-                df[col] = df[col].apply(
-                    lambda x: str(x) if pd.notna(x) else "")
-    
-    return df
+    identifier_cols = (
+        "material",
+        "location",
+        "sending",
+        "receiving",
+        "sourcing",
+        "dps_location",
+        "from_material",
+        "to_material",
+        "line",
+        "delegate_line",
+        "changeover_id",
+    )
+    return normalize_identifiers_scalar(
+        df,
+        identifier_cols=identifier_cols,
+        location_cols=("location", "dps_location", "sending", "receiving"),
+        material_cols=("material", "from_material", "to_material"),
+        passthrough_str_cols=("changeover_id", "line", "delegate_line"),
+    )

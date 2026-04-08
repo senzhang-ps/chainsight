@@ -12,6 +12,13 @@ from typing import List
 
 # 使用统一的 CPU 配置
 from src.utils.cpu_config import CPU_COUNT, MAX_WORKERS
+from src.utils.runtime_defaults import (
+    DEFAULT_LEAD_TIME,
+    DEFAULT_LSK,
+    DEFAULT_MOQ,
+    DEFAULT_PTF,
+    DEFAULT_RV,
+)
 
 # 性能优化开关
 USE_VECTORIZED_DEMAND_COLLECTION: bool = False  # 暂时关闭，需要修复horizon计算问题
@@ -30,17 +37,6 @@ DEFAULT_SIM_END: str = '2025-12-31'
 DEFAULT_AO_PRIORITY: int = 1
 DEFAULT_NORMAL_PRIORITY: int = 2
 DEFAULT_OTHER_PRIORITY: int = 9
-
-# 默认MOQ/RV值
-DEFAULT_MOQ: int = 1
-DEFAULT_RV: int = 1
-
-# 默认PTF/LSK值
-DEFAULT_PTF: int = 0
-DEFAULT_LSK: int = 1
-
-# 默认lead time
-DEFAULT_LEAD_TIME: int = 1
 
 # 默认push levels
 DEFAULT_PUSH_LEVELS: List[float] = [1.2, 1.5, 2.0, 2.5, 3.0]

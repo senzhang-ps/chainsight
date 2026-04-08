@@ -9,6 +9,12 @@ from typing import Dict, List, Optional, Tuple, Union
 import numpy as np
 import pandas as pd
 
+from src.utils.normalization_common import (
+    normalize_identifiers_vectorized,
+    normalize_location_zero_fill_any,
+    normalize_material_basic,
+)
+
 from .constants import (
     DEFAULT_MOQ,
     DEFAULT_RV,
@@ -63,12 +69,7 @@ def normalize_location(location_str: Union[str, int, float, None]) -> str:
     返回：
         str: 规范化后的地点字符串
     """
-    if location_str is None or pd.isna(location_str):
-        return ""
-    try:
-        return str(int(location_str)).zfill(4)
-    except (ValueError, TypeError):
-        return str(location_str).zfill(4)
+    return normalize_location_zero_fill_any(location_str)
 
 
 def normalize_material(material_str: Union[str, int, float, None]) -> str:
@@ -84,9 +85,7 @@ def normalize_material(material_str: Union[str, int, float, None]) -> str:
     返回：
         str: 规范化后的物料字符串
     """
-    if material_str is None or pd.isna(material_str):
-        return ""
-    return str(material_str)
+    return normalize_material_basic(material_str)
 
 
 def normalize_identifiers(df: pd.DataFrame) -> pd.DataFrame:
@@ -101,34 +100,17 @@ def normalize_identifiers(df: pd.DataFrame) -> pd.DataFrame:
     返回：
         pd.DataFrame: 规范化后的DataFrame副本
     """
-    if df.empty:
-        return df
-
-    df = df.copy()
-    
-    # 向量化处理 material 列
-    if COL_MATERIAL in df.columns:
-        df[COL_MATERIAL] = df[COL_MATERIAL].astype(str)
-        df[COL_MATERIAL] = df[COL_MATERIAL].replace(['nan', 'None', '<NA>', 'NaN'], '')
-        # 移除数字的 .0 后缀
-        df[COL_MATERIAL] = df[COL_MATERIAL].str.replace(r'\.0$', '', regex=True)
-    
-    # 向量化处理 location 类列
-    for col in LOCATION_TYPE_COLUMNS:
-        if col in df.columns:
-            df[col] = df[col].astype(str).str.strip()
-            df[col] = df[col].replace(['nan', 'None', '<NA>', 'NaN'], '')
-            # 识别纯数字的行并补齐4位
-            is_numeric = df[col].str.match(r'^\d+$', na=False)
-            df.loc[is_numeric, col] = df.loc[is_numeric, col].str.zfill(4)
-    
-    # 其他标识符列
-    other_cols = [c for c in IDENTIFIER_COLUMNS if c not in LOCATION_TYPE_COLUMNS and c != COL_MATERIAL]
-    for col in other_cols:
-        if col in df.columns:
-            df[col] = df[col].fillna('').astype(str)
-
-    return df
+    other_cols = [
+        c
+        for c in IDENTIFIER_COLUMNS
+        if c not in LOCATION_TYPE_COLUMNS and c != COL_MATERIAL
+    ]
+    return normalize_identifiers_vectorized(
+        df,
+        material_cols=(COL_MATERIAL,),
+        location_cols=tuple(LOCATION_TYPE_COLUMNS),
+        other_identifier_cols=tuple(other_cols),
+    )
 
 
 def lookup_moq_rv_three_keys(

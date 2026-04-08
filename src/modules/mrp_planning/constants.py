@@ -18,14 +18,13 @@ USE_DUCKDB_BATCH_CALCULATION: bool = True  # Re-enabled with detailed tracing
 # 批量计算阈值（层内节点数超过此值时使用批量处理）
 BATCH_CALCULATION_THRESHOLD: int = 50
 
-# MOQ / RV 默认值
-DEFAULT_MOQ = 1
-DEFAULT_RV = 1
-
-# 时间窗口默认值
-DEFAULT_HORIZON = 1
-DEFAULT_PTF = 0
-DEFAULT_LSK = 1
+from src.utils.runtime_defaults import (
+    DEFAULT_HORIZON,
+    DEFAULT_LSK,
+    DEFAULT_MOQ,
+    DEFAULT_PTF,
+    DEFAULT_RV,
+)
 
 # DataFrame 列名常量
 COL_MATERIAL = 'material'

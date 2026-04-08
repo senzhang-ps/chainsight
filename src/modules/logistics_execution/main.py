@@ -44,11 +44,11 @@ import numpy as np
 import pandas as pd
 
 # 从子模块导入
-from .logistics_execution.config_loader import (
+from .config_loader import (
     load_integrated_config,
     load_standalone_config,
 )
-from .logistics_execution.capacity_manager import (
+from .capacity_manager import (
     build_capacity_map,
     get_optimal_truck_sequence,
     get_truck_capacity,
@@ -56,7 +56,7 @@ from .logistics_execution.capacity_manager import (
     get_truck_spec,
     normalize_capacity_plan,
 )
-from .logistics_execution.delivery_processor import (
+from .delivery_processor import (
     calculate_actual_delivery_date,
     calculate_lead_time,
     create_bypass_record,
@@ -68,20 +68,20 @@ from .logistics_execution.delivery_processor import (
 
 # DuckDB 批量优化
 try:
-    from .logistics_execution.duckdb_batch_calculator import (
+    from .duckdb_batch_calculator import (
         batch_sample_delivery_delays_duckdb,
         is_duckdb_available as m6_is_duckdb_available,
     )
     M6_DUCKDB_AVAILABLE = True
 except ImportError:
     M6_DUCKDB_AVAILABLE = False
-from .logistics_execution.expression_evaluator import SafeExpressionEvaluator
-from .logistics_execution.inventory_manager import (
+from .expression_evaluator import SafeExpressionEvaluator
+from .inventory_manager import (
     calculate_inventory_limit,
     calculate_physical_inventory,
     update_inventory_after_load,
 )
-from .logistics_execution.validators import (
+from .validators import (
     check_and_deduplicate,
     generate_validation_report,
     validate_deployment_plan,
@@ -90,7 +90,7 @@ from .logistics_execution.validators import (
     validate_truck_config,
     validate_truck_specs,
 )
-from .logistics_execution.vehicle_packer import (
+from .vehicle_packer import (
     VehiclePacker,
     create_vehicle_log_entry,
     determine_trigger_cause,

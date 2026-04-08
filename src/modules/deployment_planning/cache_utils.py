@@ -12,6 +12,11 @@ from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 
+from src.utils.date_helpers import (
+    calculate_transport_lead_time,
+    is_calendar_review_day,
+)
+
 from .constants import DEFAULT_PTF, DEFAULT_LSK, DEFAULT_LEAD_TIME
 
 # DuckDB 加速开关
@@ -565,13 +570,16 @@ def determine_lead_time(
                 m4_mlcfg_df=m4_mlcfg_df, cache=ptf_lsk_cache
             )
 
-        if str(location_type).lower() == 'plant':
-            base_lt = max(mct, pdt + gr)
-            leadtime = base_lt + ptf + lsk - 1
-        else:
-            leadtime = pdt + gr
-
-        return max(1, int(leadtime)), ""
+        leadtime = calculate_transport_lead_time(
+            pdt=pdt,
+            gr=gr,
+            mct=mct,
+            location_type=location_type,
+            ptf=ptf,
+            lsk=lsk,
+            minimum=1,
+        )
+        return leadtime, ""
 
     except Exception as e:
         return DEFAULT_LEAD_TIME, f'lead_time_calculation_error: {str(e)}'
@@ -629,10 +637,4 @@ def is_review_day(dt: pd.Timestamp, lsk: str, day: int) -> bool:
     返回：
         bool: 是否为回顾日
     """
-    if lsk == 'daily':
-        return True
-    if lsk == 'weekly':
-        return dt.weekday() == (int(day) - 1)
-    if lsk == 'monthly':
-        return dt.day == int(day)
-    raise ValueError(f"Unknown LSK: {lsk}")
+    return is_calendar_review_day(dt, lsk, day)

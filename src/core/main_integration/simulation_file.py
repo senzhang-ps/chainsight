@@ -20,12 +20,21 @@ from ...utils.config_validator import run_pre_simulation_validation
 from ...utils.inventory_balance_checker import InventoryBalanceChecker
 from ...services.summary_report_generator import SummaryReportGenerator
 from ...services.performance_profiler import PerformanceProfiler
-from ...modules import module1, module3, module4, module5, module6
+from ...modules import (
+    demand_planning as module1,
+    deployment_planning as module5,
+    logistics_execution as module6,
+    mrp_planning as module3,
+    production_planning as module4,
+)
 
 from .normalize import _normalize_identifiers
 from .resume import check_resume_capability, restore_orchestrator_state
 from .seed import set_module_seeds
-from .module4_runner import run_module4_integrated, load_current_date_production_gr
+from .production_integration import (
+    load_current_date_production_gr,
+    run_module4_integrated,
+)
 from .config_loader import load_configuration
 
 
@@ -83,6 +92,8 @@ def run_integrated_simulation(
         return {
             'validation_passed': False,
             'validation_report': validation_report,
+            'failure_stage': 'pre_validation',
+            'status_message': 'Configuration pre-validation failed',
             'simulation_completed': False
         }
     

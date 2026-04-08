@@ -32,12 +32,13 @@ def _write_checkpoint_to_db(
     """
     import json
     from pgsql_db.checkpoint import serialize_orchestrator_state, _json_serializer
-    from pgsql_db.checkpoint import serialize_m1_previous_orders
 
     # 序列化 Orchestrator 状态
     orch_state = serialize_orchestrator_state(orch)
-    orch_state['m1_previous_orders'] = serialize_m1_previous_orders(m1_previous_orders)
     orch_json = json.dumps(orch_state, default=_json_serializer, ensure_ascii=False)
+    orch_json_bytes = len(orch_json.encode('utf-8'))
+    if orch_json_bytes >= 16 * 1024 * 1024:
+        print(f"  [WARN] checkpoint JSON size={orch_json_bytes / 1024 / 1024:.2f} MB")
 
     conn = db.connect()
     try:
@@ -98,13 +99,14 @@ def _flush_batch_to_db(
 
     # 步骤 0：在事务外先序列化编排器状态（纯 CPU 操作，无 DB 交互）
     orch_state = serialize_orchestrator_state(orch)
-    # 将 m1_previous_orders 一并序列化进 checkpoint JSON
-    from pgsql_db.checkpoint import serialize_m1_previous_orders
-    orch_state['m1_previous_orders'] = serialize_m1_previous_orders(m1_previous_orders)
+    # m1_previous_orders is rebuilt from DB orderlog on resume to keep checkpoint small.
     # [DB-MEM] 将 DbRuntimeState 序列化进 checkpoint JSON（M4 line states, capacity, M3 result）
     if runtime_state is not None:
         orch_state['db_runtime_state'] = runtime_state.to_dict()
     orch_json = json.dumps(orch_state, default=_json_serializer, ensure_ascii=False)
+    orch_json_bytes = len(orch_json.encode('utf-8'))
+    if orch_json_bytes >= 16 * 1024 * 1024:
+        print(f"  [WARN] checkpoint JSON size={orch_json_bytes / 1024 / 1024:.2f} MB")
 
     # 步骤 0b：在事务外预处理批次数据为可写入的 DataFrame
     prepared_tables = writer.prepare_batch_dataframes(batch_results, run_id=run_id)

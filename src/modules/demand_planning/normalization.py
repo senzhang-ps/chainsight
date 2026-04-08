@@ -13,6 +13,12 @@ from typing import Any
 
 import pandas as pd
 
+from src.utils.normalization_common import (
+    normalize_identifiers_vectorized,
+    normalize_location_zero_fill_any,
+    normalize_material_basic,
+)
+
 
 def normalize_location(location_str: Any) -> str:
     """规范化地点标识为4位零填充字符串。
@@ -29,12 +35,7 @@ def normalize_location(location_str: Any) -> str:
         >>> normalize_location('12')
         '0012'
     """
-    if location_str is None or pd.isna(location_str):
-        return ""
-    try:
-        return str(int(location_str)).zfill(4)
-    except (ValueError, TypeError):
-        return str(location_str).zfill(4)
+    return normalize_location_zero_fill_any(location_str)
 
 
 def normalize_material(material_str: Any) -> str:
@@ -49,9 +50,7 @@ def normalize_material(material_str: Any) -> str:
     返回:
         物料的字符串表示。None/NaN返回空字符串。
     """
-    if material_str is None or pd.isna(material_str):
-        return ""
-    return str(material_str)
+    return normalize_material_basic(material_str)
 
 
 def normalize_identifiers(df: pd.DataFrame) -> pd.DataFrame:
@@ -70,26 +69,8 @@ def normalize_identifiers(df: pd.DataFrame) -> pd.DataFrame:
     返回:
         标识列已规范化的DataFrame。
     """
-    if df.empty:
-        return df
-
-    df = df.copy()
-    
-    # 向量化处理 material 列
-    if 'material' in df.columns:
-        df['material'] = df['material'].astype(str)
-        df['material'] = df['material'].replace(['nan', 'None', '<NA>', 'NaN'], '')
-        # 移除数字的 .0 后缀
-        df['material'] = df['material'].str.replace(r'\.0$', '', regex=True)
-    
-    # 向量化处理 location 类列
-    location_cols = ['location', 'dps_location', 'sending', 'receiving', 'sourcing']
-    for col in location_cols:
-        if col in df.columns:
-            df[col] = df[col].astype(str).str.strip()
-            df[col] = df[col].replace(['nan', 'None', '<NA>', 'NaN'], '')
-            # 识别纯数字的行并补齐4位
-            is_numeric = df[col].str.match(r'^\d+$', na=False)
-            df.loc[is_numeric, col] = df.loc[is_numeric, col].str.zfill(4)
-
-    return df
+    return normalize_identifiers_vectorized(
+        df,
+        material_cols=("material",),
+        location_cols=("location", "dps_location", "sending", "receiving", "sourcing"),
+    )

@@ -489,6 +489,9 @@ class OrchestratorProcessorsMixin:
                     uid,
                     vehicle_uid,
                 )
+                date_str = date_obj.strftime(
+                    '%Y-%m-%d'
+                )
                 is_duplicate = any(
                     (
                         record['date'],
@@ -498,15 +501,14 @@ class OrchestratorProcessorsMixin:
                         record['vehicle_uid'],
                     )
                     == existing_key
-                    for record in self.delivery_gr
+                    for record in self.delivery_gr_by_date.get(
+                        date_str, []
+                    )
                 )
 
                 if not is_duplicate:
                     self.delivery_gr.append(gr_record)
                     # 索引以便 O(1) 查询
-                    date_str = date_obj.strftime(
-                        '%Y-%m-%d'
-                    )
                     if date_str not in (
                         self.delivery_gr_by_date
                     ):

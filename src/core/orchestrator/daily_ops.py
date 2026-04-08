@@ -178,6 +178,9 @@ class OrchestratorDailyOpsMixin:
                     ],
                     transit_record['vehicle_uid'],
                 )
+                date_str = date_obj.strftime(
+                    '%Y-%m-%d'
+                )
                 if not any(
                     (
                         record['date'],
@@ -187,13 +190,12 @@ class OrchestratorDailyOpsMixin:
                         record['vehicle_uid'],
                     )
                     == existing_key
-                    for record in self.delivery_gr
+                    for record in self.delivery_gr_by_date.get(
+                        date_str, []
+                    )
                 ):
                     self.delivery_gr.append(gr_record)
                     # 索引以便 O(1) 查询
-                    date_str = date_obj.strftime(
-                        '%Y-%m-%d'
-                    )
                     if date_str not in (
                         self.delivery_gr_by_date
                     ):

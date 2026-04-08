@@ -36,6 +36,11 @@ from .inventory_manager import (
     calculate_physical_inventory,
     update_inventory_after_load
 )
+from .main import (
+    run_daily_physical_flow,
+    run_physical_flow_module,
+    main,
+)
 from .vehicle_packer import (
     VehiclePacker,
     create_load_record,
@@ -57,6 +62,9 @@ __all__ = [
     'calculate_lead_time',
     'calculate_physical_inventory',
     'update_inventory_after_load',
+    'run_daily_physical_flow',
+    'run_physical_flow_module',
+    'main',
     'VehiclePacker',
     'create_load_record',
     'calculate_load_ratios',

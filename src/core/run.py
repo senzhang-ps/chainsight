@@ -1291,7 +1291,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         # 将执行交由支持续跑能力的一体化仿真流程
-        _ = run_integrated_simulation(
+        result = run_integrated_simulation(
             config_path=str(cfg_path),
             start_date=simulation_start,
             end_date=end_date,
@@ -1314,7 +1314,16 @@ def main(argv: list[str] | None = None) -> int:
             runtime_str = f"{seconds:.2f}秒"
         
         logger.info("\n" + "=" * 60)
-        logger.info("[OK] 仿真成功完成")
+        if result and result.get('simulation_completed'):
+            logger.info("[OK] 仿真成功完成")
+        else:
+            failure_stage = (
+                result.get('failure_stage', 'unknown')
+                if isinstance(result, dict) else 'unknown'
+            )
+            logger.warning(f"[WARN] 仿真未完成，已在阶段 {failure_stage} 停止")
+            if isinstance(result, dict) and result.get('validation_report'):
+                logger.warning(f"[WARN] 验证报告: {result['validation_report']}")
         logger.info("=" * 60)
         logger.info("🕐 程序时间统计:")
         logger.info(f"   📅 开始时间: {program_start_datetime.strftime('%Y-%m-%d %H:%M:%S')}")

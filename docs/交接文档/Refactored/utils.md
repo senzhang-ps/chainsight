@@ -1,6 +1,6 @@
 # `src/utils` — 工具层模块文档
 
-本文档覆盖 `src/utils/` 目录下的所有 19 个文件。
+本文档覆盖 `src/utils/` 目录下的所有 22 个文件。
 
 ---
 
@@ -8,25 +8,28 @@
 
 1. [模块概述](#模块概述)
 2. [包导出（__init__.py）](#包导出__initpy)
-3. [日志配置（logger_config.py）](#日志配置logger_configpy)
-4. [配置验证（config_validator.py）](#配置验证config_validatorpy)
-5. [时间管理（time_manager.py）](#时间管理time_managerpy)
-6. [资源配置（resource_config.py）](#资源配置resource_configpy)
-7. [优化配置（optimization_config.py）](#优化配置optimization_configpy)
-8. [验证管理（validation_manager.py）](#验证管理validation_managerpy)
-9. [内存数据存储（memory_data_store.py）](#内存数据存储memory_data_storepy)
-10. [仿真缓存（simulation_cache.py）](#仿真缓存simulation_cachepy)
-11. [库存平衡检查（inventory_balance_checker.py）](#库存平衡检查inventory_balance_checkerpy)
-12. [性能工具（performance.py）](#性能工具performancepy)
-13. [DuckDB SQL 包装（duckdb_sql_wrapper.py）](#duckdb-sql-包装duckdb_sql_wrapperpy)
-14. [DuckDB 优化器（duckdb_optimizer.py）](#duckdb-优化器duckdb_optimizerpy)
-15. [DuckDB 加速器（duckdb_accelerator.py）](#duckdb-加速器duckdb_acceleratorpy)
-16. [CPU 配置（cpu_config.py）](#cpu-配置cpu_configpy)
-17. [并行优化（parallel_optimizer.py）](#并行优化parallel_optimizerpy)
-18. [进程池执行器（process_pool_executor.py）](#进程池执行器process_pool_executorpy)
-19. [高性能执行器（high_perf_executor.py）](#高性能执行器high_perf_executorpy)
-20. [多进程执行器（multiprocess_executor.py）](#多进程执行器multiprocess_executorpy)
-21. [依赖关系总览](#依赖关系总览)
+3. [共享运行时默认值（runtime_defaults.py）](#共享运行时默认值runtime_defaultspy)
+4. [共享标准化工具（normalization_common.py）](#共享标准化工具normalization_commonpy)
+5. [共享日期工具（date_helpers.py）](#共享日期工具date_helperspy)
+6. [日志配置（logger_config.py）](#日志配置logger_configpy)
+7. [配置验证（config_validator.py）](#配置验证config_validatorpy)
+8. [时间管理（time_manager.py）](#时间管理time_managerpy)
+9. [资源配置（resource_config.py）](#资源配置resource_configpy)
+10. [优化配置（optimization_config.py）](#优化配置optimization_configpy)
+11. [验证管理（validation_manager.py）](#验证管理validation_managerpy)
+12. [内存数据存储（memory_data_store.py）](#内存数据存储memory_data_storepy)
+13. [仿真缓存（simulation_cache.py）](#仿真缓存simulation_cachepy)
+14. [库存平衡检查（inventory_balance_checker.py）](#库存平衡检查inventory_balance_checkerpy)
+15. [性能工具（performance.py）](#性能工具performancepy)
+16. [DuckDB SQL 包装（duckdb_sql_wrapper.py）](#duckdb-sql-包装duckdb_sql_wrapperpy)
+17. [DuckDB 优化器（duckdb_optimizer.py）](#duckdb-优化器duckdb_optimizerpy)
+18. [DuckDB 加速器（duckdb_accelerator.py）](#duckdb-加速器duckdb_acceleratorpy)
+19. [CPU 配置（cpu_config.py）](#cpu-配置cpu_configpy)
+20. [并行优化（parallel_optimizer.py）](#并行优化parallel_optimizerpy)
+21. [进程池执行器（process_pool_executor.py）](#进程池执行器process_pool_executorpy)
+22. [高性能执行器（high_perf_executor.py）](#高性能执行器high_perf_executorpy)
+23. [多进程执行器（multiprocess_executor.py）](#多进程执行器multiprocess_executorpy)
+24. [依赖关系总览](#依赖关系总览)
 
 ---
 
@@ -39,6 +42,9 @@
 | 日志 | `logger_config.py` |
 | 配置验证 | `config_validator.py`, `validation_manager.py` |
 | 时间管理 | `time_manager.py` |
+| 共享默认值 | `runtime_defaults.py` |
+| 共享标准化 | `normalization_common.py` |
+| 共享日期与前置期 | `date_helpers.py` |
 | 资源与优化配置 | `resource_config.py`, `optimization_config.py`, `cpu_config.py` |
 | 数据存储与缓存 | `memory_data_store.py`, `simulation_cache.py` |
 | 库存验证 | `inventory_balance_checker.py` |
@@ -83,6 +89,105 @@ from .simulation_cache import (
 | `initialize_simulation_cache` | `simulation_cache.py` |
 | `get_simulation_cache` | `simulation_cache.py` |
 | `clear_simulation_cache` | `simulation_cache.py` |
+
+说明：
+
+- `runtime_defaults.py`、`normalization_common.py`、`date_helpers.py` 当前不经由 `src.utils.__all__` 暴露。
+- 这三个文件属于“共享底层实现”，供模块内部或新代码按需显式导入。
+- 保持它们不自动导出，可以继续降低 `src.utils` 初始化时的耦合和循环导入风险。
+
+---
+
+## 共享运行时默认值（`runtime_defaults.py`）
+
+**文件路径**：`src/utils/runtime_defaults.py`  
+**行数**：12 行
+
+这个文件是本轮“零结果漂移”收口新增的共享默认值单一真源，当前主要用于收口 M3 / M5 中重复出现的小默认值。
+
+### 当前公开常量
+
+| 常量 | 默认值 | 当前用途 |
+|------|--------|---------|
+| `DEFAULT_MOQ` | `1` | M3 / M5 MOQ 默认值 |
+| `DEFAULT_RV` | `1` | M3 / M5 RV 默认值 |
+| `DEFAULT_PTF` | `0` | 共享前置窗口默认值 |
+| `DEFAULT_LSK` | `1` | 共享 review 间隔默认值 |
+| `DEFAULT_HORIZON` | `1` | M3 horizon 默认值 |
+| `DEFAULT_LEAD_TIME` | `1` | M5 fallback lead time 默认值 |
+
+### 使用边界
+
+- 该文件只放“跨模块共享、且值稳定”的小常量。
+- 模块私有常量仍应留在各自 `constants.py`，不要为了集中而集中。
+- 当前 `mrp_planning/constants.py` 与 `deployment_planning/constants.py` 只是 re-export 这些共享值，没有改变旧调用面。
+
+---
+
+## 共享标准化工具（`normalization_common.py`）
+
+**文件路径**：`src/utils/normalization_common.py`  
+**行数**：140 行
+
+这个文件收口了多个模块重复实现的标识符标准化逻辑，但保留“包装层选择语义”的设计，所以不会强行把所有模块变成同一套规则。
+
+### 关键函数
+
+| 函数 | 说明 |
+|------|------|
+| `normalize_location_zero_fill_any()` | 地点类编码补零，对非空值统一做零填充 |
+| `normalize_location_preserve_non_numeric()` | 地点类编码标准化，但保留非数字文本原貌 |
+| `normalize_material_basic()` | 最轻量的物料转字符串 |
+| `normalize_material_numeric_token_cleanup()` | 适配 `main_integration` 历史语义 |
+| `normalize_material_numeric_preserve_text()` | 适配 `orchestrator` 历史语义 |
+| `normalize_identifiers_vectorized()` | DataFrame 级向量化标准化 |
+| `normalize_identifiers_scalar()` | 标量式标准化路径，保留历史逐列语义 |
+| `cast_identifier_columns()` | 将指定列转为字符串并按需规范化地点列 |
+
+### 当前调用侧
+
+- `src/modules/demand_planning/normalization.py`
+- `src/modules/mrp_planning/utils.py`
+- `src/modules/deployment_planning/normalizer.py`
+- `src/core/orchestrator/normalize.py`
+- `src/core/main_integration/normalize.py`
+- `src/modules/production_planning/utils.py`
+
+### 维护约束
+
+- 若修改共享实现，必须先确认调用侧 wrapper 的历史语义是否仍保持一致。
+- `orchestrator` 和 `main_integration` 当前故意保留不同的物料字符串语义，不能简单合并成单一路径。
+- 共享函数应只承担“底层公共实现”，模块级业务语义仍应留在各模块包装函数中。
+
+---
+
+## 共享日期工具（`date_helpers.py`）
+
+**文件路径**：`src/utils/date_helpers.py`  
+**行数**：54 行
+
+这个文件收口了多个模块重复出现的窗口、review day 和 lead time 底层逻辑。
+
+### 关键函数
+
+| 函数 | 说明 |
+|------|------|
+| `compute_planning_window()` | 计算包含起止边界的 planning window |
+| `is_offset_review_day()` | 基于仿真起点偏移的 review day 判定 |
+| `is_calendar_review_day()` | 基于 daily / weekly / monthly 规则的 review day 判定 |
+| `calculate_transport_lead_time()` | Plant / DC lead time 计算底层实现 |
+
+### 当前调用侧
+
+- `src/modules/production_planning/utils.py`
+- `src/modules/deployment_planning/cache_utils.py`
+- `src/modules/mrp_planning/lead_time.py`
+
+### 维护约束
+
+- 共享函数只做确定性、低语义耦合的日期计算。
+- 带模块业务口径的包装函数仍保留在模块内，例如不同最小值约束和不同 review day 入参形式。
+- 若后续要引入 YAML 配置驱动，不应直接改写这里的默认行为，而应由上层包装决定配置来源。
 
 ---
 

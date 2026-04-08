@@ -8,6 +8,8 @@ from typing import Dict, Optional, Tuple
 
 import pandas as pd
 
+from src.utils.date_helpers import calculate_transport_lead_time
+
 from .constants import (
     DEFAULT_HORIZON,
     LOCATION_TYPE_DC,
@@ -145,10 +147,15 @@ def _calculate_lead_time(
             cache=ptf_lsk_cache
         )
 
-    if str(location_type).lower() == 'plant':
-        base_lt = max(mct, pdt + gr)
-        return base_lt + ptf + lsk - 1
-    return pdt + gr
+    return calculate_transport_lead_time(
+        pdt=pdt,
+        gr=gr,
+        mct=mct,
+        location_type=location_type,
+        ptf=ptf,
+        lsk=lsk,
+        minimum=0,
+    )
 
 
 def infer_sending_location_type(

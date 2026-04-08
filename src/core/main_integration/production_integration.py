@@ -9,7 +9,7 @@ import os
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from ...modules import module4
+from ...modules import production_planning as module4
 from .normalize import _normalize_material
 
 

@@ -62,6 +62,11 @@ temp/
 # Outputs (generated reports, not tracked)
 outputs/
 
+# ChainSight Dev generated output folders
+ChainSight_Dev/*/
+!ChainSight_Dev/.vscode/
+!ChainSight_Dev/.vscode/**
+
 # ChainSight Dev run outputs
 ChainSight_Dev/**/run_*/
 

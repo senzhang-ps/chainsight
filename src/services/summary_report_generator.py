@@ -337,8 +337,14 @@ class SummaryReportGenerator:
                     if original_count != filtered_count:
                         print(f"📊 Delivery Plan 过滤：{original_count} 条 → {filtered_count} 条（移除了 {original_count - filtered_count} 条超出日期范围的记录）")
                 
-                # 按需求添加字段: date, material, sending, receiving, planned_qty, delivered_qty, planned_deploy_date, actual_ship_date
-                required_columns = ['date', 'material', 'sending', 'receiving', 'planned_qty', 'delivered_qty', 'planned_deploy_date', 'actual_ship_date']
+                if 'date' in combined_deliveries.columns:
+                    ordered_columns = ['date'] + [
+                        col for col in combined_deliveries.columns
+                        if col != 'date'
+                    ]
+                    combined_deliveries = combined_deliveries[
+                        ordered_columns
+                    ]
                 
                 with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
                     combined_deliveries.to_excel(writer, sheet_name='FullDeliveryPlan', index=False)

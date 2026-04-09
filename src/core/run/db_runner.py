@@ -13,6 +13,7 @@ from typing import Optional
 import pandas as pd
 
 from pgsql_db import table_mapping
+from ..main_integration.config_loader import load_csv_overrides
 from .db_config import _load_config_from_database
 from .local_writer import _write_results_to_local_dev_format
 
@@ -34,18 +35,22 @@ def _normalize_for_compare(df: pd.DataFrame) -> pd.DataFrame:
     return norm
 
 
-def _build_expected_local_config(config_name: str) -> dict:
-    """构建本地期望配置（Excel + 同目录CSV覆盖）。返回 key 为不带 cfg_ 的小写表名。"""
+def _find_local_config_file(config_name: str) -> Path | None:
+    """按配置名查找本地 Excel 配置文件。"""
     config_basename = Path(config_name).stem
     project_root = Path(__file__).parent.parent.parent.parent
     search_dirs = [project_root / "config", project_root / "test_files", project_root]
 
-    config_file = None
     for d in search_dirs:
         candidate = d / f"{config_basename}.xlsx"
         if candidate.exists():
-            config_file = candidate
-            break
+            return candidate
+    return None
+
+
+def _build_expected_local_config(config_name: str) -> dict:
+    """构建本地期望配置（与文件模式相同的 Excel/CSV 解析口径）。"""
+    config_file = _find_local_config_file(config_name)
     if config_file is None:
         return {}
 
@@ -65,10 +70,10 @@ def _build_expected_local_config(config_name: str) -> dict:
         db_key = table_name[4:] if table_name.startswith("cfg_") else table_name
         expected[db_key] = df
 
-    # CSV 覆盖（同目录）
-    for csv_file in sorted(config_file.parent.glob("*.csv")):
-        db_key = csv_file.stem.lower()
-        expected[db_key] = pd.read_csv(str(csv_file))
+    # CSV 覆盖：与文件模式保持同一解析规则，避免多 Excel 目录下的误覆盖。
+    for sheet_name, df in load_csv_overrides(str(config_file)).items():
+        db_key = sheet_name.lower()
+        expected[db_key] = df
 
     return expected
 
@@ -137,38 +142,26 @@ def _apply_csv_overrides_for_db(config_data: dict, config_name: str, logger, db=
     CSV 文件名使用 Excel sheet 名（如 M1_DemandForecast.csv），
     匹配时通过小写化文件名进行对应。
     """
-    import pandas as pd
+    config_file = _find_local_config_file(config_name)
+    if config_file is None:
+        return
 
-    # 搜索 CSV 文件的目录列表
-    project_root = Path(__file__).parent.parent.parent.parent
-    search_dirs = [
-        project_root / "config",
-        project_root / "test_files",
-        project_root,
-    ]
+    csv_messages: list[str] = []
+    csv_overrides = load_csv_overrides(str(config_file), csv_messages)
+    for message in csv_messages:
+        logger.info(f"  ℹ️ {message}")
 
-    csv_files = {}
-    for search_dir in search_dirs:
-        if not search_dir.is_dir():
-            continue
-        for f in sorted(search_dir.iterdir()):
-            if f.suffix.lower() == '.csv':
-                # CSV 文件名 -> 小写 DB key（如 M4_MaterialLocationLineCfg.csv -> m4_materiallocationlinecfg）
-                db_key = f.stem.lower()
-                if db_key not in csv_files:
-                    csv_files[db_key] = f
-
-    if not csv_files:
+    if not csv_overrides:
         return
 
     # 推导 config_basename：用于 config_name 过滤/删除（与运行配置一致）
     config_basename = Path(config_name).stem
 
     logger.info(f"\n  {'─' * 50}")
-    logger.info(f"  📄 发现 {len(csv_files)} 个 CSV 覆盖文件:")
-    for db_key, csv_path in csv_files.items():
+    logger.info(f"  📄 发现 {len(csv_overrides)} 个 CSV 覆盖文件:")
+    for sheet_name, df in csv_overrides.items():
         try:
-            df = pd.read_csv(str(csv_path))
+            db_key = sheet_name.lower()
             is_override = db_key in config_data
             config_data[db_key] = df
 
@@ -176,7 +169,7 @@ def _apply_csv_overrides_for_db(config_data: dict, config_name: str, logger, db=
             # - config_name: 仍使用当前运行配置（如 BC_S9 / PDS1）
             # - config_type: 按用户要求使用 CSV 文件名（如 M3_SafetyStock）
             table_name = f"cfg_{db_key}"
-            csv_config_type = csv_path.stem
+            csv_config_type = sheet_name
             if db is not None:
                 try:
                     deleted = db.delete_config_data(table_name, config_basename)
@@ -191,11 +184,11 @@ def _apply_csv_overrides_for_db(config_data: dict, config_name: str, logger, db=
                 db_status = "(仅内存覆盖)"
 
             if is_override:
-                logger.info(f"  🔄 [CSV 覆盖] {csv_path.stem} ({len(df)} 行) ← 替代DB版本 {db_status}")
+                logger.info(f"  🔄 [CSV 覆盖] {sheet_name} ({len(df)} 行) ← 替代DB版本 {db_status}")
             else:
-                logger.info(f"  ➕ [CSV 新增] {csv_path.stem} ({len(df)} 行) {db_status}")
+                logger.info(f"  ➕ [CSV 新增] {sheet_name} ({len(df)} 行) {db_status}")
         except Exception as e:
-            logger.warning(f"  ⚠️ CSV 文件读取失败: {csv_path.name} - {e}")
+            logger.warning(f"  ⚠️ CSV 文件读取失败: {sheet_name}.csv - {e}")
     logger.info(f"  {'─' * 50}")
 
 

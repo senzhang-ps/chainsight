@@ -786,7 +786,10 @@ def run_pre_simulation_validation(config_path: str, output_dir: str) -> tuple:
         # 使用更高效的方式读取所有工作表，且只读取数据值以加速
         config_dict = pd.read_excel(config_path, sheet_name=None, engine='openpyxl', engine_kwargs={'data_only': True})
         # 扫描并应用 CSV 覆盖
-        csv_overrides = load_csv_overrides(config_path)
+        csv_messages: list[str] = []
+        csv_overrides = load_csv_overrides(config_path, csv_messages)
+        for message in csv_messages:
+            validation_manager.add_info("ConfigLoader", "CSVOverride", message)
         for sheet_name, df in csv_overrides.items():
             config_dict[sheet_name] = df
     except Exception as e:

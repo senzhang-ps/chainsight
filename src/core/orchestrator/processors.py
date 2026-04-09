@@ -262,6 +262,11 @@ class OrchestratorProcessorsMixin:
         """
         date_obj = pd.to_datetime(date).normalize()
 
+        # 每日重置 UID 序列计数器，与 Dev 版本行为一致
+        # （Dev 在续跑模式下每天重新创建 Orchestrator，
+        #   uid_sequence 自然从 0 开始）
+        self.uid_sequence = 0
+
         # 为保证可复现，在生成 UID 之前稳定排序
         sort_cols = [
             col

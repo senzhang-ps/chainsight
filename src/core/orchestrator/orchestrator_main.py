@@ -154,7 +154,7 @@ class Orchestrator(
             self.unrestricted_inventory[key] = quantity
             self.initial_inventory[key] = quantity
 
-        msg = f"Initialized {len(normalized_df)} records"
+        msg = f"Initialized {len(normalized_df)} inventory records"
         self._log_event("INIT_INVENTORY", msg)
 
     def set_space_capacity(

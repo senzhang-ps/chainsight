@@ -8,6 +8,7 @@
 
 import pandas as pd
 import time
+import logging
 from datetime import datetime
 from pathlib import Path
 from tqdm import tqdm
@@ -493,7 +494,15 @@ def run_integrated_simulation(
                 
                 # 直接保存每日状态，状态更新已在各模块运行后实时完成
                 orchestrator.save_daily_state(current_date.strftime('%Y-%m-%d'))
-                
+
+                # Dev 在续跑模式下通过 restore_orchestrator_state 将库存值
+                # 从 int 转为 float，后续日期输出因此带 .0 后缀。
+                # 这里复现同样的类型转换以保持输出一致。
+                for k in orchestrator.unrestricted_inventory:
+                    orchestrator.unrestricted_inventory[k] = float(
+                        orchestrator.unrestricted_inventory[k]
+                    )
+
                 # 获取当日统计
                 stats = orchestrator.get_summary_statistics(current_date.strftime('%Y-%m-%d'))
                 print(f"📊 当日统计: {stats}")

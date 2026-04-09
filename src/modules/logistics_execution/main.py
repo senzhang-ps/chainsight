@@ -560,7 +560,14 @@ def _prepare_deployment_plan(
     
     # 为保证在相同配置和随机种子下UID可复现，先对关键字段做稳定排序（与code_vo保持一致）
     sort_cols = [
-        col for col in ['planned_deployment_date', 'sending', 'receiving', 'material', 'demand_element']
+        col for col in [
+            'material',
+            'sending',
+            'receiving',
+            'planned_deployment_date',
+            'demand_element',
+            'deployed_qty',
+        ]
         if col in dp.columns
     ]
     if sort_cols:

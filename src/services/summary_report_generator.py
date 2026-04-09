@@ -553,6 +553,23 @@ class SummaryReportGenerator:
                 filtered_count = len(combined_deployments)
                 if original_count != filtered_count:
                     print(f"📊 Deployment Plan 过滤：{original_count} 条 → {filtered_count} 条（移除了 {original_count - filtered_count} 条超出日期范围的记录）")
+
+                sort_cols = [
+                    c for c in [
+                        'date', 'material', 'sending', 'receiving',
+                        'planned_delivery_date', 'demand_element',
+                        'demand_qty', 'planned_qty', 'deployed_qty_invCon',
+                        'deploy_qty_with_plan_order', 'deploy_from_in_transit',
+                        'deploy_from_open_deployment_inbound',
+                        'deploy_from_future_production', 'deployed_qty',
+                        'leadtime', 'orig_location', 'is_cross_node', 'quota',
+                    ] if c in combined_deployments.columns
+                ]
+                if sort_cols:
+                    combined_deployments = combined_deployments.sort_values(
+                        by=sort_cols,
+                        kind='mergesort',
+                    ).reset_index(drop=True)
                 
                 # 🔧 FIX: 检查数据量，超过 Excel 限制则使用 CSV
                 EXCEL_MAX_ROWS = 1048576

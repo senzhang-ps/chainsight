@@ -1,22 +1,24 @@
-"""Business module namespace with lazy subpackage loading."""
+"""
+业务模块 - 供应链计划各独立模块
 
-from importlib import import_module
+子包映射：
+  module1 → demand_planning     (需求规划)
+  module3 → mrp_planning        (MRP计划)
+  module4 → production_planning (生产计划)
+  module5 → deployment_planning (部署规划)
+  module6 → logistics_execution (物流执行)
+"""
 
-_SUBMODULES = {
-    'demand_planning': '.demand_planning',
-    'mrp_planning': '.mrp_planning',
-    'production_planning': '.production_planning',
-    'deployment_planning': '.deployment_planning',
-    'logistics_execution': '.logistics_execution',
-}
+from . import demand_planning as module1
+from . import mrp_planning as module3
+from . import production_planning as module4
+from . import deployment_planning as module5
+from . import logistics_execution as module6
 
-__all__ = list(_SUBMODULES)
-
-
-def __getattr__(name):
-    if name not in _SUBMODULES:
-        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-
-    module = import_module(_SUBMODULES[name], __name__)
-    globals()[name] = module
-    return module
+__all__ = [
+    'module1',
+    'module3',
+    'module4',
+    'module5',
+    'module6',
+]

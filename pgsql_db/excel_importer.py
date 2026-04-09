@@ -63,19 +63,8 @@ class ExcelImporter:
 
     @staticmethod
     def _scan_csv_overrides(excel_path: str) -> Dict[str, pd.DataFrame]:
-        """扫描 Excel 同目录下的 CSV 文件作为配置表覆盖"""
-        overrides = {}
-        try:
-            config_dir = Path(excel_path).parent
-            for csv_file in sorted(config_dir.glob('*.csv')):
-                sheet_name = csv_file.stem
-                try:
-                    overrides[sheet_name] = pd.read_csv(str(csv_file))
-                except Exception as e:
-                    print(f"  ⚠️ CSV 文件读取失败: {csv_file.name} - {e}")
-        except Exception as e:
-            print(f"  ⚠️ CSV 覆盖扫描失败: {e}")
-        return overrides
+        """数据库导入模式禁用 CSV 覆盖，保持与 Dev 文件模式一致。"""
+        return {}
 
     def import_excel_file(
         self,

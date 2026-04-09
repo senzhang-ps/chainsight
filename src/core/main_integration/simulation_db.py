@@ -14,18 +14,12 @@ from .. import orchestrator
 from ..orchestrator import create_orchestrator
 from ...utils.time_manager import initialize_time_manager
 from ...services.summary_report_generator import SummaryReportGenerator
-from ...modules import (
-    demand_planning as module1,
-    deployment_planning as module5,
-    logistics_execution as module6,
-    mrp_planning as module3,
-    production_planning as module4,
-)
+from ...modules import module1, module3, module4, module5, module6
 
 from .normalize import _normalize_identifiers
 from .config_loader import load_configuration_from_dict
 from .seed import set_module_seeds
-from .production_integration import run_module4_integrated
+from .production_runner import run_module4_integrated
 from .runtime_state import DbRuntimeState
 from .memory_store import (_ensure_memory_store_imported, _enable_memory_mode,
                           _disable_memory_mode, _is_memory_mode_enabled, _get_data_store)
@@ -197,15 +191,17 @@ def run_integrated_simulation_from_dict(
               f"delivery_gr={len(orch.delivery_gr_by_date)} days, "
               f"shipment_log={len(orch.shipment_log_by_date)} days, "
               f"delivery_shipment_log={len(orch.delivery_shipment_log_by_date)} days")
-        # Prefer old checkpoint payload when present; newer checkpoints rebuild
-        # m1_previous_orders from DB orderlog to avoid oversized JSONB payloads.
+        # 🔧 从 checkpoint 恢复 m1_previous_orders（断点续跑可靠性关键）
         from pgsql_db.checkpoint import deserialize_m1_previous_orders
-        m1_previous_orders_blob = checkpoint['orch_state_json'].get('m1_previous_orders')
-        m1_previous_orders = deserialize_m1_previous_orders(m1_previous_orders_blob)
+        m1_previous_orders = deserialize_m1_previous_orders(
+            checkpoint['orch_state_json'].get('m1_previous_orders')
+        )
         if m1_previous_orders is not None:
             print(f"  ✅ 从DB恢复历史订单: {len(m1_previous_orders)} 条")
         else:
-            print("  [INFO] Rebuilding m1_previous_orders from DB orderlog...")
+            # 兼容兜底：旧版 checkpoint 中无 m1_previous_orders 字段（序列化前中断）
+            # 从 module1_output_orderlog 按 run_id + sim_date < actual_start_date 读取历史订单
+            print(f"  ⚠️ checkpoint 中无 m1_previous_orders，尝试从 DB orderlog 表回退读取...")
             if db is not None:
                 try:
                     _prev_date = checkpoint['last_batch_end']  # 上一批次结束日（e.g. "2025-12-15"）
@@ -217,6 +213,7 @@ def run_integrated_simulation_from_dict(
                     if _fallback_rows:
                         m1_previous_orders = pd.DataFrame(_fallback_rows)
                         # 规范化日期列
+                        from pgsql_db.checkpoint import deserialize_m1_previous_orders as _deserialize
                         _DATE_COLS = {'simulation_date', 'order_date', 'delivery_date',
                                       'ship_date', 'available_date', 'date', 'created_date'}
                         for _col in _DATE_COLS & set(m1_previous_orders.columns):

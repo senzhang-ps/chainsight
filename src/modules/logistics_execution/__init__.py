@@ -10,6 +10,9 @@ Logistics Execution Module (物流执行模块)
 - delivery_processor: 发货处理器
 - inventory_manager: 库存管理
 - vehicle_packer: 车辆装载优化
+- main: 主入口函数
+- simulation: 仿真循环与路线处理
+- output_writer: 输出组装与文件写入
 """
 
 from .expression_evaluator import SafeExpressionEvaluator
@@ -36,18 +39,24 @@ from .inventory_manager import (
     calculate_physical_inventory,
     update_inventory_after_load
 )
+from .vehicle_packer import (
+    VehiclePacker,
+    create_vehicle_log_entry,
+    determine_trigger_cause,
+    get_representative_context,
+)
+
+# 主入口函数
 from .main import (
     run_daily_physical_flow,
     run_physical_flow_module,
-    main,
-)
-from .vehicle_packer import (
-    VehiclePacker,
-    create_load_record,
-    calculate_load_ratios
 )
 
 __all__ = [
+    # 入口函数
+    'run_daily_physical_flow',
+    'run_physical_flow_module',
+    # 子模块导出
     'SafeExpressionEvaluator',
     'load_standalone_config',
     'load_integrated_config',
@@ -62,10 +71,8 @@ __all__ = [
     'calculate_lead_time',
     'calculate_physical_inventory',
     'update_inventory_after_load',
-    'run_daily_physical_flow',
-    'run_physical_flow_module',
-    'main',
     'VehiclePacker',
-    'create_load_record',
-    'calculate_load_ratios',
+    'create_vehicle_log_entry',
+    'determine_trigger_cause',
+    'get_representative_context',
 ]

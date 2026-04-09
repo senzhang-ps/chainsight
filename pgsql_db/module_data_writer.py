@@ -1540,6 +1540,23 @@ class ModuleDataWriter:
         if df.empty:
             print(f"  [WARN] {table_name}: 过滤后无数据")
             return 0
+
+        sort_cols = [
+            c for c in [
+                'date', 'material', 'sending', 'receiving',
+                'planned_delivery_date', 'demand_element',
+                'demand_qty', 'planned_qty', 'deployed_qty_invcon',
+                'deploy_qty_with_plan_order', 'deploy_from_in_transit',
+                'deploy_from_open_deployment_inbound',
+                'deploy_from_future_production', 'deployed_qty',
+                'leadtime', 'orig_location', 'is_cross_node', 'quota',
+            ] if c in df.columns
+        ]
+        if sort_cols:
+            df = df.sort_values(
+                by=sort_cols,
+                kind='mergesort',
+            ).reset_index(drop=True)
         
         # 添加run_id
         if run_id and 'run_id' not in df.columns:

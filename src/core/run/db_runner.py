@@ -13,7 +13,6 @@ from typing import Optional
 import pandas as pd
 
 from pgsql_db import table_mapping
-from ..main_integration.config_loader import load_csv_overrides
 from .db_config import _load_config_from_database
 from .local_writer import _write_results_to_local_dev_format
 
@@ -49,7 +48,7 @@ def _find_local_config_file(config_name: str) -> Path | None:
 
 
 def _build_expected_local_config(config_name: str) -> dict:
-    """构建本地期望配置（与文件模式相同的 Excel/CSV 解析口径）。"""
+    """构建本地期望配置（仅 Excel，保持与 Dev 一致）。"""
     config_file = _find_local_config_file(config_name)
     if config_file is None:
         return {}
@@ -68,11 +67,6 @@ def _build_expected_local_config(config_name: str) -> dict:
         df = xl.parse(sheet_name)
         table_name = table_mapping.get_config_table_name(sheet_name)
         db_key = table_name[4:] if table_name.startswith("cfg_") else table_name
-        expected[db_key] = df
-
-    # CSV 覆盖：与文件模式保持同一解析规则，避免多 Excel 目录下的误覆盖。
-    for sheet_name, df in load_csv_overrides(str(config_file)).items():
-        db_key = sheet_name.lower()
         expected[db_key] = df
 
     return expected
@@ -132,64 +126,8 @@ def _sync_config_by_diff(db, config_name: str, expected_config: dict, diff_resul
 
 
 def _apply_csv_overrides_for_db(config_data: dict, config_name: str, logger, db=None) -> None:
-    """扫描 config/ 目录下的 CSV 文件，覆盖从数据库加载的配置数据并回写 DB。
-
-    数据库模式下 DB 初始化器在检测到已有配置数据时会跳过 Excel 导入，
-    导致 ExcelImporter 中的 CSV 覆盖逻辑不会执行。
-    因此需要在从 DB 加载配置后，直接在内存中应用 CSV 覆盖，并同步写入数据库。
-
-    config_data 的 key 是小写 DB 表名（如 m1_demandforecast），
-    CSV 文件名使用 Excel sheet 名（如 M1_DemandForecast.csv），
-    匹配时通过小写化文件名进行对应。
-    """
-    config_file = _find_local_config_file(config_name)
-    if config_file is None:
-        return
-
-    csv_messages: list[str] = []
-    csv_overrides = load_csv_overrides(str(config_file), csv_messages)
-    for message in csv_messages:
-        logger.info(f"  ℹ️ {message}")
-
-    if not csv_overrides:
-        return
-
-    # 推导 config_basename：用于 config_name 过滤/删除（与运行配置一致）
-    config_basename = Path(config_name).stem
-
-    logger.info(f"\n  {'─' * 50}")
-    logger.info(f"  📄 发现 {len(csv_overrides)} 个 CSV 覆盖文件:")
-    for sheet_name, df in csv_overrides.items():
-        try:
-            db_key = sheet_name.lower()
-            is_override = db_key in config_data
-            config_data[db_key] = df
-
-            # 同步写入数据库：
-            # - config_name: 仍使用当前运行配置（如 BC_S9 / PDS1）
-            # - config_type: 按用户要求使用 CSV 文件名（如 M3_SafetyStock）
-            table_name = f"cfg_{db_key}"
-            csv_config_type = sheet_name
-            if db is not None:
-                try:
-                    deleted = db.delete_config_data(table_name, config_basename)
-                    db.create_table_from_df(
-                        df, table_name, if_exists="append",
-                        config_name=config_basename, config_type=csv_config_type
-                    )
-                    db_status = f"(DB已更新, 删除{deleted}行旧数据)"
-                except Exception as db_err:
-                    db_status = f"(DB写入失败: {db_err})"
-            else:
-                db_status = "(仅内存覆盖)"
-
-            if is_override:
-                logger.info(f"  🔄 [CSV 覆盖] {sheet_name} ({len(df)} 行) ← 替代DB版本 {db_status}")
-            else:
-                logger.info(f"  ➕ [CSV 新增] {sheet_name} ({len(df)} 行) {db_status}")
-        except Exception as e:
-            logger.warning(f"  ⚠️ CSV 文件读取失败: {sheet_name}.csv - {e}")
-    logger.info(f"  {'─' * 50}")
+    """数据库模式禁用 CSV 覆盖，保持与 Dev 文件模式一致。"""
+    return
 
 
 def _build_db_log_dir(

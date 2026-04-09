@@ -12,13 +12,6 @@ from typing import List
 
 # 使用统一的 CPU 配置
 from src.utils.cpu_config import CPU_COUNT, MAX_WORKERS
-from src.utils.runtime_defaults import (
-    DEFAULT_LEAD_TIME,
-    DEFAULT_LSK,
-    DEFAULT_MOQ,
-    DEFAULT_PTF,
-    DEFAULT_RV,
-)
 
 # 性能优化开关
 USE_VECTORIZED_DEMAND_COLLECTION: bool = False  # 暂时关闭，需要修复horizon计算问题
@@ -38,8 +31,15 @@ DEFAULT_AO_PRIORITY: int = 1
 DEFAULT_NORMAL_PRIORITY: int = 2
 DEFAULT_OTHER_PRIORITY: int = 9
 
-# 默认push levels
-DEFAULT_PUSH_LEVELS: List[float] = [1.2, 1.5, 2.0, 2.5, 3.0]
+# 默认业务参数 —— 统一来源
+from src.utils.defaults import (
+    DEFAULT_MOQ,
+    DEFAULT_RV,
+    DEFAULT_PTF,
+    DEFAULT_LSK,
+    DEFAULT_LEAD_TIME,
+    DEFAULT_PUSH_LEVELS,
+)
 
 # 标识符列名
 IDENTIFIER_COLUMNS: List[str] = [

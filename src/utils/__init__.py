@@ -1,33 +1,40 @@
-"""Utility namespace with lazy attribute loading.
-
-Keeping the package lightweight avoids importing the full simulation stack when
-callers only need small leaf modules such as ``cpu_config``.
+"""
+Utility functions and helpers
 """
 
-from importlib import import_module
-
-_EXPORTS = {
-    'run_pre_simulation_validation': ('.config_validator', 'run_pre_simulation_validation'),
-    'setup_logging': ('.logger_config', 'setup_logging'),
-    'ValidationManager': ('.validation_manager', 'ValidationManager'),
-    'InventoryBalanceChecker': ('.inventory_balance_checker', 'InventoryBalanceChecker'),
-    'SimulationTimeManager': ('.time_manager', 'SimulationTimeManager'),
-    'initialize_time_manager': ('.time_manager', 'initialize_time_manager'),
-    'SimulationCache': ('.simulation_cache', 'SimulationCache'),
-    'initialize_simulation_cache': ('.simulation_cache', 'initialize_simulation_cache'),
-    'get_simulation_cache': ('.simulation_cache', 'get_simulation_cache'),
-    'clear_simulation_cache': ('.simulation_cache', 'clear_simulation_cache'),
-}
-
-__all__ = list(_EXPORTS)
+from .logger_config import setup_logging
+from .validation_manager import ValidationManager
+from .inventory_balance_checker import InventoryBalanceChecker
+from .time_manager import SimulationTimeManager, initialize_time_manager
+from .simulation_cache import (
+    SimulationCache,
+    initialize_simulation_cache,
+    get_simulation_cache,
+    clear_simulation_cache,
+)
 
 
 def __getattr__(name):
-    if name not in _EXPORTS:
-        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    """延迟导入 config_validator 以避免循环引用。
 
-    module_name, attr_name = _EXPORTS[name]
-    module = import_module(module_name, __name__)
-    value = getattr(module, attr_name)
-    globals()[name] = value
-    return value
+    config_validator → core.main_integration → core.orchestrator → utils.normalization
+    会在包初始化阶段形成循环，因此改用 lazy import。
+    """
+    if name == 'run_pre_simulation_validation':
+        from .config_validator import run_pre_simulation_validation
+        return run_pre_simulation_validation
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+__all__ = [
+    'run_pre_simulation_validation',
+    'setup_logging',
+    'ValidationManager',
+    'InventoryBalanceChecker',
+    'SimulationTimeManager',
+    'initialize_time_manager',
+    'SimulationCache',
+    'initialize_simulation_cache',
+    'get_simulation_cache',
+    'clear_simulation_cache',
+]

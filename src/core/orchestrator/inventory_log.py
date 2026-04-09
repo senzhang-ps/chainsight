@@ -9,6 +9,29 @@ import pandas as pd
 class OrchestratorInventoryLogMixin:
     """库存变动日志生成方法集合（Mixin）。"""
 
+    @staticmethod
+    def _stable_sort_inventory_change_log(
+        df: pd.DataFrame,
+    ) -> pd.DataFrame:
+        if df.empty:
+            return df
+
+        sort_cols = [
+            c for c in [
+                'date', 'material', 'location', 'beginning_inventory',
+                'production_gr', 'delivery_gr', 'shipment',
+                'delivery_ship', 'ending_inventory',
+                'calculated_ending', 'balance_diff',
+            ] if c in df.columns
+        ]
+        if not sort_cols:
+            return df.reset_index(drop=True)
+
+        return df.sort_values(
+            by=sort_cols,
+            kind='mergesort',
+        ).reset_index(drop=True)
+
     def generate_inventory_change_log(
         self, date: str
     ) -> pd.DataFrame:
@@ -218,4 +241,4 @@ class OrchestratorInventoryLogMixin:
                 'balance_diff',
             ])
 
-        return df
+        return self._stable_sort_inventory_change_log(df)

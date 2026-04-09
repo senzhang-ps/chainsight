@@ -8,7 +8,6 @@
 
 import pandas as pd
 import time
-import logging
 from datetime import datetime
 from pathlib import Path
 from tqdm import tqdm
@@ -21,21 +20,12 @@ from ...utils.config_validator import run_pre_simulation_validation
 from ...utils.inventory_balance_checker import InventoryBalanceChecker
 from ...services.summary_report_generator import SummaryReportGenerator
 from ...services.performance_profiler import PerformanceProfiler
-from ...modules import (
-    demand_planning as module1,
-    deployment_planning as module5,
-    logistics_execution as module6,
-    mrp_planning as module3,
-    production_planning as module4,
-)
+from ...modules import module1, module3, module4, module5, module6
 
 from .normalize import _normalize_identifiers
 from .resume import check_resume_capability, restore_orchestrator_state
 from .seed import set_module_seeds
-from .production_integration import (
-    load_current_date_production_gr,
-    run_module4_integrated,
-)
+from .production_runner import run_module4_integrated, load_current_date_production_gr
 from .config_loader import load_configuration
 
 
@@ -93,8 +83,6 @@ def run_integrated_simulation(
         return {
             'validation_passed': False,
             'validation_report': validation_report,
-            'failure_stage': 'pre_validation',
-            'status_message': 'Configuration pre-validation failed',
             'simulation_completed': False
         }
     
@@ -494,15 +482,7 @@ def run_integrated_simulation(
                 
                 # 直接保存每日状态，状态更新已在各模块运行后实时完成
                 orchestrator.save_daily_state(current_date.strftime('%Y-%m-%d'))
-
-                # Dev 在续跑模式下通过 restore_orchestrator_state 将库存值
-                # 从 int 转为 float，后续日期输出因此带 .0 后缀。
-                # 这里复现同样的类型转换以保持输出一致。
-                for k in orchestrator.unrestricted_inventory:
-                    orchestrator.unrestricted_inventory[k] = float(
-                        orchestrator.unrestricted_inventory[k]
-                    )
-
+                
                 # 获取当日统计
                 stats = orchestrator.get_summary_statistics(current_date.strftime('%Y-%m-%d'))
                 print(f"📊 当日统计: {stats}")

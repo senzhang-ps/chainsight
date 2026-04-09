@@ -57,6 +57,21 @@ from .push_allocation import push_softpush_allocation
 from .validation import log_outputs, validate_config_before_run
 
 
+def _stable_sort_output(
+    df: pd.DataFrame,
+    preferred_cols: list[str],
+) -> pd.DataFrame:
+    """对输出 DataFrame 做稳定排序，确保结果可复现。"""
+    if df.empty:
+        return df
+
+    sort_cols = [c for c in preferred_cols if c in df.columns]
+    if not sort_cols:
+        return df.reset_index(drop=True)
+
+    return df.sort_values(by=sort_cols, kind='mergesort').reset_index(drop=True)
+
+
 def _validate_deployment_shipment_constraint(
     deployment_plan_df: pd.DataFrame,
     config: Dict,
@@ -1062,8 +1077,35 @@ def main(
         deployment_plan_rows, receiving_space, sim_date, demand_priority_map
     )
     unfulfilled_all = pd.DataFrame(unfulfilled_rows + unfulfilled_space)
-    
-    # 与code_v0保持一致：不对unfulfilled_all排序
+
+    deployment_plan_rows_df = _stable_sort_output(
+        deployment_plan_rows_df,
+        [
+            'date', 'material', 'sending', 'receiving',
+            'planned_delivery_date', 'demand_element', 'demand_qty',
+            'planned_qty', 'deployed_qty_invCon',
+            'deploy_qty_with_plan_order', 'deploy_from_in_transit',
+            'deploy_from_open_deployment_inbound',
+            'deploy_from_future_production', 'deployed_qty',
+            'leadtime', 'orig_location', 'is_cross_node', 'quota',
+        ],
+    )
+    unfulfilled_all = _stable_sort_output(
+        unfulfilled_all,
+        [
+            'date', 'sending', 'receiving',
+            'demand_element', 'demand_qty',
+            'unfulfilled_qty', 'reason',
+        ],
+    )
+    stock_on_hand_log_df = _stable_sort_output(
+        pd.DataFrame(stock_on_hand_log),
+        [
+            'date', 'material', 'location',
+            'beginning_soh', 'production', 'in_transit',
+            'delivery_gr', 'today_shipment', 'deployed_qty', 'ending_soh',
+        ],
+    )
 
     # 🔧 验证约束：deployed_qty 不超过 shipment_qty
     _validate_deployment_shipment_constraint(
@@ -1074,7 +1116,7 @@ def main(
     outputs = {
         'DeploymentPlan': deployment_plan_rows_df,
         'UnfulfilledLog': unfulfilled_all,
-        'StockOnHandLog': pd.DataFrame(stock_on_hand_log),
+        'StockOnHandLog': stock_on_hand_log_df,
         'Validation': pd.DataFrame(validation_log),
     }
 
@@ -1086,7 +1128,7 @@ def main(
     return {
         'deployment_plan': deployment_plan_rows_df,
         'unfulfilled_log': unfulfilled_all,
-        'stock_on_hand_log': pd.DataFrame(stock_on_hand_log),
+        'stock_on_hand_log': stock_on_hand_log_df,
         'validation_log': pd.DataFrame(validation_log),
         'statistics': {
             'deployment_count': len(deployment_plan_rows_df),

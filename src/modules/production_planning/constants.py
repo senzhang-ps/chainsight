@@ -16,8 +16,8 @@ IDENTIFIER_COLS: List[str] = [
     'to_material',
 ]
 
-# 默认换产时间（小时）
-DEFAULT_CHANGEOVER_TIME: float = 24.0
+# 默认换产时间 —— 统一来源
+from src.utils.defaults import DEFAULT_CHANGEOVER_TIME
 
 # 生产计划表列名
 PLAN_COLUMNS: List[str] = [

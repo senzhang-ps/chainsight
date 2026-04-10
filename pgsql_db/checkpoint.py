@@ -161,20 +161,12 @@ def serialize_orchestrator_state(orch, max_log_entries: int = 1000) -> dict:
     防止长仿真中 orch_state_json 膨胀导致 checkpoint 写入超时。
     核心状态（inventory/in_transit/open_deployment/space_quota）不受限制。
     """
+    # 历史日志类状态已按天落库，checkpoint 仅保留断点续跑所需的轻量状态。
     def _inv_key(k):
         # [FIX-风险G] 使用 JSON array 替代 ||| 分隔符，避免 material/location 包含 ||| 导致反序列化错误
         if isinstance(k, tuple):
             return json.dumps([k[0], k[1]], ensure_ascii=False)
         return str(k)
-
-    def _normalize_df_list(records):
-        result = []
-        for rec in records:
-            if isinstance(rec, dict):
-                result.append({k: _val(v) for k, v in rec.items()})
-            else:
-                result.append(_val(rec))
-        return result
 
     def _val(v):
         if isinstance(v, pd.Timestamp):
@@ -213,29 +205,28 @@ def serialize_orchestrator_state(orch, max_log_entries: int = 1000) -> dict:
     else:
         space_capacity_records = []
 
-    # [FIX-#11] delivery_gr 不截断：其全量 flat list 在每日仿真中用于 O(N) 去重检查
-    # （processors.py:490, daily_ops.py:178），截断会导致断点续跑后遗漏去重、重复入库。
-    # 其他日志列表仅通过 *_by_date 索引查询，截断不影响计算正确性。
-    delivery_gr    = _normalize_df_list(getattr(orch, 'delivery_gr', []))
-    production_gr  = _truncate(_normalize_df_list(getattr(orch, 'production_gr', [])), 'production_gr')
-    shipment_log   = _truncate(_normalize_df_list(getattr(orch, 'shipment_log', [])), 'shipment_log')
-    dlv_ship_log   = _truncate(_normalize_df_list(getattr(orch, 'delivery_shipment_log', [])), 'delivery_shipment_log')
-    inv_change_log = _truncate(_normalize_df_list(getattr(orch, 'inventory_change_log', [])), 'inventory_change_log')
+    # Historical logs are already persisted per day. Keep checkpoint JSON lean
+    # and rebuild any date indexes from the serialized lightweight state on resume.
+    delivery_gr = []
+    production_gr = []
+    shipment_log = []
+    dlv_ship_log = []
+    inv_change_log = []
 
-    daily_logs_raw = getattr(orch, 'daily_logs', [])
-    if isinstance(daily_logs_raw, list):
-        daily_logs = _normalize_df_list(daily_logs_raw)
-    else:
-        daily_logs = {}
-        for k, v in daily_logs_raw.items():
-            daily_logs[str(k)] = {dk: _val(dv) for dk, dv in v.items()} if isinstance(v, dict) else str(v)
+    daily_logs = []
 
     cur_date = getattr(orch, 'current_date', None)
     cur_date_str = cur_date.isoformat() if isinstance(cur_date, (date, datetime, pd.Timestamp)) else str(cur_date) if cur_date else None
 
     # [FIX-#2] 序列化 production_plan_backlog（M3 需求净计算的供给数据源）
     _ppb = getattr(orch, 'production_plan_backlog', [])
-    production_plan_backlog = _normalize_df_list(_ppb) if isinstance(_ppb, list) else []
+    production_plan_backlog = []
+    if isinstance(_ppb, list):
+        for rec in _ppb:
+            if isinstance(rec, dict):
+                production_plan_backlog.append({k: _val(v) for k, v in rec.items()})
+            else:
+                production_plan_backlog.append(_val(rec))
 
     # [FIX-#9] 保存 numpy 全局 PRNG 状态，确保断点续跑时随机序列连续
     # np.random.get_state() 返回 ('MT19937', ndarray(624,), pos, has_gauss, cached_gauss)

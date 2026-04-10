@@ -1377,7 +1377,6 @@ class ModuleDataWriter:
         """生成订单/发货/缺货汇总报告"""
         table_name = "summary_output_ordershipmentcutsummary"
         
-        # 读取Module1的三个表
         try:
             orders_df = self.db.read_table("module1_output_orderlog")
         except:
@@ -1393,109 +1392,111 @@ class ModuleDataWriter:
         except:
             cuts_df = pd.DataFrame()
         
-        # 按run_id过滤
         if run_id:
             if not orders_df.empty and 'run_id' in orders_df.columns:
-                orders_df = orders_df[orders_df['run_id'] == run_id]
+                orders_df = orders_df[orders_df['run_id'] == run_id].reset_index(drop=True)
             if not shipments_df.empty and 'run_id' in shipments_df.columns:
-                shipments_df = shipments_df[shipments_df['run_id'] == run_id]
+                shipments_df = shipments_df[shipments_df['run_id'] == run_id].reset_index(drop=True)
             if not cuts_df.empty and 'run_id' in cuts_df.columns:
-                cuts_df = cuts_df[cuts_df['run_id'] == run_id]
+                cuts_df = cuts_df[cuts_df['run_id'] == run_id].reset_index(drop=True)
         
-        # 去重订单（AO订单可能在多个simulation_date被重复记录）
+        # Dev 从文件路径提取 simulation_date（取路径中第一个8位数字日期，
+        # 实际来自 config_name 如 OC_Paste_S1_20251224 → '2025-12-24'）。
+        # DB 需要复制此行为：从 config_name 列提取日期，统一覆盖 simulation_date。
+        import re
+        config_sim_date = None
+        for df_ref in [orders_df, shipments_df, cuts_df]:
+            if not df_ref.empty and 'config_name' in df_ref.columns:
+                sample_config = str(df_ref['config_name'].iloc[0])
+                m = re.search(r'(\d{8})', sample_config)
+                if m:
+                    config_sim_date = pd.to_datetime(m.group(1), format='%Y%m%d').strftime('%Y-%m-%d')
+                break
+        
+        for df_ref in [orders_df, shipments_df, cuts_df]:
+            if not df_ref.empty:
+                if config_sim_date:
+                    # 与 Dev 一致：所有行使用从 config_name 提取的同一 simulation_date
+                    df_ref['simulation_date'] = config_sim_date
+                elif 'simulation_date' not in df_ref.columns and 'sim_date' in df_ref.columns:
+                    df_ref['simulation_date'] = df_ref['sim_date']
+        
+        # 去重（与 Dev 一致：按 date, material, location, quantity, simulation_date [+ demand_type]）
         if not orders_df.empty:
-            dedup_cols = ['date', 'material', 'location', 'quantity', 'sim_date']
+            dedup_cols = ['date', 'material', 'location', 'quantity', 'simulation_date']
             if 'demand_type' in orders_df.columns:
                 dedup_cols.append('demand_type')
             existing_cols = [c for c in dedup_cols if c in orders_df.columns]
             if existing_cols:
                 orders_df = orders_df.drop_duplicates(subset=existing_cols, keep='first')
         
-        # 聚合订单数据
-        order_agg = pd.DataFrame(columns=['date', 'material', 'location', 'sim_date', 'order_qty'])
+        group_cols = ['date', 'material', 'location', 'simulation_date']
+        merge_cols = ['date', 'material', 'location', 'simulation_date']
+        
+        order_agg = pd.DataFrame(columns=merge_cols + ['order_qty'])
         if not orders_df.empty:
             orders_df['date'] = pd.to_datetime(orders_df['date'], errors='coerce')
-            group_cols = ['date', 'material', 'location']
-            if 'sim_date' in orders_df.columns:
-                group_cols.append('sim_date')
-            order_agg = orders_df.groupby(group_cols, dropna=False).agg(
+            existing_group = [c for c in group_cols if c in orders_df.columns]
+            order_agg = orders_df.groupby(existing_group, dropna=False).agg(
                 {'quantity': 'sum'}
             ).reset_index()
             order_agg.rename(columns={'quantity': 'order_qty'}, inplace=True)
         
-        # 聚合发货数据
-        shipment_agg = pd.DataFrame(columns=['date', 'material', 'location', 'sim_date', 'shipment_qty'])
+        shipment_agg = pd.DataFrame(columns=merge_cols + ['shipment_qty'])
         if not shipments_df.empty:
             shipments_df['date'] = pd.to_datetime(shipments_df['date'], errors='coerce')
-            group_cols = ['date', 'material', 'location']
-            if 'sim_date' in shipments_df.columns:
-                group_cols.append('sim_date')
-            shipment_agg = shipments_df.groupby(group_cols, dropna=False).agg(
+            existing_group = [c for c in group_cols if c in shipments_df.columns]
+            shipment_agg = shipments_df.groupby(existing_group, dropna=False).agg(
                 {'quantity': 'sum'}
             ).reset_index()
             shipment_agg.rename(columns={'quantity': 'shipment_qty'}, inplace=True)
         
-        # 聚合缺货数据
-        cut_agg = pd.DataFrame(columns=['date', 'material', 'location', 'sim_date', 'cut_qty'])
+        cut_agg = pd.DataFrame(columns=merge_cols + ['cut_qty'])
         if not cuts_df.empty:
             cuts_df['date'] = pd.to_datetime(cuts_df['date'], errors='coerce')
-            group_cols = ['date', 'material', 'location']
-            if 'sim_date' in cuts_df.columns:
-                group_cols.append('sim_date')
-            cut_agg = cuts_df.groupby(group_cols, dropna=False).agg(
+            existing_group = [c for c in group_cols if c in cuts_df.columns]
+            cut_agg = cuts_df.groupby(existing_group, dropna=False).agg(
                 {'quantity': 'sum'}
             ).reset_index()
             cut_agg.rename(columns={'quantity': 'cut_qty'}, inplace=True)
         
-        # 合并三个汇总表
-        merge_cols = ['date', 'material', 'location']
-        if 'sim_date' in order_agg.columns or 'sim_date' in shipment_agg.columns or 'sim_date' in cut_agg.columns:
-            merge_cols.append('sim_date')
+        existing_merge = [c for c in merge_cols if c in order_agg.columns or c in shipment_agg.columns or c in cut_agg.columns]
+        if not existing_merge:
+            existing_merge = merge_cols
         
         summary = order_agg
         if not shipment_agg.empty:
-            summary = summary.merge(shipment_agg, on=merge_cols, how='outer')
+            summary = summary.merge(shipment_agg, on=existing_merge, how='outer')
         if not cut_agg.empty:
-            summary = summary.merge(cut_agg, on=merge_cols, how='outer')
+            summary = summary.merge(cut_agg, on=existing_merge, how='outer')
         
         if summary.empty:
             print(f"  [WARN] {table_name}: 无数据")
             return 0
         
-        # 填充缺失值（与本地版本 SummaryReportGenerator 保持一致）
         for col in ['order_qty', 'shipment_qty', 'cut_qty']:
             if col in summary.columns:
                 summary[col] = summary[col].fillna(0).astype(int)
             else:
                 summary[col] = 0
         
-        # [FIX] 与本地版本保持一致：用计算值覆盖 cut_qty，确保 cut_qty = max(0, order_qty - shipment_qty)
-        summary['cut_qty'] = (summary['order_qty'] - summary['shipment_qty']).clip(lower=0)
+        # Dev 保留 CutLog 原始 cut_qty（不覆盖），仅做一致性校验
+        # 不再用 clip(lower=0) 覆盖
         
-        # 按日期过滤
         if end_date_dt is not None and 'date' in summary.columns:
             summary = summary[summary['date'] <= end_date_dt]
         
-        # 排序
-        sort_cols = []
-        if 'sim_date' in summary.columns:
-            sort_cols.append('sim_date')
-        sort_cols.extend(['date', 'material', 'location'])
-        summary = summary.sort_values([c for c in sort_cols if c in summary.columns])
+        summary = summary.sort_values(
+            [c for c in ['simulation_date', 'date', 'material', 'location'] if c in summary.columns]
+        )
         
-        # 重命名sim_date为simulation_date以匹配原格式
-        if 'sim_date' in summary.columns:
-            summary = summary.rename(columns={'sim_date': 'simulation_date'})
-            # 调整列顺序
-            cols = ['simulation_date', 'date', 'material', 'location', 'order_qty', 'shipment_qty', 'cut_qty']
-            cols = [c for c in cols if c in summary.columns]
-            summary = summary[cols]
+        cols = ['simulation_date', 'date', 'material', 'location', 'order_qty', 'shipment_qty', 'cut_qty']
+        cols = [c for c in cols if c in summary.columns]
+        summary = summary[cols]
         
-        # 添加run_id
         if run_id:
             summary['run_id'] = run_id
         
-        # 写入数据库
         self.db.create_table_from_df(summary, table_name, if_exists, config_name=self.config_name)
         self.written_tables[table_name] = {"module": "summary", "rows": len(summary)}
         print(f"  [OK] {table_name}: {len(summary):,} 行")
@@ -1523,19 +1524,39 @@ class ModuleDataWriter:
         
         # 按run_id过滤
         if run_id and 'run_id' in df.columns:
-            df = df[df['run_id'] == run_id]
+            df = df[df['run_id'] == run_id].reset_index(drop=True)
         
-        # 按日期过滤
+        # 按日期过滤（与 Dev 版本一致：只在 changeover_end_date 上过滤，不在 date 上过滤）
+        # Dev 数据中 changeover_end_date 不存在，所以过滤是 no-op，保留全部行
+        # DB 数据中 date 列值可能 > end_date，但不应在 date 上过滤
         if end_date_dt is not None:
-            for col in ['changeover_end_date', 'date']:
+            for col in ['changeover_start_date', 'changeover_end_date', 'date']:
                 if col in df.columns:
                     df[col] = pd.to_datetime(df[col], errors='coerce')
-                    df = df[(df[col].isna()) | (df[col] <= end_date_dt)]
-                    break
+            
+            if 'changeover_end_date' in df.columns:
+                df = df[(df['changeover_end_date'].isna()) | (df['changeover_end_date'] <= end_date_dt)]
         
         if df.empty:
             print(f"  [WARN] {table_name}: 过滤后无数据")
             return 0
+
+        sort_cols = [
+            c for c in [
+                'date', 'material', 'sending', 'receiving',
+                'planned_delivery_date', 'demand_element',
+                'demand_qty', 'planned_qty', 'deployed_qty_invcon',
+                'deploy_qty_with_plan_order', 'deploy_from_in_transit',
+                'deploy_from_open_deployment_inbound',
+                'deploy_from_future_production', 'deployed_qty',
+                'leadtime', 'orig_location', 'is_cross_node', 'quota',
+            ] if c in df.columns
+        ]
+        if sort_cols:
+            df = df.sort_values(
+                by=sort_cols,
+                kind='mergesort',
+            ).reset_index(drop=True)
         
         # 添加run_id
         if run_id and 'run_id' not in df.columns:
@@ -1612,9 +1633,8 @@ class ModuleDataWriter:
         
         # 按run_id过滤
         if run_id and 'run_id' in df.columns:
-            df = df[df['run_id'] == run_id]
+            df = df[df['run_id'] == run_id].reset_index(drop=True)
         
-        # 按日期过滤 - 使用available_date作为过滤条件
         if end_date_dt is not None and 'available_date' in df.columns:
             df['available_date'] = pd.to_datetime(df['available_date'], errors='coerce')
             df = df[(df['available_date'].isna()) | (df['available_date'] <= end_date_dt)]
@@ -1655,17 +1675,19 @@ class ModuleDataWriter:
         
         # 按run_id过滤
         if run_id and 'run_id' in df.columns:
-            df = df[df['run_id'] == run_id]
+            df = df[df['run_id'] == run_id].reset_index(drop=True)
         
-        # 按日期过滤
+        # 按日期过滤（与 Dev 版本 _generate_deployment_report 保持一致）
+        # Dev 版本过滤列: ['deployment_date', 'arrival_date', 'ship_date', 'date']
+        # 只有 'date' 列存在于实际数据中，且值在仿真范围内，所以过滤是 no-op
         if end_date_dt is not None:
             date_cols = ['deployment_date', 'arrival_date', 'ship_date', 'date']
             for col in date_cols:
                 if col in df.columns:
                     df[col] = pd.to_datetime(df[col], errors='coerce')
             
-            # 创建过滤mask
-            mask = pd.Series([True] * len(df))
+            # 创建过滤mask（使用 df.index 确保对齐）
+            mask = pd.Series([True] * len(df), index=df.index)
             for col in date_cols:
                 if col in df.columns:
                     mask = mask & ((df[col].isna()) | (df[col] <= end_date_dt))
@@ -1707,16 +1729,19 @@ class ModuleDataWriter:
         
         # 按run_id过滤
         if run_id and 'run_id' in df.columns:
-            df = df[df['run_id'] == run_id]
+            df = df[df['run_id'] == run_id].reset_index(drop=True)
         
-        # 按日期过滤
+        # 按日期过滤（与 Dev 版本 _generate_delivery_report 保持一致）
+        # Dev 版本过滤列: ['planned_deploy_date', 'actual_ship_date']
+        # DB 表列名是 planned_deployment_date（不匹配 planned_deploy_date），所以只在 actual_ship_date 上实际过滤
         if end_date_dt is not None:
             date_cols = ['planned_deploy_date', 'actual_ship_date', 'date']
             for col in date_cols:
                 if col in df.columns:
                     df[col] = pd.to_datetime(df[col], errors='coerce')
             
-            mask = pd.Series([True] * len(df))
+            # 创建过滤mask（使用 df.index 确保对齐）
+            mask = pd.Series([True] * len(df), index=df.index)
             for col in ['planned_deploy_date', 'actual_ship_date']:
                 if col in df.columns:
                     mask = mask & ((df[col].isna()) | (df[col] <= end_date_dt))

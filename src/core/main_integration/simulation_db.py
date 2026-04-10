@@ -19,7 +19,7 @@ from ...modules import module1, module3, module4, module5, module6
 from .normalize import _normalize_identifiers
 from .config_loader import load_configuration_from_dict
 from .seed import set_module_seeds
-from .module4_runner import run_module4_integrated
+from .production_runner import run_module4_integrated
 from .runtime_state import DbRuntimeState
 from .memory_store import (_ensure_memory_store_imported, _enable_memory_mode,
                           _disable_memory_mode, _is_memory_mode_enabled, _get_data_store)

@@ -262,6 +262,11 @@ class OrchestratorProcessorsMixin:
         """
         date_obj = pd.to_datetime(date).normalize()
 
+        # 每日重置 UID 序列计数器，与 Dev 版本行为一致
+        # （Dev 在续跑模式下每天重新创建 Orchestrator，
+        #   uid_sequence 自然从 0 开始）
+        self.uid_sequence = 0
+
         # 为保证可复现，在生成 UID 之前稳定排序
         sort_cols = [
             col
@@ -489,6 +494,9 @@ class OrchestratorProcessorsMixin:
                     uid,
                     vehicle_uid,
                 )
+                date_str = date_obj.strftime(
+                    '%Y-%m-%d'
+                )
                 is_duplicate = any(
                     (
                         record['date'],
@@ -498,15 +506,14 @@ class OrchestratorProcessorsMixin:
                         record['vehicle_uid'],
                     )
                     == existing_key
-                    for record in self.delivery_gr
+                    for record in self.delivery_gr_by_date.get(
+                        date_str, []
+                    )
                 )
 
                 if not is_duplicate:
                     self.delivery_gr.append(gr_record)
                     # 索引以便 O(1) 查询
-                    date_str = date_obj.strftime(
-                        '%Y-%m-%d'
-                    )
                     if date_str not in (
                         self.delivery_gr_by_date
                     ):

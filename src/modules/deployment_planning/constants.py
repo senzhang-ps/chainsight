@@ -31,19 +31,15 @@ DEFAULT_AO_PRIORITY: int = 1
 DEFAULT_NORMAL_PRIORITY: int = 2
 DEFAULT_OTHER_PRIORITY: int = 9
 
-# 默认MOQ/RV值
-DEFAULT_MOQ: int = 1
-DEFAULT_RV: int = 1
-
-# 默认PTF/LSK值
-DEFAULT_PTF: int = 0
-DEFAULT_LSK: int = 1
-
-# 默认lead time
-DEFAULT_LEAD_TIME: int = 1
-
-# 默认push levels
-DEFAULT_PUSH_LEVELS: List[float] = [1.2, 1.5, 2.0, 2.5, 3.0]
+# 默认业务参数 —— 统一来源
+from src.utils.defaults import (
+    DEFAULT_MOQ,
+    DEFAULT_RV,
+    DEFAULT_PTF,
+    DEFAULT_LSK,
+    DEFAULT_LEAD_TIME,
+    DEFAULT_PUSH_LEVELS,
+)
 
 # 标识符列名
 IDENTIFIER_COLUMNS: List[str] = [

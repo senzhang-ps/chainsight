@@ -25,7 +25,7 @@ from ...modules import module1, module3, module4, module5, module6
 from .normalize import _normalize_identifiers
 from .resume import check_resume_capability, restore_orchestrator_state
 from .seed import set_module_seeds
-from .module4_runner import run_module4_integrated, load_current_date_production_gr
+from .production_runner import run_module4_integrated, load_current_date_production_gr
 from .config_loader import load_configuration
 
 

@@ -683,7 +683,7 @@ class DatabaseConnection:
                     try:
                         float_val = float(val)
                         if round_float_values:
-                            new_row.append(round(float_val, 10))
+                            new_row.append(round(float_val, 15))
                         else:
                             new_row.append(float_val)
                     except (ValueError, TypeError):

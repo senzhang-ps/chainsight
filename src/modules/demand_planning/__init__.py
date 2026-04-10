@@ -74,6 +74,10 @@ _normalize_identifiers = normalize_identifiers
 _append_error_log = append_error_log
 _validate_m1_config = validate_m1_config
 _prepare_daily_forecasts = prepare_daily_forecasts
+_consume_orders = consume_orders
+_consume_ao_orders_serial = consume_ao_orders_serial
+_consume_normal_orders_serial = consume_normal_orders_serial
+_load_previous_orders = load_previous_orders
 
 __all__ = [
     # 常量
@@ -113,6 +117,9 @@ __all__ = [
     'consume_orders',
     'consume_ao_orders_serial',
     'consume_normal_orders_serial',
+    '_consume_orders',
+    '_consume_ao_orders_serial',
+    '_consume_normal_orders_serial',
     # 发货
     'simulate_shipment_for_single_day',
     'generate_shipment_with_inventory_check',
@@ -121,5 +128,6 @@ __all__ = [
     'generate_supply_demand_log_for_integration',
     # 输入输出
     'load_previous_orders',
+    '_load_previous_orders',
     'save_module1_output_with_supply_demand',
 ]

@@ -362,15 +362,94 @@ class ConfigValidator:
                 ))
                 
                 # 日期转换
-                safety_df = self.vm.safe_date_conversion(safety_df, 'date', 'Module3')
-                
-                # 验证安全库存为非负数
-                non_negative_stock = safety_df[safety_df['safety_stock_qty'] >= 0]
-                if len(non_negative_stock) < len(safety_df):
-                    negative_count = len(safety_df) - len(non_negative_stock)
-                    self.vm.add_error("Module3", "InvalidValues", 
-                                    f"M3_SafetyStock has {negative_count} negative safety stock values")
+                safety_df = self.vm.safe_date_conversion(safety_df.copy(), 'date', 'Module3')
+
+                raw_qty = safety_df['safety_stock_qty']
+                raw_qty_str = raw_qty.astype('string').str.strip()
+                qty_missing_mask = raw_qty.isna() | raw_qty_str.eq("")
+                numeric_qty = pd.to_numeric(raw_qty, errors='coerce')
+                invalid_qty_mask = (~qty_missing_mask) & numeric_qty.isna()
+                negative_qty_mask = numeric_qty < 0
+                date_missing_mask = safety_df['date'].isna()
+                nonzero_qty_mask = numeric_qty.fillna(0) != 0
+
+                # 与 Dev / 当前运行时口径对齐：
+                # - 空 safety_stock_qty 在运行时按 0 处理，因此只做 warning
+                # - 真负值、非数字脏值、缺少 date 但携带非零数量仍视为阻断错误
+                blank_row_mask = date_missing_mask & qty_missing_mask
+                null_qty_treated_as_zero_mask = (~date_missing_mask) & qty_missing_mask
+                missing_date_with_nonzero_qty_mask = date_missing_mask & (~qty_missing_mask) & nonzero_qty_mask
+
+                anomaly_frames = []
+
+                def _append_anomaly_rows(mask, issue_type):
+                    if not mask.any():
+                        return
+                    anomaly_df = safety_df.loc[mask, ['material', 'location', 'date', 'safety_stock_qty']].copy()
+                    anomaly_df.insert(0, 'row_index', anomaly_df.index)
+                    anomaly_df.insert(1, 'issue_type', issue_type)
+                    anomaly_frames.append(anomaly_df)
+
+                if invalid_qty_mask.any():
+                    invalid_count = int(invalid_qty_mask.sum())
+                    self.vm.add_error(
+                        "Module3",
+                        "InvalidValues",
+                        f"M3_SafetyStock has {invalid_count} non-numeric safety_stock_qty values"
+                    )
                     results.append(False)
+                    _append_anomaly_rows(invalid_qty_mask, 'invalid_qty_non_numeric')
+
+                if negative_qty_mask.any():
+                    negative_count = int(negative_qty_mask.sum())
+                    self.vm.add_error(
+                        "Module3",
+                        "InvalidValues",
+                        f"M3_SafetyStock has {negative_count} negative safety stock values"
+                    )
+                    results.append(False)
+                    _append_anomaly_rows(negative_qty_mask, 'negative_qty')
+
+                if missing_date_with_nonzero_qty_mask.any():
+                    missing_date_count = int(missing_date_with_nonzero_qty_mask.sum())
+                    self.vm.add_error(
+                        "Module3",
+                        "InvalidValues",
+                        f"M3_SafetyStock has {missing_date_count} rows with missing date but non-zero safety_stock_qty"
+                    )
+                    results.append(False)
+                    _append_anomaly_rows(missing_date_with_nonzero_qty_mask, 'missing_date_nonzero_qty')
+
+                if null_qty_treated_as_zero_mask.any():
+                    null_qty_count = int(null_qty_treated_as_zero_mask.sum())
+                    self.vm.add_warning(
+                        "Module3",
+                        "NullValues",
+                        "M3_SafetyStock has "
+                        f"{null_qty_count} rows with empty safety_stock_qty; runtime will treat them as 0"
+                    )
+                    _append_anomaly_rows(null_qty_treated_as_zero_mask, 'null_qty_treated_as_zero')
+
+                if blank_row_mask.any():
+                    blank_row_count = int(blank_row_mask.sum())
+                    self.vm.add_warning(
+                        "Module3",
+                        "BlankRows",
+                        f"M3_SafetyStock has {blank_row_count} rows with both date and safety_stock_qty empty; runtime will ignore them"
+                    )
+                    _append_anomaly_rows(blank_row_mask, 'blank_row_ignored')
+
+                if anomaly_frames:
+                    anomaly_report = pd.concat(anomaly_frames, ignore_index=True)
+                    anomaly_report_path = self.vm.export_anomaly_rows(
+                        anomaly_report,
+                        "m3_safetystock_validation_anomalies.csv"
+                    )
+                    self.vm.add_info(
+                        "Module3",
+                        "ValidationArtifact",
+                        f"M3_SafetyStock anomaly details exported to: {anomaly_report_path}"
+                    )
             else:
                 self.vm.add_warning("Module3", "EmptyConfig", "M3_SafetyStock configuration is empty")
         else:
@@ -707,7 +786,10 @@ def run_pre_simulation_validation(config_path: str, output_dir: str) -> tuple:
         # 使用更高效的方式读取所有工作表，且只读取数据值以加速
         config_dict = pd.read_excel(config_path, sheet_name=None, engine='openpyxl', engine_kwargs={'data_only': True})
         # 扫描并应用 CSV 覆盖
-        csv_overrides = load_csv_overrides(config_path)
+        csv_messages: list[str] = []
+        csv_overrides = load_csv_overrides(config_path, csv_messages)
+        for message in csv_messages:
+            validation_manager.add_info("ConfigLoader", "CSVOverride", message)
         for sheet_name, df in csv_overrides.items():
             config_dict[sheet_name] = df
     except Exception as e:

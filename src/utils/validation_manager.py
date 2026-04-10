@@ -125,6 +125,21 @@ class ValidationManager:
         
         return str(self.validation_file)
 
+    def export_anomaly_rows(self, df: pd.DataFrame, filename: str) -> str:
+        """
+        将校验异常明细导出为 CSV，便于用户直接定位和清洗数据。
+
+        Args:
+            df: 待导出的异常数据
+            filename: 输出文件名
+
+        Returns:
+            str: 导出文件路径
+        """
+        output_path = self.output_dir / filename
+        df.to_csv(output_path, index=False, encoding='utf-8-sig')
+        return str(output_path)
+
     def safe_date_conversion(self, df: pd.DataFrame, column: str, module: str) -> pd.DataFrame:
         """
         安全的日期转换，记录转换失败的行

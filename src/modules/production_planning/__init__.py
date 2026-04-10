@@ -1,45 +1,45 @@
-"""
-Production Planning Module (生产计划模块)
+"""Production planning package public API.
 
-该包包含生产计划的所有子模块，按照Python代码规范拆分为以下子模块:
-- constants: 常量定义
-- types: 类型定义和数据类
-- utils: 通用工具函数
-- state_manager: 状态持久化管理
-- config_loader: 配置加载和校验
-- demand_loader: 净需求数据加载
-- plan_builder: 无约束计划构建
-- capacity_allocator: 产能分配和换产处理
-- output_writer: 输出文件生成
-
-使用方法:
-    from src.modules.production_planning import run_daily_production_planning
+This package contains the refactored Module4 implementation while preserving
+legacy names that older callers still import.
 """
 
 from .constants import (
-    IDENTIFIER_COLS,
-    DEFAULT_CHANGEOVER_TIME,
-    PLAN_COLUMNS,
-    EXCEED_COLUMNS,
-    VALIDATION_COLUMNS,
     CHANGEOVER_LOG_COLUMNS,
+    DEFAULT_CHANGEOVER_TIME,
+    EXCEED_COLUMNS,
+    IDENTIFIER_COLS,
+    PLAN_COLUMNS,
+    REQUIRED_CONFIG_SHEETS,
+    SHEET_KEY_MAPPING,
+    UNCONSTRAINED_PLAN_COLUMNS,
+    VALIDATION_COLUMNS,
 )
-from .types import LineState, ChangeoverInfo, PlanRecord, ExceedRecord
+from .types import (
+    ChangeoverInfo,
+    ExceedRecord,
+    LineState,
+    PlanRecord,
+    ValidationIssue,
+)
 from .utils import (
-    normalize_location,
     cast_identifiers_to_str,
-    validate_merge_keys,
     compute_planning_window,
-    is_review_day,
     dedup_issues,
+    ensure_dataframe_columns,
+    is_review_day,
+    normalize_location,
+    round_up_to_batch,
+    safe_float_conversion,
+    validate_merge_keys,
 )
 from .state_manager import (
     get_or_init_simulation_start,
-    save_line_state,
+    load_all_previous_capacity,
+    load_allocated_capacity,
     load_line_state,
     save_allocated_capacity,
-    load_allocated_capacity,
-    load_all_previous_capacity,
+    save_line_state,
 )
 from .config_loader import load_config, validate_config
 from .demand_loader import load_daily_net_demand
@@ -48,63 +48,87 @@ from .plan_builder import (
     optimal_changeover_sequence,
 )
 from .capacity_allocator import (
+    _analyze_end_of_day_changeover,
+    calculate_changeover_metrics,
     centralized_capacity_allocation_with_changeover,
     extract_allocated_capacity_from_plan,
-    validate_capacity_allocation,
     extract_line_states_from_plan,
-    calculate_changeover_metrics,
     simulate_production,
-    _analyze_end_of_day_changeover,
+    validate_capacity_allocation,
 )
-from .output_writer import write_output, generate_consolidated_output
-from .main import run_daily_production_planning, main
+from .output_writer import generate_consolidated_output, write_output
+from .main import DailyProductionPlanner, main, run_daily_production_planning
+
+_normalize_location = normalize_location
+_cast_identifiers_to_str = cast_identifiers_to_str
+_validate_merge_keys = validate_merge_keys
+
+
+def analyze_end_of_day_changeover_state(
+    plan_df,
+    cap_df,
+    co_def,
+    simulation_date,
+    rate_map,
+):
+    """Backward-compatible alias for the legacy module4 helper name."""
+    return _analyze_end_of_day_changeover(
+        plan_df,
+        cap_df,
+        co_def,
+        simulation_date,
+        rate_map,
+    )
+
 
 __all__ = [
-    # 常量
-    'IDENTIFIER_COLS',
-    'DEFAULT_CHANGEOVER_TIME',
-    'PLAN_COLUMNS',
-    'EXCEED_COLUMNS',
-    'VALIDATION_COLUMNS',
-    'CHANGEOVER_LOG_COLUMNS',
-    # 类型
-    'LineState',
-    'ChangeoverInfo',
-    'PlanRecord',
-    'ExceedRecord',
-    # 工具函数
-    'normalize_location',
-    'cast_identifiers_to_str',
-    'validate_merge_keys',
-    'compute_planning_window',
-    'is_review_day',
-    'dedup_issues',
-    # 状态管理
-    'get_or_init_simulation_start',
-    'save_line_state',
-    'load_line_state',
-    'save_allocated_capacity',
-    'load_allocated_capacity',
-    'load_all_previous_capacity',
-    # 配置
-    'load_config',
-    'validate_config',
-    # 需求
-    'load_daily_net_demand',
-    # 计划构建
-    'build_unconstrained_plan_for_single_day',
-    'optimal_changeover_sequence',
-    # 产能分配
-    'centralized_capacity_allocation_with_changeover',
-    'extract_allocated_capacity_from_plan',
-    'validate_capacity_allocation',
-    'extract_line_states_from_plan',
-    'calculate_changeover_metrics',
-    'simulate_production',
-    # 输出
-    'write_output',
-    'generate_consolidated_output',
-    # 主入口
-    'run_daily_production_planning',
-    'main',
+    "IDENTIFIER_COLS",
+    "DEFAULT_CHANGEOVER_TIME",
+    "PLAN_COLUMNS",
+    "EXCEED_COLUMNS",
+    "VALIDATION_COLUMNS",
+    "CHANGEOVER_LOG_COLUMNS",
+    "UNCONSTRAINED_PLAN_COLUMNS",
+    "REQUIRED_CONFIG_SHEETS",
+    "SHEET_KEY_MAPPING",
+    "LineState",
+    "ChangeoverInfo",
+    "PlanRecord",
+    "ExceedRecord",
+    "ValidationIssue",
+    "normalize_location",
+    "_normalize_location",
+    "cast_identifiers_to_str",
+    "_cast_identifiers_to_str",
+    "validate_merge_keys",
+    "_validate_merge_keys",
+    "compute_planning_window",
+    "is_review_day",
+    "dedup_issues",
+    "round_up_to_batch",
+    "safe_float_conversion",
+    "ensure_dataframe_columns",
+    "get_or_init_simulation_start",
+    "save_line_state",
+    "load_line_state",
+    "save_allocated_capacity",
+    "load_allocated_capacity",
+    "load_all_previous_capacity",
+    "load_config",
+    "validate_config",
+    "load_daily_net_demand",
+    "build_unconstrained_plan_for_single_day",
+    "optimal_changeover_sequence",
+    "centralized_capacity_allocation_with_changeover",
+    "extract_allocated_capacity_from_plan",
+    "validate_capacity_allocation",
+    "extract_line_states_from_plan",
+    "analyze_end_of_day_changeover_state",
+    "calculate_changeover_metrics",
+    "simulate_production",
+    "write_output",
+    "generate_consolidated_output",
+    "run_daily_production_planning",
+    "main",
+    "DailyProductionPlanner",
 ]

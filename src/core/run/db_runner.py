@@ -34,18 +34,22 @@ def _normalize_for_compare(df: pd.DataFrame) -> pd.DataFrame:
     return norm
 
 
-def _build_expected_local_config(config_name: str) -> dict:
-    """构建本地期望配置（Excel + 同目录CSV覆盖）。返回 key 为不带 cfg_ 的小写表名。"""
+def _find_local_config_file(config_name: str) -> Path | None:
+    """按配置名查找本地 Excel 配置文件。"""
     config_basename = Path(config_name).stem
     project_root = Path(__file__).parent.parent.parent.parent
     search_dirs = [project_root / "config", project_root / "test_files", project_root]
 
-    config_file = None
     for d in search_dirs:
         candidate = d / f"{config_basename}.xlsx"
         if candidate.exists():
-            config_file = candidate
-            break
+            return candidate
+    return None
+
+
+def _build_expected_local_config(config_name: str) -> dict:
+    """构建本地期望配置（仅 Excel，保持与 Dev 一致）。"""
+    config_file = _find_local_config_file(config_name)
     if config_file is None:
         return {}
 
@@ -64,11 +68,6 @@ def _build_expected_local_config(config_name: str) -> dict:
         table_name = table_mapping.get_config_table_name(sheet_name)
         db_key = table_name[4:] if table_name.startswith("cfg_") else table_name
         expected[db_key] = df
-
-    # CSV 覆盖（同目录）
-    for csv_file in sorted(config_file.parent.glob("*.csv")):
-        db_key = csv_file.stem.lower()
-        expected[db_key] = pd.read_csv(str(csv_file))
 
     return expected
 
@@ -127,76 +126,8 @@ def _sync_config_by_diff(db, config_name: str, expected_config: dict, diff_resul
 
 
 def _apply_csv_overrides_for_db(config_data: dict, config_name: str, logger, db=None) -> None:
-    """扫描 config/ 目录下的 CSV 文件，覆盖从数据库加载的配置数据并回写 DB。
-
-    数据库模式下 DB 初始化器在检测到已有配置数据时会跳过 Excel 导入，
-    导致 ExcelImporter 中的 CSV 覆盖逻辑不会执行。
-    因此需要在从 DB 加载配置后，直接在内存中应用 CSV 覆盖，并同步写入数据库。
-
-    config_data 的 key 是小写 DB 表名（如 m1_demandforecast），
-    CSV 文件名使用 Excel sheet 名（如 M1_DemandForecast.csv），
-    匹配时通过小写化文件名进行对应。
-    """
-    import pandas as pd
-
-    # 搜索 CSV 文件的目录列表
-    project_root = Path(__file__).parent.parent.parent.parent
-    search_dirs = [
-        project_root / "config",
-        project_root / "test_files",
-        project_root,
-    ]
-
-    csv_files = {}
-    for search_dir in search_dirs:
-        if not search_dir.is_dir():
-            continue
-        for f in sorted(search_dir.iterdir()):
-            if f.suffix.lower() == '.csv':
-                # CSV 文件名 -> 小写 DB key（如 M4_MaterialLocationLineCfg.csv -> m4_materiallocationlinecfg）
-                db_key = f.stem.lower()
-                if db_key not in csv_files:
-                    csv_files[db_key] = f
-
-    if not csv_files:
-        return
-
-    # 推导 config_basename：用于 config_name 过滤/删除（与运行配置一致）
-    config_basename = Path(config_name).stem
-
-    logger.info(f"\n  {'─' * 50}")
-    logger.info(f"  📄 发现 {len(csv_files)} 个 CSV 覆盖文件:")
-    for db_key, csv_path in csv_files.items():
-        try:
-            df = pd.read_csv(str(csv_path))
-            is_override = db_key in config_data
-            config_data[db_key] = df
-
-            # 同步写入数据库：
-            # - config_name: 仍使用当前运行配置（如 BC_S9 / PDS1）
-            # - config_type: 按用户要求使用 CSV 文件名（如 M3_SafetyStock）
-            table_name = f"cfg_{db_key}"
-            csv_config_type = csv_path.stem
-            if db is not None:
-                try:
-                    deleted = db.delete_config_data(table_name, config_basename)
-                    db.create_table_from_df(
-                        df, table_name, if_exists="append",
-                        config_name=config_basename, config_type=csv_config_type
-                    )
-                    db_status = f"(DB已更新, 删除{deleted}行旧数据)"
-                except Exception as db_err:
-                    db_status = f"(DB写入失败: {db_err})"
-            else:
-                db_status = "(仅内存覆盖)"
-
-            if is_override:
-                logger.info(f"  🔄 [CSV 覆盖] {csv_path.stem} ({len(df)} 行) ← 替代DB版本 {db_status}")
-            else:
-                logger.info(f"  ➕ [CSV 新增] {csv_path.stem} ({len(df)} 行) {db_status}")
-        except Exception as e:
-            logger.warning(f"  ⚠️ CSV 文件读取失败: {csv_path.name} - {e}")
-    logger.info(f"  {'─' * 50}")
+    """数据库模式禁用 CSV 覆盖，保持与 Dev 文件模式一致。"""
+    return
 
 
 def _build_db_log_dir(

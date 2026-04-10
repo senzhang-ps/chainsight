@@ -6,8 +6,16 @@
 
 import pandas as pd
 import numpy as np
-from datetime import timedelta
 from typing import List, Tuple, Optional, Any
+
+from src.utils.date_helpers import (
+    compute_planning_window as compute_shared_planning_window,
+    is_offset_review_day,
+)
+from src.utils.normalization_common import (
+    cast_identifier_columns,
+    normalize_location_preserve_non_numeric,
+)
 
 from .constants import IDENTIFIER_COLS
 
@@ -29,14 +37,7 @@ def normalize_location(location_str: str) -> str:
         >>> normalize_location("A888")
         'A888'
     """
-    if pd.isna(location_str) or location_str is None:
-        return ""
-
-    location_str = str(location_str).strip()
-
-    if location_str.isdigit():
-        return str(int(location_str)).zfill(4)
-    return location_str
+    return normalize_location_preserve_non_numeric(location_str)
 
 
 def cast_identifiers_to_str(
@@ -52,18 +53,12 @@ def cast_identifiers_to_str(
     返回：
         pd.DataFrame: 处理后的DataFrame副本
     """
-    if df is None or df.empty:
-        return df
-
     cols = cols or IDENTIFIER_COLS
-
-    for col in cols:
-        if col in df.columns:
-            df[col] = df[col].astype('string')
-            if col == 'location':
-                df[col] = df[col].apply(normalize_location)
-
-    return df
+    return cast_identifier_columns(
+        df,
+        cols=cols,
+        normalized_location_cols=("location",),
+    )
 
 
 def validate_merge_keys(
@@ -111,9 +106,7 @@ def compute_planning_window(
         >>> compute_planning_window(pd.Timestamp('2024-01-01'), 2, 7)
         (Timestamp('2024-01-03'), Timestamp('2024-01-09'))
     """
-    window_start = simulation_date + timedelta(days=ptf)
-    window_end = simulation_date + timedelta(days=ptf + lsk - 1)
-    return window_start, window_end
+    return compute_shared_planning_window(simulation_date, ptf, lsk)
 
 
 def is_review_day(
@@ -135,13 +128,7 @@ def is_review_day(
     返回：
         bool: 若是审查日返回True
     """
-    days_since_start = (simulation_date - simulation_start).days
-    first_review_day = int(day) - 1
-
-    is_on_cycle = (days_since_start - first_review_day) % int(lsk) == 0
-    is_after_first = days_since_start >= first_review_day
-
-    return is_on_cycle and is_after_first
+    return is_offset_review_day(simulation_date, simulation_start, lsk, day)
 
 
 def dedup_issues(issues: List[dict]) -> List[dict]:

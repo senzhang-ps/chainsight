@@ -9,8 +9,8 @@ import os
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from ...modules import module4
-from .normalize import _normalize_material
+from ...modules import production_planning as module4
+from .normalize import _normalize_material, _normalize_identifiers
 
 
 def run_module4_integrated(
@@ -251,10 +251,9 @@ def run_module4_integrated(
         production_df = pd.DataFrame()
         if not plan_log.empty and 'available_date' in plan_log.columns:
             plan_log['available_date'] = pd.to_datetime(plan_log['available_date'])
-            # 与 Dev 版本一致：只返回 available_date >= simulation_date 的记录
             current_production = plan_log[plan_log['available_date'] >= simulation_date.normalize()]
             if not current_production.empty:
-                production_df = current_production.copy()
+                production_df = _normalize_identifiers(current_production.copy())
         
         # 返回完整结构供数据库写入
         return {

@@ -1,0 +1,402 @@
+<mxfile host="app.diagrams.net" modified="2026-04-12T00:00:00.000Z" agent="Claude" version="24.7.17" type="device" compressed="false">
+
+  <!-- ========== 第1页：系统架构总览 ========== -->
+  <diagram id="page1-architecture" name="系统架构总览">
+    <mxGraphModel dx="1800" dy="1500" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1800" pageHeight="1500" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- ===== 标题区 ===== -->
+        <mxCell id="p1_title" value="ChainSight v2.0 重构后系统架构总览" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;fontSize=24;fontStyle=1;fontColor=#333333;" vertex="1" parent="1">
+          <mxGeometry x="60" y="15" width="700" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="p1_subtitle" value="交接视角 · 入口 → 编排 → 配置 → 业务模块 → 支撑层 · 从上到下即为代码调用层次" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;fontSize=12;fontColor=#888888;" vertex="1" parent="1">
+          <mxGeometry x="60" y="52" width="900" height="22" as="geometry" />
+        </mxCell>
+        <mxCell id="p1_version" value="文档版本 v2.0 | 2026-04-12" style="text;html=1;strokeColor=none;fillColor=none;align=right;verticalAlign=middle;whiteSpace=wrap;fontSize=11;fontColor=#aaaaaa;" vertex="1" parent="1">
+          <mxGeometry x="1400" y="15" width="340" height="22" as="geometry" />
+        </mxCell>
+
+        <!-- ===== Layer 0: CLI 入口层 ===== -->
+        <mxCell id="L0" value="Layer 0 · CLI 入口层" style="swimlane;startSize=28;fillColor=#dae8fc;strokeColor=#6c8ebf;rounded=1;shadow=0;fontSize=13;fontStyle=1;swimlaneLine=0;arcSize=8;collapsible=0;" vertex="1" parent="1">
+          <mxGeometry x="60" y="90" width="1580" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="c_runpy" value="&lt;b&gt;run.py&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:10px;color:#666&quot;&gt;项目唯一启动入口&lt;br&gt;参数传递至 core/run/&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#6c8ebf;fontSize=12;shadow=1;" vertex="1" parent="L0">
+          <mxGeometry x="80" y="38" width="180" height="68" as="geometry" />
+        </mxCell>
+        <mxCell id="c_corerun" value="&lt;b&gt;src/core/run/&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:10px;color:#666&quot;&gt;run_main.py · 参数解析 + 模式分发&lt;br&gt;db_runner.py · 数据库模式入口&lt;br&gt;local_writer.py · 本地输出管理&lt;br&gt;output_dir.py · 输出目录与续跑检测&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#6c8ebf;fontSize=12;shadow=1;" vertex="1" parent="L0">
+          <mxGeometry x="380" y="33" width="340" height="78" as="geometry" />
+        </mxCell>
+        <mxCell id="e_run" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#6c8ebf;" edge="1" parent="L0" source="c_runpy" target="c_corerun">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- ===== Layer 1: Core 核心编排层 ===== -->
+        <mxCell id="L1" value="Layer 1 · Core 核心编排层" style="swimlane;startSize=28;fillColor=#d5e8d4;strokeColor=#82b366;rounded=1;shadow=0;fontSize=13;fontStyle=1;swimlaneLine=0;arcSize=8;collapsible=0;" vertex="1" parent="1">
+          <mxGeometry x="60" y="250" width="1580" height="240" as="geometry" />
+        </mxCell>
+        <mxCell id="c_mi" value="&lt;b&gt;src/core/main_integration/&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:10px;color:#666&quot;&gt;主编排 — 按天循环驱动所有模块&lt;/font&gt;&lt;hr size=&quot;1&quot;&gt;&lt;font style=&quot;font-size:10px;color:#555&quot;&gt;simulation_file.py · 本地文件模式仿真&lt;br&gt;simulation_db.py · 数据库模式仿真&lt;br&gt;production_planning_runner.py · M4 集成调用&lt;br&gt;config_loader.py · 配置加载&lt;br&gt;resume.py · 断点续跑&lt;br&gt;normalize.py · 标识符规范化 (re-export)&lt;br&gt;cli.py · CLI 入口适配&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#82b366;fontSize=12;shadow=1;align=left;spacingLeft=12;spacingTop=2;" vertex="1" parent="L1">
+          <mxGeometry x="40" y="38" width="660" height="185" as="geometry" />
+        </mxCell>
+        <mxCell id="c_orch" value="&lt;b&gt;src/core/orchestrator/&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:10px;color:#c0392b&quot;&gt;🔴 共享状态中心 — 单一事实源 (SSOT)&lt;/font&gt;&lt;hr size=&quot;1&quot;&gt;&lt;font style=&quot;font-size:10px;color:#555&quot;&gt;orchestrator_main.py · 核心状态容器&lt;br&gt;daily_ops.py · 日度操作(GR入库/清理)&lt;br&gt;processors.py · 模块结果回写处理器&lt;br&gt;persistence.py · 状态快照落盘 (CSV)&lt;br&gt;models.py · 数据模型定义&lt;br&gt;views.py · 状态查询视图&lt;br&gt;normalize.py · 标识符规范化 (re-export)&lt;/font&gt;&lt;hr size=&quot;1&quot;&gt;&lt;font style=&quot;font-size:10px;color:#c0392b&quot;&gt;状态: inventory | open_deployment | in_transit&lt;br&gt;production_gr | delivery_gr | shipment_log | space_quota&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fce4e4;strokeColor=#b85450;fontSize=12;shadow=1;align=left;spacingLeft=12;spacingTop=2;" vertex="1" parent="L1">
+          <mxGeometry x="780" y="38" width="750" height="185" as="geometry" />
+        </mxCell>
+        <mxCell id="e_mi_orch" value="&lt;font style=&quot;font-size:10px&quot;&gt;初始化 / 状态读写 / 快照&lt;/font&gt;" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;startArrow=block;startFill=1;strokeWidth=2;strokeColor=#b85450;dashed=1;" edge="1" parent="L1" source="c_mi" target="c_orch">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- ===== Layer 2: Config 配置层 ===== -->
+        <mxCell id="L2" value="Layer 2 · Config 配置层 [v2.0 新增]" style="swimlane;startSize=28;fillColor=#fff2cc;strokeColor=#d6b656;rounded=1;shadow=0;fontSize=13;fontStyle=1;swimlaneLine=0;arcSize=8;collapsible=0;" vertex="1" parent="1">
+          <mxGeometry x="60" y="530" width="780" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="c_config" value="&lt;b&gt;src/config/&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:10px;color:#666&quot;&gt;__init__.py · get_config / get_shared_config / get_module_config&lt;br&gt;loader.py · YAML 加载 + 环境变量覆盖 + 深度合并&lt;br&gt;default_config.yaml · 集中化默认参数 (shared + 各模块段)&lt;/font&gt;&lt;hr size=&quot;1&quot;&gt;&lt;font style=&quot;font-size:10px;color:#d6b656&quot;&gt;→ 各模块 constants.py 通过 _shared() / _module() 惰性读取&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#d6b656;fontSize=12;shadow=1;align=left;spacingLeft=12;" vertex="1" parent="L2">
+          <mxGeometry x="40" y="35" width="700" height="75" as="geometry" />
+        </mxCell>
+
+        <!-- DB 适配层 -->
+        <mxCell id="c_pgsql" value="&lt;b&gt;pgsql_db/&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:10px;color:#666&quot;&gt;db_initializer.py · 数据库初始化&lt;br&gt;module_data_writer.py · 结果落库&lt;br&gt;database_connection.py · 连接管理&lt;/font&gt;&lt;hr size=&quot;1&quot;&gt;&lt;font style=&quot;font-size:10px;color:#d6b656&quot;&gt;可选链路 (--use-db)&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#d6b656;fontSize=12;shadow=1;align=left;spacingLeft=12;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="920" y="565" width="340" height="75" as="geometry" />
+        </mxCell>
+
+        <!-- ===== Layer 3: Modules 业务模块层 ===== -->
+        <mxCell id="L3" value="Layer 3 · Modules 业务模块层 — 执行顺序: ① → ② → ③ → ④ → ⑤" style="swimlane;startSize=28;fillColor=#e1d5e7;strokeColor=#9673a6;rounded=1;shadow=0;fontSize=13;fontStyle=1;swimlaneLine=0;arcSize=8;collapsible=0;" vertex="1" parent="1">
+          <mxGeometry x="60" y="690" width="1580" height="280" as="geometry" />
+        </mxCell>
+        <!-- M1 -->
+        <mxCell id="c_m1" value="&lt;b&gt;① M1 demand_planning&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:10px;color:#666&quot;&gt;src/modules/demand_planning/&lt;/font&gt;&lt;hr size=&quot;1&quot;&gt;&lt;font style=&quot;font-size:10px;color:#555&quot;&gt;预测拆分 → 订单生成&lt;br&gt;→ 发货模拟 → 缺货记录&lt;/font&gt;&lt;hr size=&quot;1&quot;&gt;&lt;font style=&quot;font-size:9px;color:#999&quot;&gt;integration.py | forecast.py&lt;br&gt;order.py | shipment.py&lt;br&gt;normalization.py (re-export)&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#9673a6;fontSize=11;shadow=1;align=left;spacingLeft=8;" vertex="1" parent="L3">
+          <mxGeometry x="20" y="38" width="280" height="155" as="geometry" />
+        </mxCell>
+        <!-- M4 -->
+        <mxCell id="c_m4" value="&lt;b&gt;② M4 production_planning&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:10px;color:#666&quot;&gt;src/modules/production_planning/&lt;/font&gt;&lt;hr size=&quot;1&quot;&gt;&lt;font style=&quot;font-size:10px;color:#555&quot;&gt;净需求读取 → 无约束计划&lt;br&gt;→ 产能分配 → 换产管理&lt;/font&gt;&lt;hr size=&quot;1&quot;&gt;&lt;font style=&quot;font-size:9px;color:#999&quot;&gt;main.py | capacity_allocator.py&lt;br&gt;plan_builder.py | state_manager.py&lt;br&gt;demand_loader.py&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#9673a6;fontSize=11;shadow=1;align=left;spacingLeft=8;" vertex="1" parent="L3">
+          <mxGeometry x="330" y="38" width="280" height="155" as="geometry" />
+        </mxCell>
+        <!-- M5 -->
+        <mxCell id="c_m5" value="&lt;b&gt;③ M5 deployment_planning&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:10px;color:#666&quot;&gt;src/modules/deployment_planning/&lt;/font&gt;&lt;hr size=&quot;1&quot;&gt;&lt;font style=&quot;font-size:10px;color:#555&quot;&gt;库存投影 → 需求收集&lt;br&gt;→ 优先级分配 → push/pull&lt;/font&gt;&lt;hr size=&quot;1&quot;&gt;&lt;font style=&quot;font-size:9px;color:#999&quot;&gt;main.py | allocation.py&lt;br&gt;demand_collector.py&lt;br&gt;batch_optimizer.py&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#9673a6;fontSize=11;shadow=1;align=left;spacingLeft=8;" vertex="1" parent="L3">
+          <mxGeometry x="640" y="38" width="280" height="155" as="geometry" />
+        </mxCell>
+        <!-- M6 -->
+        <mxCell id="c_m6" value="&lt;b&gt;④ M6 logistics_execution&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:10px;color:#666&quot;&gt;src/modules/logistics_execution/&lt;/font&gt;&lt;hr size=&quot;1&quot;&gt;&lt;font style=&quot;font-size:10px;color:#555&quot;&gt;两轮装载 → 发运执行&lt;br&gt;→ 在途/到货回写&lt;/font&gt;&lt;hr size=&quot;1&quot;&gt;&lt;font style=&quot;font-size:9px;color:#999&quot;&gt;main.py | simulation_engine.py&lt;br&gt;route_processor.py | data_preparer.py&lt;br&gt;output_builder.py [v2.0 拆分8模块]&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#9673a6;fontSize=11;shadow=1;align=left;spacingLeft=8;" vertex="1" parent="L3">
+          <mxGeometry x="950" y="38" width="280" height="155" as="geometry" />
+        </mxCell>
+        <!-- M3 -->
+        <mxCell id="c_m3" value="&lt;b&gt;⑤ M3 mrp_planning&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:10px;color:#666&quot;&gt;src/modules/mrp_planning/&lt;/font&gt;&lt;hr size=&quot;1&quot;&gt;&lt;font style=&quot;font-size:10px;color:#555&quot;&gt;网络分层 → 提前期计算&lt;br&gt;→ 净需求 → 缺口层级传播&lt;/font&gt;&lt;hr size=&quot;1&quot;&gt;&lt;font style=&quot;font-size:9px;color:#999&quot;&gt;mrp_simulation.py | net_demand.py&lt;br&gt;lead_time.py | node_processor.py&lt;br&gt;layer_assignment.py&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#9673a6;fontSize=11;shadow=1;align=left;spacingLeft=8;" vertex="1" parent="L3">
+          <mxGeometry x="1260" y="38" width="280" height="155" as="geometry" />
+        </mxCell>
+        <!-- 模块间执行顺序箭头 -->
+        <mxCell id="e_m1m4" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#9673a6;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="L3" source="c_m1" target="c_m4">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_m4m5" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#9673a6;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="L3" source="c_m4" target="c_m5">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_m5m6" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#9673a6;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="L3" source="c_m5" target="c_m6">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_m6m3" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#9673a6;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="L3" source="c_m6" target="c_m3">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <!-- __init__.py 说明 -->
+        <mxCell id="c_init_note" value="&lt;font style=&quot;font-size:10px;color:#9673a6&quot;&gt;src/modules/__init__.py 提供向后兼容别名: module1=demand_planning, module3=mrp_planning, module4=production_planning, module5=deployment_planning, module6=logistics_execution&lt;/font&gt;" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;" vertex="1" parent="L3">
+          <mxGeometry x="20" y="205" width="1540" height="25" as="geometry" />
+        </mxCell>
+        <!-- 各模块 constants.py 统一说明 -->
+        <mxCell id="c_const_note" value="&lt;font style=&quot;font-size:10px;color:#d6b656&quot;&gt;📌 各模块 constants.py 均通过 get_module_config() / get_shared_config() 从 YAML 配置层读取默认值，导出接口不变&lt;/font&gt;" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;" vertex="1" parent="L3">
+          <mxGeometry x="20" y="235" width="1540" height="25" as="geometry" />
+        </mxCell>
+
+        <!-- ===== Layer 4: 支撑层 ===== -->
+        <mxCell id="L4" value="Layer 4 · 支撑层 (Services · Utils · Storage)" style="swimlane;startSize=28;fillColor=#f5f5f5;strokeColor=#666666;rounded=1;shadow=0;fontSize=13;fontStyle=1;swimlaneLine=0;arcSize=8;collapsible=0;" vertex="1" parent="1">
+          <mxGeometry x="60" y="1010" width="1580" height="190" as="geometry" />
+        </mxCell>
+        <mxCell id="c_utils" value="&lt;b&gt;Utils 工具层&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:10px;color:#666&quot;&gt;src/utils/&lt;/font&gt;&lt;hr size=&quot;1&quot;&gt;&lt;font style=&quot;font-size:10px;color:#555&quot;&gt;normalization.py · 统一标识符规范化 (SSOT)&lt;br&gt;date_helpers.py · 日期辅助函数&lt;br&gt;config_validator.py · 预仿真配置校验&lt;br&gt;validation_manager.py · 校验记录管理&lt;br&gt;time_manager.py · 仿真时间状态管理&lt;br&gt;duckdb_accelerator.py · DuckDB 业务加速器&lt;br&gt;inventory_balance_checker.py · 库存平衡校验&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#666666;fontSize=11;shadow=1;align=left;spacingLeft=8;" vertex="1" parent="L4">
+          <mxGeometry x="20" y="35" width="480" height="142" as="geometry" />
+        </mxCell>
+        <mxCell id="c_services" value="&lt;b&gt;Services 服务层&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:10px;color:#666&quot;&gt;src/services/&lt;/font&gt;&lt;hr size=&quot;1&quot;&gt;&lt;font style=&quot;font-size:10px;color:#555&quot;&gt;summary_report_generator.py&lt;br&gt;· 8 类汇总报告、跨模块聚合&lt;br&gt;&lt;br&gt;performance_profiler.py&lt;br&gt;· cProfile 包装、性能诊断&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#666666;fontSize=11;shadow=1;align=left;spacingLeft=8;" vertex="1" parent="L4">
+          <mxGeometry x="530" y="35" width="380" height="142" as="geometry" />
+        </mxCell>
+        <mxCell id="c_storage" value="&lt;b&gt;Storage 存储层&lt;/b&gt;&lt;hr size=&quot;1&quot;&gt;&lt;font style=&quot;font-size:10px;color:#555&quot;&gt;📄 Excel 文件 · 配置输入 + 模块输出&lt;br&gt;📋 CSV 文件 · Orchestrator 每日状态快照&lt;br&gt;💾 DuckDB 内存库 · 向量化计算加速&lt;br&gt;🗂 内存字典/列表 · Orchestrator 运行时状态&lt;br&gt;🐘 PostgreSQL · 数据库模式 (可选)&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#666666;fontSize=11;shadow=1;align=left;spacingLeft=8;" vertex="1" parent="L4">
+          <mxGeometry x="940" y="35" width="420" height="142" as="geometry" />
+        </mxCell>
+
+        <!-- ===== 交接基线 ===== -->
+        <mxCell id="c_baseline" value="&lt;b&gt;交接基线与文档&lt;/b&gt;&amp;nbsp;&amp;nbsp;|&amp;nbsp;&amp;nbsp;ChainSight_Dev/ = 结果回归基线（不修改）&amp;nbsp;&amp;nbsp;|&amp;nbsp;&amp;nbsp;docs/交接文档/Refactored/ = 交接资料主目录（20个文档）" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8e8e8;strokeColor=#999999;fontSize=11;shadow=0;fontStyle=0;" vertex="1" parent="1">
+          <mxGeometry x="60" y="1230" width="1580" height="38" as="geometry" />
+        </mxCell>
+
+        <!-- ===== 层间连接箭头 ===== -->
+        <!-- CLI → Core -->
+        <mxCell id="e_cli_core" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#82b366;exitX=0.5;exitY=1;exitDx=0;exitDy=0;" edge="1" parent="1" source="L0" target="L1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <!-- Core → Config -->
+        <mxCell id="e_core_cfg" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=1.5;strokeColor=#d6b656;dashed=1;exitX=0.25;exitY=1;exitDx=0;exitDy=0;" edge="1" parent="1" source="L1" target="L2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <!-- Core → Modules -->
+        <mxCell id="e_core_mod" value="&lt;font style=&quot;font-size:10px&quot;&gt;按日调度模块执行&lt;/font&gt;" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#9673a6;exitX=0.75;exitY=1;exitDx=0;exitDy=0;" edge="1" parent="1" source="L1" target="L3">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <!-- Orchestrator ↔ Modules 双向数据流 -->
+        <mxCell id="e_orch_mod" value="&lt;font style=&quot;font-size:10px;color:#b85450&quot;&gt;状态读写 (双向)&lt;/font&gt;" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;startArrow=block;startFill=1;strokeWidth=2;strokeColor=#b85450;dashed=1;exitX=0.85;exitY=1;exitDx=0;exitDy=0;entryX=0.85;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="L1" target="L3">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <!-- Config → Modules -->
+        <mxCell id="e_cfg_mod" value="&lt;font style=&quot;font-size:10px;color:#d6b656&quot;&gt;constants 参数&lt;/font&gt;" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=1.5;strokeColor=#d6b656;dashed=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.15;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="L2" target="L3">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <!-- Modules → Support -->
+        <mxCell id="e_mod_sup" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=1.5;strokeColor=#666666;dashed=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;" edge="1" parent="1" source="L3" target="L4">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- ===== normalization SSOT 标注 ===== -->
+        <mxCell id="c_norm_ssot" value="&lt;font style=&quot;font-size:10px;color:#82b366&quot;&gt;🔗 标识符规范化 SSOT: src/utils/normalization.py → 各模块 normalization.py / normalizer.py (re-export 代理)&lt;/font&gt;" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;" vertex="1" parent="1">
+          <mxGeometry x="60" y="1280" width="1000" height="22" as="geometry" />
+        </mxCell>
+
+        <!-- ===== 图例 ===== -->
+        <mxCell id="p1_legend_title" value="&lt;b&gt;图例&lt;/b&gt;" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=12;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="60" y="1320" width="60" height="22" as="geometry" />
+        </mxCell>
+        <mxCell id="lg1" value="" style="rounded=1;fillColor=#dae8fc;strokeColor=#6c8ebf;shadow=0;" vertex="1" parent="1">
+          <mxGeometry x="60" y="1348" width="30" height="18" as="geometry" />
+        </mxCell>
+        <mxCell id="lg1t" value="CLI 入口" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="95" y="1346" width="80" height="22" as="geometry" />
+        </mxCell>
+        <mxCell id="lg2" value="" style="rounded=1;fillColor=#d5e8d4;strokeColor=#82b366;shadow=0;" vertex="1" parent="1">
+          <mxGeometry x="200" y="1348" width="30" height="18" as="geometry" />
+        </mxCell>
+        <mxCell id="lg2t" value="Core 编排" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="235" y="1346" width="80" height="22" as="geometry" />
+        </mxCell>
+        <mxCell id="lg3" value="" style="rounded=1;fillColor=#fce4e4;strokeColor=#b85450;shadow=0;" vertex="1" parent="1">
+          <mxGeometry x="340" y="1348" width="30" height="18" as="geometry" />
+        </mxCell>
+        <mxCell id="lg3t" value="Orchestrator (SSOT)" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="375" y="1346" width="130" height="22" as="geometry" />
+        </mxCell>
+        <mxCell id="lg4" value="" style="rounded=1;fillColor=#fff2cc;strokeColor=#d6b656;shadow=0;" vertex="1" parent="1">
+          <mxGeometry x="530" y="1348" width="30" height="18" as="geometry" />
+        </mxCell>
+        <mxCell id="lg4t" value="Config 配置" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="565" y="1346" width="80" height="22" as="geometry" />
+        </mxCell>
+        <mxCell id="lg5" value="" style="rounded=1;fillColor=#e1d5e7;strokeColor=#9673a6;shadow=0;" vertex="1" parent="1">
+          <mxGeometry x="670" y="1348" width="30" height="18" as="geometry" />
+        </mxCell>
+        <mxCell id="lg5t" value="Modules 业务模块" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="705" y="1346" width="120" height="22" as="geometry" />
+        </mxCell>
+        <mxCell id="lg6" value="" style="rounded=1;fillColor=#f5f5f5;strokeColor=#666666;shadow=0;" vertex="1" parent="1">
+          <mxGeometry x="850" y="1348" width="30" height="18" as="geometry" />
+        </mxCell>
+        <mxCell id="lg6t" value="支撑层" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="885" y="1346" width="50" height="22" as="geometry" />
+        </mxCell>
+        <mxCell id="lg7" value="──▶" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=10;fontColor=#333333;" vertex="1" parent="1">
+          <mxGeometry x="960" y="1346" width="40" height="22" as="geometry" />
+        </mxCell>
+        <mxCell id="lg7t" value="调用/控制流" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1000" y="1346" width="80" height="22" as="geometry" />
+        </mxCell>
+        <mxCell id="lg8" value="- -▶" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=10;fontColor=#b85450;" vertex="1" parent="1">
+          <mxGeometry x="1100" y="1346" width="40" height="22" as="geometry" />
+        </mxCell>
+        <mxCell id="lg8t" value="数据/状态流" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1140" y="1346" width="80" height="22" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+
+  <!-- ========== 第2页：每日仿真执行流程 ========== -->
+  <diagram id="page2-daily-flow" name="每日仿真执行流程">
+    <mxGraphModel dx="1600" dy="1600" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1600" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- ===== 标题 ===== -->
+        <mxCell id="p2_title" value="ChainSight v2.0 每日仿真执行流程" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;fontSize=22;fontStyle=1;fontColor=#333333;" vertex="1" parent="1">
+          <mxGeometry x="60" y="15" width="600" height="36" as="geometry" />
+        </mxCell>
+        <mxCell id="p2_sub" value="单日循环: 日初处理 → M1 → M4 → M5 → M6 → M3 → 日末保存 → 下一天" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;fontSize=11;fontColor=#888888;" vertex="1" parent="1">
+          <mxGeometry x="60" y="48" width="800" height="20" as="geometry" />
+        </mxCell>
+
+        <!-- ===== 左侧：Orchestrator 状态列 ===== -->
+        <mxCell id="orch_col" value="&lt;b&gt;Orchestrator 状态 (SSOT)&lt;/b&gt;" style="swimlane;startSize=24;fillColor=#fce4e4;strokeColor=#b85450;rounded=1;fontSize=11;fontStyle=1;swimlaneLine=0;collapsible=0;" vertex="1" parent="1">
+          <mxGeometry x="40" y="85" width="280" height="1480" as="geometry" />
+        </mxCell>
+        <mxCell id="os1" value="&lt;font style=&quot;font-size:10px&quot;&gt;📦 unrestricted_inventory&lt;br&gt;非限制库存（按 ML 粒度）&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#b85450;fontSize=10;align=left;spacingLeft=8;" vertex="1" parent="orch_col">
+          <mxGeometry x="10" y="35" width="260" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="os2" value="&lt;font style=&quot;font-size:10px&quot;&gt;📋 open_deployment&lt;br&gt;待执行调拨（M5 生成，M6 消费）&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#b85450;fontSize=10;align=left;spacingLeft=8;" vertex="1" parent="orch_col">
+          <mxGeometry x="10" y="85" width="260" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="os3" value="&lt;font style=&quot;font-size:10px&quot;&gt;🚚 planning_intransit&lt;br&gt;在途货物（M6 发运 → 未来到货）&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#b85450;fontSize=10;align=left;spacingLeft=8;" vertex="1" parent="orch_col">
+          <mxGeometry x="10" y="135" width="260" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="os4" value="&lt;font style=&quot;font-size:10px&quot;&gt;🏭 production_gr&lt;br&gt;生产入库记录&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#b85450;fontSize=10;align=left;spacingLeft=8;" vertex="1" parent="orch_col">
+          <mxGeometry x="10" y="185" width="260" height="36" as="geometry" />
+        </mxCell>
+        <mxCell id="os5" value="&lt;font style=&quot;font-size:10px&quot;&gt;📥 delivery_gr&lt;br&gt;交付入库记录&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#b85450;fontSize=10;align=left;spacingLeft=8;" vertex="1" parent="orch_col">
+          <mxGeometry x="10" y="230" width="260" height="36" as="geometry" />
+        </mxCell>
+        <mxCell id="os6" value="&lt;font style=&quot;font-size:10px&quot;&gt;📊 shipment_log / space_quota&lt;br&gt;发货日志 / 接收空间配额&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#b85450;fontSize=10;align=left;spacingLeft=8;" vertex="1" parent="orch_col">
+          <mxGeometry x="10" y="275" width="260" height="36" as="geometry" />
+        </mxCell>
+        <mxCell id="os_snap" value="&lt;font style=&quot;font-size:10px&quot;&gt;💾 save_daily_state(date) → CSV&lt;br&gt;每日快照 → 支持断点续跑&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;align=left;spacingLeft=8;" vertex="1" parent="orch_col">
+          <mxGeometry x="10" y="330" width="260" height="40" as="geometry" />
+        </mxCell>
+
+        <!-- ===== 中间：主执行流程 ===== -->
+        <mxCell id="flow_col" value="&lt;b&gt;主执行流程 (main_integration)&lt;/b&gt;" style="swimlane;startSize=24;fillColor=#d5e8d4;strokeColor=#82b366;rounded=1;fontSize=11;fontStyle=1;swimlaneLine=0;collapsible=0;" vertex="1" parent="1">
+          <mxGeometry x="380" y="85" width="520" height="1480" as="geometry" />
+        </mxCell>
+
+        <!-- Start -->
+        <mxCell id="f_start" value="&lt;b&gt;开始仿真&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:10px&quot;&gt;加载配置 → 初始化 Orchestrator&lt;br&gt;→ 检查续跑 → 设置随机种子&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;shadow=1;" vertex="1" parent="flow_col">
+          <mxGeometry x="100" y="40" width="320" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- Day Loop Start -->
+        <mxCell id="f_dayloop" value="&lt;b&gt;📅 按日仿真循环&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:10px&quot;&gt;for date in simulation_dates&lt;/font&gt;" style="shape=parallelogram;perimeter=parallelogramPerimeter;whiteSpace=wrap;html=1;fixedSize=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;shadow=1;" vertex="1" parent="flow_col">
+          <mxGeometry x="100" y="125" width="320" height="45" as="geometry" />
+        </mxCell>
+
+        <!-- Step 0: 日初 -->
+        <mxCell id="f_dayinit" value="&lt;b&gt;Step 0: 日初处理&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:10px&quot;&gt;save_beginning_inventory(date)&lt;br&gt;cleanup_past_due_open_deployments(date)&lt;br&gt;_process_delivery_arrivals(date) — 在途到货入库&lt;br&gt;load_current_date_production_gr() — 当日生产入库&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#82b366;fontSize=11;shadow=1;align=left;spacingLeft=10;" vertex="1" parent="flow_col">
+          <mxGeometry x="60" y="200" width="400" height="85" as="geometry" />
+        </mxCell>
+
+        <!-- M1 -->
+        <mxCell id="f_m1" value="&lt;b&gt;① M1: demand_planning&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:10px&quot;&gt;run_daily_order_generation(...)&lt;br&gt;→ process_module1_shipments(shipment_df)&lt;br&gt;🔸 扣减发货库存&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8daf0;strokeColor=#9673a6;fontSize=11;shadow=1;align=left;spacingLeft=10;" vertex="1" parent="flow_col">
+          <mxGeometry x="60" y="315" width="400" height="72" as="geometry" />
+        </mxCell>
+
+        <!-- M4 -->
+        <mxCell id="f_m4" value="&lt;b&gt;② M4: production_planning&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:10px&quot;&gt;run_module4_integrated(...)&lt;br&gt;→ process_module4_production(production_df)&lt;br&gt;🔸 持久化未来生产计划&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8daf0;strokeColor=#9673a6;fontSize=11;shadow=1;align=left;spacingLeft=10;" vertex="1" parent="flow_col">
+          <mxGeometry x="60" y="417" width="400" height="72" as="geometry" />
+        </mxCell>
+
+        <!-- M5 -->
+        <mxCell id="f_m5" value="&lt;b&gt;③ M5: deployment_planning&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:10px&quot;&gt;module5.main(...)&lt;br&gt;→ process_module5_deployment(deployment_plan)&lt;br&gt;🔸 新增 open_deployment&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8daf0;strokeColor=#9673a6;fontSize=11;shadow=1;align=left;spacingLeft=10;" vertex="1" parent="flow_col">
+          <mxGeometry x="60" y="519" width="400" height="72" as="geometry" />
+        </mxCell>
+
+        <!-- M6 -->
+        <mxCell id="f_m6" value="&lt;b&gt;④ M6: logistics_execution&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:10px&quot;&gt;run_daily_physical_flow(...)&lt;br&gt;→ process_module6_delivery(delivery_plan)&lt;br&gt;🔸 扣库存 + 关闭 open_deployment + 新增 in-transit&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8daf0;strokeColor=#9673a6;fontSize=11;shadow=1;align=left;spacingLeft=10;" vertex="1" parent="flow_col">
+          <mxGeometry x="60" y="621" width="400" height="78" as="geometry" />
+        </mxCell>
+
+        <!-- M3 -->
+        <mxCell id="f_m3" value="&lt;b&gt;⑤ M3: mrp_planning&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:10px&quot;&gt;run_integrated_mode(...)&lt;br&gt;→ 输出 net_demand_df&lt;br&gt;🔸 layer=0 净需求 → 下一天 M4 输入&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8daf0;strokeColor=#9673a6;fontSize=11;shadow=1;align=left;spacingLeft=10;" vertex="1" parent="flow_col">
+          <mxGeometry x="60" y="729" width="400" height="72" as="geometry" />
+        </mxCell>
+
+        <!-- Step End: 日末 -->
+        <mxCell id="f_dayend" value="&lt;b&gt;Step E: 日末保存&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:10px&quot;&gt;save_ending_inventory(date)&lt;br&gt;save_daily_state(date) → CSV 快照&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#82b366;fontSize=11;shadow=1;align=left;spacingLeft=10;" vertex="1" parent="flow_col">
+          <mxGeometry x="100" y="835" width="320" height="55" as="geometry" />
+        </mxCell>
+
+        <!-- Decision: 下一天? -->
+        <mxCell id="f_nextday" value="还有&lt;br&gt;下一天?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;shadow=1;" vertex="1" parent="flow_col">
+          <mxGeometry x="190" y="920" width="120" height="70" as="geometry" />
+        </mxCell>
+
+        <!-- Final -->
+        <mxCell id="f_final" value="&lt;b&gt;最终处理&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:10px&quot;&gt;InventoryBalanceChecker · 库存平衡校验&lt;br&gt;SummaryReportGenerator · 汇总报告生成&lt;br&gt;(DB 模式: 写入 module*_output_* 表)&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;shadow=1;align=left;spacingLeft=10;" vertex="1" parent="flow_col">
+          <mxGeometry x="100" y="1025" width="320" height="68" as="geometry" />
+        </mxCell>
+
+        <!-- End -->
+        <mxCell id="f_end" value="&lt;b&gt;仿真完成&lt;/b&gt;" style="ellipse;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=13;fontStyle=1;shadow=1;" vertex="1" parent="flow_col">
+          <mxGeometry x="170" y="1125" width="160" height="50" as="geometry" />
+        </mxCell>
+
+        <!-- 流程箭头 -->
+        <mxCell id="fe1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=1.5;" edge="1" parent="flow_col" source="f_start" target="f_dayloop">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="fe2" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=1.5;" edge="1" parent="flow_col" source="f_dayloop" target="f_dayinit">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="fe3" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=1.5;" edge="1" parent="flow_col" source="f_dayinit" target="f_m1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="fe4" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=1.5;" edge="1" parent="flow_col" source="f_m1" target="f_m4">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="fe5" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=1.5;" edge="1" parent="flow_col" source="f_m4" target="f_m5">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="fe6" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=1.5;" edge="1" parent="flow_col" source="f_m5" target="f_m6">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="fe7" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=1.5;" edge="1" parent="flow_col" source="f_m6" target="f_m3">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="fe8" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=1.5;" edge="1" parent="flow_col" source="f_m3" target="f_dayend">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="fe9" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=1.5;" edge="1" parent="flow_col" source="f_dayend" target="f_nextday">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="fe10" value="否" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=1.5;exitX=0.5;exitY=1;exitDx=0;exitDy=0;" edge="1" parent="flow_col" source="f_nextday" target="f_final">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="fe11" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=1.5;" edge="1" parent="flow_col" source="f_final" target="f_end">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <!-- Loop back -->
+        <mxCell id="fe_loop" value="是" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=1.5;strokeColor=#82b366;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="flow_col" source="f_nextday" target="f_dayloop">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="480" y="955" />
+              <mxPoint x="480" y="148" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- ===== 右侧：模块输出列 ===== -->
+        <mxCell id="out_col" value="&lt;b&gt;模块输出 (每日 Excel/CSV)&lt;/b&gt;" style="swimlane;startSize=24;fillColor=#f5f5f5;strokeColor=#666666;rounded=1;fontSize=11;fontStyle=1;swimlaneLine=0;collapsible=0;" vertex="1" parent="1">
+          <mxGeometry x="960" y="85" width="310" height="1480" as="geometry" />
+        </mxCell>
+        <mxCell id="o_m1" value="&lt;font style=&quot;font-size:10px&quot;&gt;📄 module1_output_YYYYMMDD.xlsx&lt;br&gt;OrderLog | ShipmentLog | CutLog&lt;br&gt;SupplyDemandLog | Summary&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#999999;fontSize=10;align=left;spacingLeft=8;" vertex="1" parent="out_col">
+          <mxGeometry x="15" y="275" width="280" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="o_m4" value="&lt;font style=&quot;font-size:10px&quot;&gt;📄 Module4Output_YYYYMMDD.xlsx&lt;br&gt;ProductionPlan | CapacityExceed&lt;br&gt;Validation | ChangeoverLog&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#999999;fontSize=10;align=left;spacingLeft=8;" vertex="1" parent="out_col">
+          <mxGeometry x="15" y="377" width="280" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="o_m5" value="&lt;font style=&quot;font-size:10px&quot;&gt;📄 Module5Output_YYYYMMDD.xlsx&lt;br&gt;DeploymentPlan | UnfulfilledLog&lt;br&gt;StockOnHandLog | Validation&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#999999;fontSize=10;align=left;spacingLeft=8;" vertex="1" parent="out_col">
+          <mxGeometry x="15" y="479" width="280" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="o_m6" value="&lt;font style=&quot;font-size:10px&quot;&gt;📄 Module6Output_YYYYMMDD.xlsx&lt;br&gt;DeliveryPlan | VehicleLog | TruckUsage&lt;br&gt;UnsatisfiedMDQ | Validation | Bypass&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#999999;fontSize=10;align=left;spacingLeft=8;" vertex="1" parent="out_col">
+          <mxGeometry x="15" y="581" width="280" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="o_m3" value="&lt;font style=&quot;font-size:10px&quot;&gt;📄 Module3Output_YYYYMMDD.xlsx&lt;br&gt;NetDemand&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#999999;fontSize=10;align=left;spacingLeft=8;" vertex="1" parent="out_col">
+          <mxGeometry x="15" y="689" width="280" height="42" as="geometry" />
+        </mxCell>
+        <mxCell id="o_orch" value="&lt;font style=&quot;font-size:10px&quot;&gt;📋 orchestrator/YYYYMMDD/&lt;br&gt;unrestricted_inventory.csv&lt;br&gt;open_deployment.csv&lt;br&gt;planning_intransit.csv&lt;br&gt;production_gr.csv | delivery_gr.csv&lt;br&gt;shipment_log.csv | change_log.csv&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#b85450;fontSize=10;align=left;spacingLeft=8;" vertex="1" parent="out_col">
+          <mxGeometry x="15" y="790" width="280" height="95" as="geometry" />
+        </mxCell>
+        <mxCell id="o_summary" value="&lt;font style=&quot;font-size:10px&quot;&gt;📊 SummaryReport.xlsx&lt;br&gt;8 类汇总报告&lt;br&gt;(仿真结束后生成)&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#6c8ebf;fontSize=10;align=left;spacingLeft=8;" vertex="1" parent="out_col">
+          <mxGeometry x="15" y="985" width="280" height="50" as="geometry" />
+        </mxCell>
+
+        <!-- 模块→输出 箭头 (跨 container，使用绝对坐标) -->
+        <!-- 使用注释代替跨 container 边线，保持简洁 -->
+
+        <!-- ===== 底部说明 ===== -->
+        <mxCell id="p2_note" value="&lt;font style=&quot;font-size:10px;color:#666&quot;&gt;💡 &lt;b&gt;关键理解&lt;/b&gt;: Orchestrator 是唯一的跨模块共享状态容器。每个模块执行后通过 process_moduleX_xxx() 回写状态，下一个模块从 Orchestrator 读取最新状态。日末保存的 CSV 快照支持断点续跑。&lt;/font&gt;" style="text;html=1;strokeColor=#82b366;fillColor=#f0f8f0;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=1;spacingLeft=10;" vertex="1" parent="1">
+          <mxGeometry x="40" y="1530" width="900" height="35" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+
+</mxfile>

@@ -107,23 +107,7 @@
 3. `src/core/main_integration/simulation_file.py::run_integrated_simulation()`
 4. 加载配置、校验、读取随机种子、初始化输出目录
 5. `create_orchestrator()` 构造共享状态
-6. 按日循环执行：
-   - `save_beginning_inventory()`
-   - `cleanup_past_due_open_deployments()`
-   - `_process_delivery_arrivals()`
-   - `load_current_date_production_gr()`
-   - `module1.run_daily_order_generation()`
-   - `process_module1_shipments()`
-   - `run_module4_integrated()`
-   - `process_module4_production()`
-   - `module5.main()`
-   - `process_module5_deployment()`
-   - `module6.run_daily_physical_flow()`
-   - `process_module6_delivery()`
-   - `module3.run_integrated_mode()`
-   - `save_ending_inventory()`
-   - `output_daily_inventory_summary()`
-   - `save_daily_state()`
+6. 按日循环执行：`save_beginning_inventory()` → `cleanup_past_due_open_deployments()` → `_process_delivery_arrivals()` → `load_current_date_production_gr()` → `module1.run_daily_order_generation()` → `process_module1_shipments()` → `run_module4_integrated()` → `process_module4_production()` → `module5.main()` → `process_module5_deployment()` → `module6.run_daily_physical_flow()` → `process_module6_delivery()` → `module3.run_integrated_mode()` → `save_ending_inventory()` → `output_daily_inventory_summary()` → `save_daily_state()`
 7. `InventoryBalanceChecker` 做账平验证
 8. `SummaryReportGenerator.generate_all_reports()` 生成汇总结果
 
@@ -262,7 +246,7 @@ from src.utils.defaults import DEFAULT_MOQ, DEFAULT_RV
 
 #### 具体收益
 
-参数治理从"改多个 Python 常量文件"变成"改一个 YAML 真源"，更适合持续维护和版本追踪。
+参数治理从"改多个 Python 常量文件"变成"改一个 YAML 权威数据源（Single Source of Truth）"，更适合持续维护和版本追踪。
 
 ### 5.3 标识符归一化统一
 
@@ -290,7 +274,7 @@ from src.utils.defaults import DEFAULT_MOQ, DEFAULT_RV
 
 #### 改后状态
 
-新增 `src/utils/normalization.py` 作为单一真源，所有模块统一导入：
+新增 `src/utils/normalization.py` 作为权威数据源（Single Source of Truth），所有模块统一导入：
 
 ```python
 from src.utils.normalization import normalize_identifiers
@@ -310,7 +294,7 @@ from src.utils.normalization import normalize_identifiers
 
 #### 具体收益
 
-后续任何跨模块主键异常，都能优先回到单一真源排查，不再需要逐个模块寻找历史分叉。
+后续任何跨模块主键异常，都能优先回到权威数据源排查，不再需要逐个模块寻找历史分叉。
 
 ### 5.4 死代码清理
 
@@ -1219,7 +1203,7 @@ python tools/regression_compare.py <基线输出目录> <目标输出目录> --t
 
 1. 新代码继续遵守"入口薄、编排稳、算法纯、写入专"的边界。
 2. 共享默认参数继续只在 `defaults.yaml` 维护。
-3. 标识符归一化继续只保留单一真源。
+3. 标识符归一化继续只保留权威数据源。
 4. 性能优化继续和零漂移验证绑定推进。
 
 ### 14.2 不建议再回退的做法

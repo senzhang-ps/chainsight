@@ -62,7 +62,6 @@ class SimulationCache:
         """构建所有缓存。"""
         t_start = time.perf_counter()
         
-        print("📊 预构建仿真缓存...")
         
         # 1. 构建Network缓存和层级分配
         self._build_network_cache()
@@ -81,12 +80,6 @@ class SimulationCache:
         
         self._build_time_ms = (time.perf_counter() - t_start) * 1000
         
-        print(f"✅ 缓存构建完成: {self._build_time_ms:.1f}ms")
-        print(f"   - Network索引: {len(self._network_index)} 条")
-        print(f"   - PTF/LSK缓存: {len(self._ptf_lsk_cache)} 条")
-        print(f"   - LeadTime缓存: {len(self._lead_time_cache)} 条")
-        print(f"   - DeployConfig缓存: {len(self._deploy_config_index)} 条")
-        print(f"   - SafetyStock索引: {len(self._safety_stock_index)} 条")
     
     def _build_network_cache(self):
         """构建Network缓存和层级分配。"""
@@ -325,11 +318,6 @@ class SimulationCache:
     def print_stats(self):
         """打印缓存统计信息。"""
         stats = self.get_stats()
-        print("\n📊 仿真缓存统计:")
-        print(f"   构建时间: {stats['build_time_ms']:.1f}ms")
-        print(f"   命中次数: {stats['hit_count']}")
-        print(f"   未命中次数: {stats['miss_count']}")
-        print(f"   命中率: {stats['hit_rate']}")
 
 
 # 全局缓存实例

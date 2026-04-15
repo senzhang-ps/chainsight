@@ -21,6 +21,8 @@
 import os
 from typing import Optional
 
+from src.utils.defaults import RESOURCE_UTILIZATION
+
 # 尝试导入psutil获取更准确的内存信息
 try:
     import psutil
@@ -30,11 +32,8 @@ except ImportError:
 
 
 # ============================================================================
-# 核心配置参数 (唯一的静态值)
+# 核心配置参数 (从 defaults.yaml 加载)
 # ============================================================================
-
-# 资源使用率 (90%)
-RESOURCE_UTILIZATION = 0.9
 
 
 # ============================================================================
@@ -189,14 +188,6 @@ def get_resource_config() -> dict:
 def print_resource_config():
     """打印当前资源配置信息。"""
     config = get_resource_config()
-    print(f"\n📊 系统资源配置 (使用率: {config['utilization']*100:.0f}%)")
-    print(f"   CPU核心数: {config['cpu_count']}")
-    print(f"   可用线程数: {config['optimal_threads']}")
-    print(f"   可用Worker数: {config['max_workers']}")
-    print(f"   系统总内存: {config['total_memory_gb']:.1f}GB")
-    print(f"   当前可用内存: {config['available_memory_gb']:.1f}GB")
-    print(f"   分配内存(90%): {config['optimal_memory_str']}")
-    print(f"   psutil可用: {config['psutil_available']}")
 
 
 # ============================================================================

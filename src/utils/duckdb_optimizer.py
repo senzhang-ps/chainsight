@@ -22,7 +22,7 @@ import pandas as pd
 import numpy as np
 
 # 使用统一的 CPU 配置
-from src.utils.cpu_config import CPU_COUNT, MAX_WORKERS
+from src.utils.resource_config import CPU_COUNT, MAX_WORKERS
 
 
 class DuckDBOptimizer:
@@ -34,7 +34,6 @@ class DuckDBOptimizer:
     
     def __init__(self):
         """初始化 DuckDB 连接。"""
-        pass
     
     @classmethod
     def get_instance(cls) -> 'DuckDBOptimizer':
@@ -150,7 +149,6 @@ class DuckDBOptimizer:
             for (mat, loc), group in result.groupby(['material', 'location']):
                 index[(str(mat), str(loc))] = group.reset_index(drop=True)
             
-            # print(f"[DuckDB] SDL index built in {time.perf_counter() - t_start:.3f}s, {len(index)} pairs")
             return index
             
         finally:
@@ -484,6 +482,5 @@ def build_indexes_with_duckdb(
     )
     
     elapsed = time.perf_counter() - t_start
-    # print(f"[DuckDB] All indexes built in {elapsed:.3f}s")
     
     return sdl_index, ss_index, order_index

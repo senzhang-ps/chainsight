@@ -15,12 +15,10 @@ def _cleanup_data_files(output_dir: str, log_dir: Path):
     for log_file in output_path.glob("**/*.txt"):
         dest = log_dir / log_file.name
         shutil.copy2(log_file, dest)
-        print(f"  📄 保存日志: {log_file.name}")
     
     for log_file in output_path.glob("**/*.log"):
         dest = log_dir / log_file.name
         shutil.copy2(log_file, dest)
-        print(f"  📄 保存日志: {log_file.name}")
     
     # 强制垃圾回收，释放可能被 pandas 持有的文件句柄
     gc.collect()
@@ -31,7 +29,6 @@ def _cleanup_data_files(output_dir: str, log_dir: Path):
     for attempt in range(max_retries):
         try:
             shutil.rmtree(temp_dir)
-            print(f"  [DEL] 已清理临时数据目录")
             break
         except PermissionError as e:
             if attempt < max_retries - 1:
@@ -40,10 +37,6 @@ def _cleanup_data_files(output_dir: str, log_dir: Path):
                 gc.collect()
             else:
                 # 最后一次尝试失败，尝试逐个删除文件
-                print(
-                    f"  [WARN] 临时目录清理延迟"
-                    f"（文件可能被占用）: {temp_dir}"
-                )
                 try:
                     # 尝试删除可以删除的文件
                     for file in temp_dir.rglob("*"):
@@ -55,5 +48,4 @@ def _cleanup_data_files(output_dir: str, log_dir: Path):
                 except:
                     pass
         except Exception as e:
-            print(f"  [WARN] 清理临时目录失败: {e}")
             break

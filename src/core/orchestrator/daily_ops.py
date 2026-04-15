@@ -10,10 +10,11 @@ from typing import Optional
 
 import pandas as pd
 
-from .normalize import (
-    _normalize_material,
-    _normalize_receiving,
-    _normalize_sending,
+from ...utils.normalization import (
+    normalize_identifiers,
+    normalize_material,
+    normalize_receiving,
+    normalize_sending,
 )
 
 
@@ -45,7 +46,6 @@ class OrchestratorDailyOpsMixin:
             pd.to_datetime(date).normalize()
         )
 
-        print(f"\n📅 Processing date: {date}")
         # 仅在每日跑批开头清理一次
         normalized_date_str = pd.to_datetime(
             date
@@ -107,10 +107,6 @@ class OrchestratorDailyOpsMixin:
         # 保存每日状态
         self.save_daily_state(date)
 
-        print(
-            f"✅ Completed daily processing for "
-            f"{date}"
-        )
 
     def _process_delivery_arrivals(self, date: str):
         """处理当天到达的在途交付。"""
@@ -144,10 +140,10 @@ class OrchestratorDailyOpsMixin:
                 # 记录 delivery GR
                 gr_record = {
                     'date': date_obj,
-                    'material': _normalize_material(
+                    'material': normalize_material(
                         transit_record['material']
                     ),
-                    'receiving': _normalize_receiving(
+                    'receiving': normalize_receiving(
                         transit_record['receiving']
                     ),
                     'quantity': transit_record[
@@ -219,7 +215,6 @@ class OrchestratorDailyOpsMixin:
                 f"{len(completed_transits)} "
                 f"delivery arrivals"
             )
-            print(f"✅ {msg} for {date}")
             self._log_event("DELIVERY_ARRIVALS", msg)
 
     def cleanup_past_due_open_deployments(
@@ -265,13 +260,13 @@ class OrchestratorDailyOpsMixin:
                     'cleanup_date': cleanup_date,
                     'grace_days': int(grace_days),
                     'ori_deployment_uid': uid,
-                    'material': _normalize_material(
+                    'material': normalize_material(
                         rec.get('material')
                     ),
-                    'sending': _normalize_sending(
+                    'sending': normalize_sending(
                         rec.get('sending')
                     ),
-                    'receiving': _normalize_receiving(
+                    'receiving': normalize_receiving(
                         rec.get('receiving')
                     ),
                     'planned_deployment_date': pdd,
@@ -293,8 +288,6 @@ class OrchestratorDailyOpsMixin:
             del self.open_deployment[uid]
 
         # 生成审计DF
-        from .normalize import _normalize_identifiers
-
         cleanup_df = pd.DataFrame(removed)
         if cleanup_df.empty:
             cleanup_df = pd.DataFrame(columns=[
@@ -320,7 +313,7 @@ class OrchestratorDailyOpsMixin:
                 f"open_deployment_pastdue_"
                 f"cleanup_{date_str}.csv"
             )
-            _normalize_identifiers(cleanup_df).to_csv(
+            normalize_identifiers(cleanup_df).to_csv(
                 out_path, index=False
             )
 

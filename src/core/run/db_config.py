@@ -35,7 +35,6 @@ def _load_config_from_database(db, config_name: str) -> dict:
         try:
             df = db.read_table(table_name)
         except Exception as e:
-            print(f"  [WARN] 加载配置表失败 [{table_name}]: {e}")
             continue
         
         # 只接受包含 config_name 列的表；并按指定配置过滤
@@ -71,17 +70,9 @@ def _load_config_from_database(db, config_name: str) -> dict:
         
         # 即使过滤后为空，也保留表结构（对于某些模块配置表是必要的）
         config_data[clean_table_name] = filtered
-        print(
-            f"  [OK] 加载配置表: {table_name} -> {clean_table_name} "
-            f"({len(filtered)} 行)"
-        )
     
     # 如果新格式没有数据，回退到旧格式（兼容旧数据）
     if not config_data:
-        print(
-            f"  [INFO] 未找到新格式配置表(cfg_*)，"
-            f"尝试旧格式({old_prefix}*)..."
-        )
         for table_name in all_tables:
             if not table_name.startswith(old_prefix):
                 continue
@@ -89,7 +80,6 @@ def _load_config_from_database(db, config_name: str) -> dict:
             try:
                 df = db.read_table(table_name)
             except Exception as e:
-                print(f"  [WARN] 加载配置表失败 [{table_name}]: {e}")
                 continue
             
             if df.empty:
@@ -98,10 +88,6 @@ def _load_config_from_database(db, config_name: str) -> dict:
             # 去掉旧前缀，作为配置数据的 key
             clean_table_name = table_name[len(old_prefix):]
             config_data[clean_table_name] = df
-            print(
-                f"  [OK] 加载配置表(旧格式): {table_name} -> "
-                f"{clean_table_name} ({len(df)} 行)"
-            )
     
     return config_data if config_data else None
 

@@ -29,15 +29,12 @@ def load_global_seed(config_dict: dict) -> int:
         seed_df = config_dict['Global_Seed']
         if 'seed' in seed_df.columns:
             seed_value = int(seed_df.iloc[0]['seed'])
-            print(f"🌱 从 Global_Seed 读取随机种子: {seed_value}")
             return seed_value
         elif len(seed_df.columns) > 0 and len(seed_df) > 0:
             # 兼容旧格式，读取首行首列的值
             seed_value = int(seed_df.iloc[0, 0])
-            print(f"🌱 从 Global_Seed 兼容格式读取随机种子: {seed_value}")
             return seed_value
     
-    print("⚠️未找到 Global_Seed 配置，使用默认值: 42")
     return 42
 
 
@@ -70,5 +67,4 @@ def set_module_seeds(config_dict: dict, global_seed: int = None):
     config_dict['M5_RandomSeed'] = global_seed
     config_dict['M6_RandomSeed'] = global_seed
     
-    print(f"✨已为所有模块设置统一随机种子: {global_seed}")
     return global_seed

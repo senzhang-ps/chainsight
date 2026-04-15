@@ -11,6 +11,8 @@ from typing import Dict, List, Optional
 from psycopg import sql as psql
 import pandas as pd
 
+from ...utils.normalization import normalize_identifiers
+
 
 def _write_checkpoint_to_db(
     db,
@@ -38,7 +40,7 @@ def _write_checkpoint_to_db(
     orch_json = json.dumps(orch_state, default=_json_serializer, ensure_ascii=False)
     orch_json_bytes = len(orch_json.encode('utf-8'))
     if orch_json_bytes >= 16 * 1024 * 1024:
-        print(f"  [WARN] checkpoint JSON size={orch_json_bytes / 1024 / 1024:.2f} MB")
+        pass
 
     conn = db.connect()
     try:
@@ -59,10 +61,9 @@ def _write_checkpoint_to_db(
                     (run_key, run_id, config_name, start_date,
                      end_date, current_date_str, orch_json),
                 )
-        print(f"  💾 checkpoint 实时写入: {current_date_str}")
     except Exception as e:
         # checkpoint 写入失败不中止仿真，仅警告
-        print(f"  ⚠️ checkpoint 实时写入失败（不影响仿真继续）: {e}")
+        pass
 
 
 def _flush_batch_to_db(
@@ -95,7 +96,6 @@ def _flush_batch_to_db(
     from pgsql_db.checkpoint import serialize_orchestrator_state, _json_serializer
     from psycopg import sql as psql
 
-    print(f"\n💾 批次写入: {batch_start_date} ~ {batch_end_date}")
 
     # 步骤 0：在事务外先序列化编排器状态（纯 CPU 操作，无 DB 交互）
     orch_state = serialize_orchestrator_state(orch)
@@ -106,7 +106,7 @@ def _flush_batch_to_db(
     orch_json = json.dumps(orch_state, default=_json_serializer, ensure_ascii=False)
     orch_json_bytes = len(orch_json.encode('utf-8'))
     if orch_json_bytes >= 16 * 1024 * 1024:
-        print(f"  [WARN] checkpoint JSON size={orch_json_bytes / 1024 / 1024:.2f} MB")
+        pass
 
     # 步骤 0b：在事务外预处理批次数据为可写入的 DataFrame
     prepared_tables = writer.prepare_batch_dataframes(batch_results, run_id=run_id)
@@ -130,9 +130,8 @@ def _flush_batch_to_db(
         )
     if orchestrator_tables:
         orch_total_rows = sum(df.shape[0] for df, _ in orchestrator_tables.values())
-        print(f"  📋 Orchestrator 当日数据: {len(orchestrator_tables)} 张表, 共 {orch_total_rows} 行")
         for tbl_name, (df, _) in orchestrator_tables.items():
-            print(f"    - {tbl_name}: {len(df)} 行")
+            pass
     prepared_tables.update(orchestrator_tables)
 
     # 获取底层连接
@@ -169,10 +168,8 @@ def _flush_batch_to_db(
                      end_date, batch_end_date, orch_json),
                 )
         # 事务成功提交
-        print(f"  ✅ checkpoint 更新至 {batch_end_date}")
     except Exception:
         # conn.transaction() 退出时已自动 ROLLBACK
-        print(f"  ❌ 批次 {batch_start_date}~{batch_end_date} 写入失败，已回滚")
         raise
 
 
@@ -304,7 +301,7 @@ def _atomic_delete_batch(cur, run_id: str, batch_start_date: str, table_meta: di
             )
         deleted_total += 1
     if deleted_total > 0:
-        print(f"  🗑️  已清理批次 {batch_start_date} 起的旧数据（{deleted_total} 张表）")
+        pass
 
 
 def _atomic_copy_batch(conn, cur, prepared_tables: dict, db) -> None:
@@ -340,7 +337,6 @@ def _atomic_copy_batch(conn, cur, prepared_tables: dict, db) -> None:
                     pg_type = db._pandas_to_pg_type(df_dtype, col_name=col_name)
                     cur.execute(f'ALTER TABLE "{table_name}" ADD COLUMN IF NOT EXISTS "{col_name}" {pg_type}')
                     col_types[col_name] = pg_type
-                    print(f'    [ALTER] 为 {table_name} 添加新列: {col_name} ({pg_type})')
         import numpy as np
         records = df.values.tolist()
         col_name_to_idx = {col: idx for idx, col in enumerate(clean_columns)}
@@ -433,12 +429,12 @@ def prepare_orchestrator_day_dataframes_from_orch(
         ``{表名: (DataFrame, 清洗后列名列表)}``
 
     列处理规则：
-    - 除 daily_logs 外，所有视图均应用 ``_normalize_identifiers()``
+    - 除 daily_logs 外，所有视图均应用 ``normalize_identifiers()``
       （与 ``persistence.py:save_daily_state`` 保持一致）。
     - 追加 5 列元数据：file_date、sim_date、run_id、config_name、db_write_time。
     - 所有列名均应用 ``_clean_name()`` 清洗。
     """
-    from .normalize import _normalize_identifiers
+    from ...utils.normalization import normalize_identifiers
 
     date_key = pd.to_datetime(sim_date).strftime("%Y%m%d")
     sim_date_str = pd.to_datetime(sim_date).strftime("%Y-%m-%d")
@@ -532,7 +528,7 @@ def prepare_orchestrator_day_dataframes_from_orch(
 
         df = df.copy()
         if apply_norm:
-            df = _normalize_identifiers(df)
+            df = normalize_identifiers(df)
 
         # 追加元数据列（与 ModuleDataWriter.prepare_orchestrator_day_dataframes 相同）
         df["file_date"] = date_key
@@ -561,7 +557,6 @@ def _safe_view(orch, method_name: str, date_arg: str) -> pd.DataFrame:
             return pd.DataFrame()
         return result
     except Exception as e:
-        print(f"  [警告] {method_name}({date_arg}) 调用失败: {e}")
         return pd.DataFrame()
 
 

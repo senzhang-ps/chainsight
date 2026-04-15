@@ -57,42 +57,35 @@ def main():
     
     # 检查配置文件是否存在
     if not os.path.exists(args.config):
-        print(f"❌ 配置文件不存在: {args.config}")
-        print("请提供有效的配置文件路径，或使用测试脚本生成配置")
         sys.exit(1)
     
     # 如果没有指定输出目录，根据配置文件名生成
     if args.output is None:
         config_name = os.path.splitext(os.path.basename(args.config))[0]
         args.output = f"./{config_name}_output"
-        print(f"💫 使用默认输出目录: {args.output}")
     
     # 处理断点续跑检查选项
     if args.check_resume:
-        print(f"🔍 检查断点续跑状态...")
         resume_info = check_resume_capability(args.output, args.start_date, args.end_date)
         
-        print(f"\n📊 断点续跑状态报告:")
-        print(f"  输出目录: {args.output}")
-        print(f"  原始日期范围: {args.start_date} 到 {args.end_date}")
         
         if resume_info.get('already_completed', False):
-            print(f"  ✅ 仿真已完成！")
-            print(f"     最后处理日期: {resume_info['last_complete_date']}")
-            print(f"     总处理天数: {resume_info['days_completed']}")
+            pass
+            pass
+            pass
         elif resume_info['can_resume']:
-            print(f"  🔄 可以断点续跑！")
-            print(f"     已完成: {resume_info['days_completed']} 天 (到 {resume_info['last_complete_date']})")
-            print(f"     剩余: {resume_info['days_remaining']} 天 (从 {resume_info['resume_from_date']} 开始)")
+            pass
+            pass
+            pass
         else:
-            print(f"  📝 无法断点续跑，需要从头开始")
-            print(f"     需要处理: {resume_info['days_remaining']} 天")
+            pass
+            pass
         
         return  # 仅检查，不执行
     
     # 处理强制重启选项
     if args.force_restart:
-        print(f"🔄 强制重启模式：将从头开始，忽略任何现有状态")
+        pass
         # 通过参数透传给仿真入口，显式要求忽略已有断点续跑状态
     
     try:
@@ -105,21 +98,18 @@ def main():
             force_restart=args.force_restart
         )
         
-        print(f"\n✅ 仿真结果:")
         if result.get('is_resuming', False):
-            print(f"  断点续跑模式: 是")
-            print(f"  本次处理天数: {result.get('dates_processed_this_run', 0)}")
-            print(f"  总处理天数: {result.get('total_dates_processed', 0)}")
+            pass
+            pass
+            pass
         else:
-            print(f"  全新运行: 是")  
-            print(f"  处理天数: {result.get('dates_processed_this_run', 0)}")
-        print(f"  输出目录: {result.get('output_directory', 'Unknown')}")
+            pass
+            pass
         
         if result.get('already_completed', False):
-            print(f"  📝 注意: 仿真之前已完成，无需处理")
+            pass
         
     except Exception as e:
-        print(f"❌ 集成仿真失败: {e}")
         import traceback
         traceback.print_exc()
         sys.exit(1)

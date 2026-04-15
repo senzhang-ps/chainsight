@@ -162,13 +162,6 @@ def _run_with_database(ns: argparse.Namespace) -> int:
     if not start_date:
         raise ValueError("数据库模式必须提供 --start-date 参数")
     
-    print("\n" + "=" * 70)
-    print("🗄️  数据库模式运行")
-    print("=" * 70)
-    print(f"[INFO] 配置名称: {config_name}")
-    print(f"📅 日期范围: {start_date} 到 {end_date}")
-    print(f"🔌 数据库: {ns.db_host}:{ns.db_port}/{ns.db_name}")
-    print("=" * 70)
     
     # 导入数据库模块
     try:
@@ -177,8 +170,6 @@ def _run_with_database(ns: argparse.Namespace) -> int:
         from pgsql_db.module_data_writer import ModuleDataWriter
         from pgsql_db.db_initializer import DatabaseInitializer
     except ImportError as e:
-        print(f"[ERROR] 无法导入数据库模块: {e}")
-        print("   请确保已安装 psycopg: pip install psycopg[binary]")
         return 1
     
     # ========== 使用 DatabaseInitializer 自动检测和初始化 ==========
@@ -198,7 +189,6 @@ def _run_with_database(ns: argparse.Namespace) -> int:
     )
     
     if not init_result["success"]:
-        print("[ERROR] 数据库初始化失败")
         return 1
     
     # 获取数据库连接供后续使用
@@ -209,7 +199,6 @@ def _run_with_database(ns: argparse.Namespace) -> int:
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     log_dir = _build_db_log_dir(config_name=config_name, timestamp=ts)
     log_dir.mkdir(parents=True, exist_ok=True)
-    print(f"[DIR] 日志目录: {log_dir}")
     
     # 设置日志系统
     from ...utils.logger_config import setup_logging

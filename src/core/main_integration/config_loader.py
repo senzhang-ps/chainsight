@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from .normalize import _normalize_identifiers
+from ...utils.normalization import normalize_identifiers
 
 
 _EXCEL_SUFFIXES = {".xlsx", ".xlsm", ".xls"}
@@ -241,7 +241,7 @@ def load_configuration_from_dict(config_data: dict, config_name: str = "DB_Confi
             
             if has_identifiers:
                 original_dtypes = {col: str(df[col].dtype) for col in identifier_cols if col in df.columns}
-                config_dict[sheet_name] = _normalize_identifiers(df)
+                config_dict[sheet_name] = normalize_identifiers(df)
                 new_dtypes = {col: str(config_dict[sheet_name][col].dtype) for col in identifier_cols if col in config_dict[sheet_name].columns}
                 
                 normalized_fields = []
@@ -357,7 +357,7 @@ def load_configuration(config_path: str) -> dict:
                 
                 if has_identifiers:
                     original_dtypes = {col: str(df[col].dtype) for col in identifier_cols if col in df.columns}
-                    config_dict[sheet_name] = _normalize_identifiers(df)
+                    config_dict[sheet_name] = normalize_identifiers(df)
                     new_dtypes = {col: str(config_dict[sheet_name][col].dtype) for col in identifier_cols if col in config_dict[sheet_name].columns}
                     
                     # 记录标准化的字段

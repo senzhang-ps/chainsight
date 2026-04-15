@@ -189,16 +189,12 @@ class ParallelExecutor:
             parallel: 是否为并行模式
         """
         mode_str = "并行" if parallel else "串行"
-        print(f"\n{'='*60}")
-        print(f"📊 任务执行结果 ({mode_str}模式)")
-        print(f"{'='*60}")
         
         total_time = 0.0
         success_count = 0
         error_count = 0
         
         for task_name, result in results.items():
-            print(f"  {result}")
             total_time += result.elapsed_time
             
             if result.status == 'success':
@@ -207,21 +203,17 @@ class ParallelExecutor:
                 error_count += 1
         
         # 摘要统计
-        print(f"{'-'*60}")
-        print(f"  ✅ 成功: {success_count}/{len(results)}")
         if error_count > 0:
-            print(f"  ❌ 失败: {error_count}/{len(results)}")
+            pass
         
         if parallel:
             # 并行模式：总耗时 = max(各任务耗时)
             max_time = max((r.elapsed_time for r in results.values()),
                           default=0)
-            print(f"  ⏱️  总耗时: {max_time:.2f}s (并行优势)")
         else:
             # 串行模式：总耗时 = sum(各任务耗时)
-            print(f"  ⏱️  总耗时: {total_time:.2f}s (串行模式)")
+            pass
         
-        print(f"{'='*60}\n")
     
     def get_results_dict(
         self,

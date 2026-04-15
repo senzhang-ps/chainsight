@@ -10,10 +10,10 @@ from datetime import datetime
 
 import pandas as pd
 
-from .normalize import (
-    _normalize_identifiers,
-    _normalize_location,
-    _normalize_material,
+from ...utils.normalization import (
+    normalize_identifiers,
+    normalize_location,
+    normalize_material,
 )
 
 
@@ -37,7 +37,7 @@ class OrchestratorPersistenceMixin:
         out_path = self.output_dir / (
             f"unrestricted_inventory_{date_str}.csv"
         )
-        _normalize_identifiers(
+        normalize_identifiers(
             unrestricted_df
         ).to_csv(out_path, index=False)
 
@@ -48,7 +48,7 @@ class OrchestratorPersistenceMixin:
         out_path = self.output_dir / (
             f"open_deployment_{date_str}.csv"
         )
-        _normalize_identifiers(
+        normalize_identifiers(
             open_deployment_df
         ).to_csv(out_path, index=False)
 
@@ -59,7 +59,7 @@ class OrchestratorPersistenceMixin:
         out_path = self.output_dir / (
             f"planning_intransit_{date_str}.csv"
         )
-        _normalize_identifiers(intransit_df).to_csv(
+        normalize_identifiers(intransit_df).to_csv(
             out_path, index=False
         )
 
@@ -70,7 +70,7 @@ class OrchestratorPersistenceMixin:
         out_path = self.output_dir / (
             f"space_quota_{date_str}.csv"
         )
-        _normalize_identifiers(
+        normalize_identifiers(
             space_quota_df
         ).to_csv(out_path, index=False)
 
@@ -83,7 +83,7 @@ class OrchestratorPersistenceMixin:
         out_path = self.output_dir / (
             f"production_plan_backlog_{date_str}.csv"
         )
-        _normalize_identifiers(
+        normalize_identifiers(
             production_backlog_df
         ).to_csv(out_path, index=False)
 
@@ -94,7 +94,7 @@ class OrchestratorPersistenceMixin:
         out_path = self.output_dir / (
             f"delivery_gr_{date_str}.csv"
         )
-        _normalize_identifiers(
+        normalize_identifiers(
             delivery_gr_df
         ).to_csv(out_path, index=False)
 
@@ -105,7 +105,7 @@ class OrchestratorPersistenceMixin:
         out_path = self.output_dir / (
             f"production_gr_{date_str}.csv"
         )
-        _normalize_identifiers(
+        normalize_identifiers(
             production_gr_df
         ).to_csv(out_path, index=False)
 
@@ -129,7 +129,7 @@ class OrchestratorPersistenceMixin:
         out_path = self.output_dir / (
             f"shipment_log_{date_str}.csv"
         )
-        _normalize_identifiers(shipment_df).to_csv(
+        normalize_identifiers(shipment_df).to_csv(
             out_path, index=False
         )
 
@@ -159,7 +159,7 @@ class OrchestratorPersistenceMixin:
         out_path = self.output_dir / (
             f"delivery_shipment_log_{date_str}.csv"
         )
-        _normalize_identifiers(
+        normalize_identifiers(
             delivery_shipment_df
         ).to_csv(out_path, index=False)
 
@@ -170,7 +170,7 @@ class OrchestratorPersistenceMixin:
         out_path = self.output_dir / (
             f"inventory_change_log_{date_str}.csv"
         )
-        _normalize_identifiers(
+        normalize_identifiers(
             inventory_change_df
         ).to_csv(out_path, index=False)
 
@@ -204,7 +204,6 @@ class OrchestratorPersistenceMixin:
             f"💾已保存 {date} 期初库存: "
             f"{len(self.unrestricted_inventory)} 项"
         )
-        print(msg)
 
     def save_ending_inventory(self, date: str):
         """保存指定日期的期末库存状态。
@@ -221,7 +220,6 @@ class OrchestratorPersistenceMixin:
             f"💾已保存 {date} 期末库存: "
             f"{len(self.unrestricted_inventory)} 项"
         )
-        print(msg)
 
     def _log_event(
         self, event_type: str, message: str
@@ -291,13 +289,7 @@ class OrchestratorPersistenceMixin:
             m6_ship_qty_total = 0
 
         # 统计汇总
-        print(f"期初库存条目: {len(beginning_inv)}")
-        print(f"生产入库条目: {len(production_gr)}")
-        print(f"交付入库条目: {len(delivery_gr)}")
-        print(f"发货出库条目: {len(shipments)}")
         msg = (
             f"发运出库条目(M6): {m6_ship_count}，"
             f"数量合计: {m6_ship_qty_total}"
         )
-        print(msg)
-        print(f"期末库存条目: {len(ending_inv)}")

@@ -66,43 +66,22 @@ def _prompt_user_run_selection(run_infos: list[dict]) -> Path:
     Returns:
         用户选中的运行目录路径；若用户选择新建目录，则返回 `None`。
     """
-    print("\n" + "="*80)
-    print("📂 发现多个运行目录，请选择要续跑的目录：")
-    print("="*80)
     
     for idx, info in enumerate(run_infos, 1):
         resume_info = info['resume_info']
-        print(f"\n[{idx}] {info['name']}")
         
         if resume_info.get('already_completed', False):
-            print(f"    [OK] 状态: 已完成")
-            print(f"    📅 最后日期: {resume_info['last_complete_date']}")
-            print(f"    [DATA] 完成天数: {resume_info['days_completed']}")
+            pass
         elif resume_info['can_resume']:
-            print(f"    🔄 状态: 可续跑")
-            print(
-                f"    📅 已完成: {resume_info['days_completed']} 天 "
-                f"(截至 {resume_info['last_complete_date']})"
-            )
-            print(
-                f"    📅 剩余: {resume_info['days_remaining']} 天 "
-                f"(从 {resume_info['resume_from_date']} 开始)"
-            )
+            pass
         else:
-            print(f"    [LOG] 状态: 无可续跑数据")
-            print(f"    [DATA] 需处理: {resume_info['days_remaining']} 天")
+            pass
     
-    print("\n" + "="*80)
-    print("请输入选项：")
-    print("  - 输入数字 [1-{}] 选择对应目录".format(len(run_infos)))
-    print("  - 输入 'n' 或 'new' 创建新的运行目录")
-    print("  - 输入 'q' 或 'quit' 退出")
     
     while True:
         choice = input("\n👉 请选择: ").strip().lower()
         
         if choice in ['q', 'quit']:
-            print("[ERROR] 用户取消操作")
             sys.exit(0)
         
         if choice in ['n', 'new']:
@@ -112,15 +91,11 @@ def _prompt_user_run_selection(run_infos: list[dict]) -> Path:
             idx = int(choice)
             if 1 <= idx <= len(run_infos):
                 selected = run_infos[idx - 1]
-                print(f"\n[OK] 已选择: {selected['name']}")
                 return selected['path']
             else:
-                print(
-                    f"[ERROR] 无效选择，请输入 1-{len(run_infos)} "
-                    f"之间的数字"
-                )
+                pass
         except ValueError:
-            print("[ERROR] 无效输入，请输入数字、'n' 或 'q'")
+            pass
 
 
 def _ensure_output_dir(
@@ -164,7 +139,6 @@ def _ensure_output_dir(
             raise ValueError(
                 f"Specified run directory does not exist: {resume_from}"
             )
-        print(f"📂 使用指定的运行目录: {resume_from}")
         return target_dir
 
     # 如果启用了续跑模式，则检查是否存在历史运行目录
@@ -189,14 +163,12 @@ def _ensure_output_dir(
                 elif resumable_runs:
                     # 只有一个可用运行目录或非交互模式：使用最新的目录
                     selected = resumable_runs[0]
-                    print(f"📂 自动选择最新的运行目录: {selected['name']}")
                     return selected['path']
 
     # 在顶层目录下创建唯一的运行文件夹以避免冲突
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     run_dir = root_dir / f"run_{ts}"
     run_dir.mkdir(parents=True, exist_ok=False)
-    print(f"📂 创建新的运行目录: run_{ts}")
 
     return run_dir
 

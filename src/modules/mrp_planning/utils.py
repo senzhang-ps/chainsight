@@ -9,7 +9,7 @@ from typing import Dict, List, Optional, Tuple, Union
 import numpy as np
 import pandas as pd
 
-from src.utils.normalization_common import (
+from src.utils.normalization import (
     normalize_identifiers_vectorized,
     normalize_location_zero_fill_any,
     normalize_material_basic,

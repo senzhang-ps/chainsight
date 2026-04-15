@@ -39,7 +39,6 @@ def calculate_physical_inventory(
         _log_inventory_statistics(physical_inventory)
         return physical_inventory
     except Exception as e:
-        print(f"  ⚠️  获取实物库存失败: {e}")
         return {}
 
 
@@ -81,14 +80,12 @@ def _check_inventory_duplicates(
         
         if location_key in location_counts:
             location_counts[location_key] += 1
-            print(f"    ⚠️  发现重复键: {location_key} "
-                  f"(第{location_counts[location_key]}次)")
         else:
             location_counts[location_key] = 1
     
     duplicates = {k: v for k, v in location_counts.items() if v > 1}
     if duplicates:
-        print(f"    🚨 重复的material-location组合: {len(duplicates)} 个")
+        pass
 
 
 def _log_inventory_statistics(
@@ -105,10 +102,6 @@ def _log_inventory_statistics(
     
     total_items = sum(1 for qty in physical_inventory.values() if qty > 0)
     positive_qty = sum(qty for qty in physical_inventory.values() if qty > 0)
-    
-    # 调试信息（可根据需要启用）
-    # print(f"  📊 实物库存统计: {len(physical_inventory)} 个SKU-地点组合")
-    # print(f"  ✅ 有库存SKU: {total_items}/{len(physical_inventory)}, 总量: {positive_qty:.1f}")
 
 
 def update_inventory_after_load(

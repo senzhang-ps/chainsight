@@ -15,7 +15,7 @@ from typing import Dict, List, Optional
 import numpy as np
 import pandas as pd
 
-from ...utils.cpu_config import get_optimal_workers
+from ...utils.resource_config import get_optimal_workers
 
 from .allocation import (
     apply_grouped_moq_rv,
@@ -113,14 +113,6 @@ def _validate_deployment_shipment_constraint(
     
     # 对比
     if total_deployed_qty > total_shipment_qty * 1.01:  # 允许1%的浮点数误差
-        print(f"\n⚠️  [Module5] 约束警告: 部署量 > 订单量")
-        print(f"    订单量: {total_shipment_qty:.0f}")
-        print(f"    部署量: {total_deployed_qty:.0f}")
-        print(f"    超出: {total_deployed_qty - total_shipment_qty:.0f}")
-        print(f"    可能原因:")
-        print(f"    1. MOQ/RV 调整导致部署量增加")
-        print(f"    2. Push/SoftPush 分配产生了额外的部署")
-        print(f"    3. 订单去重不当导致重复处理")
         
         validation_log.append({
             'sheet': 'Module5_Constraint',
@@ -177,7 +169,7 @@ def _initialize_soh_dict(
 
     inv_df = inventory_log[inventory_log['date'] == actual_sim_start]
     if inv_df.empty:
-        print(f"[WARN] No inventory records found for sim_start: {actual_sim_start}")
+        pass
 
     # 检查重复
     duplicates = inv_df.duplicated(subset=['material', 'location'], keep=False)
@@ -248,7 +240,7 @@ def _process_layer_demands(
                 active_network_cache=active_network_cache
             )
         except Exception as e:
-            print(f"  ⚠️  向量化收集需求失败，回退线程池: {e}")
+            pass
     
     # 其次使用多进程版本（如果启用）
     if USE_MULTIPROCESS_DEMAND_COLLECTION:
@@ -267,7 +259,7 @@ def _process_layer_demands(
                 deploy_config_index=deploy_config_index
             )
         except Exception as e:
-            print(f"  ⚠️  多进程收集需求失败，回退线程池: {e}")
+            pass
 
     # 回退到 ThreadPoolExecutor 版本
     # 使用 horizon 预计算缓存（如果启用）
@@ -286,7 +278,6 @@ def _process_layer_demands(
                 location_layer_map=config.get('LocationLayerMap', {})
             )
         except Exception as e:
-            print(f"  ⚠️  构建horizon缓存失败，回退原始方法: {e}")
             horizon_cache = None
 
     try:
@@ -323,10 +314,9 @@ def _process_layer_demands(
                 try:
                     node_demands_map[key] = fut.result()
                 except Exception as e:
-                    print(f"  ⚠️  并行收集需求失败: {key} -> {e}")
                     node_demands_map[key] = []
     except Exception as e:
-        print(f"  ⚠️  并行收集需求初始化失败，回退串行: {e}")
+        pass
 
     return node_demands_map
 
@@ -743,7 +733,7 @@ def _update_soh_dict(
         })
 
 
-def main(
+def run_deployment_planning(
     input_path: str = None,
     output_path: str = None,
     sim_start: str = None,
@@ -846,14 +836,6 @@ def main(
     order_index = build_order_log_index(config.get('OrderLog', pd.DataFrame()))
     deploy_config_index = build_deploy_config_index(config['DeployConfig'])
 
-    print(
-        f"✅缓存已初始化: PTF/LSK={len(ptf_lsk_cache)} | "
-        f"LeadTime={len(lead_time_cache)} | Network={len(active_network_cache)}"
-    )
-    print(
-        f"✅索引已构建: SDL={len(sdl_index)} | SS={len(ss_index)} | "
-        f"Order={len(order_index)} | DeployCfg={len(deploy_config_index)}"
-    )
 
     # 初始化库存
     actual_sim_start = (
@@ -1043,14 +1025,6 @@ def main(
 
             up_gap_buffer = up_gap_next.copy()
 
-        print(
-            f"[M5] Demand collection only 用时: "
-            f"{demand_collect_only_elapsed:.3f}s"
-        )
-        print(
-            f"[M5] Demand collection+allocation 总用时: "
-            f"{time.perf_counter()-demand_collect_total_start:.3f}s"
-        )
 
         # Push/Soft-push 分配
         dynamic_soh_for_push = dynamic_soh.copy()
@@ -1123,7 +1097,6 @@ def main(
     if not skip_file_output:
         log_outputs(output_path, outputs)
 
-    print(f"[M5] Full day total 用时: {time.perf_counter()-day_start:.3f}s")
 
     return {
         'deployment_plan': deployment_plan_rows_df,

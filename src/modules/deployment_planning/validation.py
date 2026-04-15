@@ -8,7 +8,7 @@ from typing import Dict, List
 
 import pandas as pd
 
-from .normalizer import normalize_identifiers
+from ...utils.normalization import normalize_identifiers
 from .constants import (
     DEFAULT_AO_PRIORITY,
     DEFAULT_NORMAL_PRIORITY,

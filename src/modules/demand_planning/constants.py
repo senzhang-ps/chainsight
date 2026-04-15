@@ -12,12 +12,12 @@ import os
 from typing import Optional
 
 # 导入统一的 CPU 配置
-from src.utils.cpu_config import MAX_WORKERS
+from src.utils.resource_config import MAX_WORKERS
+from src.utils.defaults import M1_DEFAULT_MAX_ADVANCE_DAYS
 
 # ----------- 性能优化参数 -----------
 
-# 最大AO提前天数（从配置中动态获取，此为后备值）
-DEFAULT_MAX_ADVANCE_DAYS: int = 10
+DEFAULT_MAX_ADVANCE_DAYS: int = M1_DEFAULT_MAX_ADVANCE_DAYS
 
 # 并行计算开关（默认关闭以确保与旧版输出一致）
 DEFAULT_USE_PARALLEL_AO_CONSUME: bool = True

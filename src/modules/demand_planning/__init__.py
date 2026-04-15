@@ -9,7 +9,7 @@
 
 子模块结构：
 - constants: 常量定义与默认配置
-- normalization: 标识符规范化函数
+- utils.normalization: 标识符规范化函数
 - config: 配置加载与校验
 - dps: DPS地点拆分与供应选择
 - forecast: 预测拆分与处理
@@ -34,11 +34,6 @@ from .constants import (
     DEFAULT_ERROR_LOG_PATH,
     DEFAULT_USE_PARALLEL_NORMAL_CONSUME,
     append_error_log,
-)
-from .normalization import (
-    normalize_location,
-    normalize_material,
-    normalize_identifiers,
 )
 from .config import load_config, validate_m1_config
 from .dps import apply_dps, apply_supply_choice
@@ -67,18 +62,6 @@ from .io_utils import (
     save_module1_output_with_supply_demand,
 )
 
-# 向后兼容：保留私有函数名
-_normalize_location = normalize_location
-_normalize_material = normalize_material
-_normalize_identifiers = normalize_identifiers
-_append_error_log = append_error_log
-_validate_m1_config = validate_m1_config
-_prepare_daily_forecasts = prepare_daily_forecasts
-_consume_orders = consume_orders
-_consume_ao_orders_serial = consume_ao_orders_serial
-_consume_normal_orders_serial = consume_normal_orders_serial
-_load_previous_orders = load_previous_orders
-
 __all__ = [
     # 常量
     'DEFAULT_MAX_ADVANCE_DAYS',
@@ -88,26 +71,15 @@ __all__ = [
     'DEFAULT_ERROR_LOG_PATH',
     'DEFAULT_USE_PARALLEL_NORMAL_CONSUME',
     'append_error_log',
-    # 规范化（公开名称）
-    'normalize_location',
-    'normalize_material',
-    'normalize_identifiers',
-    # 规范化（旧私有名称，向后兼容）
-    '_normalize_location',
-    '_normalize_material',
-    '_normalize_identifiers',
-    '_append_error_log',
     # 配置
     'load_config',
     'validate_m1_config',
-    '_validate_m1_config',
     # DPS 处理
     'apply_dps',
     'apply_supply_choice',
     # 预测
     'expand_forecast_to_days_integer_split',
     'prepare_daily_forecasts',
-    '_prepare_daily_forecasts',
     # 订单
     'generate_daily_orders',
     'generate_quantity_with_percent_error',
@@ -117,9 +89,6 @@ __all__ = [
     'consume_orders',
     'consume_ao_orders_serial',
     'consume_normal_orders_serial',
-    '_consume_orders',
-    '_consume_ao_orders_serial',
-    '_consume_normal_orders_serial',
     # 发货
     'simulate_shipment_for_single_day',
     'generate_shipment_with_inventory_check',
@@ -128,6 +97,5 @@ __all__ = [
     'generate_supply_demand_log_for_integration',
     # 输入输出
     'load_previous_orders',
-    '_load_previous_orders',
     'save_module1_output_with_supply_demand',
 ]

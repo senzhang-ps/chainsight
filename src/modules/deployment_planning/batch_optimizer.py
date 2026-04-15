@@ -10,7 +10,7 @@ M5 批量优化器模块
 import time
 from typing import Dict, List, Optional, Set, Tuple
 import pandas as pd
-from ..utils.duckdb_accelerator import get_accelerator
+from ...utils.duckdb_accelerator import get_accelerator
 
 
 def batch_prefilter_layer_data(
@@ -91,7 +91,6 @@ def batch_prefilter_layer_data(
             )
     
     elapsed = time.perf_counter() - t_start
-    # print(f"[M5] 批量预过滤 {len(pairs_list)} 个 pair，用时 {elapsed:.3f}s")
     
     return result
 

@@ -91,7 +91,6 @@ def collect_demands_batch_vectorized(
     )
     
     elapsed = time.perf_counter() - t_start
-    # print(f"[M5] Batch demand collection: {elapsed:.3f}s for {len(pairs)} pairs")
     
     return result
 

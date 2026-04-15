@@ -44,7 +44,6 @@ def load_daily_net_demand(
 
     except Exception as e:
         date_str = simulation_date.strftime('%Y-%m-%d')
-        print(f"加载净需求数据出错 {date_str}: {e}")
         return pd.DataFrame(columns=empty_columns)
 
 
@@ -100,7 +99,6 @@ def _load_and_process_net_demand(
     xl = pd.ExcelFile(file_path)
 
     if 'NetDemand' not in xl.sheet_names:
-        print(f"警告: 文件 {file_path} 中未找到NetDemand工作表")
         return pd.DataFrame(columns=empty_columns)
 
     net_demand = pd.read_excel(file_path, sheet_name='NetDemand')
@@ -140,7 +138,6 @@ def _filter_layer_zero(df: pd.DataFrame) -> pd.DataFrame:
     if 'layer' in df.columns:
         return df[df['layer'] == 0].copy()
 
-    print("警告: 'layer'列不存在，使用全部需求")
     return df.copy()
 
 

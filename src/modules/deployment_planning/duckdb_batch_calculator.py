@@ -196,7 +196,6 @@ def apply_moq_rv_batch_duckdb(
         return adjusted_qtys
         
     except Exception as e:
-        print(f"[M5-DuckDB] MOQ/RV计算出错，回退到Pandas: {e}")
         if DuckDBConfig.fallback_on_error:
             from .allocation import apply_grouped_moq_rv
             return apply_grouped_moq_rv(demand_rows, location)
@@ -327,7 +326,6 @@ def apply_priority_allocation_duckdb(
         return remaining_stock
         
     except Exception as e:
-        print(f"[M5-DuckDB] 优先级分配出错，回退到Pandas: {e}")
         if DuckDBConfig.fallback_on_error:
             from .allocation import apply_priority_allocation_vectorized
             return apply_priority_allocation_vectorized(
@@ -497,7 +495,6 @@ def batch_inventory_allocation_duckdb(
                 nodes_data[node_idx]['demand_rows'][row_idx]['adjusted_qty'] = adjusted
         
         elapsed_ms = (time.perf_counter() - t0) * 1000
-        print(f"[M5-DuckDB] 批量分配 {len(nodes_data)} 节点, {len(all_demands)} 需求行: {elapsed_ms:.1f}ms")
         
         if run_id and DuckDBConfig.collect_stats:
             get_perf_stats().record(run_id, 'batch_allocation', 'duckdb', 
@@ -506,7 +503,6 @@ def batch_inventory_allocation_duckdb(
         return nodes_data
         
     except Exception as e:
-        print(f"[M5-DuckDB] 批量分配出错，回退到Pandas: {e}")
         if DuckDBConfig.fallback_on_error:
             return _batch_allocation_pandas(nodes_data, run_id)
         raise

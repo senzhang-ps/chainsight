@@ -26,7 +26,6 @@ def assign_location_layers(network_df: pd.DataFrame) -> pd.DataFrame:
 
     if network_df.empty:
         empty_df = pd.DataFrame({'material': [], 'location': [], 'layer': []})
-        print(f"[M3] assign_location_layers total: {time.perf_counter()-_t_func:.3f}s, locations=0")
         return empty_df
 
     layer_rows = []
@@ -97,11 +96,9 @@ def assign_location_layers(network_df: pd.DataFrame) -> pd.DataFrame:
 
     if not layer_rows:
         empty_df = pd.DataFrame({'material': [], 'location': [], 'layer': []})
-        print(f"[M3] assign_location_layers total: {time.perf_counter()-_t_func:.3f}s, locations=0")
         return empty_df
 
     layer_df = pd.DataFrame(layer_rows).sort_values(['material', 'layer', 'location']).reset_index(drop=True)
-    print(f"[M3] assign_location_layers total: {time.perf_counter()-_t_func:.3f}s, locations={len(layer_df)}")
     return layer_df
 
 

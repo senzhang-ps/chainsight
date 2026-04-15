@@ -12,7 +12,7 @@ from typing import Any, Optional, Tuple
 
 import pandas as pd
 
-from .normalization import normalize_identifiers
+from ...utils.normalization import normalize_identifiers
 from .dps import apply_dps, apply_supply_choice
 
 
@@ -80,10 +80,6 @@ def expand_forecast_to_days_integer_split(
     result_df['quantity'] = result_df['quantity'].astype(int)
 
     elapsed = time.perf_counter() - t0
-    print(
-        f"[M1] 周度→日度拆分完成，"
-        f"生成天数: {len(result_df)}，耗时: {elapsed:.3f}s"
-    )
 
     return normalize_identifiers(result_df)
 

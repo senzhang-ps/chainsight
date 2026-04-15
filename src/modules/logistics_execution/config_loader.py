@@ -60,7 +60,6 @@ def load_standalone_config(input_excel: str) -> Dict[str, pd.DataFrame]:
         _apply_random_seed_from_file(input_excel)
         return config
     except Exception as e:
-        print(f"❌ 读取输入失败: {e}")
         raise
 
 
@@ -135,7 +134,6 @@ def load_integrated_config(
         config['ValidationLog'] = validation_log
         
     except Exception as e:
-        print(f"❌ Error loading integrated config: {str(e)}")
         validation_log.append({
             'sheet': 'General',
             'row': '',
@@ -164,18 +162,12 @@ def _load_deployment_plan(
     open_deployment = orchestrator.get_open_deployment(current_date)
     
     if open_deployment is None or open_deployment.empty:
-        print(f"[WARN] No open deployment for {current_date.strftime('%Y-%m-%d')}")
         return pd.DataFrame(columns=DEFAULT_DEPLOYMENT_COLUMNS)
     
     _log_route_statistics(open_deployment)
     _ensure_date_format(open_deployment)
     planned_dates = pd.to_datetime(open_deployment['planned_deployment_date'], errors='coerce')
     planned_leq = int((planned_dates <= current_date).sum())
-    print(
-        f"[M6] OpenDeployment rows={len(open_deployment)} "
-        f"planned<=sim_date={planned_leq} "
-        f"min={planned_dates.min()} max={planned_dates.max()}"
-    )
     
     return open_deployment
 
@@ -195,7 +187,7 @@ def _log_route_statistics(deployment_df: pd.DataFrame) -> None:
     
     cross_node = deployment_df[deployment_df['route_type'] == 'cross_node']
     if len(cross_node) == 0:
-        print("  ⚠️  无跨节点路线数据")
+        pass
 
 
 def _ensure_date_format(deployment_df: pd.DataFrame) -> None:

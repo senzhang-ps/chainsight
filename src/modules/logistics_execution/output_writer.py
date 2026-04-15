@@ -70,9 +70,6 @@ def enforce_shipment_constraint(
             if delivery_qty > order_qty and delivery_qty > 0:
                 ratio = order_qty / delivery_qty if delivery_qty > 0 else 0
 
-                print(f"  [Module6] enforce trim: {mat}@{sending}")
-                print(f"    order_qty: {order_qty:.0f}, delivery_qty: {delivery_qty:.0f}")
-                print(f"    ratio: {ratio:.2%}")
 
                 for idx in group.index:
                     old_qty = result_df.at[idx, 'delivery_qty']
@@ -130,10 +127,6 @@ def validate_shipment_delivery_constraint(
         total_shipment_qty = 0
 
     if total_delivery_qty > total_shipment_qty:
-        print(f"\n  constraint violation: delivery_qty > shipment_qty")
-        print(f"    shipment_qty: {total_shipment_qty:.0f}")
-        print(f"    delivery_qty: {total_delivery_qty:.0f}")
-        print(f"    over: {total_delivery_qty - total_shipment_qty:.0f}")
 
         validation_log.append({
             'sheet': 'Module6_Constraint',
@@ -178,7 +171,7 @@ def generate_outputs(
     )
 
     if not constraint_passed:
-        print(f"  constraint violation: delivery_qty ({delivery_qty}) > shipment_qty ({shipment_qty})")
+        pass
 
     vehicle_df = build_vehicle_df(results['vehicle_log'])
     usage_df = build_usage_df(vehicle_df)

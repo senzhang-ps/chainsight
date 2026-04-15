@@ -11,7 +11,7 @@
 from typing import List
 
 # 使用统一的 CPU 配置
-from src.utils.cpu_config import CPU_COUNT, MAX_WORKERS
+from src.utils.resource_config import CPU_COUNT, MAX_WORKERS
 
 # 性能优化开关
 USE_VECTORIZED_DEMAND_COLLECTION: bool = False  # 暂时关闭，需要修复horizon计算问题

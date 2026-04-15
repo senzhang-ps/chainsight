@@ -21,7 +21,7 @@ from .constants import (
     DEFAULT_PARALLEL_MAX_WORKERS,
     append_error_log,
 )
-from .normalization import normalize_identifiers
+from ...utils.normalization import normalize_identifiers
 
 
 def load_previous_orders(
@@ -55,10 +55,6 @@ def load_previous_orders(
         rows = _read_order_files(candidates)
 
         count = sum(len(r) for r in rows) if rows else 0
-        print(
-            f"[M1] 历史订单读取完成，文件数: {len(candidates)}，"
-            f"合并条目: {count}"
-        )
 
         return pd.concat(rows, ignore_index=True) if rows else pd.DataFrame()
 
@@ -206,7 +202,7 @@ def save_module1_output_with_supply_demand(
             summary.to_excel(writer, sheet_name='Summary', index=False)
 
     except Exception as e:
-        print(f"⚠️  Module1 输出保存失败: {e}")
+        pass
 
 
 def _build_summary(

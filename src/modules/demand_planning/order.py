@@ -16,7 +16,7 @@ import numpy as np
 import pandas as pd
 from scipy.stats import truncnorm
 
-from .normalization import normalize_identifiers
+from ...utils.normalization import normalize_identifiers
 from .consume import consume_orders
 
 
@@ -68,7 +68,6 @@ def generate_daily_orders(
         return pd.DataFrame(), consumed_forecast
 
     elapsed = time.perf_counter() - t0
-    print(f"[M1] 平均需求计算完成，ML数: {len(ml_avg_demand)}，耗时: {elapsed:.3f}s")
 
     # 生成AO和Normal订单
     t1 = time.perf_counter()
@@ -88,11 +87,6 @@ def generate_daily_orders(
     ao_time = t2 - t1
     normal_time = time.perf_counter() - t2
     total_time = time.perf_counter() - t0
-    print(
-        f"[M1] 订单生成完成 (AO耗时: {ao_time:.3f}s, "
-        f"Normal耗时: {normal_time:.3f}s, 总耗时: {total_time:.3f}s)，"
-        f"订单数: {len(orders_df)}"
-    )
 
     # 执行消耗
     consumed_forecast = consume_orders(orders_df, consumed_forecast)

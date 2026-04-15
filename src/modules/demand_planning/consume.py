@@ -65,7 +65,6 @@ def consume_orders(
             consumed_forecast = consume_ao_orders_serial(
                 ao_consume, consumed_forecast, CONSUME_OFFSETS
             )
-        print(f"[M1] AO消耗完成，耗时: {time.perf_counter()-t3:.3f}s")
 
     # 普通订单消耗
     normal_consume = orders_df[orders_df['demand_type'] == 'normal'].copy()
@@ -83,12 +82,10 @@ def consume_orders(
             consumed_forecast = _consume_normal_orders_parallel(
                 normal_consume, consumed_forecast, CONSUME_OFFSETS, max_workers
             )
-            print(f"[M1] Normal消耗完成（并行），耗时: {time.perf_counter()-t4:.3f}s")
         else:
             consumed_forecast = consume_normal_orders_serial(
                 normal_consume, consumed_forecast, CONSUME_OFFSETS
             )
-            print(f"[M1] Normal消耗完成（串行），耗时: {time.perf_counter()-t4:.3f}s")
 
     return consumed_forecast
 
@@ -290,7 +287,7 @@ def _build_parallel_tasks(
             })
 
     if bad_pickle_info:
-        print(f"[M1] 发现不可pickle的任务: {len(bad_pickle_info)}")
+        pass
 
     return tasks
 
@@ -326,16 +323,14 @@ def _execute_parallel_consume(
                 except Exception:
                     parallel_failures += 1
                     msg = f'[{order_type}并行] 子任务异常'
-                    print(f'[M1] {msg}')
                     append_error_log(msg)
     except Exception:
         parallel_failures += 1
         msg = f'[{order_type}并行] 执行器失败'
-        print(f'[M1] {msg}')
         append_error_log(msg)
 
     if parallel_failures > 0:
-        print(f"[M1] {order_type}并行有{parallel_failures}个失败事件")
+        pass
 
     return patches
 

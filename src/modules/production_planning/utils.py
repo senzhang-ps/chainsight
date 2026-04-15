@@ -12,7 +12,7 @@ from src.utils.date_helpers import (
     compute_planning_window as compute_shared_planning_window,
     is_offset_review_day,
 )
-from src.utils.normalization_common import (
+from src.utils.normalization import (
     cast_identifier_columns,
     normalize_location_preserve_non_numeric,
 )

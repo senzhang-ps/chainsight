@@ -53,14 +53,12 @@ def batch_sample_delivery_delays_duckdb(
     try:
         delays = _vectorized_delay_sampling(routes, dist_df, seed)
         elapsed_ms = (time.perf_counter() - t0) * 1000
-        print(f'[M6-DuckDB] Batch delay sampling {len(routes)} routes: {elapsed_ms:.1f}ms')
         
         if run_id and DuckDBConfig.collect_stats:
             get_perf_stats().record(run_id, 'batch_sample_delays', 'duckdb', len(routes), elapsed_ms)
         
         return delays
     except Exception as e:
-        print(f'[M6-DuckDB] Error, fallback to Pandas: {e}')
         if DuckDBConfig.fallback_on_error:
             return _batch_sample_delays_pandas(routes, dist_df, seed, run_id)
         raise
@@ -177,7 +175,6 @@ def _batch_sample_delays_pandas(
     ])
     
     elapsed_ms = (time.perf_counter() - t0) * 1000
-    print(f'[M6-Pandas] Batch delay sampling {len(routes)} routes: {elapsed_ms:.1f}ms')
     
     if run_id and DUCKDB_INTEGRATION_AVAILABLE and DuckDBConfig.collect_stats:
         get_perf_stats().record(run_id, 'batch_sample_delays', 'pandas', len(routes), elapsed_ms)

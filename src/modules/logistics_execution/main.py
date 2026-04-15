@@ -24,6 +24,7 @@ from .validators import (
 )
 from .simulation import run_simulation_loop
 from .output_writer import generate_outputs
+from ...utils.defaults import M6_MAX_WAIT_DAYS
 
 
 # ---------------------------------------------------------------------------
@@ -35,7 +36,7 @@ def run_daily_physical_flow(
     orchestrator: object,
     current_date: pd.Timestamp,
     output_dir: str,
-    max_wait_days: int = 30,
+    max_wait_days: int = M6_MAX_WAIT_DAYS,
     random_seed: Optional[int] = None,
     skip_file_output: bool = False
 ) -> Dict[str, Any]:
@@ -90,7 +91,7 @@ def run_physical_flow_module(
     current_date: Optional[str] = None,
     output_path: Optional[str] = None,
     # 通用参数
-    max_wait_days: int = 30,
+    max_wait_days: int = M6_MAX_WAIT_DAYS,
     random_seed: Optional[int] = None,
     skip_file_output: bool = False
 ) -> Dict[str, Any]:
@@ -345,7 +346,6 @@ def _log_missing_materials(
 ) -> None:
     """记录缺失的物料元数据。"""
     missing_materials = missing_mat['material'].unique()
-    print(f"  Warning: {len(missing_materials)} materials missing metadata, using defaults")
 
     for val in missing_materials:
         missing_records = missing_mat[missing_mat['material'] == val]
@@ -409,8 +409,6 @@ def _handle_uid_duplicates(
     dup_count = dup_mask.sum()
     dup_uid_count = dp.loc[dup_mask, 'ori_deployment_uid'].nunique()
 
-    print(f"  Warning: {dup_uid_count} duplicate ori_deployment_uid "
-          f"({dup_count} records)")
 
     validation_log.append({
         'sheet': 'DeploymentPlan',
@@ -423,7 +421,6 @@ def _handle_uid_duplicates(
     })
 
     dp = dp.drop_duplicates(subset=['ori_deployment_uid'], keep='first')
-    print(f"  Dedup result: {len(dp)} records retained")
 
     return dp, validation_log
 

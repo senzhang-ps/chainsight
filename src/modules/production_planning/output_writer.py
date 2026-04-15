@@ -168,7 +168,6 @@ def generate_consolidated_output(
         output_path: 汇总输出路径
     """
     if not daily_output_files:
-        print("警告: 没有每日输出文件可合并")
         return
 
     all_data = _collect_all_daily_data(daily_output_files)
@@ -204,7 +203,6 @@ def _collect_all_daily_data(
 
     for file_path in daily_files:
         if not os.path.exists(file_path):
-            print(f"警告: 每日输出文件不存在: {file_path}")
             continue
 
         daily_data = _read_daily_file(file_path)
@@ -233,7 +231,6 @@ def _read_daily_file(
             'changeover': _read_sheet(xl, 'ChangeoverLog'),
         }
     except Exception as e:
-        print(f"读取每日文件出错 {file_path}: {e}")
         return {'plan': None, 'exceed': None, 'issues': None, 'changeover': None}
 
 

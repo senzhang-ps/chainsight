@@ -12,7 +12,7 @@ from typing import Any, Dict, Optional, Tuple
 import numpy as np
 import pandas as pd
 
-from .normalization import (
+from ...utils.normalization import (
     normalize_identifiers,
     normalize_location,
     normalize_material,

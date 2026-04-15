@@ -127,7 +127,6 @@ def load_line_state(
         with open(state_file, "r", encoding='utf-8') as f:
             return json.load(f)
     except Exception as e:
-        print(f"警告: 加载产线状态失败 {state_file}: {e}")
         return {}
 
 
@@ -180,7 +179,6 @@ def load_allocated_capacity(
         with open(capacity_file, "r", encoding='utf-8') as f:
             return json.load(f)
     except Exception as e:
-        print(f"警告: 加载已分配产能失败 {capacity_file}: {e}")
         return {}
 
 
@@ -267,7 +265,6 @@ def _load_capacity_file(
         with open(file_path, "r", encoding='utf-8') as f:
             return json.load(f)
     except Exception as e:
-        print(f"警告: 加载产能文件失败 {file_name}: {e}")
         return {}
 
 

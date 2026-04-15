@@ -210,7 +210,6 @@ def _evaluate_rule_condition(
             rule_id = rule.get('rule_id')
         return evaluator.eval(expr, context)
     except Exception as e:
-        print(f"  ⚠️  规则表达式评估失败 (RuleID={rule_id}): {e}")
         return False
 
 

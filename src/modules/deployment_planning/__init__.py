@@ -18,13 +18,6 @@ Deployment Planning Module (部署规划模块)
 - ReceivingSpace：按 (receiving, date) 维护 max_qty
 - Network：按 (material, location) 维护 sourcing
 """
-# 规范化函数
-from .normalizer import (
-    normalize_identifiers,
-    normalize_location,
-    normalize_material,
-)
-
 # 数据加载函数
 from .data_loader import (
     load_config,
@@ -75,13 +68,9 @@ from .push_allocation import push_softpush_allocation
 from .validation import validate_config_before_run, log_outputs
 
 # 主函数
-from .main import main
+from .main import run_deployment_planning
 
 __all__ = [
-    # 规范化函数
-    'normalize_identifiers',
-    'normalize_location',
-    'normalize_material',
     # 数据加载函数
     'load_config',
     'load_integrated_config',
@@ -118,5 +107,5 @@ __all__ = [
     'validate_config_before_run',
     'log_outputs',
     # 主函数
-    'main',
+    'run_deployment_planning',
 ]

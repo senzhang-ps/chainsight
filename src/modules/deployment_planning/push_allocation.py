@@ -475,9 +475,5 @@ def push_softpush_allocation(
             plan_rows_push.append(plan)
 
     elapsed = time.perf_counter() - t0
-    print(
-        f"[M5] push_softpush_allocation 用时: {elapsed:.3f}s，"
-        f"生成行数: {len(plan_rows_push)}"
-    )
 
     return plan_rows_push

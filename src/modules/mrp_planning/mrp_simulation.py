@@ -21,7 +21,7 @@ import numpy as np
 import pandas as pd
 
 from .data_indexer import DataIndexer, create_simulation_indexer
-from ...utils.cpu_config import get_optimal_workers
+from ...utils.resource_config import get_optimal_workers
 from .layer_assignment import assign_location_layers
 from .node_processor import NodeProcessor
 from .utils import (
@@ -83,7 +83,6 @@ def run_mrp_layered_simulation_daily(
     t_start = time.perf_counter()
 
     if network_df.empty:
-        print(f"Warning: Empty network config for {sim_date}")
         return _empty_net_demand_df()
 
     # 初始化上下文
@@ -111,7 +110,6 @@ def run_mrp_layered_simulation_daily(
         delivery_shipment_df=delivery_shipment_df,
     )
     ctx['data_indexer'] = data_indexer
-    # print(f"[M3] DataIndexer 构建完成，用时 {time.perf_counter() - t_index:.3f}s")
 
     # 按层级处理
     all_records = []
@@ -143,7 +141,6 @@ def run_mrp_layered_simulation_daily(
     result_df = _build_result_df(all_records)
 
     elapsed = time.perf_counter() - t_start
-    print(f"[M3] mrp_simulation: {elapsed:.3f}s, records={len(result_df)}")
     return result_df
 
 
@@ -306,10 +303,10 @@ def _process_layer_parallel(
                             for k in ['AO', 'FC', 'SS']:
                                 parent_accum[parent_key][k] += parent_gaps[k]
                 except Exception as e:
-                    print(f"[M3] task failed on layer {layer}: {e}")
+                    pass
 
     except Exception as e:
-        print(f"[M3] parallel failed for layer {layer}: {e}")
+        pass
 
     return all_records, parent_accum
 
@@ -426,13 +423,11 @@ def _process_layer_batch(
                             parent_accum[parent_key][de] += float(q)
         
         elapsed = time.perf_counter() - t0
-        print(f"[M3] batch layer {layer}: {len(nodes)} nodes in {elapsed:.3f}s")
         
         return all_records, parent_accum
         
     except Exception as e:
         # 批量处理失败，回退到并行处理
-        print(f"[M3] batch processing failed, fallback to parallel: {e}")
         return _process_layer_parallel(
             layer, ctx, downstream_gaps, sim_date, layer_nodes, **data_dfs
         )

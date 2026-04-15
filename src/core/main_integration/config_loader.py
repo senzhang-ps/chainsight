@@ -99,13 +99,13 @@ def load_csv_overrides(excel_path: str, messages: list[str] | None = None) -> di
                 if messages is not None:
                     messages.append(error_message)
                 else:
-                    print(f"  ⚠️ {error_message}")
+                    pass
     except Exception as e:
         error_message = f"CSV 覆盖扫描失败: {e}"
         if messages is not None:
             messages.append(error_message)
         else:
-            print(f"  ⚠️ {error_message}")
+            pass
     return csv_overrides
 
 
@@ -123,7 +123,6 @@ def load_configuration_from_dict(config_data: dict, config_name: str = "DB_Confi
     Returns:
         dict: 标准化后的配置数据字典
     """
-    print(f"📋 处理配置数据: {config_name} (共 {len(config_data)} 个表)")
     
     # Sheet 名称映射（数据库小写表名 -> 集成流程沿用的工作表名/历史别名）
     sheet_mapping = {
@@ -216,7 +215,6 @@ def load_configuration_from_dict(config_data: dict, config_name: str = "DB_Confi
             df_copy[col] = pd.NA
 
         config_dict[sheet_name] = df_copy
-        print(f"  ✅ 加载配置表: {sheet_name} ({len(df_copy)} 行)")
     
     # 确保必要的配置表存在
     required_sheets = [
@@ -229,12 +227,10 @@ def load_configuration_from_dict(config_data: dict, config_name: str = "DB_Confi
     
     missing_sheets = [sheet for sheet in required_sheets if sheet not in config_dict]
     if missing_sheets:
-        print(f"⚠️  缺少必要配置表: {missing_sheets}")
         for sheet in missing_sheets:
             config_dict[sheet] = pd.DataFrame()
     
     # 统一标准化所有配置表的标识符字段
-    print(f"🔧 正在标准化标识符字段...")
     standardized_count = 0
     for sheet_name, df in config_dict.items():
         if isinstance(df, pd.DataFrame) and not df.empty:
@@ -254,15 +250,13 @@ def load_configuration_from_dict(config_data: dict, config_name: str = "DB_Confi
                         normalized_fields.append(f"{col}({original_dtypes[col]}→{new_dtypes[col]})")
                 
                 if normalized_fields:
-                    print(f"  🔧 {sheet_name}: {', '.join(normalized_fields)}")
                     standardized_count += 1
     
     if standardized_count > 0:
-        print(f"✅ 已标准化 {standardized_count} 个配置表的标识符字段")
     
+        pass
     # Changeover 配置校验和去重
     if 'M4_ChangeoverMatrix' in config_dict and not config_dict['M4_ChangeoverMatrix'].empty:
-        print(f"\n🔧 校验 Changeover Matrix 配置...")
         co_matrix = config_dict['M4_ChangeoverMatrix']
         duplicates = co_matrix[co_matrix.duplicated(subset=['from_material', 'to_material'], keep=False)]
         if not duplicates.empty:
@@ -270,13 +264,11 @@ def load_configuration_from_dict(config_data: dict, config_name: str = "DB_Confi
             config_dict['M4_ChangeoverMatrix'] = co_matrix.drop_duplicates(
                 subset=['from_material', 'to_material'], keep='first'
             )
-            print(f"  🔧 已去除 {original_count - len(config_dict['M4_ChangeoverMatrix'])} 条重复记录")
         else:
-            print(f"  ✅ Changeover Matrix 无重复定义")
     
+            pass
     # ChangeoverDefinition 配置校验和去重
     if 'M4_ChangeoverDefinition' in config_dict and not config_dict['M4_ChangeoverDefinition'].empty:
-        print(f"\n🔧 校验 Changeover Definition 配置...")
         co_def = config_dict['M4_ChangeoverDefinition']
         duplicates = co_def[co_def.duplicated(subset=['changeover_id', 'line'], keep=False)]
         if not duplicates.empty:
@@ -284,12 +276,10 @@ def load_configuration_from_dict(config_data: dict, config_name: str = "DB_Confi
             config_dict['M4_ChangeoverDefinition'] = co_def.drop_duplicates(
                 subset=['changeover_id', 'line'], keep='first'
             )
-            print(f"  🔧 已去除 {original_count - len(config_dict['M4_ChangeoverDefinition'])} 条重复记录")
         else:
-            print(f"  ✅ Changeover Definition 无重复定义")
     
+            pass
     # Module4 配置表映射
-    print(f"\n🔧 正在映射 Module4 配置表...")
     module4_mappings = {
         'M4_MaterialLocationLineCfg': 'MaterialLocationLineCfg',
         'M4_LineCapacity': 'LineCapacity',
@@ -302,12 +292,11 @@ def load_configuration_from_dict(config_data: dict, config_name: str = "DB_Confi
     for original_key, mapped_key in module4_mappings.items():
         if original_key in config_dict and not config_dict[original_key].empty:
             config_dict[mapped_key] = config_dict[original_key]
-            print(f"  🔧 映射 {original_key} → {mapped_key}")
             mapped_count += 1
     
     if mapped_count > 0:
-        print(f"✅ 已映射 {mapped_count} 个 Module4 配置表")
     
+        pass
     return config_dict
 
 
@@ -332,7 +321,6 @@ def load_configuration(config_path: str) -> dict:
     逻辑：
         - 加载→补齐必要表→标准化标识符→检验并去重 Changeover 配置→映射关键表→返回字典。
     """
-    print(f"📋 加载配置文件: {config_path}")
 
     try:
         xl = pd.ExcelFile(config_path)
@@ -341,10 +329,8 @@ def load_configuration(config_path: str) -> dict:
         # 加载所有配置表
         for sheet_name in xl.sheet_names:
             config_dict[sheet_name] = xl.parse(sheet_name)
-            print(f"  ✅ [Excel] {sheet_name} ({len(config_dict[sheet_name])} 行)")
 
         # 汇总（CSV 覆盖机制已禁用，与 Dev 版本保持一致：仅从 Excel 加载）
-        print(f"📊 配置加载汇总: 共 {len(xl.sheet_names)} 个配置表 (Excel: {len(xl.sheet_names)})")
 
         # 确保必要的配置表存在
         required_sheets = [
@@ -357,13 +343,11 @@ def load_configuration(config_path: str) -> dict:
         
         missing_sheets = [sheet for sheet in required_sheets if sheet not in config_dict]
         if missing_sheets:
-            print(f"⚠️  缺少必要配置表: {missing_sheets}")
             # 创建空的配置表
             for sheet in missing_sheets:
                 config_dict[sheet] = pd.DataFrame()
         
         # 统一标准化所有配置表的标识符字段
-        print(f"🔧 正在标准化标识符字段...")
         standardized_count = 0
         for sheet_name, df in config_dict.items():
             if isinstance(df, pd.DataFrame) and not df.empty:
@@ -383,33 +367,28 @@ def load_configuration(config_path: str) -> dict:
                             normalized_fields.append(f"{col}({original_dtypes[col]}→{new_dtypes[col]})")
                     
                     if normalized_fields:
-                        print(f"  🔧 {sheet_name}: {', '.join(normalized_fields)}")
                         standardized_count += 1
         
         if standardized_count > 0:
-            print(f"✅ 已标准化 {standardized_count} 个配置表的标识符字段")
+            pass
         else:
-            print(f"✅ 所有配置表的标识符字段已是标准格式")
         
+            pass
         # 🔧 Changeover 配置校验和去重
         if 'M4_ChangeoverMatrix' in config_dict and not config_dict['M4_ChangeoverMatrix'].empty:
-            print(f"\n🔧 校验 Changeover Matrix 配置...")
             co_matrix = config_dict['M4_ChangeoverMatrix']
             
             # 检查重复定义
             duplicates = co_matrix[co_matrix.duplicated(subset=['from_material', 'to_material'], keep=False)]
             if not duplicates.empty:
-                print(f"  ⚠️  发现 {len(duplicates)} 条重复的 changeover matrix 定义")
                 
                 # 详细检查每组重复
                 for (from_mat, to_mat), group in duplicates.groupby(['from_material', 'to_material']):
                     unique_coids = group['changeover_id'].unique()
                     if len(unique_coids) > 1:
-                        # 不同的 changeover_id - 严重错误
-                        print(f"    ❌ ERROR: {from_mat} → {to_mat} 有 {len(unique_coids)} 个不同的 changeover_id: {list(unique_coids)}")
+                        pass
                     else:
-                        # 相同的 changeover_id - 只是重复
-                        print(f"    ⚠️  {from_mat} → {to_mat} 有 {len(group)} 条重复记录 (changeover_id={unique_coids[0]})")
+                        pass
                 
                 # 去重（保留第一条）
                 original_count = len(co_matrix)
@@ -417,29 +396,24 @@ def load_configuration(config_path: str) -> dict:
                     subset=['from_material', 'to_material'], keep='first'
                 )
                 removed_count = original_count - len(config_dict['M4_ChangeoverMatrix'])
-                print(f"  🔧 已去除 {removed_count} 条重复记录")
             else:
-                print(f"  ✅ Changeover Matrix 无重复定义")
         
+                pass
         # 🔧 ChangeoverDefinition 配置校验和去重
         if 'M4_ChangeoverDefinition' in config_dict and not config_dict['M4_ChangeoverDefinition'].empty:
-            print(f"\n🔧 校验 Changeover Definition 配置...")
             co_def = config_dict['M4_ChangeoverDefinition']
             
             # 检查重复定义
             duplicates = co_def[co_def.duplicated(subset=['changeover_id', 'line'], keep=False)]
             if not duplicates.empty:
-                print(f"  ⚠️  发现 {len(duplicates)} 条重复的 changeover definition 定义")
                 
                 # 详细检查每组重复
                 for (coid, line), group in duplicates.groupby(['changeover_id', 'line']):
                     unique_times = group['time'].unique()
                     if len(unique_times) > 1:
-                        # 不同的 time - 严重错误
-                        print(f"    ❌ ERROR: changeover_id={coid}, line={line} 有 {len(unique_times)} 个不同的 time 值: {list(unique_times)}")
+                        pass
                     else:
-                        # 相同的参数 - 只是重复
-                        print(f"    ⚠️  changeover_id={coid}, line={line} 有 {len(group)} 条重复记录 (time={unique_times[0]})")
+                        pass
                 
                 # 去重（保留第一条）
                 original_count = len(co_def)
@@ -447,12 +421,10 @@ def load_configuration(config_path: str) -> dict:
                     subset=['changeover_id', 'line'], keep='first'
                 )
                 removed_count = original_count - len(config_dict['M4_ChangeoverDefinition'])
-                print(f"  🔧 已去除 {removed_count} 条重复记录")
             else:
-                print(f"  ✅ Changeover Definition 无重复定义")
         
+                pass
         # Module4 配置表映射（为了向后兼容）
-        print(f"\n🔧 正在映射 Module4 配置表...")
         module4_mappings = {
             'M4_MaterialLocationLineCfg': 'MaterialLocationLineCfg',
             'M4_LineCapacity': 'LineCapacity',
@@ -465,16 +437,14 @@ def load_configuration(config_path: str) -> dict:
         for original_key, mapped_key in module4_mappings.items():
             if original_key in config_dict and not config_dict[original_key].empty:
                 config_dict[mapped_key] = config_dict[original_key]
-                print(f"  🔧 映射 {original_key} → {mapped_key}")
                 mapped_count += 1
 
         if mapped_count > 0:
-            print(f"✅ 已映射 {mapped_count} 个 Module4 配置表")
+            pass
         else:
-            print(f"✅ 无需映射 Module4 配置表")
         
+            pass
         return config_dict
         
     except Exception as e:
-        print(f"❌ 配置文件加载失败: {e}")
         raise

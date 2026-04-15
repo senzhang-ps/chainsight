@@ -110,7 +110,6 @@ class ModuleCalculationEngine:
             self._prepared_indexes['mat_loc_line'] = True
         
         elapsed = time.perf_counter() - t0
-        print(f"✅ 配置索引预建完成: {len(self._prepared_indexes)} 个索引, 耗时 {elapsed*1000:.1f}ms")
     
     def prepare_daily_indexes(
         self,
@@ -153,7 +152,6 @@ class ModuleCalculationEngine:
             )
         
         elapsed = time.perf_counter() - t0
-        print(f"  📊 每日索引预建: {elapsed*1000:.1f}ms")
     
     # ==================== 快速查找 ====================
     

@@ -100,13 +100,8 @@ class ExcelImporter:
         # 推导配置类型
         config_type = self._derive_config_type(config_name)
 
-        print(f"\n📂 导入Excel文件: {path.name}")
-        print(f"🏷️  配置标识: {config_name}  类型: {config_type} (将通过 config_name/config_type 字段区分)")
-        print(f"📋 表名规则: 统一配置表名 (cfg_xxx)")
-        print("-" * 50)
         
         # 读取所有sheet
-        print(f"  ⏳ 正在读取Excel文件...", end="", flush=True)
         try:
             xl = pd.ExcelFile(excel_path)
         except ValueError:
@@ -114,7 +109,6 @@ class ExcelImporter:
             # 临时放宽校验后重试
             self._patch_openpyxl_font_family()
             xl = pd.ExcelFile(excel_path)
-        print(f" 完成 ({len(xl.sheet_names)} 个sheet)")
         results = {}
         
         start_time = time.time()
@@ -130,11 +124,9 @@ class ExcelImporter:
                 if df.empty:
                     # 检查是否有列定义
                     if len(df.columns) > 0:
-                        print(f"  📋 Sheet [{sheet_name}] 为空表，创建表结构 ({len(df.columns)} 列)")
                         self.db.create_table_from_df(df, table_name, if_exists, config_name=config_name, config_type=config_type)
                         results[sheet_name] = 0
                     else:
-                        print(f"  ⚠️ Sheet [{sheet_name}] 无数据且无列定义，跳过")
                         results[sheet_name] = -1
                     continue
                 
@@ -152,14 +144,12 @@ class ExcelImporter:
                 }
                 
             except Exception as e:
-                print(f"  ❌ Sheet [{sheet_name}] 导入失败: {e}")
                 results[sheet_name] = -1
 
         # 扫描并导入 CSV 覆盖文件
         csv_overrides = self._scan_csv_overrides(excel_path)
         if csv_overrides:
-            print(f"\n  {'─' * 50}")
-            print(f"  📄 发现 {len(csv_overrides)} 个 CSV 覆盖文件:")
+            pass
         for csv_sheet_name, csv_df in csv_overrides.items():
             try:
                 csv_table_name = table_mapping.get_config_table_name(csv_sheet_name)
@@ -167,9 +157,9 @@ class ExcelImporter:
 
                 if csv_df.empty and len(csv_df.columns) > 0:
                     if is_override:
-                        print(f"  🔄 [CSV 覆盖] {csv_sheet_name} 为空表，创建表结构 ({len(csv_df.columns)} 列)")
+                        pass
                     else:
-                        print(f"  ➕ [CSV 新增] {csv_sheet_name} 为空表，创建表结构 ({len(csv_df.columns)} 列)")
+                        pass
                     self.db.create_table_from_df(csv_df, csv_table_name, if_exists, config_name=config_name, config_type=config_type)
                     results[csv_sheet_name] = 0
                 elif not csv_df.empty:
@@ -183,18 +173,16 @@ class ExcelImporter:
                         "config_name": config_name
                     }
                     if is_override:
-                        print(f"  🔄 [CSV 覆盖] {csv_sheet_name} → {csv_table_name} ({len(csv_df)} 行) ← 替代Excel版本")
+                        pass
                     else:
-                        print(f"  ➕ [CSV 新增] {csv_sheet_name} → {csv_table_name} ({len(csv_df)} 行)")
+                        pass
             except Exception as e:
-                print(f"  ❌ CSV [{csv_sheet_name}] 导入失败: {e}")
                 results[csv_sheet_name] = -1
         if csv_overrides:
-            print(f"  {'─' * 50}")
+            pass
 
         elapsed = time.time() - start_time
         total_rows = sum(r for r in results.values() if r > 0)
-        print(f"✅ 文件导入完成: {len(results)} 个sheet, {total_rows} 行数据, 耗时 {elapsed:.2f}s")
         
         return results
     
@@ -215,9 +203,6 @@ class ExcelImporter:
         """
         all_results = {}
         
-        print("\n" + "=" * 60)
-        print("批量导入Excel配置文件")
-        print("=" * 60)
         
         total_start = time.time()
         
@@ -226,7 +211,6 @@ class ExcelImporter:
                 results = self.import_excel_file(excel_path, if_exists=if_exists)
                 all_results[excel_path] = results
             except Exception as e:
-                print(f"❌ 文件导入失败 [{excel_path}]: {e}")
                 all_results[excel_path] = {"error": str(e)}
         
         total_elapsed = time.time() - total_start
@@ -239,13 +223,6 @@ class ExcelImporter:
             for r in all_results.values() if isinstance(r, dict)
         )
         
-        print("\n" + "=" * 60)
-        print(f"📊 导入汇总:")
-        print(f"   文件数: {total_files}")
-        print(f"   Sheet数: {total_sheets}")
-        print(f"   总行数: {total_rows}")
-        print(f"   总耗时: {total_elapsed:.2f}s")
-        print("=" * 60)
         
         return all_results
     
@@ -271,19 +248,12 @@ class ExcelImporter:
     def print_import_summary(self):
         """打印导入汇总"""
         if not self.imported_tables:
-            print("暂无导入记录")
             return
         
-        print("\n📋 导入表汇总:")
-        print("-" * 80)
-        print(f"{'表名':<40} {'行数':>10} {'列数':>10} {'来源Sheet':<20}")
-        print("-" * 80)
         
         for table_name, info in self.imported_tables.items():
-            print(f"{table_name:<40} {info['row_count']:>10} {info['column_count']:>10} {info['sheet_name']:<20}")
+            pass
         
-        print("-" * 80)
-        print(f"共 {len(self.imported_tables)} 个表")
 
 
 def import_config_files(
@@ -320,10 +290,9 @@ def import_config_files(
         if Path(f).exists():
             existing_files.append(f)
         else:
-            print(f"⚠️ 文件不存在: {f}")
+            pass
     
     if not existing_files:
-        print("❌ 没有找到任何配置文件")
         return False
     
     # 创建数据库连接
@@ -338,7 +307,6 @@ def import_config_files(
     # 测试连接
     conn_result = db.test_connection()
     if not conn_result["success"]:
-        print(f"❌ 数据库连接失败: {conn_result['message']}")
         return False
     
     # 创建导入器并执行导入

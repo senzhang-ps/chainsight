@@ -110,7 +110,6 @@ class OptimizedDataProcessor:
             ATTACH '{self.pg_conn_str}' AS pg (TYPE postgres, SCHEMA '{schema}')
         """)
         self._pg_attached = True
-        print(f"✅ PostgreSQL已附加到DuckDB")
     
     def close(self):
         """关闭连接"""
@@ -661,12 +660,3 @@ class OptimizedDataProcessor:
     def print_stats(self):
         """打印性能统计"""
         stats = self.get_stats()
-        print("\n" + "=" * 50)
-        print("📊 OptimizedDataProcessor 性能统计")
-        print("=" * 50)
-        print(f"查询次数: {stats['queries_executed']}")
-        print(f"处理行数: {stats['rows_processed']:,}")
-        print(f"总查询时间: {stats['total_query_time']:.2f}s")
-        print(f"平均查询时间: {stats['avg_query_time']*1000:.2f}ms")
-        print(f"缓存命中率: {stats['cache_hit_rate']*100:.1f}%")
-        print("=" * 50)

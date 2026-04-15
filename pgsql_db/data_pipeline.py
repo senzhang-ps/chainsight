@@ -68,14 +68,6 @@ class DataPipeline:
     
     def print_stats(self):
         """打印处理统计"""
-        print("\n" + "=" * 50)
-        print("📊 数据处理统计")
-        print("=" * 50)
-        print(f"处理表数: {self._stats['tables_processed']}")
-        print(f"处理行数: {self._stats['rows_processed']}")
-        print(f"写入表数: {self._stats['tables_written']}")
-        print(f"写入行数: {self._stats['rows_written']}")
-        print("=" * 50)
     
     def update_stats(
         self, 

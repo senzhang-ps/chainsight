@@ -561,9 +561,6 @@ class DuckDBToPostgres:
 
 def test_duckdb_processor():
     """测试DuckDB 处理器"""
-    print("=" * 60)
-    print("DuckDB处理器测试")
-    print("=" * 60)
     
     processor = DuckDBProcessor()
     
@@ -574,13 +571,9 @@ def test_duckdb_processor():
         'quantity': [100, 200, 150, 250]
     })
     
-    print("\n原始数据:")
-    print(df)
     
     # 测试聚合
     result = processor.aggregate_orders(df, ['material'])
-    print("\n按material聚合:")
-    print(result)
     
     # 测试SQL查询
     processor.register_dataframe(df, 'test_table')
@@ -592,11 +585,8 @@ def test_duckdb_processor():
         FROM test_table
         GROUP BY material
     """)
-    print("\nSQL查询结果:")
-    print(result2)
     
     processor.close()
-    print("\n✅ 测试完成")
 
 
 if __name__ == "__main__":

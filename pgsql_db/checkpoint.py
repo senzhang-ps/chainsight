@@ -124,16 +124,8 @@ def load_checkpoint(
     }
     # [FIX-#5] 校验日期区间一致性
     if start_date is not None and cp["start_date"] != str(start_date):
-        print(
-            f"  [WARN][FIX-#5] checkpoint start_date 不匹配 "
-            f"（DB: {cp['start_date']}，请求: {start_date}）。忽略旧 checkpoint，全新开始。"
-        )
         return None
     if end_date is not None and cp["end_date"] != str(end_date):
-        print(
-            f"  [WARN][FIX-#5] checkpoint end_date 不匹配 "
-            f"（DB: {cp['end_date']}，请求: {end_date}）。忽略旧 checkpoint，全新开始。"
-        )
         return None
     return cp
 
@@ -180,7 +172,6 @@ def serialize_orchestrator_state(orch, max_log_entries: int = 1000) -> dict:
     def _truncate(lst, name):
         """[FIX-风险D] 截断过长的历史日志，仅保留最近 max_log_entries 条"""
         if len(lst) > max_log_entries:
-            print(f"  [WARN] checkpoint: {name} 有 {len(lst)} 条记录，截断为最近 {max_log_entries} 条")
             return lst[-max_log_entries:]
         return lst
 
@@ -241,7 +232,6 @@ def serialize_orchestrator_state(orch, max_log_entries: int = 1000) -> dict:
             'cached_gauss': float(_rng[4]),       # 缓存的高斯值
         }
     except Exception as _e:
-        print(f"  [WARN][FIX-#9] 保存 numpy random state 失败: {_e}")
         numpy_random_state = None
 
     return {
@@ -369,18 +359,11 @@ def deserialize_orchestrator_state(orch, state_dict: dict) -> None:
                 float(_rng_data['cached_gauss']),                     # 缓存的高斯值
             )
             np.random.set_state(_state_tuple)
-            print(f"  [OK][FIX-#9] Restored numpy random state (pos={_rng_data['pos']})")
         except Exception as _e:
-            print(f"  [WARN][FIX-#9] 恢复 numpy random state 失败: {_e}，PRNG 状态可能不连续")
+            pass
     else:
-        print(f"  [WARN][FIX-#9] checkpoint 中无 numpy_random_state，PRNG 状态可能不连续（旧版 checkpoint）")
+        pass
 
-    print(f"  [OK] Restored unrestricted_inventory from DB: {len(orch.unrestricted_inventory)} records")
-    print(f"  [OK] Restored in_transit from DB: {len(orch.in_transit)} records")
-    print(f"  [OK] Restored open_deployment from DB: {len(orch.open_deployment)} records")
-    print(f"  [OK] Restored space_capacity from DB: {len(orch.space_capacity)} rows")          # [FIX-#1]
-    print(f"  [OK] Restored production_plan_backlog from DB: {len(orch.production_plan_backlog)} records")  # [FIX-#2]
-    print(f"  [OK] Restored uid_sequence from DB: {orch.uid_sequence}")                      # [FIX-#6]
 
 def serialize_m1_previous_orders(df) -> Optional[list]:
     """将 m1_previous_orders DataFrame 序列化为 JSON 兼容的 list[dict]"""
@@ -500,7 +483,7 @@ def save_m4_state_files(
                 (run_id, sim_date_str, file_type, content),
             )
         except Exception as e:
-            print(f"  [WARN][FIX-#3] Failed to upload M4 state file {file_type} ({sim_date_str}): {e}")
+            pass
 
 
 def restore_m4_state_files(
@@ -544,9 +527,8 @@ def restore_m4_state_files(
                 fh.write(raw)
             restored += 1
         except Exception as e:
-            print(f"  [WARN][FIX-#3] Failed to restore M4 state file {file_name}: {e}")
+            pass
 
-    print(f"  [OK][FIX-#3] 已从 DB 恢复 {restored} 个 M4 状态文件")
     return restored
 
 

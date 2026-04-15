@@ -297,7 +297,7 @@ class DatabaseInitializer:
         def log(msg):
             result["messages"].append(msg)
             if verbose:
-                print(msg)
+                pass
         
         # ========== 步骤1: 检测数据库 ==========
         log(f"\n🔍 检测数据库 '{self.database}'...")

@@ -348,7 +348,6 @@ def calculate_net_demand_batch_duckdb(
         
     except Exception as e:
         if DuckDBConfig.fallback_on_error:
-            print(f"[DuckDB] 净需求计算出错，回退到Pandas: {e}")
             return _calculate_net_demand_pandas(nodes_df, run_id)
         raise
 
@@ -473,7 +472,6 @@ def apply_moq_rv_batch_duckdb(
         
     except Exception as e:
         if DuckDBConfig.fallback_on_error:
-            print(f"[DuckDB] MOQ/RV计算出错，回退到Pandas: {e}")
             return _apply_moq_rv_pandas(demand_df, config_df, run_id)
         raise
 
@@ -626,7 +624,6 @@ def priority_allocation_batch_duckdb(
         
     except Exception as e:
         if DuckDBConfig.fallback_on_error:
-            print(f"[DuckDB] 优先级分配出错，回退到Pandas: {e}")
             return _priority_allocation_pandas(demand_df, inventory_df, priority_df, run_id)
         raise
 
@@ -753,11 +750,8 @@ def performance_comparison(name: str = "default"):
         yield run_id
     finally:
         stats = _perf_stats.end_run(run_id)
-        print(f"\n📊 性能统计 [{name}]:")
         for op, data in stats.items():
             avg_ms = data['total_ms'] / max(data['count'], 1)
-            print(f"  {op}: {data['count']}次, 总计{data['total_ms']:.1f}ms, "
-                  f"平均{avg_ms:.2f}ms, {data['total_rows']:,}行")
 
 
 def run_ab_comparison(

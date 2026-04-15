@@ -133,7 +133,6 @@ class DatabaseConnection:
                 exists = cursor.fetchone() is not None
             return exists
         except Exception as e:
-            print(f"检测数据库存在性时出错: {e}")
             return False
         finally:
             if temp_conn and not temp_conn.closed:
@@ -147,7 +146,6 @@ class DatabaseConnection:
             bool: 是否成功
         """
         if self.database_exists():
-            print(f"[OK] 数据库已存在: {self.database}")
             return True
         
         temp_conn = None
@@ -167,10 +165,8 @@ class DatabaseConnection:
                 cursor.execute(
                     sql.SQL("CREATE DATABASE {}").format(sql.Identifier(self.database))
                 )
-            print(f"[OK] 已创建数据库: {self.database}")
             return True
         except Exception as e:
-            print(f"[ERROR] 创建数据库失败: {e}")
             return False
         finally:
             if temp_conn and not temp_conn.closed:
@@ -255,7 +251,6 @@ class DatabaseConnection:
                 sql.SQL(cascade_str)
             )
             cursor.execute(query)
-            print(f"[OK]已删除表: {table_name}")
     
     def check_config_exists(self, table_name: str, config_name: str) -> bool:
         """
@@ -291,7 +286,6 @@ class DatabaseConnection:
                 )
                 return cursor.fetchone() is not None
         except Exception as e:
-            print(f"[WARN]检查配置存在性时出错: {e}")
             return False
     
     def delete_config_data(self, table_name: str, config_name: str) -> int:
@@ -319,10 +313,9 @@ class DatabaseConnection:
                 )
                 deleted_count = cursor.rowcount
                 if deleted_count > 0:
-                    print(f"  [DEL] 已删除 {table_name} 中配置 [{config_name}] 的 {deleted_count} 行数据")
+                    pass
                 return deleted_count
         except Exception as e:
-            print(f"[WARN]删除配置数据时出错: {e}")
             return 0
     
     def create_table_from_df(
@@ -392,12 +385,10 @@ class DatabaseConnection:
             elif if_exists == "replace":
                 # 为避免丢失历史数据，replace模式改为追加写入
                 if not self._check_table_compatible(clean_table_name, df_to_write):
-                    print(f"[WARN]表结构不兼容，跳过追加: {clean_table_name}")
                     return False
             elif if_exists == "append":
                 # 追加模式（append）：检查表结构是否兼容
                 if not self._check_table_compatible(clean_table_name, df_to_write):
-                    print(f"[WARN]表结构不兼容，跳过追加: {clean_table_name}")
                     return False
         
         # 创建表（如果不存在）
@@ -413,12 +404,11 @@ class DatabaseConnection:
             with self.get_cursor() as cursor:
                 cursor.execute(create_sql)
             
-            print(f"[OK]已创建表: {clean_table_name} ({len(df_to_write)} 行, {len(df_to_write.columns)} 列)")
         else:
             if is_empty_table:
-                print(f"[OK]表已存在（空表）: {clean_table_name}")
+                pass
             else:
-                print(f"[OK]追加数据到表: {clean_table_name} (+{len(df_to_write)} 行)")
+                pass
         
         # 插入数据（非空表才插入）
         if not is_empty_table:
@@ -478,7 +468,6 @@ class DatabaseConnection:
             
             # 如果现有表缺少db_write_time列，自动添加
             if 'db_write_time' not in existing_cols and 'db_write_time' in df_cols:
-                print(f"🔧 为表 {table_name} 添加 db_write_time 列")
                 with self.get_cursor() as cursor:
                     cursor.execute(sql.SQL("""
                         ALTER TABLE {} ADD COLUMN db_write_time TIMESTAMP
@@ -495,7 +484,6 @@ class DatabaseConnection:
                 existing_pg_type = existing_col_info.get(col_name, '').upper()
                 # 如果 DataFrame 期望 DOUBLE PRECISION 但 DB 现有列是整型 → 升级
                 if expected_pg_type == 'DOUBLE PRECISION' and existing_pg_type in INT_TYPES:
-                    print(f"🔧 表 {table_name} 列 {col_name}: {existing_pg_type} → DOUBLE PRECISION（防止浮点截断）")
                     with self.get_cursor() as cursor:
                         cursor.execute(sql.SQL("""
                             ALTER TABLE {} ALTER COLUMN {} TYPE DOUBLE PRECISION USING {}::DOUBLE PRECISION
@@ -509,11 +497,9 @@ class DatabaseConnection:
             missing_cols = df_cols - existing_cols
             if missing_cols:
                 # 自动为缺失列补齐表结构
-                print(f"🔧 表 {table_name} 缺少列: {missing_cols}，自动补齐...")
                 for col_name in missing_cols:
                     dtype = df_col_types.get(col_name)
                     if dtype is None:
-                        print(f"[WARN]无法确定列类型，跳过补齐列: {col_name}")
                         continue
                     pg_type = self._pandas_to_pg_type(dtype, col_name=col_name)
                     with self.get_cursor() as cursor:
@@ -529,7 +515,6 @@ class DatabaseConnection:
             
             return True
         except Exception as e:
-            print(f"[WARN]检查表结构时出错: {e}")
             return False
     
     def _clean_name(self, name: str) -> str:
@@ -719,8 +704,7 @@ class DatabaseConnection:
             
             # 大数据集时显示进度
             if total_rows >= 10000:
-                print(f"  [DATA] 写入完成: {total_rows} 行数据")
-                print(f"  [FAST] 性能优化：单次事务提交")
+                pass
         except Exception as error:
             # [FIX] autocommit=True 模式下，conn.transaction() 退出时已自动 ROLLBACK，
             # 无需手动 rollback
@@ -801,7 +785,7 @@ class DatabaseConnection:
                     pass
         
         if indexes_created:
-            print(f"  🔑 已创建索引: {', '.join(indexes_created)}")
+            pass
     
     def read_table(self, table_name: str) -> pd.DataFrame:
         """读取表数据到DataFrame"""
@@ -847,31 +831,21 @@ class DatabaseConnection:
 
 def test_database_connection():
     """测试数据库连接的独立函数"""
-    print("=" * 60)
-    print("PostgreSQL数据库连接测试")
-    print("=" * 60)
     
     db = DatabaseConnection()
     result = db.test_connection()
     
-    print(f"主机: {result['host']}:{result['port']}")
-    print(f"数据库: {result['database']}")
-    print(f"连接状态: {'[OK]成功' if result['success'] else '[ERROR]失败'}")
-    print(f"连接耗时: {result['connection_time_ms']}ms")
     
     if result['success']:
-        print(f"数据库版本: {result['version'][:50]}...")
         
         # 列出所有表
         tables = db.get_all_tables()
-        print(f"现有表数量: {len(tables)}")
         if tables:
-            print(f"表列表: {', '.join(tables[:10])}" + ("..." if len(tables) > 10 else ""))
+            pass
     else:
-        print(f"错误信息: {result['message']}")
+        pass
     
     db.close()
-    print("=" * 60)
     return result['success']
 
 

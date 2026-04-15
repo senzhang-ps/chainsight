@@ -87,7 +87,6 @@ class OptimizedSimulationRunner:
         if not self.enable_optimization:
             return
         
-        print("🚀 初始化DuckDB优化引擎...")
         start_time = time.time()
         
         # 创建计算引擎 - create_calculation_engine 返回 (processor, engine) 元组
@@ -98,12 +97,10 @@ class OptimizedSimulationRunner:
         self._calculation_engine = engine
         
         # 预构建配置索引
-        print("📊 预构建配置数据索引...")
         self._calculation_engine.prepare_config_indexes(self.config_dict)
         self._indexes_built = True
         
         init_time = time.time() - start_time
-        print(f"✅ 优化引擎初始化完成，耗时: {init_time:.2f}秒")
         
         self.performance_stats['initialization_time'] = init_time
     
@@ -355,36 +352,21 @@ class OptimizedSimulationRunner:
     
     def print_performance_summary(self):
         """打印性能摘要"""
-        print("\n" + "=" * 60)
-        print("📊 DuckDB优化性能报告")
-        print("=" * 60)
         
         stats = self.performance_stats
-        print(f"优化状态: {'已启用' if stats['optimization_enabled'] else '未启用'}")
-        print(f"总计算次数: {stats['total_calculations']}")
         
         if 'initialization_time' in stats:
-            print(f"初始化时间: {stats['initialization_time']:.2f}秒")
+            pass
         
-        print("\n模块计算时间:")
         for module, times in stats['module_times'].items():
-            print(f"  {module}:")
-            print(f"    总时间: {times['total_time']:.2f}秒")
-            print(f"    调用次数: {times['call_count']}")
-            print(f"    平均时间: {times['avg_time']*1000:.2f}ms")
+            pass
         
         if self._data_processor and hasattr(self._data_processor, 'get_stats'):
             proc_stats = self._data_processor.get_stats()
             # 计算缓存命中率
             total_cache = proc_stats.get('cache_hits', 0) + proc_stats.get('cache_misses', 0)
             cache_hit_rate = proc_stats.get('cache_hits', 0) / total_cache if total_cache > 0 else 0
-            print(f"\n数据处理统计:")
-            print(f"  查询执行次数: {proc_stats.get('queries_executed', 0)}")
-            print(f"  缓存命中率: {cache_hit_rate:.1%}")
-            print(f"  处理行数: {proc_stats.get('rows_processed', 0)}")
-            print(f"  总查询时间: {proc_stats.get('total_query_time', 0):.2f}秒")
         
-        print("=" * 60)
 
 
 class ModuleOptimizer:
@@ -490,13 +472,6 @@ def run_optimized_simulation_from_dict(
     import time as time_module
     from datetime import datetime
     
-    print("\n" + "=" * 60)
-    print("🚀 高性能引擎仿真模式")
-    print("=" * 60)
-    print(f"配置: {config_name}")
-    print(f"日期: {start_date} 到 {end_date}")
-    print(f"高性能引擎: {'启用' if enable_high_performance else '禁用'}")
-    print("=" * 60)
     
     sim_start_time = time_module.time()
     
@@ -552,7 +527,6 @@ def run_optimized_simulation_from_dict(
         traceback.print_exc()
         
         # 回退到原始实现
-        print("⚠️ 回退到标准仿真模式...")
         from src.core.main_integration import run_integrated_simulation_from_dict
         return run_integrated_simulation_from_dict(
             config_data=config_data,

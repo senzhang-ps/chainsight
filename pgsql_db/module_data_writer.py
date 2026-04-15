@@ -44,12 +44,8 @@ class ModuleDataWriter:
             int: 成功删除数据的表数量
         """
         if not run_id:
-            print("\n[WARN] truncate_output_tables: run_id 为空，跳过删除操作")
             return 0
 
-        print("\n" + "=" * 60)
-        print(f"[DEL]  删除 run_id={run_id} 的数据库输出表数据")
-        print("=" * 60)
 
         # 定义所有需要按 run_id 删除的输出表
         output_tables = [
@@ -181,9 +177,9 @@ class ModuleDataWriter:
                     cur.execute(f'CREATE TABLE "{table_name}" ({cols_sql})')
                     created += 1
         if created > 0:
-            print(f"  📋 预建输出表: 新建 {created} 张（共 {len(self.ALL_OUTPUT_TABLES)} 张）")
+            pass
         else:
-            print(f"  ✅ 所有 {len(self.ALL_OUTPUT_TABLES)} 张输出表已存在")
+            pass
         return created
 
         try:
@@ -206,14 +202,12 @@ class ModuleDataWriter:
                                 (run_id,)
                             )
                             deleted_count += 1
-                            print(f"  [v] 已删除 run_id={run_id} 的数据: {table_name}")
                     except Exception as e:
-                        print(f"  [x] 删除失败 {table_name}: {e}")
+                        pass
 
-            print(f"\n[OK] 共处理 {deleted_count} 个表（按 run_id={run_id} 删除）")
 
         except Exception as e:
-            print(f"\n[ERROR] 删除表数据时出错: {e}")
+            pass
 
         return deleted_count
 
@@ -308,25 +302,18 @@ class ModuleDataWriter:
         if run_id is None:
             run_id = base_path.name
         
-        print("\n" + "=" * 60)
-        print("[OUT] 【优化模式】批量写入Summary和Orchestrator数据")
-        print(f"运行目录: {output_dir}")
-        print(f"运行ID: {run_id}")
-        print("=" * 60)
         
         results = {}
         
         # 1. 写入Summary数据（最重要）
         summary_dir = base_path / "summary"
         if summary_dir.exists():
-            print("\n[DATA] 写入Summary汇总数据...")
             summary_results = self._write_summary_files_fast(str(summary_dir), run_id, if_exists)
             results.update(summary_results)
         
         # 2. 写入Orchestrator状态数据
         orch_dir = base_path / "orchestrator"
         if orch_dir.exists():
-            print("\n[DIR] 写入Orchestrator状态数据...")
             orch_results = self.write_orchestrator_data(str(orch_dir), run_id=run_id, if_exists=if_exists)
             results.update(orch_results)
         
@@ -334,12 +321,6 @@ class ModuleDataWriter:
         total_tables = len([v for v in results.values() if isinstance(v, int) and v >= 0])
         total_rows = sum(v for v in results.values() if isinstance(v, int) and v > 0)
         
-        print("\n" + "=" * 60)
-        print(f"[OK] 优化写入完成!")
-        print(f"   表数量: {total_tables}")
-        print(f"   总行数: {total_rows:,}")
-        print(f"   耗时: {elapsed:.2f}秒")
-        print("=" * 60)
         
         return results
     
@@ -387,9 +368,7 @@ class ModuleDataWriter:
                         "module": "summary",
                         "rows": len(df)
                     }
-                    print(f"  [OK] {table_name}: {len(df):,} 行")
                 except Exception as e:
-                    print(f"  [ERROR] {file_name}: {e}")
                     results[table_name] = -1
         
         return results
@@ -419,11 +398,9 @@ class ModuleDataWriter:
         """
         output_path = Path(output_dir)
         if not output_path.exists():
-            print(f"[WARN]模块输出目录不存在: {output_dir}")
             return {}
         
         results = {}
-        print(f"\n[DIR] 写入 {module_name} 输出数据...")
         
         # 跟踪每个表是否已经被写入过（用于 replace 模式）
         # 第一次写入用 replace，后续用 append
@@ -444,7 +421,6 @@ class ModuleDataWriter:
                 )
                 results[excel_file.name] = file_results
             except Exception as e:
-                print(f"  [ERROR] 文件写入失败 [{excel_file.name}]: {e}")
                 results[excel_file.name] = {"error": str(e)}
         
         # 查找所有CSV文件并按日期排序
@@ -505,7 +481,6 @@ class ModuleDataWriter:
                         "rows": len(df)
                     }
             except Exception as e:
-                print(f"  [ERROR] CSV文件写入失败 [{csv_file.name}]: {e}")
                 results[csv_file.name] = {"error": str(e)}
         
         return results
@@ -601,7 +576,6 @@ class ModuleDataWriter:
                     }
                 
             except Exception as e:
-                print(f"    [WARN] Sheet [{sheet_name}] 写入失败: {e}")
                 results[sheet_name] = -1
         
         return results
@@ -632,11 +606,6 @@ class ModuleDataWriter:
         if run_id is None:
             run_id = base_path.name
         
-        print("\n" + "=" * 60)
-        print(f"写入模块输出数据到数据库")
-        print(f"运行目录: {run_output_dir}")
-        print(f"运行ID: {run_id}")
-        print("=" * 60)
         
         all_results = {}
         modules = ['module1', 'module3', 'module4', 'module5', 'module6', 'orchestrator', 'summary']
@@ -655,7 +624,7 @@ class ModuleDataWriter:
                 )
                 all_results[module] = results
             else:
-                print(f"[WARN]模块目录不存在: {module}")
+                pass
         
         elapsed = time.time() - start_time
         
@@ -663,12 +632,6 @@ class ModuleDataWriter:
         total_tables = len(self.written_tables)
         total_rows = sum(info.get('rows', 0) for info in self.written_tables.values())
         
-        print("\n" + "=" * 60)
-        print(f"[DATA] 写入汇总:")
-        print(f"   表数量: {total_tables}")
-        print(f"   总行数: {total_rows}")
-        print(f"   耗时: {elapsed:.2f}s")
-        print("=" * 60)
         
         return all_results
     
@@ -693,11 +656,9 @@ class ModuleDataWriter:
         """
         orch_path = Path(orchestrator_dir)
         if not orch_path.exists():
-            print(f"[WARN] Orchestrator目录不存在: {orchestrator_dir}")
             return {}
         
         results = {}
-        print(f"\n[INFO] 写入Orchestrator数据...")
         
         # 定义Orchestrator输出文件类型
         file_patterns = [
@@ -751,7 +712,7 @@ class ModuleDataWriter:
                                 df['run_id'] = run_id
                         dfs.append(df)
                     except Exception as e:
-                        print(f"    [WARN] 读取失败 [{csv_file.name}]: {e}")
+                        pass
                 
                 if dfs:
                     combined_df = pd.concat(dfs, ignore_index=True)
@@ -874,7 +835,7 @@ class ModuleDataWriter:
                     logging.error(f"delete_batch_data: 表 {table_name} 删除失败: {e}")
                     raise  # 真正的错误（连接中断、锁超时等），上报
         if deleted_total > 0:
-            print(f"  🗑️  已清理批次 {batch_start_date} 起的旧数据（{deleted_total} 张表）")
+            pass
 
     def _filter_module1_orders_for_day(
         self,
@@ -1046,10 +1007,6 @@ class ModuleDataWriter:
         if truncate_first:
             self.truncate_output_tables(run_id=run_id)
         
-        print("\n" + "=" * 60)
-        print("[OUT] 从内存写入模块输出到数据库")
-        print(f"运行ID: {run_id}")
-        print("=" * 60)
         
         # 定义模块输出的DataFrame到表名的映射
         # 键名必须与模块返回的字典键名一致
@@ -1092,31 +1049,23 @@ class ModuleDataWriter:
             module_results = all_results.get(module_name, [])
             
             # [DEBUG] DEBUG: 打印每个模块的结果详情
-            print(f"\n[DEBUG] DEBUG: {module_name} 结果检查:")
-            print(f"   module_results 类型: {type(module_results)}")
-            print(f"   module_results 长度: {len(module_results) if module_results else 0}")
             if module_results and len(module_results) > 0:
                 first_result = module_results[0]
                 if isinstance(first_result, dict):
-                    print(f"   第一天结果的键: {list(first_result.keys())}")
-                    print(f"   期望的键 (df_mapping): {list(df_mapping.keys())}")
                     # 检查键是否匹配
                     expected_keys = set(df_mapping.keys())
                     actual_keys = set(first_result.keys())
                     matched = expected_keys & actual_keys
                     missing = expected_keys - actual_keys
                     extra = actual_keys - expected_keys
-                    print(f"   匹配的键: {matched}")
                     if missing:
-                        print(f"   [WARN] 缺失的键: {missing}")
+                        pass
                     if extra:
-                        print(f"   额外的键: {extra}")
+                        pass
             
             if not module_results:
-                print(f"   [WARN] {module_name} 没有结果，跳过")
                 continue
             
-            print(f"\n[DIR] 写入 {module_name} 输出...")
             
             # 收集同一个表的所有数据
             table_data = {table_name: [] for table_name in df_mapping.values()}
@@ -1137,11 +1086,11 @@ class ModuleDataWriter:
                     # [DEBUG] DEBUG: 打印每个 DataFrame 键的检查结果
                     if df is not None:
                         if isinstance(df, pd.DataFrame):
-                            print(f"      [v] {df_key} -> {table_name}: DataFrame shape={df.shape}")
+                            pass
                         else:
-                            print(f"      [x] {df_key} -> {table_name}: 不是DataFrame, type={type(df).__name__}")
+                            pass
                     else:
-                        print(f"      [x] {df_key} -> {table_name}: None")
+                        pass
                     if df is not None and isinstance(df, pd.DataFrame):
                         # 为每一天的数据添加 sim_date（包括空 DataFrame）
                         df = df.copy()  # 避免修改原始数据
@@ -1174,9 +1123,7 @@ class ModuleDataWriter:
                             "module": module_name,
                             "rows": 0
                         }
-                        print(f"  [OK] 创建空表 {table_name}")
                     except Exception as e:
-                        print(f"  [ERROR] 创建空表 {table_name} 失败: {e}")
                         results[table_name] = -1
                     continue
                 
@@ -1202,16 +1149,12 @@ class ModuleDataWriter:
                         "rows": len(combined_df)
                     }
                 except Exception as e:
-                    print(f"  [ERROR] 写入表 {table_name} 失败: {e}")
                     results[table_name] = -1
         
         # 统计
         total_tables = sum(1 for v in results.values() if v > 0)
         total_rows = sum(v for v in results.values() if v > 0)
         
-        print(f"\n[OK] 模块输出写入完成:")
-        print(f"   表数量: {total_tables}")
-        print(f"   总行数: {total_rows}")
         
         return results
     
@@ -1230,21 +1173,13 @@ class ModuleDataWriter:
     def print_summary(self):
         """打印写入汇总"""
         if not self.written_tables:
-            print("暂无写入记录")
             return
         
-        print("\n[INFO] 已写入表汇总:")
-        print("-" * 80)
-        print(f"{'表名':<50} {'行数':>10} {'来源':<20}")
-        print("-" * 80)
         
         for table_name, info in self.written_tables.items():
             source = info.get('module', info.get('source', 'unknown'))[:20]
             rows = info.get('rows', 0)
-            print(f"{table_name:<50} {rows:>10} {source:<20}")
         
-        print("-" * 80)
-        print(f"共 {len(self.written_tables)} 个表")
     
     def generate_summary_reports_from_db(
         self,
@@ -1280,12 +1215,8 @@ class ModuleDataWriter:
         import time
         start_time = time.time()
         
-        print("\n" + "=" * 60)
-        print("[DATA] 从数据库生成Summary汇总报告")
-        print(f"运行ID: {run_id}")
         if start_date and end_date:
-            print(f"日期范围: {start_date} 到 {end_date}")
-        print("=" * 60)
+            pass
         
         results = {}
         
@@ -1298,7 +1229,6 @@ class ModuleDataWriter:
                 run_id, end_date_dt, if_exists
             )
         except Exception as e:
-            print(f"  [ERROR] order_shipment_cut 生成失败: {e}")
             results['summary_output_ordershipmentcutsummary'] = -1
         
         # 2. 生成 changeover 汇总报告
@@ -1307,7 +1237,6 @@ class ModuleDataWriter:
                 run_id, end_date_dt, if_exists
             )
         except Exception as e:
-            print(f"  [ERROR] changeover 生成失败: {e}")
             results['summary_output_fullchangeoverlog'] = -1
         
         # 3. 生成 capacity_exceed 汇总报告
@@ -1316,7 +1245,6 @@ class ModuleDataWriter:
                 run_id, end_date_dt, if_exists
             )
         except Exception as e:
-            print(f"  [ERROR] capacity_exceed 生成失败: {e}")
             results['summary_output_fullcapacityexceed'] = -1
         
         # 4. 生成 production_plan 汇总报告
@@ -1325,7 +1253,6 @@ class ModuleDataWriter:
                 run_id, end_date_dt, if_exists
             )
         except Exception as e:
-            print(f"  [ERROR] production_plan 生成失败: {e}")
             results['summary_output_fullproductionplan'] = -1
         
         # 5. 生成 deployment_plan 汇总报告
@@ -1334,7 +1261,6 @@ class ModuleDataWriter:
                 run_id, end_date_dt, if_exists
             )
         except Exception as e:
-            print(f"  [ERROR] deployment_plan 生成失败: {e}")
             results['summary_output_fulldeploymentplan'] = -1
         
         # 6. 生成 delivery_plan 汇总报告
@@ -1343,7 +1269,6 @@ class ModuleDataWriter:
                 run_id, end_date_dt, if_exists
             )
         except Exception as e:
-            print(f"  [ERROR] delivery_plan 生成失败: {e}")
             results['summary_output_fulldeliveryplan'] = -1
         
         # 7. 生成 truck_usage 汇总报告
@@ -1352,19 +1277,12 @@ class ModuleDataWriter:
                 run_id, end_date_dt, if_exists
             )
         except Exception as e:
-            print(f"  [ERROR] truck_usage 生成失败: {e}")
             results['summary_output_fulltruckusage'] = -1
         
         elapsed = time.time() - start_time
         total_tables = sum(1 for v in results.values() if isinstance(v, int) and v >= 0)
         total_rows = sum(v for v in results.values() if isinstance(v, int) and v > 0)
         
-        print("\n" + "=" * 60)
-        print(f"[OK] Summary汇总报告生成完成!")
-        print(f"   表数量: {total_tables}")
-        print(f"   总行数: {total_rows:,}")
-        print(f"   耗时: {elapsed:.2f}秒")
-        print("=" * 60)
         
         return results
     
@@ -1471,7 +1389,6 @@ class ModuleDataWriter:
             summary = summary.merge(cut_agg, on=existing_merge, how='outer')
         
         if summary.empty:
-            print(f"  [WARN] {table_name}: 无数据")
             return 0
         
         for col in ['order_qty', 'shipment_qty', 'cut_qty']:
@@ -1499,7 +1416,6 @@ class ModuleDataWriter:
         
         self.db.create_table_from_df(summary, table_name, if_exists, config_name=self.config_name)
         self.written_tables[table_name] = {"module": "summary", "rows": len(summary)}
-        print(f"  [OK] {table_name}: {len(summary):,} 行")
         
         return len(summary)
     
@@ -1515,11 +1431,9 @@ class ModuleDataWriter:
         try:
             df = self.db.read_table("module4_output_changeoverlog")
         except:
-            print(f"  [WARN] {table_name}: 源表不存在")
             return 0
         
         if df.empty:
-            print(f"  [WARN] {table_name}: 无数据")
             return 0
         
         # 按run_id过滤
@@ -1538,7 +1452,6 @@ class ModuleDataWriter:
                 df = df[(df['changeover_end_date'].isna()) | (df['changeover_end_date'] <= end_date_dt)]
         
         if df.empty:
-            print(f"  [WARN] {table_name}: 过滤后无数据")
             return 0
 
         sort_cols = [
@@ -1565,7 +1478,6 @@ class ModuleDataWriter:
         # 写入数据库
         self.db.create_table_from_df(df, table_name, if_exists, config_name=self.config_name)
         self.written_tables[table_name] = {"module": "summary", "rows": len(df)}
-        print(f"  [OK] {table_name}: {len(df):,} 行")
         
         return len(df)
     
@@ -1581,11 +1493,9 @@ class ModuleDataWriter:
         try:
             df = self.db.read_table("module4_output_capacityexceed")
         except:
-            print(f"  [WARN] {table_name}: 源表不存在")
             return 0
         
         if df.empty:
-            print(f"  [WARN] {table_name}: 无数据")
             return 0
         
         # 按run_id过滤
@@ -1598,7 +1508,6 @@ class ModuleDataWriter:
             df = df[(df['date'].isna()) | (df['date'] <= end_date_dt)]
         
         if df.empty:
-            print(f"  [WARN] {table_name}: 过滤后无数据")
             return 0
         
         # 添加run_id
@@ -1608,7 +1517,6 @@ class ModuleDataWriter:
         # 写入数据库
         self.db.create_table_from_df(df, table_name, if_exists, config_name=self.config_name)
         self.written_tables[table_name] = {"module": "summary", "rows": len(df)}
-        print(f"  [OK] {table_name}: {len(df):,} 行")
         
         return len(df)
     
@@ -1624,11 +1532,9 @@ class ModuleDataWriter:
         try:
             df = self.db.read_table("module4_output_productionplan")
         except:
-            print(f"  [WARN] {table_name}: 源表不存在")
             return 0
         
         if df.empty:
-            print(f"  [WARN] {table_name}: 无数据")
             return 0
         
         # 按run_id过滤
@@ -1640,7 +1546,6 @@ class ModuleDataWriter:
             df = df[(df['available_date'].isna()) | (df['available_date'] <= end_date_dt)]
         
         if df.empty:
-            print(f"  [WARN] {table_name}: 过滤后无数据")
             return 0
         
         # 添加run_id
@@ -1650,7 +1555,6 @@ class ModuleDataWriter:
         # 写入数据库
         self.db.create_table_from_df(df, table_name, if_exists, config_name=self.config_name)
         self.written_tables[table_name] = {"module": "summary", "rows": len(df)}
-        print(f"  [OK] {table_name}: {len(df):,} 行")
         
         return len(df)
     
@@ -1666,11 +1570,9 @@ class ModuleDataWriter:
         try:
             df = self.db.read_table("module5_output_deploymentplan")
         except:
-            print(f"  [WARN] {table_name}: 源表不存在")
             return 0
         
         if df.empty:
-            print(f"  [WARN] {table_name}: 无数据")
             return 0
         
         # 按run_id过滤
@@ -1694,7 +1596,6 @@ class ModuleDataWriter:
             df = df[mask]
         
         if df.empty:
-            print(f"  [WARN] {table_name}: 过滤后无数据")
             return 0
         
         # 添加run_id
@@ -1704,7 +1605,6 @@ class ModuleDataWriter:
         # 写入数据库
         self.db.create_table_from_df(df, table_name, if_exists, config_name=self.config_name)
         self.written_tables[table_name] = {"module": "summary", "rows": len(df)}
-        print(f"  [OK] {table_name}: {len(df):,} 行")
         
         return len(df)
     
@@ -1720,11 +1620,9 @@ class ModuleDataWriter:
         try:
             df = self.db.read_table("module6_output_deliveryplan")
         except:
-            print(f"  [WARN] {table_name}: 源表不存在")
             return 0
         
         if df.empty:
-            print(f"  [WARN] {table_name}: 无数据")
             return 0
         
         # 按run_id过滤
@@ -1748,7 +1646,6 @@ class ModuleDataWriter:
             df = df[mask]
         
         if df.empty:
-            print(f"  [WARN] {table_name}: 过滤后无数据")
             return 0
         
         # 添加run_id
@@ -1758,7 +1655,6 @@ class ModuleDataWriter:
         # 写入数据库
         self.db.create_table_from_df(df, table_name, if_exists, config_name=self.config_name)
         self.written_tables[table_name] = {"module": "summary", "rows": len(df)}
-        print(f"  [OK] {table_name}: {len(df):,} 行")
         
         return len(df)
     
@@ -1774,11 +1670,9 @@ class ModuleDataWriter:
         try:
             df = self.db.read_table("module6_output_truckusagelog")
         except:
-            print(f"  [WARN] {table_name}: 源表不存在")
             return 0
         
         if df.empty:
-            print(f"  [WARN] {table_name}: 无数据")
             return 0
         
         # 按run_id过滤
@@ -1791,7 +1685,6 @@ class ModuleDataWriter:
             df = df[(df['date'].isna()) | (df['date'] <= end_date_dt)]
         
         if df.empty:
-            print(f"  [WARN] {table_name}: 过滤后无数据")
             return 0
         
         # 添加run_id
@@ -1801,7 +1694,6 @@ class ModuleDataWriter:
         # 写入数据库
         self.db.create_table_from_df(df, table_name, if_exists, config_name=self.config_name)
         self.written_tables[table_name] = {"module": "summary", "rows": len(df)}
-        print(f"  [OK] {table_name}: {len(df):,} 行")
         
         return len(df)
 
@@ -1845,7 +1737,6 @@ def write_run_data_to_db(
     # 测试连接
     conn_result = db.test_connection()
     if not conn_result["success"]:
-        print(f"[ERROR] 数据库连接失败: {conn_result['message']}")
         return False
     
     # 创建写入器并执行
@@ -1861,7 +1752,6 @@ def write_run_data_to_db(
         
         return True
     except Exception as e:
-        print(f"[ERROR] 写入失败: {e}")
         return False
     finally:
         db.close()

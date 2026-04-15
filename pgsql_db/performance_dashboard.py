@@ -252,49 +252,28 @@ class PerformanceDashboard:
         """打印性能摘要"""
         summary = self.get_summary()
         
-        print("\n" + "=" * 70)
-        print("📊 性能监控仪表盘")
-        print("=" * 70)
         
         # 全局统计
-        print("\n🌍 全局统计:")
-        print(f"  仿真开始: {summary['global']['simulation_start']}")
-        print(f"  仿真结束: {summary['global']['simulation_end']}")
-        print(f"  总天数: {summary['global']['total_days']}")
-        print(f"  总记录数: {summary['global']['total_records']:,}")
-        print(f"  缓存命中率: {summary['global']['cache_hit_rate']}")
-        print(f"  平均每天耗时: {summary['global']['avg_daily_time_s']}秒")
         
         # 模块性能
-        print("\n📦 模块性能:")
-        print("-" * 70)
-        print(f"{'模块':<20} {'调用次数':<10} {'总时间(s)':<12} {'平均(ms)':<12} {'成功率':<10}")
-        print("-" * 70)
         
         for name, metrics in sorted(
             summary['modules'].items(), 
             key=lambda x: x[1]['total_time_s'], 
             reverse=True
         ):
-            print(f"{name:<20} {metrics['call_count']:<10} {metrics['total_time_s']:<12} "
-                  f"{metrics['avg_time_ms']:<12} {metrics['success_rate']:<10}")
+            pass
         
         # 时间分布
-        print("\n⏱️ 时间分布:")
         for name, pct in summary['module_distribution'].items():
             bar_len = int(float(pct.replace('%', '')) / 5)
             bar = '█' * bar_len
-            print(f"  {name:<20} {bar} {pct}")
         
         # 告警
         if summary['alerts_count'] > 0:
-            print(f"\n⚠️ 告警: {summary['alerts_count']} 条 "
-                  f"(严重: {summary['critical_alerts']})")
             for alert in self.alerts[-5:]:  # 显示最近5条
                 icon = '🔴' if alert['level'] == 'critical' else '🟡'
-                print(f"  {icon} [{alert['timestamp'][-8:]}] {alert['message']}")
         
-        print("\n" + "=" * 70)
     
     def export_report(self, format: str = 'json') -> str:
         """
@@ -515,11 +494,6 @@ class RealTimeMonitor:
         filled = int(bar_width * self.current_day / max(self.total_days, 1))
         bar = '█' * filled + '░' * (bar_width - filled)
         
-        print(f"\r[{bar}] {progress['progress']} | "
-              f"Day {progress['current_day']}/{progress['total_days']} | "
-              f"Elapsed: {progress['elapsed_time']} | "
-              f"ETA: {progress['eta']} | "
-              f"Avg: {progress['avg_day_time']}", end='', flush=True)
 
 
 # ===================== 全局仪表盘实例 =====================

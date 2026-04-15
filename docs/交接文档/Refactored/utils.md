@@ -1,68 +1,59 @@
 # `src/utils` — 工具层模块文档
 
-本文档覆盖 `src/utils/` 目录下的所有 22 个文件。
+**编写人**：陈显跃  
+**更新时间**：2026-04-15
+
+本文档覆盖当前 `src/utils/` 目录中实际存在的工具模块，并同步第三阶段后续清理结果。
 
 ---
 
-## 目录
+## 1. 当前结论
 
-1. [模块概述](#模块概述)
-2. [包导出（__init__.py）](#包导出__initpy)
-3. [共享运行时默认值（runtime_defaults.py）](#共享运行时默认值runtime_defaultspy)
-4. [共享标准化工具（normalization_common.py）](#共享标准化工具normalization_commonpy)
-5. [共享日期工具（date_helpers.py）](#共享日期工具date_helperspy)
-6. [日志配置（logger_config.py）](#日志配置logger_configpy)
-7. [配置验证（config_validator.py）](#配置验证config_validatorpy)
-8. [时间管理（time_manager.py）](#时间管理time_managerpy)
-9. [资源配置（resource_config.py）](#资源配置resource_configpy)
-10. [优化配置（optimization_config.py）](#优化配置optimization_configpy)
-11. [验证管理（validation_manager.py）](#验证管理validation_managerpy)
-12. [内存数据存储（memory_data_store.py）](#内存数据存储memory_data_storepy)
-13. [仿真缓存（simulation_cache.py）](#仿真缓存simulation_cachepy)
-14. [库存平衡检查（inventory_balance_checker.py）](#库存平衡检查inventory_balance_checkerpy)
-15. [性能工具（performance.py）](#性能工具performancepy)
-16. [DuckDB SQL 包装（duckdb_sql_wrapper.py）](#duckdb-sql-包装duckdb_sql_wrapperpy)
-17. [DuckDB 优化器（duckdb_optimizer.py）](#duckdb-优化器duckdb_optimizerpy)
-18. [DuckDB 加速器（duckdb_accelerator.py）](#duckdb-加速器duckdb_acceleratorpy)
-19. [CPU 配置（cpu_config.py）](#cpu-配置cpu_configpy)
-20. [并行优化（parallel_optimizer.py）](#并行优化parallel_optimizerpy)
-21. [进程池执行器（process_pool_executor.py）](#进程池执行器process_pool_executorpy)
-22. [高性能执行器（high_perf_executor.py）](#高性能执行器high_perf_executorpy)
-23. [多进程执行器（multiprocess_executor.py）](#多进程执行器multiprocess_executorpy)
-24. [依赖关系总览](#依赖关系总览)
+`src/utils/` 当前是项目的横切基础设施层，目录中实际存在 **15 个文件**：
+
+- `__init__.py`
+- `config_validator.py`
+- `date_helpers.py`
+- `defaults.py`
+- `duckdb_accelerator.py`
+- `duckdb_optimizer.py`
+- `inventory_balance_checker.py`
+- `logger_config.py`
+- `memory_data_store.py`
+- `normalization.py`
+- `resource_config.py`
+- `simulation_cache.py`
+- `time_manager.py`
+- `validation_manager.py`
+
+已删除且不应再引用的旧兼容文件：
+
+- `runtime_defaults.py`
+- `normalization_common.py`
+- `cpu_config.py`
 
 ---
 
-## 模块概述
+## 2. 模块分层概览
 
-`src/utils/` 是 ChainSight 的横切基础设施层，提供以下能力：
-
-| 能力分类 | 文件 |
-|---------|------|
-| 日志 | `logger_config.py` |
-| 配置验证 | `config_validator.py`, `validation_manager.py` |
-| 时间管理 | `time_manager.py` |
-| 共享默认值 | `runtime_defaults.py` |
-| 共享标准化 | `normalization_common.py` |
-| 共享日期与前置期 | `date_helpers.py` |
-| 资源与优化配置 | `resource_config.py`, `optimization_config.py`, `cpu_config.py` |
-| 数据存储与缓存 | `memory_data_store.py`, `simulation_cache.py` |
-| 库存验证 | `inventory_balance_checker.py` |
-| 性能与向量化 | `performance.py` |
-| DuckDB 集成 | `duckdb_sql_wrapper.py`, `duckdb_optimizer.py`, `duckdb_accelerator.py` |
-| 并行执行 | `parallel_optimizer.py`, `process_pool_executor.py`, `high_perf_executor.py`, `multiprocess_executor.py` |
+| 能力分类 | 当前文件 |
+|---|---|
+| 配置与默认值 | `defaults.py`, `config_validator.py`, `resource_config.py` |
+| 标识符规范化 | `normalization.py` |
+| 日期与时间 | `date_helpers.py`, `time_manager.py` |
+| 日志与校验 | `logger_config.py`, `validation_manager.py`, `inventory_balance_checker.py` |
+| 缓存与内存存储 | `simulation_cache.py`, `memory_data_store.py` |
+| DuckDB 加速 | `duckdb_optimizer.py`, `duckdb_accelerator.py` |
 
 ---
 
-## 包导出（`__init__.py`）
+## 3. 包入口（`__init__.py`）
 
-**文件路径**：`src/utils/__init__.py`  
-**行数**：28 行
+**文件路径**：`src/utils/__init__.py`
 
-### 公开导出列表
+当前公开导出：
 
 ```python
-from .config_validator import run_pre_simulation_validation
 from .logger_config import setup_logging
 from .validation_manager import ValidationManager
 from .inventory_balance_checker import InventoryBalanceChecker
@@ -75,1100 +66,216 @@ from .simulation_cache import (
 )
 ```
 
-**`__all__`**：
+`run_pre_simulation_validation` 仍通过 `__getattr__` 延迟导入，以避免循环引用。
 
-| 名称 | 来源文件 |
-|------|---------|
-| `run_pre_simulation_validation` | `config_validator.py` |
-| `setup_logging` | `logger_config.py` |
-| `ValidationManager` | `validation_manager.py` |
-| `InventoryBalanceChecker` | `inventory_balance_checker.py` |
-| `SimulationTimeManager` | `time_manager.py` |
-| `initialize_time_manager` | `time_manager.py` |
-| `SimulationCache` | `simulation_cache.py` |
-| `initialize_simulation_cache` | `simulation_cache.py` |
-| `get_simulation_cache` | `simulation_cache.py` |
-| `clear_simulation_cache` | `simulation_cache.py` |
+以下模块不经由包入口自动暴露，需显式导入：
 
-说明：
-
-- `runtime_defaults.py`、`normalization_common.py`、`date_helpers.py` 当前不经由 `src.utils.__all__` 暴露。
-- 这三个文件属于“共享底层实现”，供模块内部或新代码按需显式导入。
-- 保持它们不自动导出，可以继续降低 `src.utils` 初始化时的耦合和循环导入风险。
+- `src.utils.defaults`
+- `src.utils.normalization`
+- `src.utils.resource_config`
+- `src.utils.date_helpers`
 
 ---
 
-## 共享运行时默认值（`runtime_defaults.py`）
+## 4. 默认值与配置
 
-**文件路径**：`src/utils/runtime_defaults.py`  
-**行数**：12 行
+### 4.1 `defaults.py`
 
-这个文件是本轮“零结果漂移”收口新增的共享默认值单一真源，当前主要用于收口 M3 / M5 中重复出现的小默认值。
+**文件路径**：`src/utils/defaults.py`  
+**配置来源**：`config/defaults.yaml`
 
-### 当前公开常量
+用途：集中管理跨模块默认参数，避免硬编码散落在各模块。
 
-| 常量 | 默认值 | 当前用途 |
-|------|--------|---------|
-| `DEFAULT_MOQ` | `1` | M3 / M5 MOQ 默认值 |
-| `DEFAULT_RV` | `1` | M3 / M5 RV 默认值 |
-| `DEFAULT_PTF` | `0` | 共享前置窗口默认值 |
-| `DEFAULT_LSK` | `1` | 共享 review 间隔默认值 |
-| `DEFAULT_HORIZON` | `1` | M3 horizon 默认值 |
-| `DEFAULT_LEAD_TIME` | `1` | M5 fallback lead time 默认值 |
+当前重要常量包括：
 
-### 使用边界
+- `DEFAULT_MOQ`
+- `DEFAULT_RV`
+- `DEFAULT_PTF`
+- `DEFAULT_LSK`
+- `DEFAULT_LEAD_TIME`
+- `DEFAULT_HORIZON`
+- `DEFAULT_CHANGEOVER_TIME`
+- `DEFAULT_PUSH_LEVELS`
+- `RESOURCE_UTILIZATION`
+- `M1_FUTURE_CUTOFF_DAYS`
+- `M1_DEFAULT_MAX_ADVANCE_DAYS`
+- `M6_MAX_WAIT_DAYS`
+- `M6_RANDOM_SEED`
 
-- 该文件只放“跨模块共享、且值稳定”的小常量。
-- 模块私有常量仍应留在各自 `constants.py`，不要为了集中而集中。
-- 当前 `mrp_planning/constants.py` 与 `deployment_planning/constants.py` 只是 re-export 这些共享值，没有改变旧调用面。
-
----
-
-## 共享标准化工具（`normalization_common.py`）
-
-**文件路径**：`src/utils/normalization_common.py`  
-**行数**：140 行
-
-这个文件收口了多个模块重复实现的标识符标准化逻辑，但保留“包装层选择语义”的设计，所以不会强行把所有模块变成同一套规则。
-
-### 关键函数
-
-| 函数 | 说明 |
-|------|------|
-| `normalize_location_zero_fill_any()` | 地点类编码补零，对非空值统一做零填充 |
-| `normalize_location_preserve_non_numeric()` | 地点类编码标准化，但保留非数字文本原貌 |
-| `normalize_material_basic()` | 最轻量的物料转字符串 |
-| `normalize_material_numeric_token_cleanup()` | 适配 `main_integration` 历史语义 |
-| `normalize_material_numeric_preserve_text()` | 适配 `orchestrator` 历史语义 |
-| `normalize_identifiers_vectorized()` | DataFrame 级向量化标准化 |
-| `normalize_identifiers_scalar()` | 标量式标准化路径，保留历史逐列语义 |
-| `cast_identifier_columns()` | 将指定列转为字符串并按需规范化地点列 |
-
-### 当前调用侧
-
-- `src/modules/demand_planning/normalization.py`
-- `src/modules/mrp_planning/utils.py`
-- `src/modules/deployment_planning/normalizer.py`
-- `src/core/orchestrator/normalize.py`
-- `src/core/main_integration/normalize.py`
-- `src/modules/production_planning/utils.py`
-
-### 维护约束
-
-- 若修改共享实现，必须先确认调用侧 wrapper 的历史语义是否仍保持一致。
-- `orchestrator` 和 `main_integration` 当前故意保留不同的物料字符串语义，不能简单合并成单一路径。
-- 共享函数应只承担“底层公共实现”，模块级业务语义仍应留在各模块包装函数中。
-
----
-
-## 共享日期工具（`date_helpers.py`）
-
-**文件路径**：`src/utils/date_helpers.py`  
-**行数**：54 行
-
-这个文件收口了多个模块重复出现的窗口、review day 和 lead time 底层逻辑。
-
-### 关键函数
-
-| 函数 | 说明 |
-|------|------|
-| `compute_planning_window()` | 计算包含起止边界的 planning window |
-| `is_offset_review_day()` | 基于仿真起点偏移的 review day 判定 |
-| `is_calendar_review_day()` | 基于 daily / weekly / monthly 规则的 review day 判定 |
-| `calculate_transport_lead_time()` | Plant / DC lead time 计算底层实现 |
-
-### 当前调用侧
-
-- `src/modules/production_planning/utils.py`
-- `src/modules/deployment_planning/cache_utils.py`
-- `src/modules/mrp_planning/lead_time.py`
-
-### 维护约束
-
-- 共享函数只做确定性、低语义耦合的日期计算。
-- 带模块业务口径的包装函数仍保留在模块内，例如不同最小值约束和不同 review day 入参形式。
-- 若后续要引入 YAML 配置驱动，不应直接改写这里的默认行为，而应由上层包装决定配置来源。
-
----
-
-## 日志配置（`logger_config.py`）
-
-**文件路径**：`src/utils/logger_config.py`  
-**行数**：218 行
-
-### `DualLogger` 类
-
-同时向文件和控制台输出日志的双输出日志器。
+推荐导入：
 
 ```python
-class DualLogger:
-    def __init__(self, name: str, log_file: str, level: int = logging.INFO)
+from src.utils.defaults import M6_MAX_WAIT_DAYS, M6_RANDOM_SEED
 ```
 
-**参数**：
+### 4.2 `config_validator.py`
 
-| 参数 | 类型 | 说明 |
-|------|------|------|
-| `name` | `str` | Logger 名称 |
-| `log_file` | `str` | 日志文件路径 |
-| `level` | `int` | 日志级别，默认 `INFO` |
+用于仿真启动前检查配置完整性与结构合法性，是 `run.py` 主链路预校验的一部分。
 
 ---
 
-### `PrintRedirector` 类
+## 5. 标识符归一化
 
-将 `print()` 输出重定向到日志系统。
+### `normalization.py`
+
+**文件路径**：`src/utils/normalization.py`
+
+用途：作为全仓库标识符归一化的单一真源。
+
+关键函数：
+
+- `normalize_material()`
+- `normalize_location()`
+- `normalize_identifiers()`
+- `cast_identifier_columns()`
+
+调用位置包括：
+
+- `src/core/main_integration/production_runner.py`
+- `src/core/main_integration/simulation_file.py`
+- `src/core/main_integration/simulation_db.py`
+- `src/core/orchestrator/views.py`
+- `src/core/orchestrator/processors.py`
+- `src/core/orchestrator/persistence.py`
+- `src/core/orchestrator/orchestrator_main.py`
+- `src/core/orchestrator/daily_ops.py`
+- `src/modules/deployment_planning/data_loader.py`
+- `src/modules/deployment_planning/validation.py`
+- `src/modules/*` 的部分工具函数
+
+> 说明：`runtime_defaults.py`、`normalization_common.py`、`src/core/main_integration/normalize.py`、`src/modules/demand_planning/normalization.py`、`src/core/orchestrator/normalize.py`、`src/modules/deployment_planning/normalizer.py` 已删除，不再作为兼容层保留。
+
+---
+
+## 6. 日期、时间与资源
+
+### 6.1 `date_helpers.py`
+
+提供共享的规划窗口、review day 与 lead time 计算 helper。
+
+关键函数：
+
+- `compute_planning_window()`
+- `calculate_transport_lead_time()`
+
+### 6.2 `time_manager.py`
+
+提供 `SimulationTimeManager` 与 `initialize_time_manager()`，用于统一仿真日期管理。
+
+### 6.3 `resource_config.py`
+
+当前资源配置单一入口，替代已删除的 `cpu_config.py`。
+
+关键能力：
+
+- `get_optimal_threads()`
+- `get_optimal_workers()`
+- `get_optimal_memory()`
+- `get_resource_config()`
+- `get_duckdb_config()`
+
+实现特点：
+
+- 优先使用 `psutil` 获取更准确的内存信息
+- 若 `psutil` 不可用，则回退到环境变量/默认值
+- `RESOURCE_UTILIZATION` 从 `config/defaults.yaml` 加载
+
+---
+
+## 7. 日志、验证与状态
+
+### `logger_config.py`
+
+提供 `setup_logging()`，为文件模式和数据库模式建立统一日志输出。
+
+### `validation_manager.py`
+
+用于收集和管理仿真过程中的校验结果。
+
+### `inventory_balance_checker.py`
+
+用于最终库存平衡检查，是主仿真流程结束前的重要验证步骤。
+
+### `simulation_cache.py`
+
+提供运行期缓存，用于减少重复计算。
+
+### `memory_data_store.py`
+
+提供内存级数据存储，用于数据库模式和部分高性能链路。
+
+---
+
+## 8. DuckDB 相关模块
+
+### `duckdb_optimizer.py`
+
+提供 DuckDB 批量计算优化能力，并改为从 `resource_config.py` 读取线程/内存配置。
+
+### `duckdb_accelerator.py`
+
+提供更底层的 DuckDB 加速封装，为部分模块的批处理路径提供支撑。
+
+---
+
+## 9. 已删除模块与迁移规则
+
+以下旧文件已从 `src/utils/` 物理删除：
+
+| 已删除文件 | 替代方案 |
+|---|---|
+| `runtime_defaults.py` | `defaults.py` |
+| `normalization_common.py` | `normalization.py` |
+| `cpu_config.py` | `resource_config.py` |
+
+推荐迁移方式：
 
 ```python
-class PrintRedirector:
-    def __init__(self, logger: logging.Logger)
+# 默认值
+from src.utils.defaults import DEFAULT_MOQ
+
+# 归一化
+from src.utils.normalization import normalize_identifiers
+
+# 资源配置
+from src.utils.resource_config import get_optimal_threads
 ```
 
-`write(message)` 方法将 `print` 的内容转发至 `logger.info()`。
-
----
-
-### `setup_logging(log_dir, module_name, level)` → `logging.Logger`
-
-创建并配置双输出 Logger（文件 + 控制台）。
-
-**参数**：
-
-| 参数 | 类型 | 说明 |
-|------|------|------|
-| `log_dir` | `str` | 日志目录 |
-| `module_name` | `str` | 模块名称（用于日志文件命名） |
-| `level` | `int` | 日志级别 |
-
-**文件命名**：`{module_name}_{YYYYMMDD_HHMMSS}.log`
-
----
-
-### `create_simple_file_logger(name, log_file, level)` → `logging.Logger`
-
-创建仅写入文件的简单 Logger（不输出控制台）。
-
----
-
-## 配置验证（`config_validator.py`）
-
-**文件路径**：`src/utils/config_validator.py`  
-**行数**：720 行
-
-### `ConfigValidator` 类
-
-对仿真配置进行仿真前完整验证，包含 7 个验证方法。
+不要再使用：
 
 ```python
-class ConfigValidator:
-    def __init__(self, config: dict)
-```
-
-#### 验证方法
-
-| 方法 | 说明 |
-|------|------|
-| `validate_global()` | 验证全局配置（仿真日期、输出路径等） |
-| `validate_module1()` | 验证 M1 需求规划配置 |
-| `validate_module3()` | 验证 M3 MRP 规划配置 |
-| `validate_module4()` | 验证 M4 生产规划配置 |
-| `validate_module5()` | 验证 M5 部署规划配置 |
-| `validate_module6()` | 验证 M6 物流执行配置 |
-| `validate_cross_module()` | 跨模块一致性验证（如日期范围对齐） |
-
-**已知设计问题**：M6 的 `TruckReleaseCon` 路线 OTD 检查代码位于 `return` 语句之后（死代码，永远不会执行）。
-
----
-
-### `run_pre_simulation_validation(config)` → `ValidationResult`
-
-仿真启动前的统一验证入口。依次执行所有 7 个验证方法，返回汇总验证结果。
-
-**参数**：`config: dict`  
-**返回值**：`ValidationResult`（含 errors、warnings、is_valid 字段）
-
----
-
-## 时间管理（`time_manager.py`）
-
-**文件路径**：`src/utils/time_manager.py`  
-**行数**：278 行
-
-### `SimulationTimeManager` 类
-
-管理仿真时间序列，提供日期迭代、PTF 窗口计算、节假日处理等能力。
-
-```python
-class SimulationTimeManager:
-    def __init__(
-        self,
-        sim_start: str,
-        sim_end: str,
-        calendar_config: Optional[dict] = None
-    )
-```
-
-**参数**：
-
-| 参数 | 类型 | 说明 |
-|------|------|------|
-| `sim_start` | `str` | 仿真开始日期（`YYYY-MM-DD`） |
-| `sim_end` | `str` | 仿真结束日期（`YYYY-MM-DD`） |
-| `calendar_config` | `Optional[dict]` | 日历配置（节假日等） |
-
-#### 13 个实例方法
-
-| 方法 | 说明 |
-|------|------|
-| `get_simulation_dates()` | 返回仿真日期列表 |
-| `get_current_date()` | 返回当前仿真日期 |
-| `advance_date()` | 推进到下一个仿真日期 |
-| `is_simulation_complete()` | 检查仿真是否结束 |
-| `get_ptf_window(date, ptf_days)` | 获取给定日期的 PTF 窗口范围 |
-| `get_working_days(start, end)` | 获取工作日列表 |
-| `add_working_days(date, n)` | 在工作日基础上加 n 天 |
-| `is_working_day(date)` | 判断是否为工作日 |
-| `get_week_number(date)` | 获取周数 |
-| `get_month_end(date)` | 获取月末日期 |
-| `format_date(date)` | 格式化日期为字符串 |
-| `parse_date(date_str)` | 解析日期字符串 |
-| `days_between(date1, date2)` | 计算两日期间隔天数 |
-
----
-
-### 全局实例管理函数
-
-```python
-def initialize_time_manager(sim_start: str, sim_end: str, calendar_config: Optional[dict] = None) -> SimulationTimeManager
-def get_time_manager() -> SimulationTimeManager
-def reset_time_manager() -> None
-```
-
-**使用模式**：
-
-```python
-# 初始化（仿真启动时调用一次）
-initialize_time_manager("2024-01-01", "2024-03-31")
-
-# 在任意模块中获取实例
-tm = get_time_manager()
-dates = tm.get_simulation_dates()
+from src.utils.runtime_defaults import ...
+from src.utils.normalization_common import ...
+from src.utils.cpu_config import ...
 ```
 
 ---
 
-## 资源配置（`resource_config.py`）
+## 10. 当前依赖关系总览
 
-**文件路径**：`src/utils/resource_config.py`  
-**行数**：259 行
-
-### 模块概述
-
-动态计算系统资源配置，目标 CPU 利用率 **90%**。通过 `__getattr__` 支持常量名访问。
-
-### 核心函数
-
-| 函数 | 返回类型 | 说明 |
-|------|---------|------|
-| `get_optimal_threads()` | `int` | 最优线程数（`cpu_count * 0.9`，向上取整） |
-| `get_optimal_memory()` | `int` | 最优内存限制（字节），默认系统可用内存的 75% |
-| `get_duckdb_config()` | `dict` | DuckDB 运行时配置字典（threads、memory_limit 等） |
-| `get_resource_config()` | `dict` | 完整资源配置字典 |
-
-### `get_duckdb_config()` 返回结构
-
-```python
-{
-    "threads": int,           # 线程数
-    "memory_limit": str,      # 如 "8GB"
-    "enable_progress_bar": bool,
-    "temp_directory": str
-}
-```
-
-### 常量访问
-
-```python
-from src.utils.resource_config import OPTIMAL_THREADS, MEMORY_LIMIT_GB
-```
-
-通过模块级 `__getattr__` 实现，动态计算后缓存。
-
----
-
-## 优化配置（`optimization_config.py`）
-
-**文件路径**：`src/utils/optimization_config.py`  
-**行数**：304 行
-
-### `_OptimizationConfig` Dataclass
-
-全局优化策略开关。
-
-```python
-@dataclass
-class _OptimizationConfig:
-    USE_DUCKDB: bool = False          # 默认不使用 DuckDB（Pandas 在大多数场景更快）
-    USE_PARALLEL: bool = True
-    DUCKDB_MIN_ROWS: int = 10_000     # 触发 DuckDB 的最小行数阈值
-    ...
-```
-
-**单例访问**：`OptimizationConfig`（全局单例实例）
-
-**重要设计决定**：`USE_DUCKDB` 默认为 `False`。经测试，Pandas 在大多数仿真场景下比 DuckDB 快，仅在超大数据集（>10 万行）时 DuckDB 有优势。
-
-### 便捷函数
-
-```python
-def use_duckdb_for_merge(df_size: int) -> bool
-def use_duckdb_for_groupby(df_size: int) -> bool
-def use_duckdb_for_filter(df_size: int) -> bool
-```
-
-每个函数根据 `df_size` 和对应阈值返回是否应使用 DuckDB。
-
----
-
-### `PerformanceStats` 类
-
-单例性能统计收集器，记录各操作的耗时分布。
-
-```python
-class PerformanceStats:
-    def record(self, operation: str, duration: float) -> None
-    def get_summary(self) -> dict
-    def reset(self) -> None
-```
-
----
-
-## 验证管理（`validation_manager.py`）
-
-**文件路径**：`src/utils/validation_manager.py`  
-**行数**：335 行
-
-### `ValidationManager` 类
-
-管理仿真运行期间的验证消息，分三个级别。
-
-```python
-class ValidationManager:
-    def __init__(self, module_name: str)
-```
-
-**三级消息列表**：`errors`（错误）、`warnings`（警告）、`infos`（信息）
-
-#### 实例方法
-
-| 方法 | 说明 |
-|------|------|
-| `add_error(message, location)` | 添加错误（会影响仿真继续执行） |
-| `add_warning(message, location)` | 添加警告（记录但不停止） |
-| `add_info(message, location)` | 添加信息性日志 |
-| `has_errors()` → `bool` | 是否存在错误 |
-| `write_report(output_path)` | 将所有消息写入 `validation_report.txt` |
-| `validate_required_columns(df, required_cols, df_name)` | 检查 DataFrame 必要列是否存在 |
-| `validate_positive_numbers(df, cols, df_name)` | 检查列值是否为正数 |
-| `validate_date_ranges(df, date_col, start, end, df_name)` | 检查日期是否在范围内 |
-| `validate_safe_date_conversion(series, col_name)` | 安全日期类型转换，记录转换失败 |
-
----
-
-### `execute_with_validation(func)` 装饰器
-
-包装函数，自动捕获异常并记录为 ValidationManager 错误。
-
-```python
-@execute_with_validation
-def my_function(vm: ValidationManager, ...):
-    ...
-```
-
----
-
-### 辅助函数
-
-```python
-def is_critical_error(error_message: str) -> bool
-def get_default_result(result_type: str) -> Any
-```
-
----
-
-## 内存数据存储（`memory_data_store.py`）
-
-**文件路径**：`src/utils/memory_data_store.py`  
-**行数**：531 行
-
-### `MemoryDataStore` 类
-
-基于 **DuckDB 内存数据库**的模块间数据共享单例，线程安全。
-
-```python
-class MemoryDataStore:
-    # 单例，不直接实例化
-```
-
-#### 生命周期方法
-
-| 方法 | 说明 |
-|------|------|
-| `enable()` | 启用内存存储（创建 DuckDB 内存连接） |
-| `disable()` | 禁用并关闭连接，释放内存 |
-| `is_enabled()` → `bool` | 是否已启用 |
-
-#### 数据操作方法
-
-| 方法 | 参数 | 说明 |
-|------|------|------|
-| `write_module_output(module, sheet, date, df)` | `str, str, str, DataFrame` | 写入模块输出数据 |
-| `read_module_output(module, sheet, date)` | `str, str, str` | 读取模块输出数据 |
-| `query(sql)` | `str` | 执行任意 SQL 查询 |
-| `export_to_parquet(table_name, path)` | `str, str` | 导出为 Parquet 文件 |
-
-**表名格式**：`{module}_{sheet}_{date}`（如 `module4_ProductionPlan_20240315`）
-
-#### 模块级便捷函数
-
-```python
-# 写入
-def write_module4_output(sheet: str, date: str, df: pd.DataFrame) -> None
-def write_module3_output(sheet: str, date: str, df: pd.DataFrame) -> None
-def write_module5_output(sheet: str, date: str, df: pd.DataFrame) -> None
-def write_module6_output(sheet: str, date: str, df: pd.DataFrame) -> None
-def write_module1_output(sheet: str, date: str, df: pd.DataFrame) -> None
-
-# 读取（常用快捷方式）
-def read_module4_production_plan(date: str) -> pd.DataFrame
-def read_module3_net_demand(date: str) -> pd.DataFrame
-```
-
----
-
-## 仿真缓存（`simulation_cache.py`）
-
-**文件路径**：`src/utils/simulation_cache.py`  
-**行数**：364 行
-
-### `SimulationCache` 类
-
-预构建 5 种高频查找索引，避免仿真循环中重复构建。
-
-```python
-class SimulationCache:
-    def __init__(self, config: dict)
-```
-
-#### 预构建的 5 种缓存
-
-| 缓存名 | 键结构 | 说明 |
-|--------|--------|------|
-| `network_cache` | `(sending, receiving)` → 路线配置 | 物流网络路线信息 |
-| `ptf_lsk_cache` | `(material, location)` → PTF/LSK 值 | 计划时间围栏和安全库存键 |
-| `lead_time_cache` | `(material, sending, receiving)` → `int` | 交货提前期（天数） |
-| `deploy_config_cache` | `(material, location)` → 部署配置 | 部署规则配置 |
-| `safety_stock_cache` | `(material, location)` → `float` | 安全库存量 |
-
-#### 访问方法
-
-```python
-def get_network(sending: str, receiving: str) -> Optional[dict]
-def get_ptf_lsk(material: str, location: str) -> Optional[tuple]
-def get_lead_time(material: str, sending: str, receiving: str) -> Optional[int]
-def get_deploy_config(material: str, location: str) -> Optional[dict]
-def get_safety_stock(material: str, location: str) -> Optional[float]
-```
-
-#### 依赖
-
-从 `deployment_planning.cache_utils` 调用 `assign_location_layers()` 构建层级结构。
-
----
-
-### 全局实例管理函数
-
-```python
-def initialize_simulation_cache(config: dict) -> SimulationCache
-def get_simulation_cache() -> SimulationCache
-def clear_simulation_cache() -> None
-```
-
----
-
-## 库存平衡检查（`inventory_balance_checker.py`）
-
-**文件路径**：`src/utils/inventory_balance_checker.py`  
-**行数**：803 行
-
-### `InventoryBalanceChecker` 类
-
-验证仿真日度库存平衡公式的正确性。
-
-```python
-class InventoryBalanceChecker:
-    def __init__(self, tolerance: float = 0.01)
-```
-
-### 库存平衡公式
-
-```
-期末库存 = 期初库存 + 生产GR + 交付GR - 发货量 - delivery_plan出库量
-```
-
-**负库存处理**：负库存重置为 0（与 Orchestrator 行为一致）。
-
-#### 核心方法
-
-| 方法 | 说明 |
-|------|------|
-| `check_daily_balance(date, inventory_state, module_outputs)` | 检查单日库存平衡 |
-| `check_period_balance(start, end, daily_states)` | 检查期间累计平衡 |
-| `generate_balance_report(output_path)` | 生成平衡验证报告 |
-| `get_violations(tolerance)` | 获取超出容差的违规记录 |
-
-**调试代码**：`_output_detailed_comparison()` 方法中的详细对比输出全部已注释掉。
-
----
-
-## 性能工具（`performance.py`）
-
-**文件路径**：`src/utils/performance.py`  
-**行数**：293 行
-
-### 向量化规范化函数
-
-高性能批量规范化，比逐行应用快 10-100x。
-
-```python
-def normalize_material_vectorized(series: pd.Series) -> pd.Series
-def normalize_location_vectorized(series: pd.Series) -> pd.Series
-def normalize_identifiers_vectorized(df: pd.DataFrame) -> pd.DataFrame
-```
-
-**`normalize_identifiers_vectorized(df)`**：同时规范化 `material` 和 `location` 列，返回处理后的 DataFrame。
-
----
-
-### `ConfigCache` 类
-
-配置数据查询字典缓存，避免重复的 DataFrame 查找操作。
-
-```python
-class ConfigCache:
-    def __init__(self)
-    def build_index(self, df: pd.DataFrame, key_cols: List[str], value_cols: List[str]) -> None
-    def lookup(self, key: tuple) -> Optional[dict]
-    def clear(self) -> None
-```
-
-**全局实例**：`_global_config_cache`
-
----
-
-### 高效 DataFrame 操作
-
-```python
-def efficient_merge(
-    left: pd.DataFrame,
-    right: pd.DataFrame,
-    on: List[str],
-    how: str = "left"
-) -> pd.DataFrame
-```
-
-根据数据量自动选择最优 merge 策略（Pandas / DuckDB）。
-
-```python
-def batch_groupby_apply(
-    df: pd.DataFrame,
-    groupby_cols: List[str],
-    apply_func: Callable,
-    n_workers: int = 1
-) -> List[Any]
-```
-
-批量分组并行应用函数。
-
----
-
-## DuckDB SQL 包装（`duckdb_sql_wrapper.py`）
-
-**文件路径**：`src/utils/duckdb_sql_wrapper.py`  
-**行数**：603 行
-
-### `DuckDBSQL` 类
-
-提供静态方法，将常见 Pandas 操作替换为 DuckDB SQL 实现。
-
-#### 静态方法
-
-```python
-@staticmethod
-def merge(left: pd.DataFrame, right: pd.DataFrame, on: List[str], how: str = "inner") -> pd.DataFrame
-
-@staticmethod
-def groupby_agg(df: pd.DataFrame, groupby: List[str], aggs: dict) -> pd.DataFrame
-# aggs 格式: {"output_col": ("input_col", "agg_func")}
-
-@staticmethod
-def filter(df: pd.DataFrame, condition: str) -> pd.DataFrame
-# condition 为 SQL WHERE 子句字符串
-
-@staticmethod
-def batch_filter_by_keys(df: pd.DataFrame, key_cols: List[str], keys: List[tuple]) -> pd.DataFrame
-
-@staticmethod
-def sort(df: pd.DataFrame, by: List[str], ascending: bool = True) -> pd.DataFrame
-```
-
-### 自动引擎选择
-
-所有方法根据 `OptimizationConfig` 和数据量自动选择 Pandas 或 DuckDB 引擎。
-
-### 便捷函数
-
-```python
-def smart_merge(left, right, on, how="inner") -> pd.DataFrame
-def smart_groupby_agg(df, groupby, aggs) -> pd.DataFrame
-def smart_filter(df, condition) -> pd.DataFrame
-```
-
----
-
-## DuckDB 优化器（`duckdb_optimizer.py`）
-
-**文件路径**：`src/utils/duckdb_optimizer.py`  
-**行数**：489 行
-
-### `DuckDBOptimizer` 类
-
-专为 **M5（部署规划）** 和 **M3（MRP 规划）** 优化的 DuckDB 单例。
-
-```python
-class DuckDBOptimizer:
-    # 单例，通过 get_instance() 访问
-```
-
-#### 3 个批量索引构建方法
-
-| 方法 | 说明 | 用途 |
-|------|------|------|
-| `batch_build_sdl_index(df)` | 构建 SDL（Supply/Demand/Lead-time）索引 | M3/M5 |
-| `batch_build_ss_index(df)` | 构建安全库存索引 | M3/M5 |
-| `batch_build_order_index(df)` | 构建订单索引 | M3 |
-
-#### 批量净需求计算
-
-```python
-def batch_calculate_net_demand(
-    demand_df: pd.DataFrame,
-    inventory_df: pd.DataFrame,
-    ss_df: pd.DataFrame
-) -> pd.DataFrame
-```
-
-使用 DuckDB SQL 一次性计算所有物料地点组合的净需求，替代逐行循环。
-
-#### 一键构建
-
-```python
-def build_indexes_with_duckdb(sdl_df, ss_df, order_df) -> dict
-```
-
-同时构建全部 3 个索引，返回索引字典。
-
-**线程配置**：使用 `CPU_COUNT` 配置 DuckDB 线程数。
-
----
-
-## DuckDB 加速器（`duckdb_accelerator.py`）
-
-**文件路径**：`src/utils/duckdb_accelerator.py`  
-**行数**：275 行
-
-### `DuckDBAccelerator` 类
-
-通用 DuckDB 加速器单例，提供高频 DataFrame 操作的 DuckDB 优化版本。
-
-#### 5 个方法
-
-```python
-def batch_filter_by_material_location(
-    df: pd.DataFrame,
-    material: str,
-    location: str
-) -> pd.DataFrame
-```
-按物料和地点过滤。
-
-```python
-def aggregate_by_groups(
-    df: pd.DataFrame,
-    group_cols: List[str],
-    agg_specs: dict
-) -> pd.DataFrame
-```
-分组聚合。
-
-```python
-def filter_date_range(
-    df: pd.DataFrame,
-    date_col: str,
-    start_date: str,
-    end_date: str
-) -> pd.DataFrame
-```
-日期范围过滤。
-
-```python
-def build_material_location_index(df: pd.DataFrame) -> dict
-```
-构建物料-地点复合键索引。
-
-```python
-def batch_filter_all_pairs(
-    df: pd.DataFrame,
-    pairs: List[Tuple[str, str]]
-) -> pd.DataFrame
-```
-**单次 JOIN 获取所有（物料, 地点）组合的结果**，比逐对过滤快 10-100x。
-
----
-
-## CPU 配置（`cpu_config.py`）
-
-**文件路径**：`src/utils/cpu_config.py`  
-**行数**：99 行
-
-### 模块概述
-
-动态 CPU 配置，目标利用率 **90%**。通过 `__getattr__` 支持常量名直接访问。
-
-### 核心函数
-
-```python
-def get_cpu_count() -> int
-# 返回总 CPU 核心数（os.cpu_count()）
-
-def get_max_workers() -> int
-# 返回推荐最大工作进程数（ceil(cpu_count * 0.9)，最小 1）
-
-def get_optimal_workers(task_count: int) -> int
-# 根据任务数量返回最优工作数（min(task_count, max_workers)）
-```
-
-### 常量访问
-
-```python
-from src.utils.cpu_config import CPU_COUNT, MAX_WORKERS
-```
-
-通过模块级 `__getattr__` 实现，动态计算后缓存：
-
-| 常量 | 说明 |
-|------|------|
-| `CPU_COUNT` | 总 CPU 核心数 |
-| `MAX_WORKERS` | 推荐最大工作数（≈ CPU_COUNT * 0.9） |
-
----
-
-## 并行优化（`parallel_optimizer.py`）
-
-**文件路径**：`src/utils/parallel_optimizer.py`  
-**行数**：307 行
-
-### 核心函数
-
-#### `parallel_batch_process(func, items, use_threads, n_workers)` → `List[Any]`
-
-使用线程池或进程池批量并行处理。
-
-| 参数 | 类型 | 说明 |
-|------|------|------|
-| `func` | `Callable` | 处理函数 |
-| `items` | `List[Any]` | 待处理项列表 |
-| `use_threads` | `bool` | `True` 使用线程，`False` 使用进程 |
-| `n_workers` | `Optional[int]` | 工作数，默认 `MAX_WORKERS` |
-
-#### `batch_dataframe_filter(df, key_cols, filter_keys)` → `Dict[tuple, pd.DataFrame]`
-
-**一次性分组过滤**，按复合键分组后直接映射，比逐个过滤快 **10-100x**。
-
-| 参数 | 类型 | 说明 |
-|------|------|------|
-| `df` | `pd.DataFrame` | 源 DataFrame |
-| `key_cols` | `List[str]` | 复合键列名 |
-| `filter_keys` | `List[tuple]` | 目标键值元组列表 |
-
-**返回**：`{key_tuple: sub_dataframe}` 字典
-
-#### `vectorized_demand_aggregation(demand_df, group_cols, agg_col)` → `pd.DataFrame`
-
-向量化需求聚合，使用 NumPy 加速 groupby 操作。
-
----
-
-### `ParallelBatchProcessor` 类
-
-封装并行批处理器，支持任务队列管理。
-
-```python
-class ParallelBatchProcessor:
-    def __init__(self, n_workers: int = MAX_WORKERS, use_processes: bool = False)
-    def process(self, func: Callable, items: List[Any]) -> List[Any]
-    def process_dataframe_groups(self, df, groupby_cols, apply_func) -> List[Any]
-```
-
----
-
-### 预计算函数
-
-```python
-def precompute_all_indices(config_data: dict) -> dict
-```
-预构建所有常用查找索引，减少仿真循环中的重复构建。
-
-```python
-def warmup_cache(config_data: dict) -> None
-```
-预热缓存：构建索引 + 预加载常用数据。
-
----
-
-## 进程池执行器（`process_pool_executor.py`）
-
-**文件路径**：`src/utils/process_pool_executor.py`  
-**行数**：267 行
-
-### 模块概述
-
-使用 `ProcessPoolExecutor` 突破 GIL 限制，针对 **MRP（M3）** 和**部署规划（M5）**的批量计算优化。Windows 兼容（使用 `spawn` 方式创建子进程）。
-
-### `_worker_init()` → `None`
-
-工作进程初始化函数。在 Windows 下将子进程优先级设置为 `ABOVE_NORMAL_PRIORITY_CLASS`（`0x00008000`）。
-
-### 核心函数
-
-#### `batch_process_parallel(func, items, n_workers, batch_size)` → `List[Any]`
-
-批量并行处理，将任务分批提交到进程池。
-
-| 参数 | 类型 | 说明 |
-|------|------|------|
-| `func` | `Callable` | 处理函数（必须可序列化） |
-| `items` | `List[Any]` | 待处理项列表 |
-| `n_workers` | `Optional[int]` | 工作进程数 |
-| `batch_size` | `int` | 批处理大小，默认 50 |
-
-**失败处理**：单个任务失败时结果置 `None`，全体并行失败时自动回退到串行执行。
-
-#### `parallel_dataframe_groupby_apply(df, groupby_cols, apply_func, n_workers)` → `List[Any]`
-
-对 DataFrame 分组并行应用函数。`apply_func` 签名为 `(group_key, group_df) -> result`。
-
-#### `parallel_layer_process(layer_items, process_func, context_data, n_workers)` → `List[Any]`
-
-专为 M3/M5 层级处理优化。`layer_items` 为 `(material, location)` 元组列表，上下文数据自动序列化/反序列化。
-
----
-
-### 序列化辅助函数
-
-```python
-def _serialize_context(ctx: dict) -> dict
-# DataFrame → dict of records
-
-def _deserialize_context(ctx: dict) -> dict
-# dict of records → DataFrame
-```
-
----
-
-### `ProcessPoolManager` 类
-
-进程池管理器单例，用于复用进程池，避免重复创建开销。
-
-```python
-class ProcessPoolManager:
-    @classmethod
-    def get_instance(cls, max_workers: Optional[int] = None) -> 'ProcessPoolManager'
-    def start_pool(self) -> None
-    def shutdown_pool(self) -> None
-    def submit(self, func: Callable, *args, **kwargs) -> Future
-    def map(self, func: Callable, items: List[Any]) -> List[Any]
-```
-
-### 便捷函数
-
-```python
-def get_pool_manager() -> ProcessPoolManager
-def get_optimal_workers() -> int
-def print_cpu_info() -> None
-```
-
----
-
-## 高性能执行器（`high_perf_executor.py`）
-
-**文件路径**：`src/utils/high_perf_executor.py`  
-**行数**：336 行  
-**版本**：v3.1
-
-### 模块概述
-
-进程/线程混合并行执行器，支持 IO 密集型（线程池）和 CPU 密集型（进程池）两种模式。目标 90% CPU 利用率。
-
-### `HighPerformanceExecutor` 类
-
-```python
-class HighPerformanceExecutor:
-    def __init__(self, n_workers: Optional[int] = None)
-    
-    @classmethod
-    def get_instance(cls, n_workers: Optional[int] = None) -> 'HighPerformanceExecutor'
-```
-
-**兼容变量**：`OPTIMAL_WORKERS = MAX_WORKERS`（向后兼容别名）
-
-#### 池管理
-
-| 方法 | 说明 |
-|------|------|
-| `get_process_pool()` | 获取或创建进程池（使用 `spawn` 上下文，Windows 兼容） |
-| `get_thread_pool()` | 获取或创建线程池（线程数为 `n_workers * 4`，IO 密集型） |
-| `shutdown()` | 关闭所有池 |
-
-#### 执行方法
-
-```python
-def parallel_map_threads(func, items, timeout=None) -> List[Any]
-# 使用线程池并行映射（适合 IO 密集型，如文件读写、网络请求）
-
-def parallel_map_processes(func, items, timeout=None) -> List[Any]
-# 使用进程池并行映射（适合 CPU 密集型，如数值计算）
-# 注：items < 4 时自动退化为串行
-
-def batch_process(func, items, batch_size=100, use_processes=False) -> List[Any]
-# 分批并行处理，减少内存压力
-
-def chunked_dataframe_apply(df, func, n_chunks=None) -> pd.DataFrame
-# 将 DataFrame 分块并行处理，合并结果
-```
-
----
-
-### 模块级函数
-
-```python
-def get_executor() -> HighPerformanceExecutor
-# 获取全局执行器单例
-
-def parallel_process_layers(layer_data, process_func, ctx) -> List[Any]
-# 多层级处理：层间串行（存在依赖），层内并行
-# layer_data: {layer_num: [(material, location), ...]}
-
-def optimize_cpu_bound_loop(items, func, use_multiprocessing=False) -> List[Any]
-# 优化 CPU 密集型循环
-
-def get_optimal_workers() -> int
-def print_executor_stats() -> None
-```
-
----
-
-## 多进程执行器（`multiprocess_executor.py`）
-
-**文件路径**：`src/utils/multiprocess_executor.py`  
-**行数**：178 行
-
-### 模块概述
-
-最简化的多进程执行器，侧重简单易用。在模块加载时自动设置 `spawn` 启动方式（Windows 兼容）：
-
-```python
-if os.name == 'nt':
-    mp.set_start_method('spawn', force=True)
-```
-
-### `MultiProcessExecutor` 类
-
-```python
-class MultiProcessExecutor:
-    def __init__(self, max_workers: Optional[int] = None)
-    
-    @classmethod
-    def get_instance(cls, max_workers: Optional[int] = None) -> 'MultiProcessExecutor'
-    
-    def map_parallel(self, func: Callable, items: List[Any], chunk_size: int = 10) -> List[Any]
-```
-
-`map_parallel()` 特点：
-- 保持原始顺序（通过 `(idx, result)` 元组排序）
-- 失败时自动回退到串行执行
-
----
-
-### 模块级函数
-
-#### `parallel_dataframe_apply(df, func, axis=1, n_workers=None)` → `pd.DataFrame`
-
-并行应用函数到 DataFrame 的每行（`axis=1`）或每列（`axis=0`）。
-
-内部实现：
-1. 调用 `_split_dataframe(df, n_partitions)` 分割 DataFrame
-2. 并行执行 `_apply_to_chunk(chunk, func, axis)`
-3. `pd.concat()` 合并结果
-
-#### `get_optimal_workers(task_count, max_workers=None)` → `int`
-
-根据任务数量和系统配置返回最优工作进程数：`min(task_count, max_workers, CPU_COUNT)`
-
-#### `get_executor()` → `MultiProcessExecutor`
-
-获取全局多进程执行器单例。
-
----
-
-## 依赖关系总览
-
-```
+```text
 src/utils/
-│
-├── cpu_config.py               ← 基础配置（无依赖）
-├── resource_config.py          ← 基础配置（依赖 cpu_config）
-├── optimization_config.py      ← 基础配置（无外部依赖）
-│
-├── logger_config.py            ← 基础工具（无项目依赖）
-│
-├── validation_manager.py       ← 依赖 logger_config
-├── config_validator.py         ← 依赖 validation_manager, logger_config
-│
-├── time_manager.py             ← 依赖 logger_config
-│
-├── performance.py              ← 依赖 optimization_config, logger_config
-│
-├── duckdb_sql_wrapper.py       ← 依赖 optimization_config, resource_config
-├── duckdb_optimizer.py         ← 依赖 cpu_config, duckdb_sql_wrapper
-├── duckdb_accelerator.py       ← 依赖 duckdb_optimizer
-│
-├── parallel_optimizer.py       ← 依赖 cpu_config
-├── process_pool_executor.py    ← 依赖 cpu_config
-├── high_perf_executor.py       ← 依赖 cpu_config
-├── multiprocess_executor.py    ← 依赖 cpu_config
-│
-├── memory_data_store.py        ← 依赖 logger_config, duckdb_sql_wrapper
-├── simulation_cache.py         ← 依赖 logger_config, deployment_planning.cache_utils
-│
-└── inventory_balance_checker.py← 依赖 logger_config, validation_manager
+├── __init__.py
+├── defaults.py              ← 从 config/defaults.yaml 加载共享默认值
+├── normalization.py         ← 统一归一化单一真源
+├── date_helpers.py          ← 日期与前置期 helper
+├── resource_config.py       ← 统一资源配置入口（替代 cpu_config）
+├── logger_config.py         ← 日志配置
+├── config_validator.py      ← 配置校验
+├── validation_manager.py    ← 校验结果管理
+├── time_manager.py          ← 仿真时间管理
+├── simulation_cache.py      ← 运行缓存
+├── memory_data_store.py     ← 内存存储
+├── inventory_balance_checker.py ← 库存平衡检查
+├── duckdb_optimizer.py      ← DuckDB 优化
+└── duckdb_accelerator.py    ← DuckDB 加速
 ```
 
-### 三类并行执行器对比
+---
 
-| 文件 | 特点 | 适用场景 |
-|------|------|---------|
-| `parallel_optimizer.py` | 线程/进程自选，含向量化工具 | 通用并行，M3/M5 索引构建 |
-| `process_pool_executor.py` | 进程池，含上下文序列化 | M3/M5 层级节点批量处理 |
-| `high_perf_executor.py` | 进程+线程混合，v3.1 | IO/CPU 混合场景，层级处理 |
-| `multiprocess_executor.py` | 最简多进程 | 简单 CPU 密集型任务 |
+## 11. 维护建议
+
+1. 新的跨模块默认参数只放在 `config/defaults.yaml` + `src/utils/defaults.py`
+2. 新的归一化逻辑只改 `src/utils/normalization.py`
+3. 新的资源相关逻辑只改 `src/utils/resource_config.py`
+4. 不要重新引入兼容层文件，避免再次形成多份真源

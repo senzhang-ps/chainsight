@@ -4,11 +4,16 @@
 
 | 项 | 内容 |
 |---|---|
-| 文档版本 | v3.1 (合并版) |
-| 最后更新 | 2026-03-05 |
+| 文档版本 | v3.2 |
+| 最后更新 | 2026-04-10 |
+| 编写人 | 陈显跃 |
 | 适用代码库 | `src/`（本地版）+ `pgsql_db/`（数据库版） |
 | 目标读者 | 架构师、后端开发、DBA、算法工程师、测试工程师、交付团队 |
-| 关联文档 | `docs/00_文档编写指南和计划.md`、`README_CN.md` |
+
+> **第三阶段更新说明**（2026-04-10）：  
+> `main_integration.py`、`orchestrator.py`、`run.py` 等单体文件已删除，当前 Core 层全部由包目录实现。  
+> `module1.py`～`module6.py` 已删除，业务模块通过子包访问。  
+> 以下架构描述中提及这些旧文件名的地方，应理解为对应的包目录（如 `src/core/main_integration/`）。
 
 ---
 
@@ -31,23 +36,34 @@ ChainSight 本地版是一个面向供应链计划仿真的日度离散执行系
 
 ### 1.1 五层架构图
 
-```mermaid
-flowchart TB
-    CLI[CLI / run.py\n参数解析与入口] --> CORE[Layer 1: Core\n主流程编排与状态协调]
-    CORE --> MOD[Layer 2: Modules\nM1~M6 业务算法模块]
-    CORE --> SVC[Layer 3: Services\n性能、报告、日志]
-    MOD --> UTL[Layer 4: Utils\nDuckDB/缓存/校验/时间]
-    CORE --> STG[Layer 5: Storage\nExcel + 内存结构 + DuckDB]
-    MOD --> STG
-    SVC --> STG
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│                    五层架构（执行流自上而下）                           │
+└──────────────────────────────────────────────────────────────────────┘
+
+                       [ CLI / run.py ]
+                             │  参数解析与入口
+                             ↓
+                     [ Layer 1: Core ]        ← 主流程编排与状态协调
+                      │            │
+                      ↓            ↓
+               [ Layer 2:    [ Layer 3:
+                 Modules ]    Services ]
+               M1~M6 业务    性能/报告/日志
+                      │            │
+                      ↓            ↓
+                     [ Layer 4: Utils ]       ← DuckDB/缓存/校验/时间
+                             │
+                             ↓
+                     [ Layer 5: Storage ]     ← Excel + 内存结构 + DuckDB
 ```
 
 ### 1.2 各层职责说明
 
 | 层级 | 代表组件 | 核心职责 | 关键非功能特性 |
 |---|---|---|---|
-| CLI 层 | `src/core/run.py` | 参数解析、模式选择、入口调用 | 低耦合、无业务逻辑 |
-| Core 层 | `main_integration.py`、`orchestrator.py`、`parallel_executor.py` | 日度主循环、跨模块编排、全局状态维护 | 可恢复、可追踪、可重放 |
+| CLI 层 | `src/core/run/` 包（`run_main.py`） | 参数解析、模式选择、入口调用 | 低耦合、无业务逻辑 |
+| Core 层 | `src/core/main_integration/`、`src/core/orchestrator/`、`src/core/parallel_executor/` 三个包 | 日度主循环、跨模块编排、全局状态维护 | 可恢复、可追踪、可重放 |
 | Modules 层 | `src/modules/*` + 五大子包 | 需求/生产/MRP/调拨/物流等业务算法 | 可替换、可扩展、可独立测试 |
 | Services 层 | `performance_profiler.py`、`summary_report_generator.py`、`logger_config.py` | 诊断、报告、日志治理 | 透明观测、标准输出 |
 | Utils 层 | `memory_data_store.py`、`duckdb_accelerator.py`、`simulation_cache.py` 等 | 性能加速、校验、缓存、时间管理 | 高吞吐、低延迟、线程安全 |
@@ -65,9 +81,9 @@ flowchart TB
 
 ## 2. 第1层：Core 核心编排层
 
-Core 层是本地版架构的控制中枢，核心文件为 `src/core/main_integration.py`、`src/core/orchestrator.py`、`src/core/parallel_executor.py`。
+Core 层是本地版架构的控制中枢，核心实现位于三个包：`src/core/main_integration/`、`src/core/orchestrator/`、`src/core/parallel_executor/`。
 
-### 2.1 `main_integration.py`：主流程编排
+### 2.1 `main_integration/` 包：主流程编排
 
 `run_integrated_simulation()` 是全局入口，承担以下职责：
 
@@ -108,31 +124,26 @@ def run_daily_cycle(orchestrator, current_date):
 
 ### 2.2 核心执行时序
 
-```mermaid
-sequenceDiagram
-    participant Core as main_integration
-    participant Orc as Orchestrator
-    participant M1 as Module1
-    participant M4 as Module4
-    participant M5 as Module5
-    participant M6 as Module6
-    participant M3 as Module3
+```
+┌──────────────────────────────────────────────────────────────────────────────┐
+│  核心执行时序  参与方: Core(main_integration) · Orc(Orchestrator) · M1~M6   │
+└──────────────────────────────────────────────────────────────────────────────┘
 
-    Core->>Orc: save_beginning_inventory()
-    Core->>Orc: _process_delivery_arrivals()
-    Core->>M1: run_daily_order_generation()
-    M1-->>Orc: process_module1_shipments()
-    Core->>M4: run_daily_production_planning()
-    M4-->>Orc: process_module4_production()
-    Core->>M5: main()
-    M5-->>Orc: process_module5_deployment()
-    Core->>M6: run_daily_physical_flow()
-    M6-->>Orc: process_module6_delivery()
-    Core->>M3: run_integrated_mode()
-    Core->>Orc: save_daily_state()
+Core →  Orc    save_beginning_inventory()
+Core →  Orc    _process_delivery_arrivals()
+Core →  M1     run_daily_order_generation()
+  M1 →  Orc    process_module1_shipments()
+Core →  M4     run_daily_production_planning()
+  M4 →  Orc    process_module4_production()
+Core →  M5     main()
+  M5 →  Orc    process_module5_deployment()
+Core →  M6     run_daily_physical_flow()
+  M6 →  Orc    process_module6_delivery()
+Core →  M3     run_integrated_mode()
+Core →  Orc    save_daily_state()
 ```
 
-### 2.3 `orchestrator.py`：全局状态控制器
+### 2.3 `orchestrator/` 包：全局状态控制器
 
 `Orchestrator` 采用“中央状态管理器”模型，维护库存、在途、开放调拨、历史流水、按日索引等关键对象。
 
@@ -167,7 +178,7 @@ class DeploymentUID:
         )
 ```
 
-### 2.4 `parallel_executor.py`：并行执行机制
+### 2.4 `parallel_executor/` 包：并行执行机制
 
 并行执行器封装了 `ThreadPoolExecutor`，用于承载“可并发且无共享写冲突”的任务。运行时可通过 `CHAINSIGHT_PARALLEL` 开关控制是否启用并发。
 
@@ -221,14 +232,8 @@ Core 层状态管理遵循四个原则：
 
 ### 3.2 模块依赖关系
 
-```mermaid
-flowchart LR
-    I[初始库存/配置] --> M1[M1 需求发货]
-    M1 --> M4[M4 生产排程]
-    M4 --> M5[M5 调拨规划]
-    M5 --> M6[M6 物流执行]
-    M6 --> M3[M3 MRP补货]
-    M3 --> N[次日库存与需求状态]
+```
+[初始库存/配置] → [M1 需求发货] → [M4 生产排程] → [M5 调拨规划] → [M6 物流执行] → [M3 MRP补货] → [次日库存与需求状态]
 ```
 
 ### 3.3 数据输入输出矩阵
@@ -404,17 +409,20 @@ DuckDB 在本地版不作为长期主库，而作为高性能计算引擎：
 
 ### 7.1 端到端数据流图
 
-```mermaid
-flowchart TB
-    Cfg[Excel配置] --> Core[Core读取配置并初始化状态]
-    Core --> M1[M1需求/发货]
-    M1 --> M4[M4生产]
-    M4 --> M5[M5调拨]
-    M5 --> M6[M6物流]
-    M6 --> M3[M3MRP]
-    M3 --> State[Orchestrator状态更新]
-    State --> Snap[CSV日快照]
-    State --> Report[汇总报告生成]
+```
+[Excel 配置]
+      │
+      ↓
+[Core 读取配置并初始化状态]
+      │
+      ↓  ← 每日循环
+[M1 需求/发货] → [M4 生产] → [M5 调拨] → [M6 物流] → [M3 MRP]
+                                                           │
+                                           [Orchestrator 状态更新]
+                                                   │
+                                      ┌────────────┴────────────┐
+                                      ↓                         ↓
+                               [CSV 日快照]             [汇总报告生成]
 ```
 
 ### 7.2 日度循环数据阶段
@@ -466,13 +474,14 @@ flowchart TB
 
 ### 8.3 快照与恢复机制
 
-```mermaid
-flowchart LR
-    EndDay[日终状态] --> Save[save_daily_state]
-    Save --> Files[10类CSV快照]
-    Files --> Detect[detect_last_complete_date]
-    Detect --> Restore[restore_orchestrator_state]
-    Restore --> Resume[从 next_date 继续仿真]
+```
+[日终状态] → [save_daily_state] → [10类CSV快照]
+                                          │
+                              [detect_last_complete_date]
+                                          │
+                              [restore_orchestrator_state]
+                                          │
+                              [从 next_date 继续仿真]
 ```
 
 ### 8.4 日快照文件清单
@@ -515,15 +524,16 @@ DuckDB 以内存执行列式算子，对过滤、聚合、排序等分析型操�
 
 ### 9.3 并行执行设计
 
-```mermaid
-flowchart TB
-    Split[按物料/节点分桶] --> Pool[ThreadPoolExecutor]
-    Pool --> T1[任务1]
-    Pool --> T2[任务2]
-    Pool --> T3[任务3]
-    T1 --> Merge[结果合并与校验]
-    T2 --> Merge
-    T3 --> Merge
+```
+[按物料/节点分桶] → [ThreadPoolExecutor]
+                           │
+              ┌────────────┼────────────┐
+              ↓            ↓            ↓
+           [任务1]      [任务2]      [任务3]
+              │            │            │
+              └────────────┼────────────┘
+                           ↓
+                  [结果合并与校验]
 ```
 
 并行任务必须满足两个条件：
@@ -550,8 +560,8 @@ flowchart TB
 推荐采用“模块内实现 + `src/modules` 门面 + Core 接口接入”三步法：
 
 1. 在 `src/modules/<new_domain>/` 实现算法与数据结构；
-2. 在 `src/modules/moduleX.py` 提供稳定入口函数；
-3. 在 `main_integration.py` 新增执行点与 `orchestrator.process_moduleX_*()` 写回逻辑。
+2. 在对应子包（如 `src/modules/demand_planning/`、`production_planning/` 等）提供稳定入口函数；
+3. 在 `main_integration/simulation_file.py` 新增执行点与 `orchestrator.process_moduleX_*()` 写回逻辑。
 
 **代码示例 5：新增模块门面接口（示意）**
 
@@ -592,14 +602,17 @@ def run_daily_new_module(
 
 ## 附录 A：关键文件索引
 
-| 层级 | 文件 |
+| 层级 | 路径 |
 |---|---|
-| Core | `src/core/main_integration.py` |
-| Core | `src/core/orchestrator.py` |
-| Core | `src/core/parallel_executor.py` |
-| Modules | `src/modules/module1.py`、`src/modules/module3.py`、`src/modules/module4.py`、`src/modules/module5.py`、`src/modules/module6.py` |
+| Core | `src/core/main_integration/`（13 个文件，入口：`simulation_file.py`、`simulation_db.py`） |
+| Core | `src/core/orchestrator/`（9 个文件，入口：`orchestrator_main.py`） |
+| Core | `src/core/parallel_executor/`（4 个文件，入口：`parallel_executor_main.py`） |
+| Core | `src/core/run/`（7 个文件，入口：`run_main.py`） |
+| Modules | `src/modules/demand_planning/`、`mrp_planning/`、`production_planning/`、`deployment_planning/`、`logistics_execution/` 五个子包 |
 | Services | `src/services/performance_profiler.py`、`src/services/summary_report_generator.py` |
-| Utils | `src/utils/memory_data_store.py`、`src/utils/duckdb_accelerator.py`、`src/utils/simulation_cache.py`、`src/utils/config_validator.py`、`src/utils/time_manager.py` |
+| Utils | `src/utils/memory_data_store.py`、`src/utils/duckdb_accelerator.py`、`src/utils/simulation_cache.py`、`src/utils/config_validator.py`、`src/utils/time_manager.py`、`src/utils/defaults.py`、`src/utils/normalization.py` |
+| Config | `config/defaults.yaml`（YAML 参数默认值） |
+| Tools | `tools/regression_compare.py`（输出回归对比工具） |
 
 ## 附录 B：术语
 
@@ -621,7 +634,7 @@ def run_daily_new_module(
 |---|---|
 | 文档版本 | v1.0 |
 | 最后更新 | 2026-03-05 |
-| 适用范围 | `src/core/run.py --use-db` + `pgsql_db/` |
+| 适用范围 | `python -m src.core.run --use-db` + `pgsql_db/` |
 | 目标读者 | 架构师、后端工程师、DBA、算法工程师、运维团队 |
 | 相关文档 | `docs/ARCHITECTURE.md`（本地版）、`docs/00_文档编写指南和计划.md` |
 
@@ -637,18 +650,22 @@ ChainSight 数据库版是在本地版仿真引擎基础上的“企业级数据
 
 ### 1.1 PostgreSQL + DuckDB 混合架构图
 
-```mermaid
-flowchart TB
-    CLI[run.py --use-db] --> INIT[DatabaseInitializer]
-    INIT --> PG[(PostgreSQL\n配置+输出+历史)]
-    PG --> LOAD[_load_config_from_database]
-    LOAD --> SIM[run_integrated_simulation_from_dict\n标准仿真引擎]
-    SIM --> WRITER[ModuleDataWriter]
-    WRITER --> PG
-
-    PG --> DQ[DuckDB 计算层]
-    DQ --> OPT[optimized_processor / high_performance_engine]
-    OPT --> PG
+```
+[run.py --use-db] → [DatabaseInitializer] → [(PostgreSQL 配置+输出+历史)]
+                                                         │
+                                         [_load_config_from_database]
+                                                         │
+                                 [run_integrated_simulation_from_dict 标准仿真引擎]
+                                                         │
+                                              [ModuleDataWriter]
+                                                         │
+                                         [(PostgreSQL 配置+输出+历史)]
+                                                         │
+                                              [DuckDB 计算层]
+                                                         │
+                                 [optimized_processor / high_performance_engine]
+                                                         │
+                                         [(PostgreSQL 配置+输出+历史)]
 ```
 
 ### 1.2 与本地版的核心差异
@@ -821,23 +838,20 @@ with conn.transaction():
 
 ### 4.2 运行时主同步链路
 
-```mermaid
-sequenceDiagram
-    participant Run as run.py
-    participant DBI as DatabaseInitializer
-    participant PG as PostgreSQL
-    participant SIM as run_integrated_simulation_from_dict
-    participant W as ModuleDataWriter
+```
+┌────────────────────────────────────────────────────────────────────────────────────────────┐
+│  运行时主同步链路  参与方: run.py · DatabaseInitializer · PostgreSQL · SIM · ModuleDataWriter │
+└────────────────────────────────────────────────────────────────────────────────────────────┘
 
-    Run->>DBI: initialize(config_name)
-    DBI->>PG: 检测/创建数据库、配置导入
-    Run->>PG: _load_config_from_database()
-    Run->>SIM: 传入config_dict执行仿真
-    SIM-->>Run: all_results + output_directory
-    Run->>W: write_module_results_from_dict(all_results)
-    Run->>W: write_orchestrator_data(orchestrator_dir)
-    Run->>W: generate_summary_reports_from_db(run_id)
-    W->>PG: 模块/状态/汇总结果持久化
+Run →  DBI   initialize(config_name)
+DBI →  PG    检测/创建数据库、配置导入
+Run →  PG    _load_config_from_database()
+Run →  SIM   传入 config_dict 执行仿真
+SIM ──> Run  返回: all_results + output_directory
+Run →  W     write_module_results_from_dict(all_results)
+Run →  W     write_orchestrator_data(orchestrator_dir)
+Run →  W     generate_summary_reports_from_db(run_id)
+  W →  PG    模块/状态/汇总结果持久化
 ```
 
 ### 4.3 内存结果同步：DataFrame -> PostgreSQL
@@ -885,17 +899,17 @@ sequenceDiagram
 
 ### 5.2 高性能计算流程
 
-```mermaid
-flowchart LR
-    D[模块输入DataFrame] --> IDX[预建索引/缓存]
-    IDX --> SQL[DuckDB向量化SQL]
-    SQL --> INC[增量计算判定]
-    INC --> PAR[线程池/进程池并行]
-    PAR --> R[计算结果]
-    R --> FB{异常?}
-    FB -- 否 --> O[输出结果]
-    FB -- 是 --> P[Pandas回退执行]
-    P --> O
+```
+[模块输入DataFrame] → [预建索引/缓存] → [DuckDB向量化SQL] → [增量计算判定] → [线程池/进程池并行]
+                                                                                         │
+                                                                                  [计算结果]
+                                                                                         │
+                                                                              ┌──── <异常?> ────┐
+                                                                              │否               │是
+                                                                              ↓                 ↓
+                                                                         [输出结果]    [Pandas 回退执行]
+                                                                                                │
+                                                                                           [输出结果]
 ```
 
 ### 5.3 核心优化手段
@@ -989,15 +1003,12 @@ def calc_net_demand(df, _use_duckdb=False):
 
 ### 7.4 诊断链路图
 
-```mermaid
-flowchart TB
-    RUN[仿真运行] --> LOG[日志采集]
-    RUN --> METRIC[PerformanceDashboard]
-    RUN --> DBCHK[DB连接/表信息检查]
-    METRIC --> ALERT[阈值告警]
-    LOG --> RCA[根因分析]
-    DBCHK --> RCA
-    ALERT --> RCA
+```
+[仿真运行]
+    │
+    ├─→ [日志采集] ──────────────────────────────────→ [根因分析]
+    ├─→ [PerformanceDashboard] → [阈值告警] ─────────→ [根因分析]
+    └─→ [DB连接/表信息检查] ──────────────────────────→ [根因分析]
 ```
 
 ### 7.5 生产环境建议
@@ -1020,14 +1031,15 @@ flowchart TB
 
 ### 8.2 高可用参考架构
 
-```mermaid
-flowchart LR
-    APP[ChainSight DB Mode] --> POOL[pgBouncer/连接池]
-    POOL --> PRI[(PostgreSQL Primary)]
-    PRI --> REP1[(Replica 1)]
-    PRI --> REP2[(Replica 2)]
-    REP1 --> BI[BI/报表查询]
-    REP2 --> AUDIT[审计与回放]
+```
+[ChainSight DB Mode] → [pgBouncer/连接池] → [(PostgreSQL Primary)]
+                                                      │
+                                         ┌────────────┴────────────┐
+                                         ↓                         ↓
+                                  [(Replica 1)]            [(Replica 2)]
+                                         │                         │
+                                         ↓                         ↓
+                                  [BI/报表查询]             [审计与回放]
 ```
 
 ### 8.3 落地建议
@@ -1044,7 +1056,7 @@ flowchart LR
 
 | 目录 | 文件 |
 |---|---|
-| 入口编排 | `src/core/run.py` |
+| 入口编排 | `src/core/run/`（包入口：`run_main.py`） |
 | DB连接与写入 | `pgsql_db/db_connection.py`、`pgsql_db/module_data_writer.py` |
 | 初始化与导入 | `pgsql_db/db_initializer.py`、`pgsql_db/excel_importer.py` |
 | 映射与模式 | `pgsql_db/table_mapping.py`、`pgsql_db/table_schemas.py` |
@@ -1092,20 +1104,23 @@ flowchart LR
 
 ### 本地版文件索引
 
-| 层级 | 文件 |
+| 层级 | 路径 |
 |---|---|
-| Core | `src/core/main_integration.py` |
-| Core | `src/core/orchestrator.py` |
-| Core | `src/core/parallel_executor.py` |
-| Modules | `src/modules/module1.py`、`src/modules/module3.py`、`src/modules/module4.py`、`src/modules/module5.py`、`src/modules/module6.py` |
+| Core | `src/core/main_integration/`（13 个文件，入口：`simulation_file.py`、`simulation_db.py`） |
+| Core | `src/core/orchestrator/`（9 个文件，入口：`orchestrator_main.py`） |
+| Core | `src/core/parallel_executor/`（4 个文件，入口：`parallel_executor_main.py`） |
+| Core | `src/core/run/`（7 个文件，入口：`run_main.py`） |
+| Modules | `src/modules/demand_planning/`、`mrp_planning/`、`production_planning/`、`deployment_planning/`、`logistics_execution/` 五个子包 |
 | Services | `src/services/performance_profiler.py`、`src/services/summary_report_generator.py` |
-| Utils | `src/utils/memory_data_store.py`、`src/utils/duckdb_accelerator.py`、`src/utils/simulation_cache.py`、`src/utils/config_validator.py`、`src/utils/time_manager.py` |
+| Utils | `src/utils/memory_data_store.py`、`src/utils/duckdb_accelerator.py`、`src/utils/simulation_cache.py`、`src/utils/config_validator.py`、`src/utils/time_manager.py`、`src/utils/defaults.py`、`src/utils/normalization.py` |
+| Config | `config/defaults.yaml`（YAML 参数默认值） |
+| Tools | `tools/regression_compare.py`（输出回归对比工具） |
 
 ### 数据库版文件索引
 
 | 目录 | 文件 |
 |---|---|
-| 入口编排 | `src/core/run.py` |
+| 入口编排 | `src/core/run/`（包入口：`run_main.py`） |
 | DB连接与写入 | `pgsql_db/db_connection.py`、`pgsql_db/module_data_writer.py` |
 | 初始化与导入 | `pgsql_db/db_initializer.py`、`pgsql_db/excel_importer.py` |
 | 映射与模式 | `pgsql_db/table_mapping.py`、`pgsql_db/table_schemas.py` |

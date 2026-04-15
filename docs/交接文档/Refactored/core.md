@@ -4,18 +4,25 @@
 
 | 项 | 内容 |
 |---|---|
-| 文档版本 | v1.1 |
-| 最后更新 | 2026-03-10 |
+| 文档版本 | v1.2 |
+| 最后更新 | 2026-04-10 |
+| 编写人 | 陈显跃 |
 | 适用范围 | `src/core/` 目录 |
 | 目标读者 | 架构师、后端开发、测试工程师 |
+
+> **第三阶段更新说明**（2026-04-10）：  
+> `src/core/main_integration.py`、`src/core/orchestrator.py`、`src/core/run.py` 等单体文件已删除。  
+> 当前权威实现均在对应的 **包目录** 中：`src/core/run/`、`src/core/main_integration/`、`src/core/orchestrator/`、`src/core/parallel_executor/`。  
+> 以下内容描述的是各包的整体职责和内部文件，不再指向已删除的单体文件。
 
 ---
 
 ## 目录
 
-1. [main_integration.py](#1-main_integrationpy) - 主集成执行脚本
-2. [orchestrator.py](#2-orchestratorpy) - 编排器
-3. [parallel_executor.py](#3-parallel_executorpy) - 并行执行框架
+1. [main_integration 包](#1-main_integration-包) — 主集成执行（13 个文件）
+2. [orchestrator 包](#2-orchestrator-包) — 编排器（9 个文件）
+3. [parallel_executor 包](#3-parallel_executor-包) — 并行执行框架（4 个文件）
+4. [run 包](#4-run-包) — 运行分发（7 个文件）
 
 ## 维护说明补充
 
@@ -28,11 +35,29 @@
 
 ---
 
-## 1. main_integration.py
+## 1. main_integration 包
 
 ### 1.1 模块概述
 
-**文件路径**: `src/core/main_integration.py`
+**包路径**: `src/core/main_integration/`（原 `src/core/main_integration.py` 单体文件已拆分为 13 个文件）
+
+**包内文件一览**（13 个）：
+
+| 文件 | 职责 |
+|---|---|
+| `__init__.py` | 公共导出：`run_integrated_simulation`、`run_module4_integrated` 等核心入口 |
+| `cli.py` | 命令行参数解析与调用入口 |
+| `config_loader.py` | Excel 配置加载与校验、标识符标准化 |
+| `db_helpers.py` | 数据库模式辅助函数 |
+| `memory_store.py` | 内存数据存取辅助 |
+| `normalize.py` | `_normalize_location/material/sending/receiving/identifiers` 标识符规范化 |
+| `production_integration.py` | `run_module4_integrated` 核心实现（集成模式调用 M4） |
+| `production_runner.py` | Module4 生产运行辅助（原 `module4_runner.py`） |
+| `resume.py` | 断点续跑：`detect_last_complete_date`、`restore_orchestrator_state`、`check_resume_capability` |
+| `runtime_state.py` | 运行时状态维护 |
+| `seed.py` | `load_global_seed` 统一读取随机种子 |
+| `simulation_db.py` | 数据库模式仿真主流程 |
+| `simulation_file.py` | 本地文件模式仿真主流程（`run_integrated_simulation`） |
 
 **主要职责**:
 - 作为供应链仿真的主集成执行脚本
@@ -418,34 +443,69 @@ def load_global_seed(config_dict: dict) -> int
 
 ### 1.3 数据流图
 
-```mermaid
-flowchart TB
-    START[启动仿真] --> VALID[配置校验]
-    VALID --> DETECT[检测断点]
-    DETECT --> |完整?{存在完整日期}|
-    |完整? --> |否?{无完整日期}|
-    |否? --> INIT[初始化Orchestrator]
-    |是? --> RESTORE[恢复状态]
-    RESTORE --> LOOP[日度循环]
-    LOOP --> M1[M1需求与发货]
-    M1 --> M4[M4生产排程]
-    M4 --> M5[M5调拨规划]
-    M5 --> M6[M6物流执行]
-    M6 --> M3[M3 MRP补货]
-    M3 --> |未完成?{还有日期}|
-    |未完成? --> LOOP
-    |否? --> CHECK[库存平衡校验]
-    CHECK --> REPORT[生成汇总报告]
-    REPORT --> END[完成]
+```
+[启动仿真]
+     │
+     ↓
+[配置校验]
+     │
+     ↓
+[检测断点]
+     │
+     ├─ [存在完整日期] ──→ [恢复状态] ──────────┐
+     │                                          │
+     └─ [无完整日期] ───→ [初始化 Orchestrator] ─┘
+                                                │
+                                                ↓
+                                        ┌─ 日度循环 ─────────────────────┐
+                                        │ [M1 需求与发货]                │
+                                        │       │                        │
+                                        │       ↓                        │
+                                        │ [M4 生产排程]                  │
+                                        │       │                        │
+                                        │       ↓                        │
+                                        │ [M5 调拨规划]                  │
+                                        │       │                        │
+                                        │       ↓                        │
+                                        │ [M6 物流执行]                  │
+                                        │       │                        │
+                                        │       ↓                        │
+                                        │ [M3 MRP补货]                   │
+                                        │       │                        │
+                                        │  [还有日期?] ──是──→ 回到循环顶 │
+                                        └───────┼────────────────────────┘
+                                                │ 否
+                                                ↓
+                                       [库存平衡校验]
+                                                │
+                                                ↓
+                                       [生成汇总报告]
+                                                │
+                                                ↓
+                                            [完成]
 ```
 
 ---
 
-## 2. orchestrator.py
+## 2. orchestrator 包
 
 ### 2.1 模块概述
 
-**文件路径**: `src/core/orchestrator.py`
+**包路径**: `src/core/orchestrator/`（原 `src/core/orchestrator.py` 单体文件已拆分为 9 个文件）
+
+**包内文件一览**（9 个）：
+
+| 文件 | 职责 |
+|---|---|
+| `__init__.py` | 对外导出 `Orchestrator`、`DeploymentUID` 及其他公共符号 |
+| `models.py` | `DeploymentUID` 等数据类定义 |
+| `normalize.py` | Orchestrator 内部的标识符规范化辅助 |
+| `orchestrator_main.py` | `Orchestrator` 主类、初始化与公共 API |
+| `processors.py` | `process_module1_shipments/4_production/5_deployment/6_delivery` 等按模块的状态写入 |
+| `views.py` | `get_unrestricted_inventory_view` 等各类视图方法 |
+| `daily_ops.py` | 日级运算：到货处理、过期调拨清理、日初日末操作 |
+| `inventory_log.py` | 库存变动流水日志 |
+| `persistence.py` | 每日 CSV 快照与历史日志持久化（`save_daily_state` 等） |
 
 **主要职责**:
 - 供应链计划的中心状态管理与协调枢纽
@@ -737,21 +797,13 @@ capacity - unrestricted_inventory（仿真日开始时）
 **功能**: Execute daily processing in correct order: M1 → M4 → M5 → M6
 
 **执行顺序**:
-```mermaid
-sequenceDiagram
-    participant Orc as Orchestrator
-    participant M1 as Module1
-    participant M4 as Module4
-    participant M5 as Module5
-    participant M6 as Module6
-    participant M3 as Module3
-
-    Orc->>M1: 处理发货
-    Orc->>M4: 处理生产
-    Orc->>M5: 处理部署
-    Orc->>M6: 处理交付
-    Orc->>M3: MRP补货
-    Orc->>Orc: 保存每日状态
+```
+Orc → M1    处理发货
+Orc → M4    处理生产
+Orc → M5    处理部署
+Orc → M6    处理交付
+Orc → M3    MRP 补货
+Orc → Orc   保存每日状态
 ```
 
 **参数**:
@@ -872,11 +924,20 @@ daily_logs_{date_str}.csv
 
 ---
 
-## 3. parallel_executor.py
+## 3. parallel_executor 包
 
 ### 3.1 模块概述
 
-**文件路径**: `src/core/parallel_executor.py`
+**包路径**: `src/core/parallel_executor/`（原单体 `parallel_executor.py` 已拆分为 4 个文件）
+
+**包内文件一览**（4 个）：
+
+| 文件 | 职责 |
+|---|---|
+| `__init__.py` | 对外导出 `ParallelExecutor`、`ParallelTaskResult`、`run_parallel_modules` 等 |
+| `models.py` | `ParallelTaskResult` dataclass 定义 |
+| `parallel_executor_main.py` | `ParallelExecutor` 主类与核心执行逻辑 |
+| `convenience.py` | `run_parallel_modules` 等便捷封装函数 |
 
 **主要职责**:
 - 并行执行框架 - Phase 5 性能优化
@@ -1094,9 +1155,37 @@ m1_result, m4_result, m5_result, success = run_parallel_modules(
 
 ---
 
+## 4. run 包
+
+### 4.1 模块概述
+
+**包路径**: `src/core/run/`（原 `src/core/run.py` 单体文件已拆分为 7 个文件）
+
+**包内文件一览**（7 个）：
+
+| 文件 | 职责 |
+|---|---|
+| `__init__.py` | 对外导出 `main`、`run_local`、`run_db` 等入口 |
+| `run_main.py` | 总入口：参数解析、模式分发（本地/数据库） |
+| `local_writer.py` | 本地模式下的输出写入与工件归档 |
+| `db_config.py` | 数据库模式配置加载与连接 |
+| `db_runner.py` | 数据库模式运行流程（调用 `main_integration/simulation_db.py`） |
+| `output_dir.py` | 输出目录准备、清理与重建 |
+| `utils.py` | 公共工具函数 |
+
+### 4.2 核心职责
+
+1. **参数解析**：读取 CLI 参数或调用方传入的配置字典
+2. **模式分发**：根据 `--use-db` 选择本地模式或数据库模式
+3. **输出目录准备**：按日期/场景创建输出目录
+4. **统一入口**：供 `main.py` / CLI / 测试脚本调用
+
+---
+
 ## 附录：相关文档
 
 - [ARCHITECTURE.md](ARCHITECTURE.md) - 完整架构设计文档
 - [API.md](API.md) - API 接口文档
+- [CLEANUP_AND_IMPROVEMENTS.md](CLEANUP_AND_IMPROVEMENTS.md) - 第三阶段清理与改进记录
 
 ---

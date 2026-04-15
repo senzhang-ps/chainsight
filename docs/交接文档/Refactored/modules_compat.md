@@ -1,28 +1,38 @@
 # 模块兼容层迁移说明
 
-更新时间：2026-04-08
+**编写人**：陈显跃  
+**更新时间**：2026-04-15
 
 ## 1. 当前结论
 
-截至 2026-04-08，`src/modules` 与 `src/core` 下的大部分 legacy wrapper 文件已经被物理删除。  
-本文件不再描述“兼容层如何保留”，而是描述“旧导入应如何迁移”。
+截至 2026-04-10，`src/modules` 与 `src/core` 下的所有 legacy wrapper 文件已经被物理删除。  
+同时完成了**参数集中化**（YAML 配置）和**归一化统一**（单一真源）的改进。  
+本文件描述”旧导入应如何迁移”和”新增的配置管理方式”。
 
 ## 2. 已删除的旧文件
 
-### 2.1 `src/modules`
+### 2.1 模块级平铺入口（`src/modules`）
 
-- `src/modules/module1.py`
-- `src/modules/module3.py`
-- `src/modules/module4.py`
-- `src/modules/module5.py`
-- `src/modules/module6.py`
+删除理由：通过在 `src/modules/__init__.py` 中使用包别名导入，可保持向后兼容性。
 
-### 2.2 `src/core`
+| 文件 | 行数 | 内容 | 替代方案 |
+|---|---|---|---|
+| `src/modules/module1.py` | 320 | demand_planning 纯重导出 | `from src.modules import demand_planning as module1` |
+| `src/modules/module3.py` | 340 | mrp_planning 纯重导出 | `from src.modules import mrp_planning as module3` |
+| `src/modules/module4.py` | 350 | production_planning 纯重导出 | `from src.modules import production_planning as module4` |
+| `src/modules/module5.py` | 340 | deployment_planning 纯重导出 | `from src.modules import deployment_planning as module5` |
+| `src/modules/module6.py` | 340 | logistics_execution 纯重导出 | `from src.modules import logistics_execution as module6` |
 
-- `src/core/main_integration.py`
-- `src/core/orchestrator.py`
-- `src/core/parallel_executor.py`
-- `src/core/main_integration/module4_runner.py`
+### 2.2 核心层单体文件（`src/core`）
+
+删除理由：对应的包目录（package）已存在。Python 中 package 优先级高于同名 module，因此这些文件是死代码。
+
+| 文件 | 行数 | 原用途 | 当前权威位置 |
+|---|---|---|---|
+| `src/core/main_integration.py` | 1,500 | 文件/DB 主循环 | `src/core/main_integration/__init__.py` 与其他子文件 |
+| `src/core/orchestrator.py` | 1,400 | 仓库状态管理 | `src/core/orchestrator/__init__.py` 与其他子文件 |
+| `src/core/run.py` | 600 | 命令行分发 | `src/core/run/__init__.py` 与其他子文件 |
+| `src/core/main_integration/module4_runner.py` | 150 | M4 集成适配 | 重命名为 `production_runner.py` |
 
 ## 3. 新的权威入口
 
@@ -43,15 +53,15 @@
 | `src.core.main_integration` 旧单体文件 | `src.core.main_integration` 包 |
 | `src.core.orchestrator` 旧单体文件 | `src.core.orchestrator` 包 |
 | `src.core.parallel_executor` 旧单体文件 | `src.core.parallel_executor` 包 |
-| `src.core.main_integration.module4_runner` | `src.core.main_integration.production_integration` |
+| `src.core.main_integration.module4_runner` | `src.core.main_integration.production_runner` |
 
-### 3.3 共享工具层
+### 3.3 共享工具层【第三阶段更新】
 
-| 需求 | 当前推荐入口 |
-|---|---|
-| 共享小默认值 | `src.utils.runtime_defaults` |
-| 共享标识符标准化 helper | `src.utils.normalization_common` |
-| 共享窗口 / review day / lead time helper | `src.utils.date_helpers` |
+| 需求 | 当前推荐入口 | 备注 |
+|---|---|---|
+| 跨模块共享默认参数（MOQ、RV、PTF 等） | `src.utils.defaults` | **NEW（YAML 加载，替代了 runtime_defaults）** |
+| 统一标识符归一化 | `src.utils.normalization` | **NEW（单一真源，替代了 5 处重复）** |
+| 共享日期与前置期 helper | `src.utils.date_helpers` | 保留 |
 
 ## 4. 推荐迁移写法
 
@@ -68,8 +78,8 @@ from src.modules import logistics_execution as module6
 ### 4.2 M4 集成适配层
 
 ```python
-from src.core.main_integration.production_integration import run_module4_integrated
-from src.core.main_integration.production_integration import load_current_date_production_gr
+from src.core.main_integration.production_runner import run_module4_integrated
+from src.core.main_integration.production_runner import load_current_date_production_gr
 ```
 
 ### 4.3 主流程
@@ -80,11 +90,17 @@ from src.core.main_integration import run_integrated_simulation_from_dict
 from src.core.orchestrator import create_orchestrator
 ```
 
-### 4.4 共享 helper
+### 4.4 共享 helper【第三阶段更新】
 
 ```python
-from src.utils.runtime_defaults import DEFAULT_MOQ, DEFAULT_RV
-from src.utils.normalization_common import normalize_identifiers_vectorized
+# 跨模块共享参数（从 YAML 加载）
+from src.utils.defaults import DEFAULT_MOQ, DEFAULT_RV, DEFAULT_HORIZON
+from src.utils.defaults import DEFAULT_CHANGEOVER_TIME, DEFAULT_PUSH_LEVELS
+
+# 统一的标识符归一化
+from src.utils.normalization import normalize_identifiers, normalize_material
+
+# 日期与前置期 helper
 from src.utils.date_helpers import compute_planning_window
 ```
 
@@ -98,11 +114,16 @@ from src.utils.date_helpers import compute_planning_window
 
 ## 6. 接手人最容易踩的坑
 
-### 6.1 误以为 `from src.modules import module4` 仍然可用
+### 6.1 关于 `from src.modules import module4` 的现状
 
-现在不再可用，应改为：
+旧式导入 `from src.modules import module4` **仍然可用**，因为 `src/modules/__init__.py` 通过 `from . import production_planning as module4` 暴露了同名别名（`module1` ~ `module6` 全部如此）。  
+但请注意：`src/modules/module4.py` 文件本身已不存在；新代码请直接使用子包名：
 
 ```python
+# 推荐写法（直接使用子包）
+from src.modules import production_planning
+
+# 兼容写法（仍可工作，但仅用于旧代码迁移）
 from src.modules import production_planning as module4
 ```
 
@@ -111,7 +132,7 @@ from src.modules import production_planning as module4
 现在真正的位置是：
 
 ```python
-src/core/main_integration/production_integration.py
+src/core/main_integration/production_runner.py
 ```
 
 ### 6.3 把历史文档当成当前结构

@@ -4,8 +4,9 @@
 
 | 项 | 内容 |
 |---|---|
-| 文档版本 | v1.0 |
-| 最后更新 | 2026-03-05 |
+| 文档版本 | v1.1 |
+| 最后更新 | 2026-04-10 |
+| 编写人 | 陈显跃 |
 | 适用范围 | `src/modules/demand_planning/` 目录 |
 | 目标读者 | 算法工程师、测试工程师、业务分析师 |
 
@@ -45,18 +46,22 @@
 
 ## 2. 主要文件说明
 
+**`src/modules/demand_planning/` 当前共 12 个文件**（含 `__init__.py` 与 `__pycache__` 外）：
+
 | 文件名 | 主要类/函数 | 核心功能 |
 |---|---|---|
+| `__init__.py` | — | 公共 API 导出（`run_daily_order_generation` 等） |
 | `integration.py` | `run_daily_order_generation()` | 集成模式主入口 |
 | `forecast.py` | `expand_forecast_to_days_integer_split()` | 周度预测转日度预测 |
 | `shipment.py` | `simulate_shipment_for_single_day()` | 单日发货与缺货计算 |
 | `order.py` | `generate_daily_orders()` | 每日订单生成 |
-| `consume.py` | 消耗计算 |
-| `dps.py` | DPS 与供给选择应用 |
-| `normalization.py` | 标识符标准化 |
-| `io_utils.py` | 输入输出工具函数 |
-| `constants.py` | 常量定义 |
-| `consume_optimized.py` | 优化版消耗计算 |
+| `consume.py` | — | 消耗计算 |
+| `consume_optimized.py` | — | 优化版消耗计算 |
+| `dps.py` | `apply_dps` / `apply_supply_choice` | DPS 与供给选择应用（M2 策略内嵌） |
+| `normalization.py` | — | M1 内部标识符标准化（调用统一 `src/utils/normalization.py`） |
+| `io_utils.py` | — | 输入输出工具函数 |
+| `config.py` | — | M1 特定配置常量与加载 |
+| `constants.py` | — | 常量定义 |
 
 ---
 
@@ -105,15 +110,8 @@ def run_daily_order_generation(
 ```
 
 **处理流程**:
-```mermaid
-flowchart TB
-    START[开始] --> VALID[校验配置]
-    VALID --> PREPARE[准备预测]
-    PREPARE --> ORDERS[生成当日订单]
-    ORDERS --> SHIP[生成发货与缺货]
-    SHIP --> SUPPLY[生成供需日志]
-    SUPPLY --> SAVE[保存输出]
-    SAVE --> END[完成]
+```
+[开始] → [校验配置] → [准备预测] → [生成当日订单] → [生成发货与缺货] → [生成供需日志] → [保存输出] → [完成]
 ```
 
 **处理步骤**:
@@ -348,15 +346,16 @@ DEFAULT_MAX_ADVANCE_DAYS = 14  # 默认最大提前天数
 
 ## 5. 数据流
 
-```mermaid
-flowchart LR
-    FORECAST[周度需求预测] --> SPLIT[expand_forecast_to_days]
-    SPLIT --> INTEGRATION[run_daily_order_generation]
-    INTEGRATION --> ORDERS[订单生成]
-    ORDERS --> SHIPMENT[发货计算]
-    SHIPMENT --> ORCHESTRATOR[更新库存状态]
-    SHIPMENT --> LOG[供需日志]
-    LOG --> OUTPUT[保存输出]
+```
+[周度需求预测] → [expand_forecast_to_days] → [run_daily_order_generation]
+                                                         │
+                                               [订单生成] → [发货计算]
+                                                                │
+                                                   ┌───────────┴───────────┐
+                                                   ↓                       ↓
+                                          [更新库存状态]             [供需日志]
+                                                                           │
+                                                                    [保存输出]
 ```
 
 **数据输入**:

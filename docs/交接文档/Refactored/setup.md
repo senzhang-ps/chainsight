@@ -4,8 +4,9 @@
 
 | 项 | 内容 |
 |---|---|
-| 文档版本 | v1.0 |
-| 最后更新 | 2026-03-05 |
+| 文档版本 | v1.1 |
+| 最后更新 | 2026-04-10 |
+| 编写人 | 陈显跃 |
 | 适用范围 | 本地文件模式 + 数据库模式 |
 | 适用系统 | Windows / Linux / macOS |
 
@@ -280,7 +281,7 @@ cache.print_stats()
 
 ### 8.1 目录组织规则
 
-本地模式输出路径由 `src/core/run.py::_ensure_output_dir` 统一生成：
+本地模式输出路径由 `src/core/run/output_dir.py::_ensure_output_dir` 统一生成（原 `src/core/run.py` 单体已拆分为 `src/core/run/` 包）：
 
 `outputs/<config_stem>/run_YYYYMMDD_HHMMSS/`
 

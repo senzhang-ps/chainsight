@@ -1,43 +1,50 @@
 # ChainSight
 
-供应链规划仿真系统，支持文件模式与数据库模式两种运行方式。
+供应链规划与仿真系统，支持**文件模式**和**数据库模式**两种运行方式。
 
 **中文** | [English](README_EN.md)
 
-更新时间：2026-04-08
+**更新时间：2026-04-15**
 
 ## 当前状态
 
-当前仓库已经完成第三阶段结构收口，代码应按下面的现实理解：
+- 根入口仍是 `run.py`，实际执行入口是 `src.core.run.main`
+- 主集成流程位于 `src/core/main_integration/`
+- 共享状态管理位于 `src/core/orchestrator/`
+- 业务模块保留 5 个真实子包：
+  - `src/modules/demand_planning/`（Module 1）
+  - `src/modules/mrp_planning/`（Module 3）
+  - `src/modules/production_planning/`（Module 4）
+  - `src/modules/deployment_planning/`（Module 5）
+  - `src/modules/logistics_execution/`（Module 6）
+- 共享默认参数已集中到 `config/defaults.yaml` + `src/utils/defaults.py`
+- 共享标识符归一化已统一到 `src/utils/normalization.py`
+- 资源配置统一到 `src/utils/resource_config.py`
 
-- 根入口仍是 `run.py`
-- 运行分发的权威入口是 `src.core.run` 包
-  - `run.py` 中的 `from src.core.run import main` 实际会走 `src/core/run/__init__.py`
-  - 主要实现位于 `src/core/run/run_main.py`
-- 主集成流程位于 `src/core/main_integration/*`
-- 共享状态位于 `src/core/orchestrator/*`
-- 业务模块只保留五个真实子包
-  - `src/modules/demand_planning/`
-  - `src/modules/mrp_planning/`
-  - `src/modules/production_planning/`
-  - `src/modules/deployment_planning/`
-  - `src/modules/logistics_execution/`
-- 跨模块共享 helper 现在统一收口到 `src/utils/*`
-  - `src/utils/runtime_defaults.py` 是 M3 / M5 共享小默认值的单一真源
-  - `src/utils/normalization_common.py` 提供共享标识符标准化实现，各包 wrapper 继续保留历史语义
-  - `src/utils/date_helpers.py` 提供共享窗口、review day 与 lead time helper
+### 最近完成的清理
 
-以下旧 wrapper 已经从代码树中移除，不应再作为当前入口理解：
+以下兼容/重复文件已删除，不应再引用：
 
-- `src/modules/module1.py`
-- `src/modules/module3.py`
-- `src/modules/module4.py`
-- `src/modules/module5.py`
-- `src/modules/module6.py`
-- `src/core/main_integration.py`
-- `src/core/orchestrator.py`
-- `src/core/parallel_executor.py`
-- `src/core/main_integration/module4_runner.py`
+- `src/core/main_integration/production_integration.py`
+- `src/core/main_integration/normalize.py`
+- `src/utils/runtime_defaults.py`
+- `src/utils/normalization_common.py`
+- `src/utils/cpu_config.py`
+- `src/modules/demand_planning/normalization.py`
+
+Module 4 集成调用当前以 `src/core/main_integration/production_runner.py` 为准。
+
+### 当前验证结论
+
+- 在**相同日期范围**下，`Module1-6` 与 `orchestrator` 输出已和 Dev 基线对齐
+- 之前的 `ori_deployment_uid` 序号偏差已修复
+- `summary` 对比必须使用**相同运行天数**，否则行数天然不同
+
+## 环境要求
+
+- Python 3.12
+- 建议使用独立虚拟环境
+- 如需数据库模式，需可访问 PostgreSQL
 
 ## 快速开始
 
@@ -67,30 +74,42 @@ source .venv/bin/activate
 ### 2. 安装依赖
 
 ```bash
+python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 ```
 
 ### 3. 验证关键依赖
 
-```powershell
-python -c "import pandas, numpy, duckdb, openpyxl, psycopg; print('deps ok')"
+```bash
+python -c "import pandas, numpy, scipy, duckdb, openpyxl, yaml, tqdm, psycopg, psutil; print('deps ok')"
 ```
+
+## requirements.txt 说明
+
+`requirements.txt` 当前只保留**项目直接安装依赖**：
+
+- 数据处理：`pandas`、`numpy`、`scipy`、`duckdb`
+- Excel：`openpyxl`
+- 数据库：`psycopg[binary]`
+- 配置与运行：`PyYAML`、`tqdm`、`psutil`
+
+脚本型可选依赖（如 DOCX 生成、备用 Excel writer）默认不放入主安装清单；如有需要可按脚本再补装。
 
 ## 运行方式
 
 ### 文件模式
 
-文件模式下，`--config` 传 Excel 路径。
+文件模式下，`--config` 传 Excel 路径：
 
 ```powershell
 python run.py --config config/BC_S5.xlsx --start-date 2025-10-06 --end-date 2025-10-10
+python run.py --config config/OC_Paste_S1_20251224.xlsx --end-date 2025-12-16 --force-restart --non-interactive
 python run.py --config config/BC_S5.xlsx --end-date 2025-10-15 --resume
-python run.py --config config/BC_S5.xlsx --start-date 2025-10-06 --end-date 2025-10-10 --force-restart
 ```
 
 ### 数据库模式
 
-数据库模式下，`--config` 传配置名，不传 Excel 路径。
+数据库模式下，`--config` 传配置名，并加 `--use-db`：
 
 ```powershell
 python run.py --config BC_S5 --start-date 2025-10-06 --end-date 2025-10-06 --use-db
@@ -105,13 +124,13 @@ python run.py --config OC_Paste_S1_20251224 --start-date 2025-12-15 --end-date 2
 
 说明：
 
-- `OC_Paste_S1_20251224` 当前不需要引号，因为配置名没有空格。
-- 数据库模式会把业务结果写入 PostgreSQL，本地主要保留日志目录。
-- 如需同时写本地文件，可加 `--local`。
+- 文件模式会写本地输出目录
+- 数据库模式默认主要写数据库，并保留本地运行日志
+- 数据库模式如需同时落本地文件，可加 `--local`
 
 ## CLI 参数速览
 
-当前主参数以 `src/core/run/run_main.py` 为准：
+以 `src/core/run/run_main.py` 为准：
 
 | 参数 | 说明 |
 |---|---|
@@ -119,15 +138,15 @@ python run.py --config OC_Paste_S1_20251224 --start-date 2025-12-15 --end-date 2
 | `--start-date` | 首次运行必填，格式 `YYYY-MM-DD` |
 | `--end-date` | 必填，格式 `YYYY-MM-DD` |
 | `--resume` | 自动续跑 |
-| `--resume-from` | 指定已有运行目录继续 |
-| `--check-resume` | 只检查续跑状态，不执行仿真 |
+| `--resume-from` | 从指定运行目录继续 |
+| `--check-resume` | 只检查续跑状态 |
 | `--list-runs` | 列出已有运行目录 |
-| `--non-interactive` | 续跑时关闭交互选择 |
+| `--non-interactive` | 关闭交互式选择 |
 | `--force-restart` | 忽略续跑能力，强制重跑 |
 | `--use-db` | 启用数据库模式 |
 | `--db-host` `--db-port` `--db-name` `--db-user` `--db-password` | 数据库连接参数 |
-| `--run-suffix` | 给本地运行目录追加后缀 |
-| `--local` | 数据库模式下同时保留本地 Excel 输出 |
+| `--run-suffix` | 给运行目录追加后缀 |
+| `--local` | 数据库模式下同时保留本地文件输出 |
 
 ## 当前权威目录结构
 
@@ -136,6 +155,8 @@ chainsight/
 ├── run.py
 ├── requirements.txt
 ├── config/
+│   ├── defaults.yaml
+│   └── *.xlsx
 ├── docs/
 ├── outputs/
 ├── pgsql_db/
@@ -149,17 +170,15 @@ chainsight/
     │   │   ├── output_dir.py
     │   │   └── local_writer.py
     │   ├── main_integration/
+    │   │   ├── __init__.py
     │   │   ├── simulation_file.py
     │   │   ├── simulation_db.py
-    │   │   ├── production_integration.py
+    │   │   ├── production_runner.py
     │   │   ├── config_loader.py
     │   │   ├── resume.py
+    │   │   ├── seed.py
     │   │   └── db_helpers.py
     │   ├── orchestrator/
-    │   │   ├── orchestrator_main.py
-    │   │   ├── daily_ops.py
-    │   │   ├── processors.py
-    │   │   └── persistence.py
     │   └── parallel_executor/
     ├── modules/
     │   ├── demand_planning/
@@ -169,8 +188,9 @@ chainsight/
     │   └── logistics_execution/
     ├── services/
     └── utils/
-        ├── runtime_defaults.py
-        ├── normalization_common.py
+        ├── defaults.py
+        ├── normalization.py
+        ├── resource_config.py
         └── date_helpers.py
 ```
 
@@ -191,30 +211,39 @@ from src.modules import logistics_execution as module6
 ```python
 from src.core.main_integration import run_integrated_simulation
 from src.core.main_integration import run_integrated_simulation_from_dict
-from src.core.main_integration.production_integration import run_module4_integrated
+from src.core.main_integration.production_runner import run_module4_integrated
+from src.core.main_integration.production_runner import load_current_date_production_gr
 from src.core.orchestrator import create_orchestrator
 ```
 
-### 新代码推荐直接导入的共享工具
+### 共享配置与工具
 
 ```python
-from src.utils.runtime_defaults import DEFAULT_MOQ, DEFAULT_RV
-from src.utils.normalization_common import normalize_identifiers_vectorized
+from src.utils.defaults import (
+    RESOURCE_UTILIZATION,
+    M1_FUTURE_CUTOFF_DAYS,
+    M1_DEFAULT_MAX_ADVANCE_DAYS,
+    M6_MAX_WAIT_DAYS,
+    M6_RANDOM_SEED,
+)
+
+from src.utils.normalization import normalize_identifiers, normalize_material
+from src.utils.resource_config import get_optimal_threads, get_optimal_memory
 from src.utils.date_helpers import compute_planning_window, calculate_transport_lead_time
 ```
 
-不要再使用：
+### 不要再使用的旧导入
 
 ```python
-from src.modules import module1, module3, module4, module5, module6
-from src.core.main_integration.module4_runner import run_module4_integrated
+from src.core.main_integration.production_integration import ...  # 已删除
+from src.utils.runtime_defaults import ...  # 已删除
+from src.utils.normalization_common import ...  # 已删除
+from src.utils.cpu_config import ...  # 已删除
 ```
 
-## 运行输出与日志
+## 输出与日志
 
-### 文件模式
-
-输出通常位于：
+### 文件模式输出
 
 ```text
 outputs/<config_stem>/run_YYYYMMDD_HHMMSS/
@@ -230,128 +259,36 @@ outputs/<config_stem>/run_YYYYMMDD_HHMMSS/
 - `orchestrator/`
 - `summary/`
 
-### 数据库模式
-
-数据库模式的业务结果写入 PostgreSQL，本地主要保留日志目录：
+### 数据库模式输出
 
 ```text
 outputs/db_<config_name>_<timestamp>/
 ```
 
-常见文件：
+通常主要保留：
 
 - `simulation_log_<timestamp>.txt`
 
-默认数据库参数文件：
+## 当前推荐验证命令
 
-- `config/database.json`
-
-## 当前已验证的回归基线
-
-### 标准两天 DB 回归
+两天文件模式回归：
 
 ```powershell
-python run.py --config OC_Paste_S1_20251224 --start-date 2025-12-15 --end-date 2025-12-16 --use-db
+python run.py --config config/OC_Paste_S1_20251224.xlsx --end-date 2025-12-16 --force-restart --non-interactive
 ```
 
-当前已确认通过的第三阶段删壳后批次：
-
-- `db_OC_Paste_S1_20251224_20260408_112709`
-
-关键结果：
-
-- `module1_output_orderlog = 9214`
-- `module1_output_shipmentlog = 3094`
-- `module4_output_productionplan = 10`
-- `module5_output_deploymentplan = 60182`
-- `module6_output_deliveryplan = 39`
-- `summary_output_ordershipmentcutsummary = 3433`
-- `summary_output_fullcapacityexceed = 49`
-- `summary_output_fulltruckusage = 1`
-- checkpoint `orch_state_json = 186773 bytes`
-- checkpoint 中不再包含 `m1_previous_orders`
-- checkpoint 中 `delivery_gr / shipment_log / daily_logs = 0`
-
-### 当前确认未回归的修复点
-
-- PostgreSQL checkpoint `jsonb` 过大问题已修复
-- `m1_previous_orders` 不再写入 checkpoint
-- `delivery_gr` 去重不再依赖全历史大列表
-- M4 集成适配已经从 `module4_runner.py` 收口到 `production_integration.py`
-
-### 本轮零结果漂移共享工具收口
-
-这次新增的共享模块没有改变业务调用面，只是把重复逻辑收成单一真源：
-
-- 共享小默认值统一到 `src/utils/runtime_defaults.py`
-- 共享标识符标准化统一到 `src/utils/normalization_common.py`
-- 共享日期 / lead time helper 统一到 `src/utils/date_helpers.py`
-
-收口后已验证通过的运行包括：
-
-- `db_BC_S5_20260408_123150`
-- `db_OC_Paste_S1_20251224_20260408_125002`
-
-其中 `OC_Paste_S1_20251224` 两天 DB 回归结果保持不变：
-
-- `module1_output_orderlog = 9214`
-- `module1_output_shipmentlog = 3094`
-- `module4_output_productionplan = 10`
-- `module5_output_deploymentplan = 60182`
-- `module6_output_deliveryplan = 39`
-- checkpoint `orch_state_json = 186773 bytes`
-- checkpoint 中仍不包含 `m1_previous_orders`
-- checkpoint 中 `delivery_gr / shipment_log / daily_logs = 0`
-
-## 数据库与配置说明
-
-### 当前常用配置
-
-- `config/BC_S5.xlsx`
-- `config/BC_S9.xlsx`
-- `config/OC_Paste_S1_20251224.xlsx`
-
-### 数据库模式配置来源
-
-数据库模式会根据配置名查找数据库中的配置；若缺失，会按项目配置搜索规则从 Excel 导入。当前仓库已放置：
-
-- `config/OC_Paste_S1_20251224.xlsx`
-
-这样可以保证 `OC_Paste_S1_20251224` 在数据库模式下稳定识别。
+注意：如需做结果回归，请使用你自己的对比脚本或外部工具，并确保 `summary` 目录两边运行天数一致。
 
 ## 文档入口
 
-如果你是第一次接手，建议按这个顺序看：
-
-1. [docs/用户使用入口说明.md](docs/用户使用入口说明.md)
-2. [docs/QUICK_REFERENCE.md](docs/QUICK_REFERENCE.md)
-3. [docs/交接文档/Refactored/项目交接文档.md](docs/交接文档/Refactored/项目交接文档.md)
-4. [docs/OPTIMIZED_CODE_STRUCTURE_DIAGRAM.md](docs/OPTIMIZED_CODE_STRUCTURE_DIAGRAM.md)
-5. [docs/交接文档/Refactored/setup.md](docs/交接文档/Refactored/setup.md)
-6. [docs/交接文档/Refactored/API.md](docs/交接文档/Refactored/API.md)
-
-补充材料：
-
 - [docs/INDEX.md](docs/INDEX.md)
-- [docs/README_REFACTORING_MAP.md](docs/README_REFACTORING_MAP.md)
-- [docs/PERFORMANCE_OPTIMIZATION_REPORT.md](docs/PERFORMANCE_OPTIMIZATION_REPORT.md)
-- [docs/DUCKDB_OPTIMIZATION_GUIDE.md](docs/DUCKDB_OPTIMIZATION_GUIDE.md)
-- [docs/CYTHON_OPTIMIZATION_REPORT.md](docs/CYTHON_OPTIMIZATION_REPORT.md)
+- [docs/QUICK_REFERENCE.md](docs/QUICK_REFERENCE.md)
+- [docs/用户使用入口说明.md](docs/用户使用入口说明.md)
+- [docs/交接文档/Refactored/项目交接文档.md](docs/交接文档/Refactored/项目交接文档.md)
+- [docs/交接文档/Refactored/setup.md](docs/交接文档/Refactored/setup.md)
+- [docs/交接文档/Refactored/API.md](docs/交接文档/Refactored/API.md)
+- [docs/_archive/](docs/_archive/)
 
-## 常见问题
+---
 
-### 为什么 VSCode 里旧文件不见了，但 Git 里出现很多删除
-
-这是第三阶段收口的预期结果。旧 wrapper 是被物理删除的，不是“隐藏”。
-
-### 为什么数据库模式有时会报临时目录权限错误
-
-在受限环境中，`AppData\\Local\\Temp` 之类的临时目录可能不可写。这类失败通常不是业务逻辑错误，需要在可写环境重跑。
-
-### 为什么有些旧文档还在提 `module1.py`
-
-有一部分历史背景文档还没完全收口。当前应优先以本 README、`docs/INDEX.md`、`docs/用户使用入口说明.md` 和交接文档为准。
-
-### 项目里为什么同时存在 `src/core/run.py` 和 `src/core/run/`
-
-当前实际入口是 `src.core.run` 包，也就是 `src/core/run/__init__.py` 和 `src/core/run/run_main.py`。阅读和后续开发应优先看包目录实现。
+如需继续做回归、部署或数据库初始化，优先以本 README 和 `src/core/run/run_main.py` 为准。

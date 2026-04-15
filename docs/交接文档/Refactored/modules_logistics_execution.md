@@ -4,10 +4,17 @@
 
 | 项 | 内容 |
 |---|---|
-| 文档版本 | v1.0 |
-| 最后更新 | 2026-03-05 |
-| 适用范围 | `src/modules/logistics_execution/` 目录 |
+| 文档版本 | v1.2 |
+| 最后更新 | 2026-04-10 |
+| 编写人 | 陈显跃 |
+| 适用范围 | `src/modules/logistics_execution/` 目录（共 12 个文件） |
 | 目标读者 | 算法工程师、测试工程师、业务分析师 |
+
+> **第三阶段更新说明**（2026-04-10）：  
+> 本目录经过结构重构，将原 `module6.py` 中的物流执行入口迁移到子包内，新增了 `main.py`、`output_writer.py`、`simulation.py` 等拆分文件。
+>
+> **当前目录完整文件清单**（12 个）：  
+> `__init__.py`、`capacity_manager.py`、`config_loader.py`、`delivery_processor.py`、`duckdb_batch_calculator.py`、`expression_evaluator.py`、`inventory_manager.py`、`main.py`、`output_writer.py`、`simulation.py`、`validators.py`、`vehicle_packer.py`
 
 ---
 
@@ -126,7 +133,31 @@
 - 业务规则验证
 - 约束检查
 
-### 2.8 vehicle_packer.py - 车辆装载
+### 2.8 main.py - 模块入口
+
+**主要函数**:
+
+| 函数名 | 功能 |
+|---|---|
+| `run_daily_physical_flow()` | Module6 日度物流执行主入口，供 `src/core/main_integration/simulation_file.py` 按日调用 |
+
+**主要职责**:
+- 组织调拨发运、到货处理、库存扣减等环节
+- 提供与 `src/modules/__init__.py` 中 `module6` 别名兼容的公开入口
+
+### 2.9 output_writer.py - 输出写入
+
+**主要职责**:
+- 将 Module6 生成的交付计划 / 在途更新 / 车辆使用日志等写入 Excel/CSV
+- 保留与 Module1~M5 一致的输出目录与命名规范
+
+### 2.10 simulation.py - 仿真主流程
+
+**主要职责**:
+- 实现单日物流仿真循环（调拨出库 → 延迟采样 → 到货入库）
+- 与 `src/core/orchestrator/` 的状态对接
+
+### 2.11 vehicle_packer.py - 车辆装载
 
 **主要类**:
 - `VehiclePacker`
@@ -197,16 +228,8 @@
 
 ## 4. 依赖关系
 
-```mermaid
-flowchart TB
-    DEPLOY[调拨计划] --> PROC[交付处理]
-    PROC --> DELAY[延迟采样]
-    DELAY --> TRANSIT[在途跟踪]
-    TRANSIT --> ARRIVE[到货处理]
-    ARRIVE --> PACK[车辆装载]
-    PACK --> CAPACITY[容量管理]
-    CAPACITY --> UPDATE[库存更新]
-    UPDATE --> ORCHESTRATOR[状态同步]
+```
+[调拨计划] → [交付处理] → [延迟采样] → [在途跟踪] → [到货处理] → [车辆装载] → [容量管理] → [库存更新] → [状态同步]
 ```
 
 **模块依赖**:
@@ -216,7 +239,7 @@ flowchart TB
 - 可使用 DuckDB 进行批量计算优化
 
 **依赖的外部模块**:
-- `src/core/orchestrator.py` - 库存状态管理
+- `src/core/orchestrator/` - 库存状态管理（包）
 - `src/modules/deployment_planning/` - 调拨计划
 - `src/utils/duckdb_accelerator.py` - DuckDB 加速（可选）
 

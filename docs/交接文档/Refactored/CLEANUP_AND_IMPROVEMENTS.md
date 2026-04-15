@@ -1,6 +1,6 @@
 # 零漂移重构清理总结
 
-**更新时间：2026-04-10**
+**更新时间：2026-04-15**
 
 本文档详细说明第三阶段（Legacy Wrapper 清理与配置迁移）的完整执行清单，包括删除的文件、创建的文件、改进的地方，以及验证证据。
 
@@ -48,9 +48,9 @@ python -c "import src.core.main_integration; print(src.core.main_integration.__f
 
 | 文件 | 原用途 | 当前替代方案 |
 |---|---|---|
-| `src/core/main_integration/module4_runner.py` | Module4 集成适配逻辑 | 重命名为 `production_integration.py`，函数名规范化 |
+| `src/core/main_integration/module4_runner.py` | Module4 集成适配逻辑 | 重命名为 `production_runner.py`，函数名规范化 |
 
-**删除原因**：仅作为中间版本存在，已标准化为 `production_integration.py`。
+**删除原因**：仅作为中间版本存在，已标准化为 `production_runner.py`。
 
 ---
 
@@ -123,16 +123,9 @@ Module 6（物流执行）原本没有子包结构，现在正式改为 sub-pack
 
 ---
 
-### 2.4 测试与验证工具（1 个新文件，~300 行）
+### 2.4 测试与验证
 
-| 文件 | 用途 | 为什么创建 |
-|---|---|---|
-| `tools/regression_compare.py` | 回归对比工具，验证"零漂移" | 确保重构后输出不变；支持浮点容差 |
-
-**用法**：
-```bash
-python tools/regression_compare.py <基线输出目录> <目标输出目录> [--tolerance 1e-6]
-```
+零漂移验证已完成；仓库内置的回归对比脚本已移除，不再作为当前仓库交付内容。
 
 ---
 
@@ -217,8 +210,9 @@ src/core/main_integration/module4_runner.py
 
 **之后**：
 ```
-src/core/main_integration/production_integration.py
-└─ run_module4_integrated()
+src/core/main_integration/production_runner.py
+├─ run_module4_integrated()
+└─ load_current_date_production_gr()
 ```
 
 **改进点**：名字更清晰（production 比 module4 更有语义），为后续 module5/6 integration 预留空间。
@@ -240,7 +234,6 @@ src/core/main_integration/production_integration.py
 | YAML 配置与加载器 | 2 | 100 |
 | 归一化统一实现 | 1 | 250 |
 | Module 6 拆分 | 2 | 680 |
-| 回归对比工具 | 1 | 300 |
 | **小计创建** | **6** | **~1,330** |
 | | | |
 | **修改** | | |
@@ -276,16 +269,9 @@ src/core/main_integration/production_integration.py
 
 **结论**：完全零漂移。重构对仿真输出无任何影响。
 
-### 5.3 对比工具使用
+### 5.3 对比说明
 
-```bash
-python tools/regression_compare.py \
-  outputs/baseline_2025-12-15_to_2025-12-16 \
-  outputs/final_2025-12-15_to_2025-12-16 \
-  --tolerance 1e-6
-```
-
-输出：所有 DataFrame 差异为 0，通过验证。
+零漂移结论来自当时的对比验证结果；当前仓库不再保留内置回归对比脚本。
 
 ---
 
@@ -330,7 +316,6 @@ def normalize_identifiers(df, extra_columns=None):
 - [代码结构图](./OPTIMIZED_CODE_STRUCTURE_DIAGRAM.md) —— 当前目录树与旧版映射
 - [快速参考](./QUICK_REFERENCE.md) —— 常用导入路径、运行命令
 - [交接文档](./交接文档/Refactored/项目交接文档.md) —— 整体交接说明
-- [回归对比工具](../tools/regression_compare.py) —— 验证工具源码
 
 ---
 
@@ -339,4 +324,3 @@ def normalize_identifiers(df, extra_columns=None):
 | 日期 | 版本 | 内容 | 作者 |
 |---|---|---|---|
 | 2026-04-10 | v1.0 | 初版，记录第三阶段完整清单 | 陈显跃 |
-

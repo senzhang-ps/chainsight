@@ -1,5 +1,17 @@
 # `src/modules/production_planning` — 生产计划模块文档
 
+## 文档信息
+
+| 项 | 内容 |
+|---|---|
+| 文档版本 | v1.1 |
+| 最后更新 | 2026-04-10 |
+| 编写人 | 陈显跃 |
+| 适用范围 | `src/modules/production_planning/` 目录（共 12 个文件） |
+| 目标读者 | 算法工程师、测试工程师、业务分析师 |
+
+---
+
 ## 模块概述
 
 `src/modules/production_planning/` 是 ChainSight 的 **约束产能生产计划仿真引擎**（Module 4），负责：

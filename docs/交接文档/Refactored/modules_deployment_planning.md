@@ -4,10 +4,14 @@
 
 | 项 | 内容 |
 |---|---|
-| 文档版本 | v1.0 |
-| 最后更新 | 2026-03-05 |
-| 适用范围 | `src/modules/deployment_planning/` 目录 |
+| 文档版本 | v1.1 |
+| 最后更新 | 2026-04-10 |
+| 编写人 | 陈显跃 |
+| 适用范围 | `src/modules/deployment_planning/` 目录（共 16 个文件） |
 | 目标读者 | 算法工程师、测试工程师、业务分析师 |
+
+> **当前目录完整文件清单**（16 个）：  
+> `__init__.py`、`allocation.py`、`batch_optimizer.py`、`cache_utils.py`、`constants.py`、`data_loader.py`、`demand_collector.py`、`demand_collector_vectorized.py`、`duckdb_batch_calculator.py`、`horizon_batch_calculator.py`、`inventory.py`、`main.py`、`multiprocess_optimizer.py`、`normalizer.py`、`push_allocation.py`、`validation.py`
 
 ---
 
@@ -258,13 +262,8 @@ result = main(
 
 ## 4. 依赖关系
 
-```mermaid
-flowchart TB
-    CONFIG[配置加载] --> DEMAND[需求收集]
-    DEMAND --> ALLOC[调拨分配]
-    ALLOC --> OPTIMIZE[批量优化]
-    OPTIMIZE --> VALIDATE[验证]
-    VALIDATE --> OUTPUT[输出]
+```
+[配置加载] → [需求收集] → [调拨分配] → [批量优化] → [验证] → [输出]
 ```
 
 **模块依赖**:
@@ -273,8 +272,8 @@ flowchart TB
 - 依赖 configuration 模块
 
 **依赖的外部模块**:
-- `src/core/orchestrator.py` - 库存状态管理
-- `src/core/parallel_executor.py` - 并行执行（可选）
+- `src/core/orchestrator/`（包） - 库存状态管理
+- `src/core/parallel_executor/`（包） - 并行执行（可选）
 
 ---
 

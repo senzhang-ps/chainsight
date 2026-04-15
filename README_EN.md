@@ -1,44 +1,50 @@
 # ChainSight
 
-Supply chain planning and simulation system with both file mode and database mode.
+Supply-chain planning and simulation system with both **file mode** and **database mode**.
 
 [中文版](README_CN.md) | **English**
 
-Last updated: 2026-04-08
+**Last updated: 2026-04-15**
 
 ## Current Status
 
-This repository has completed phase-3 cleanup. The codebase should now be understood like this:
+- The root entry is still `run.py`, but the real execution entry is `src.core.run.main`
+- The integrated flow lives in `src/core/main_integration/`
+- Shared state management lives in `src/core/orchestrator/`
+- The business modules are the five real subpackages:
+  - `src/modules/demand_planning/` (Module 1)
+  - `src/modules/mrp_planning/` (Module 3)
+  - `src/modules/production_planning/` (Module 4)
+  - `src/modules/deployment_planning/` (Module 5)
+  - `src/modules/logistics_execution/` (Module 6)
+- Shared defaults are centralized in `config/defaults.yaml` + `src/utils/defaults.py`
+- Shared identifier normalization is unified in `src/utils/normalization.py`
+- Shared resource configuration is unified in `src/utils/resource_config.py`
 
-- Root entry is still `run.py`
-- The authoritative runtime dispatch entry is the `src.core.run` package
-  - `run.py` imports `from src.core.run import main`
-  - that resolves to `src/core/run/__init__.py`
-  - the main implementation lives in `src/core/run/run_main.py`
-- Main integrated flow lives under `src/core/main_integration/*`
-- Shared state lives under `src/core/orchestrator/*`
-- Business logic is now package-first and only uses the five real subpackages
-  - `src/modules/demand_planning/`
-  - `src/modules/mrp_planning/`
-  - `src/modules/production_planning/`
-  - `src/modules/deployment_planning/`
-  - `src/modules/logistics_execution/`
-- Cross-module helper consolidation now lives under `src/utils/*`
-  - `src/utils/runtime_defaults.py` is the single source for shared tiny defaults reused by M3 and M5
-  - `src/utils/normalization_common.py` holds shared identifier normalization helpers while package wrappers preserve historical semantics
-  - `src/utils/date_helpers.py` holds shared planning-window, review-day, and lead-time helpers
+### Recently Removed Files
 
-The following legacy wrappers have already been physically removed:
+These compatibility/duplicate files are gone and should no longer be imported:
 
-- `src/modules/module1.py`
-- `src/modules/module3.py`
-- `src/modules/module4.py`
-- `src/modules/module5.py`
-- `src/modules/module6.py`
-- `src/core/main_integration.py`
-- `src/core/orchestrator.py`
-- `src/core/parallel_executor.py`
-- `src/core/main_integration/module4_runner.py`
+- `src/core/main_integration/production_integration.py`
+- `src/core/main_integration/normalize.py`
+- `src/utils/runtime_defaults.py`
+- `src/utils/normalization_common.py`
+- `src/utils/cpu_config.py`
+- `src/modules/demand_planning/normalization.py`
+
+Module 4 integration now uses `src/core/main_integration/production_runner.py`.
+
+### Current Verification Status
+
+- For the **same date range**, `Module1-6` and `orchestrator` outputs now align with the Dev baseline
+- The previous `ori_deployment_uid` sequence mismatch has been fixed
+- `summary` comparisons must use the **same run length**, otherwise row counts will naturally differ
+
+## Requirements
+
+- Python 3.12
+- A virtual environment is strongly recommended
+- PostgreSQL is required only for database mode
 
 ## Quick Start
 
@@ -68,30 +74,42 @@ source .venv/bin/activate
 ### 2. Install dependencies
 
 ```bash
+python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 ```
 
-### 3. Verify critical dependencies
+### 3. Verify core dependencies
 
-```powershell
-python -c "import pandas, numpy, duckdb, openpyxl, psycopg; print('deps ok')"
+```bash
+python -c "import pandas, numpy, scipy, duckdb, openpyxl, yaml, tqdm, psycopg, psutil; print('deps ok')"
 ```
+
+## About requirements.txt
+
+`requirements.txt` now keeps only the **direct install-time dependencies** of the project:
+
+- Data processing: `pandas`, `numpy`, `scipy`, `duckdb`
+- Excel I/O: `openpyxl`
+- Database mode: `psycopg[binary]`
+- Runtime/config: `PyYAML`, `tqdm`, `psutil`
+
+Script-only optional dependencies (for example DOCX generation or alternate Excel writer support) are intentionally not part of the main install set.
 
 ## Run Modes
 
 ### File mode
 
-In file mode, `--config` takes an Excel path.
+In file mode, `--config` is an Excel path:
 
 ```powershell
 python run.py --config config/BC_S5.xlsx --start-date 2025-10-06 --end-date 2025-10-10
+python run.py --config config/OC_Paste_S1_20251224.xlsx --end-date 2025-12-16 --force-restart --non-interactive
 python run.py --config config/BC_S5.xlsx --end-date 2025-10-15 --resume
-python run.py --config config/BC_S5.xlsx --start-date 2025-10-06 --end-date 2025-10-10 --force-restart
 ```
 
 ### Database mode
 
-In database mode, `--config` takes a config name, not an Excel path.
+In database mode, `--config` is a config name and you must add `--use-db`:
 
 ```powershell
 python run.py --config BC_S5 --start-date 2025-10-06 --end-date 2025-10-06 --use-db
@@ -106,29 +124,29 @@ python run.py --config OC_Paste_S1_20251224 --start-date 2025-12-15 --end-date 2
 
 Notes:
 
-- `OC_Paste_S1_20251224` should currently be passed without quotes because the config name has no spaces.
-- Database mode writes business outputs into PostgreSQL and keeps local log folders.
-- Add `--local` if you want local file outputs in addition to DB writes.
+- File mode writes local output folders
+- Database mode primarily writes business results to PostgreSQL and keeps local run logs
+- Add `--local` in DB mode if you also want local file outputs
 
-## CLI Argument Summary
+## CLI Summary
 
-The current CLI contract is defined by `src/core/run/run_main.py`:
+The CLI contract is defined by `src/core/run/run_main.py`:
 
 | Argument | Meaning |
 |---|---|
-| `--config` | Excel path in file mode, config name in DB mode |
-| `--start-date` | Required for first run, format `YYYY-MM-DD` |
+| `--config` | Excel path in file mode; config name in DB mode |
+| `--start-date` | Required for the first run, format `YYYY-MM-DD` |
 | `--end-date` | Required, format `YYYY-MM-DD` |
-| `--resume` | Automatically resume from interruption point |
-| `--resume-from` | Resume from a specific existing run directory |
-| `--check-resume` | Check resume status only |
+| `--resume` | Resume automatically |
+| `--resume-from` | Resume from a specific run directory |
+| `--check-resume` | Check resume state only |
 | `--list-runs` | List local run directories |
-| `--non-interactive` | Disable interactive run selection |
-| `--force-restart` | Ignore resume capability and start fresh |
+| `--non-interactive` | Disable interactive selection |
+| `--force-restart` | Ignore resume capability and restart from scratch |
 | `--use-db` | Enable database mode |
 | `--db-host` `--db-port` `--db-name` `--db-user` `--db-password` | Database connection parameters |
-| `--run-suffix` | Append suffix to local run directory name |
-| `--local` | In DB mode, also keep local Excel outputs |
+| `--run-suffix` | Append a suffix to the run directory |
+| `--local` | Keep local file outputs in DB mode |
 
 ## Current Authoritative Structure
 
@@ -137,6 +155,8 @@ chainsight/
 ├── run.py
 ├── requirements.txt
 ├── config/
+│   ├── defaults.yaml
+│   └── *.xlsx
 ├── docs/
 ├── outputs/
 ├── pgsql_db/
@@ -150,17 +170,15 @@ chainsight/
     │   │   ├── output_dir.py
     │   │   └── local_writer.py
     │   ├── main_integration/
+    │   │   ├── __init__.py
     │   │   ├── simulation_file.py
     │   │   ├── simulation_db.py
-    │   │   ├── production_integration.py
+    │   │   ├── production_runner.py
     │   │   ├── config_loader.py
     │   │   ├── resume.py
+    │   │   ├── seed.py
     │   │   └── db_helpers.py
     │   ├── orchestrator/
-    │   │   ├── orchestrator_main.py
-    │   │   ├── daily_ops.py
-    │   │   ├── processors.py
-    │   │   └── persistence.py
     │   └── parallel_executor/
     ├── modules/
     │   ├── demand_planning/
@@ -170,8 +188,9 @@ chainsight/
     │   └── logistics_execution/
     ├── services/
     └── utils/
-        ├── runtime_defaults.py
-        ├── normalization_common.py
+        ├── defaults.py
+        ├── normalization.py
+        ├── resource_config.py
         └── date_helpers.py
 ```
 
@@ -192,36 +211,45 @@ from src.modules import logistics_execution as module6
 ```python
 from src.core.main_integration import run_integrated_simulation
 from src.core.main_integration import run_integrated_simulation_from_dict
-from src.core.main_integration.production_integration import run_module4_integrated
+from src.core.main_integration.production_runner import run_module4_integrated
+from src.core.main_integration.production_runner import load_current_date_production_gr
 from src.core.orchestrator import create_orchestrator
 ```
 
-### Shared utilities for new code
+### Shared config and utilities
 
 ```python
-from src.utils.runtime_defaults import DEFAULT_MOQ, DEFAULT_RV
-from src.utils.normalization_common import normalize_identifiers_vectorized
+from src.utils.defaults import (
+    RESOURCE_UTILIZATION,
+    M1_FUTURE_CUTOFF_DAYS,
+    M1_DEFAULT_MAX_ADVANCE_DAYS,
+    M6_MAX_WAIT_DAYS,
+    M6_RANDOM_SEED,
+)
+
+from src.utils.normalization import normalize_identifiers, normalize_material
+from src.utils.resource_config import get_optimal_threads, get_optimal_memory
 from src.utils.date_helpers import compute_planning_window, calculate_transport_lead_time
 ```
 
-Do not use these removed imports anymore:
+### Deprecated imports you should not use
 
 ```python
-from src.modules import module1, module3, module4, module5, module6
-from src.core.main_integration.module4_runner import run_module4_integrated
+from src.core.main_integration.production_integration import ...  # removed
+from src.utils.runtime_defaults import ...  # removed
+from src.utils.normalization_common import ...  # removed
+from src.utils.cpu_config import ...  # removed
 ```
 
 ## Outputs and Logs
 
-### File mode
-
-Typical output path:
+### File mode output
 
 ```text
 outputs/<config_stem>/run_YYYYMMDD_HHMMSS/
 ```
 
-Common subdirectories:
+Typical subdirectories:
 
 - `module1/`
 - `module3/`
@@ -231,128 +259,36 @@ Common subdirectories:
 - `orchestrator/`
 - `summary/`
 
-### Database mode
-
-Database mode writes business outputs to PostgreSQL and mainly keeps local log folders:
+### Database mode output
 
 ```text
 outputs/db_<config_name>_<timestamp>/
 ```
 
-Typical file:
+Typically this mainly contains:
 
 - `simulation_log_<timestamp>.txt`
 
-Default DB config file:
+## Recommended Verification Commands
 
-- `config/database.json`
-
-## Verified Regression Baseline
-
-### Standard two-day DB regression
+Two-day file-mode regression:
 
 ```powershell
-python run.py --config OC_Paste_S1_20251224 --start-date 2025-12-15 --end-date 2025-12-16 --use-db
+python run.py --config config/OC_Paste_S1_20251224.xlsx --end-date 2025-12-16 --force-restart --non-interactive
 ```
 
-Verified successful phase-3 run:
-
-- `db_OC_Paste_S1_20251224_20260408_112709`
-
-Key result checkpoints:
-
-- `module1_output_orderlog = 9214`
-- `module1_output_shipmentlog = 3094`
-- `module4_output_productionplan = 10`
-- `module5_output_deploymentplan = 60182`
-- `module6_output_deliveryplan = 39`
-- `summary_output_ordershipmentcutsummary = 3433`
-- `summary_output_fullcapacityexceed = 49`
-- `summary_output_fulltruckusage = 1`
-- checkpoint `orch_state_json = 186773 bytes`
-- checkpoint no longer contains `m1_previous_orders`
-- checkpoint `delivery_gr / shipment_log / daily_logs = 0`
-
-### Fixes confirmed not to regress
-
-- PostgreSQL checkpoint `jsonb` size issue fixed
-- `m1_previous_orders` removed from checkpoint persistence
-- `delivery_gr` dedupe no longer depends on full historical accumulation
-- M4 integration adapter is now consolidated under `production_integration.py`
-
-### Zero-drift shared-utility consolidation
-
-The latest consolidation kept the old call surfaces but moved repeated logic to shared utility files:
-
-- shared tiny defaults now come from `src/utils/runtime_defaults.py`
-- shared normalization now comes from `src/utils/normalization_common.py`
-- shared date / lead-time helpers now come from `src/utils/date_helpers.py`
-
-Verified runs after this consolidation:
-
-- `db_BC_S5_20260408_123150`
-- `db_OC_Paste_S1_20251224_20260408_125002`
-
-The OC two-day DB regression remained unchanged after the consolidation:
-
-- `module1_output_orderlog = 9214`
-- `module1_output_shipmentlog = 3094`
-- `module4_output_productionplan = 10`
-- `module5_output_deploymentplan = 60182`
-- `module6_output_deliveryplan = 39`
-- checkpoint `orch_state_json = 186773 bytes`
-- checkpoint still has no `m1_previous_orders`
-- checkpoint `delivery_gr / shipment_log / daily_logs = 0`
-
-## Database and Config Notes
-
-### Common configs in this repo
-
-- `config/BC_S5.xlsx`
-- `config/BC_S9.xlsx`
-- `config/OC_Paste_S1_20251224.xlsx`
-
-### DB-mode config discovery
-
-Database mode resolves by config name. If the config is missing in PostgreSQL, the project can import it from Excel according to the repo search rules. This repo now includes:
-
-- `config/OC_Paste_S1_20251224.xlsx`
-
-That helps guarantee stable DB-mode lookup for `OC_Paste_S1_20251224`.
+Important: if you do regression comparison, use your own comparison script/tool and make sure both `summary` directories cover the same date range.
 
 ## Documentation Entry Points
 
-If you are taking over the project, read in this order:
-
-1. [docs/用户使用入口说明.md](docs/用户使用入口说明.md)
-2. [docs/QUICK_REFERENCE.md](docs/QUICK_REFERENCE.md)
-3. [docs/交接文档/Refactored/项目交接文档.md](docs/交接文档/Refactored/项目交接文档.md)
-4. [docs/OPTIMIZED_CODE_STRUCTURE_DIAGRAM.md](docs/OPTIMIZED_CODE_STRUCTURE_DIAGRAM.md)
-5. [docs/交接文档/Refactored/setup.md](docs/交接文档/Refactored/setup.md)
-6. [docs/交接文档/Refactored/API.md](docs/交接文档/Refactored/API.md)
-
-Supporting docs:
-
 - [docs/INDEX.md](docs/INDEX.md)
-- [docs/README_REFACTORING_MAP.md](docs/README_REFACTORING_MAP.md)
-- [docs/PERFORMANCE_OPTIMIZATION_REPORT.md](docs/PERFORMANCE_OPTIMIZATION_REPORT.md)
-- [docs/DUCKDB_OPTIMIZATION_GUIDE.md](docs/DUCKDB_OPTIMIZATION_GUIDE.md)
-- [docs/CYTHON_OPTIMIZATION_REPORT.md](docs/CYTHON_OPTIMIZATION_REPORT.md)
+- [docs/QUICK_REFERENCE.md](docs/QUICK_REFERENCE.md)
+- [docs/用户使用入口说明.md](docs/用户使用入口说明.md)
+- [docs/交接文档/Refactored/项目交接文档.md](docs/交接文档/Refactored/项目交接文档.md)
+- [docs/交接文档/Refactored/setup.md](docs/交接文档/Refactored/setup.md)
+- [docs/交接文档/Refactored/API.md](docs/交接文档/Refactored/API.md)
+- [docs/_archive/](docs/_archive/)
 
-## Common Questions
+---
 
-### Why do I see many deletions in Git after phase 3
-
-Because the legacy wrappers were physically removed. This is expected and correct.
-
-### Why can DB mode fail with temp-directory permission errors
-
-In restricted environments, temporary directories such as `AppData\\Local\\Temp` may be blocked. That usually indicates an environment write restriction, not a business-logic bug.
-
-### Why do some older docs still mention `module1.py`
-
-Some historical/background docs have not been fully rewritten yet. Prefer this README, `docs/INDEX.md`, `docs/用户使用入口说明.md`, and the current handover docs.
-
-### Why do both `src/core/run.py` and `src/core/run/` exist
-
-The active runtime entry is the `src.core.run` package, meaning `src/core/run/__init__.py` and `src/core/run/run_main.py`. For reading and future maintenance, treat the package directory as authoritative.
+For ongoing regression work, deployment, or database initialization, prefer this README and `src/core/run/run_main.py` over older historical docs.

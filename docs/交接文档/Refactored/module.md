@@ -4,10 +4,16 @@
 
 | 项 | 内容 |
 |---|---|
-| 文档版本 | v1.0 |
-| 最后更新 | 2026-03-05 |
+| 文档版本 | v1.2 |
+| 最后更新 | 2026-04-10 |
+| 编写人 | 陈显跃 |
 | 适用范围 | `src/` 本地版 + `--use-db` 数据库模式 |
 | 目标读者 | 算法工程师、后端开发、测试工程师、技术支持 |
+
+> **第三阶段更新说明**（2026-04-10）：  
+> 旧的 `src/modules/module1.py` ～ `module6.py` 单体门面已全部删除。  
+> 所有业务模块现统一放置在对应的 **子包** 中；`src/modules/__init__.py` 中保留 `module1`、`module3`～`module6` 别名，便于旧代码渐进迁移。  
+> 本文档中的 `module1.xxx()`、`module3.xxx()` 等写法指对应子包的公开入口。
 
 ---
 
@@ -15,14 +21,14 @@
 
 ChainSight 的业务计算主链包含 M1、M3、M4、M5、M6 五个公开模块，业务语义上包含六大能力（M2 供给策略内嵌在 M1）。
 
-| 模块 | 公开入口 | 核心职责 |
-|---|---|---|
-| M1 | `module1.run_daily_order_generation` | 需求展开、订单生成、发货与缺货 |
-| M2（内嵌） | `apply_dps` / `apply_supply_choice` | 供给策略和地点拆分 |
-| M3 | `module3.run_integrated_mode` | 净需求与分层 MRP 计算 |
-| M4 | `module4.run_daily_production_planning` | 生产计划与产能/换型约束 |
-| M5 | `module5.main` | 多层级调拨规划 |
-| M6 | `module6.run_daily_physical_flow` | 物流装载、发运与到货 |
+| 模块 | 子包 | 公开入口 | 核心职责 |
+|---|---|---|---|
+| M1 | `src/modules/demand_planning/` | `run_daily_order_generation` | 需求展开、订单生成、发货与缺货 |
+| M2（内嵌） | M1 子流程 | `apply_dps` / `apply_supply_choice` | 供给策略和地点拆分 |
+| M3 | `src/modules/mrp_planning/` | `run_integrated_mode` | 净需求与分层 MRP 计算 |
+| M4 | `src/modules/production_planning/` | `run_daily_production_planning` | 生产计划与产能/换型约束 |
+| M5 | `src/modules/deployment_planning/` | `main` | 多层级调拨规划 |
+| M6 | `src/modules/logistics_execution/` | `run_daily_physical_flow` | 物流装载、发运与到货 |
 
 ---
 
@@ -577,13 +583,8 @@ delays = batch_sample_delivery_delays_duckdb(
 
 ### 6.2 数据流向图
 
-```mermaid
-flowchart LR
-    M1[M1 订单/发货] --> M4[M4 生产]
-    M4 --> M5[M5 调拨]
-    M5 --> M6[M6 物流]
-    M6 --> M3[M3 MRP]
-    M3 --> NEXT[次日计划输入]
+```
+[M1 订单/发货] → [M4 生产] → [M5 调拨] → [M6 物流] → [M3 MRP] → [次日计划输入]
 ```
 
 ### 6.3 状态共享说明
@@ -608,18 +609,26 @@ flowchart LR
 
 ### 7.1 如何修改模块算法
 
-1. 优先修改子包实现（如 `deployment_planning/`），保持 `moduleX.py` 入口不变；
+1. 优先修改子包实现（如 `deployment_planning/`），保持其 `main()` / `integration.py` 公开入口签名不变；
 2. 保持输入输出列协议稳定；
 3. 修改后执行模块级回归 + 全链路库存平衡校验。
 
 ### 7.2 如何添加新模块
 
-```mermaid
-flowchart TB
-    A[新增 src/modules/moduleX.py 门面] --> B[新增子包算法实现]
-    B --> C[在 main_integration.py 插入执行点]
-    C --> D[在 orchestrator.py 增加 process_moduleX 方法]
-    D --> E[补充报告/数据库写入映射]
+```
+[在 src/modules/ 新增业务子包]
+             │
+             ↓
+[补充 __init__.py 公开入口]
+             │
+             ↓
+[在 src/core/main_integration/ 包内插入执行点]
+             │
+             ↓
+[在 src/core/orchestrator/processors.py 增加 process_moduleX 方法]
+             │
+             ↓
+[补充报告/数据库写入映射]
 ```
 
 ### 7.3 如何集成自定义规则

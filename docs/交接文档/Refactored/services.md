@@ -1,5 +1,15 @@
 # `src/services` — 服务层模块文档
 
+## 文档信息
+
+| 项 | 内容 |
+|---|---|
+| 文档版本 | v1.1 |
+| 最后更新 | 2026-04-10 |
+| 编写人 | 陈显跃 |
+| 适用范围 | `src/services/` 目录（共 3 个文件：`__init__.py`、`performance_profiler.py`、`summary_report_generator.py`） |
+| 目标读者 | 算法工程师、测试工程师、运维人员 |
+
 本文档覆盖 `src/services/` 目录下的所有文件：`performance_profiler.py` 和 `summary_report_generator.py`。
 
 ---

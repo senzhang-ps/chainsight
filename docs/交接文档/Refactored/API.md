@@ -4,8 +4,9 @@
 
 | 项 | 内容 |
 |---|---|
-| 文档版本 | v2.0 (合并版) |
-| 最后更新 | 2026-03-05 |
+| 文档版本 | v2.1 |
+| 最后更新 | 2026-04-10 |
+| 编写人 | 陈显跃 |
 | 适用范围 | `src/`（本地文件模式）+ `pgsql_db/`（数据库模式） |
 | 目标读者 | 开发工程师、测试工程师、算法工程师、集成人员、后端工程师、DBA |
 
@@ -23,21 +24,37 @@ ChainSight 本地版 API 采用“编排层 API + 业务模块 API + 工具层 A
 
 | 分类 | 主要文件 | 核心能力 |
 |---|---|---|
-| Core 编排 API | `src/core/main_integration.py`、`src/core/orchestrator.py` | 运行仿真、维护全局状态、断点续跑 |
-| 业务模块 API | `src/modules/module1.py` ~ `module6.py` | 需求、MRP、生产、调拨、物流算法 |
+| Core 编排 API | `src/core/main_integration/`（包）、`src/core/orchestrator/`（包） | 运行仿真、维护全局状态、断点续跑 |
+| 业务模块 API | `src/modules/demand_planning/` ~ `src/modules/logistics_execution/`（5 个子包） | 需求、MRP、生产、调拨、物流算法 |
 | 工具与服务 API | `src/utils/*`、`src/services/*` | DuckDB加速、内存数据、校验、性能分析、日志 |
+
+> **第三阶段更新说明（2026-04-10）**：原 `src/modules/module1.py`～`module6.py` 与 `src/core/main_integration.py`、`src/core/orchestrator.py`、`src/core/run.py`、`src/core/parallel_executor.py` 单体文件已全部删除，替换为对应包目录。调用函数签名保持一致，只是 `from` 位置换成了包路径。
 
 ### 1.2 调用流程图
 
-```mermaid
-flowchart TB
-    A[run_integrated_simulation] --> B[create_orchestrator]
-    B --> C[M1 run_daily_order_generation]
-    C --> D[M4 run_daily_production_planning]
-    D --> E[M5 main]
-    E --> F[M6 run_daily_physical_flow]
-    F --> G[M3 run_integrated_mode]
-    G --> H[save_daily_state + SummaryReportGenerator]
+```
+[run_integrated_simulation]
+            │
+            ↓
+   [create_orchestrator]
+            │
+            ↓
+[M1 run_daily_order_generation]
+            │
+            ↓
+[M4 run_daily_production_planning]
+            │
+            ↓
+        [M5 main]
+            │
+            ↓
+[M6 run_daily_physical_flow]
+            │
+            ↓
+[M3 run_integrated_mode]
+            │
+            ↓
+[save_daily_state + SummaryReportGenerator]
 ```
 
 ---
@@ -60,7 +77,7 @@ def run_integrated_simulation(
 )
 ```
 
-**位置**：`src/core/main_integration.py`
+**位置**：`src/core/main_integration/`（包；入口函数在 `simulation_file.py`）
 
 **功能**
 - 本地模式全流程入口：校验配置、初始化状态、按日调度模块、保存快照、生成报告。
@@ -116,7 +133,7 @@ def run_integrated_simulation_from_dict(
 ) -> dict
 ```
 
-**位置**：`src/core/main_integration.py`
+**位置**：`src/core/main_integration/`（包；入口函数在 `simulation_db.py`）
 
 **功能**
 - 数据库模式/内存模式入口：直接接收 DataFrame 字典，避免临时 Excel。
@@ -138,7 +155,7 @@ def create_orchestrator(
 ) -> Orchestrator
 ```
 
-**位置**：`src/core/orchestrator.py`
+**位置**：`src/core/orchestrator/`（包；入口在 `orchestrator_main.py`）
 
 **功能**
 - 创建并初始化 `Orchestrator` 实例。
@@ -162,7 +179,7 @@ class Orchestrator:
     def __init__(self, start_date: str, output_dir: str = "./orchestrator_output")
 ```
 
-**位置**：`src/core/orchestrator.py`
+**位置**：`src/core/orchestrator/`（包；类定义在 `orchestrator_main.py`）
 
 #### 2.4.1 状态写入 API
 
@@ -211,7 +228,7 @@ class ParallelExecutor:
     def run_parallel_stage(self, tasks: List[Tuple[str, Callable[[], Any]]]) -> Tuple[Dict[str, ParallelTaskResult], bool]
 ```
 
-**位置**：`src/core/parallel_executor.py`
+**位置**：`src/core/parallel_executor/`（包；类定义在 `parallel_executor_main.py`）
 
 **说明**
 - 支持串行/并行双模式；
@@ -226,7 +243,7 @@ class ParallelExecutor:
 
 ### 3.1 Module1（需求与订单）
 
-**文件**：`src/modules/module1.py`（兼容层） + `src/modules/demand_planning/*`
+**包路径**：`src/modules/demand_planning/`（原 `src/modules/module1.py` 单体已删除，仅保留同名兼容别名）
 
 #### API-1 `run_daily_order_generation()`
 
@@ -283,7 +300,7 @@ def simulate_shipment_for_single_day(
 
 ### 3.2 Module3（MRP）
 
-**文件**：`src/modules/module3.py`（兼容层） + `src/modules/mrp_planning/*`
+**包路径**：`src/modules/mrp_planning/`（原 `src/modules/module3.py` 单体已删除，仅保留同名兼容别名）
 
 #### API-1 `run_integrated_mode()`
 
@@ -349,7 +366,7 @@ def determine_lead_time(
 
 ### 3.3 Module4（生产计划）
 
-**文件**：`src/modules/module4.py`（兼容层） + `src/modules/production_planning/*`
+**包路径**：`src/modules/production_planning/`（原 `src/modules/module4.py` 单体已删除，仅保留同名兼容别名）
 
 #### API-1 `run_daily_production_planning()`
 
@@ -404,7 +421,7 @@ def centralized_capacity_allocation_with_changeover(
 
 ### 3.4 Module5（调拨规划）
 
-**文件**：`src/modules/module5.py`（兼容层） + `src/modules/deployment_planning/*`
+**包路径**：`src/modules/deployment_planning/`（原 `src/modules/module5.py` 单体已删除，仅保留同名兼容别名）
 
 #### API-1 `main()`
 
@@ -477,7 +494,7 @@ def push_softpush_allocation(
 
 ### 3.5 Module6（物流执行）
 
-**文件**：`src/modules/module6.py` + `src/modules/logistics_execution/*`
+**包路径**：`src/modules/logistics_execution/`（原 `src/modules/module6.py` 单体已删除，仅保留同名兼容别名）
 
 #### API-1 `run_daily_physical_flow()`
 
@@ -620,8 +637,8 @@ def run_pre_simulation_validation(config_path: str, output_dir: str) -> tuple
 
 | 类型 | 定义位置 | 用途 |
 |---|---|---|
-| `DeploymentUID` | `src/core/orchestrator.py` | 调拨记录唯一标识 |
-| `ParallelTaskResult` | `src/core/parallel_executor.py` | 并行任务执行结果 |
+| `DeploymentUID` | `src/core/orchestrator/`（包） | 调拨记录唯一标识 |
+| `ParallelTaskResult` | `src/core/parallel_executor/`（包；定义在 `parallel_executor_main.py`） | 并行任务执行结果 |
 | `LineState` | `src/modules/production_planning/types.py` | 产线跨天状态 |
 | `ChangeoverInfo` | `src/modules/production_planning/types.py` | 换型过程状态 |
 | `PlanRecord` | `src/modules/production_planning/types.py` | 生产计划记录 |
@@ -679,7 +696,7 @@ class SimulationResult(TypedDict, total=False):
 
 | 维度 | 兼容情况 | 说明 |
 |---|---|---|
-| 模块入口文件 | 高 | `module1.py`~`module6.py` 作为兼容层保留对外接口 |
+| 模块入口文件 | 高 | 5 个业务子包（`demand_planning` / `mrp_planning` / `production_planning` / `deployment_planning` / `logistics_execution`）通过 `src/modules/__init__.py` 同时暴露 `module1`~`module6` 别名，老脚本 `from src.modules import module1` 仍可工作 |
 | 执行语义 | 高 | 仍按 M1->M4->M5->M6->M3 顺序执行 |
 | 输出形态 | 中高 | 本地模式保持 Excel/CSV 产出，内部可切换内存路径 |
 | 参数命名 | 中高 | 大部分关键参数兼容，新增了 `skip_file_output` 等增强参数 |
@@ -688,7 +705,7 @@ class SimulationResult(TypedDict, total=False):
 
 1. **入口迁移**：将旧入口改为 `run_integrated_simulation()`；
 2. **编排迁移**：统一使用 `Orchestrator` 作为状态读写中心；
-3. **模块迁移**：优先通过 `src/modules/moduleX.py` 访问 API，不直接依赖子包内部私有函数；
+3. **模块迁移**：优先通过 `src/modules/<子包名>/`（如 `demand_planning`、`production_planning`）访问 API，或继续使用 `from src.modules import moduleX as ...` 兼容别名，不直接依赖子包内部私有函数；
 4. **性能迁移**：逐步启用 DuckDB 与缓存，不建议一次性替换全部路径；
 5. **回归验证**：对关键报表（订单、生产、调拨、物流）做逐日对比。
 
@@ -741,14 +758,23 @@ print(res.get("simulation_completed"), res.get("output_directory"))
 
 ### 1.2 典型调用流程
 
-```mermaid
-flowchart TB
-    A[DatabaseInitializer.initialize] --> B[_load_config_from_database]
-    B --> C[run_integrated_simulation_from_dict]
-    C --> D[ModuleDataWriter.write_module_results_from_dict]
-    D --> E[(PostgreSQL)]
-    C --> F[DuckDBProcessor/OptimizedDataProcessor]
-    F --> E
+```
+[DatabaseInitializer.initialize]
+            │
+            ↓
+[_load_config_from_database]
+            │
+            ↓
+[run_integrated_simulation_from_dict]
+            │
+    ┌───────┴───────┐
+    ↓               ↓
+[ModuleDataWriter]  [DuckDBProcessor /
+write_module_results OptimizedDataProcessor]
+    │               │
+    └───────┬───────┘
+            ↓
+     [(PostgreSQL)]
 ```
 
 ### 1.3 与本地版 API 的关系
@@ -1335,7 +1361,7 @@ print(cnt)
 | API 类别 | 本地版实现 | 数据库版实现 |
 |---|---|---|
 | Core 编排 API | `run_integrated_simulation()`、`Orchestrator` | `run_integrated_simulation_from_dict()`、`DatabaseInitializer` |
-| 业务模块 API | `module1.py`~`module6.py` | 保持兼容，通过 `ModuleDataWriter` 落库 |
+| 业务模块 API | 5 个业务子包（`demand_planning`、`mrp_planning`、`production_planning`、`deployment_planning`、`logistics_execution`，配合 `module1`~`module6` 兼容别名） | 保持兼容，通过 `ModuleDataWriter` 落库 |
 | 工具层 API | `DuckDBAccelerator`、`MemoryDataStore`、`PerformanceProfiler` | `DuckDBProcessor`、`OptimizedDataProcessor`、`PerformanceDashboard` |
 | 数据操作 API | pandas DataFrame 操作 | `DatabaseConnection`、`execute_query()`、`create_table_from_df()` |
 

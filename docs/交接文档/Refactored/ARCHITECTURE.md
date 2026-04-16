@@ -36,26 +36,21 @@ ChainSight 本地版是一个面向供应链计划仿真的日度离散执行系
 
 ### 1.1 五层架构图
 
-```
-┌──────────────────────────────────────────────────────────────────────┐
-│                    五层架构（执行流自上而下）                           │
-└──────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    CLI["CLI / run.py\n参数解析与入口"]
+    L1["Layer 1: Core\n主流程编排与状态协调"]
+    L2["Layer 2: Modules\nM1~M6 业务"]
+    L3["Layer 3: Services\n性能/报告/日志"]
+    L4["Layer 4: Utils\nDuckDB/缓存/校验/时间"]
+    L5["Layer 5: Storage\nExcel + 内存结构 + DuckDB"]
 
-                       [ CLI / run.py ]
-                             │  参数解析与入口
-                             ↓
-                     [ Layer 1: Core ]        ← 主流程编排与状态协调
-                      │            │
-                      ↓            ↓
-               [ Layer 2:    [ Layer 3:
-                 Modules ]    Services ]
-               M1~M6 业务    性能/报告/日志
-                      │            │
-                      ↓            ↓
-                     [ Layer 4: Utils ]       ← DuckDB/缓存/校验/时间
-                             │
-                             ↓
-                     [ Layer 5: Storage ]     ← Excel + 内存结构 + DuckDB
+    CLI --> L1
+    L1 --> L2
+    L1 --> L3
+    L2 --> L4
+    L3 --> L4
+    L4 --> L5
 ```
 
 ### 1.2 各层职责说明
@@ -124,23 +119,28 @@ def run_daily_cycle(orchestrator, current_date):
 
 ### 2.2 核心执行时序
 
-```
-┌──────────────────────────────────────────────────────────────────────────────┐
-│  核心执行时序  参与方: Core(main_integration) · Orc(Orchestrator) · M1~M6   │
-└──────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+sequenceDiagram
+    participant Core as Core (main_integration)
+    participant Orc as Orchestrator
+    participant M1 as Module1
+    participant M4 as Module4
+    participant M5 as Module5
+    participant M6 as Module6
+    participant M3 as Module3
 
-Core →  Orc    save_beginning_inventory()
-Core →  Orc    _process_delivery_arrivals()
-Core →  M1     run_daily_order_generation()
-  M1 →  Orc    process_module1_shipments()
-Core →  M4     run_daily_production_planning()
-  M4 →  Orc    process_module4_production()
-Core →  M5     main()
-  M5 →  Orc    process_module5_deployment()
-Core →  M6     run_daily_physical_flow()
-  M6 →  Orc    process_module6_delivery()
-Core →  M3     run_integrated_mode()
-Core →  Orc    save_daily_state()
+    Core->>Orc: save_beginning_inventory()
+    Core->>Orc: _process_delivery_arrivals()
+    Core->>M1: run_daily_order_generation()
+    M1->>Orc: process_module1_shipments()
+    Core->>M4: run_daily_production_planning()
+    M4->>Orc: process_module4_production()
+    Core->>M5: main()
+    M5->>Orc: process_module5_deployment()
+    Core->>M6: run_daily_physical_flow()
+    M6->>Orc: process_module6_delivery()
+    Core->>M3: run_integrated_mode()
+    Core->>Orc: save_daily_state()
 ```
 
 ### 2.3 `orchestrator/` 包：全局状态控制器
@@ -232,8 +232,9 @@ Core 层状态管理遵循四个原则：
 
 ### 3.2 模块依赖关系
 
-```
-[初始库存/配置] → [M1 需求发货] → [M4 生产排程] → [M5 调拨规划] → [M6 物流执行] → [M3 MRP补货] → [次日库存与需求状态]
+```mermaid
+flowchart LR
+    A["初始库存/配置"] --> B["M1 需求发货"] --> C["M4 生产排程"] --> D["M5 调拨规划"] --> E["M6 物流执行"] --> F["M3 MRP补货"] --> G["次日库存与需求状态"]
 ```
 
 ### 3.3 数据输入输出矩阵
@@ -409,20 +410,14 @@ DuckDB 在本地版不作为长期主库，而作为高性能计算引擎：
 
 ### 7.1 端到端数据流图
 
-```
-[Excel 配置]
-      │
-      ↓
-[Core 读取配置并初始化状态]
-      │
-      ↓  ← 每日循环
-[M1 需求/发货] → [M4 生产] → [M5 调拨] → [M6 物流] → [M3 MRP]
-                                                           │
-                                           [Orchestrator 状态更新]
-                                                   │
-                                      ┌────────────┴────────────┐
-                                      ↓                         ↓
-                               [CSV 日快照]             [汇总报告生成]
+```mermaid
+flowchart TB
+    A["Excel 配置"] --> B["Core 读取配置并初始化状态"]
+    B --> LOOP["每日循环"]
+    LOOP --> M1["M1 需求/发货"] --> M4["M4 生产"] --> M5["M5 调拨"] --> M6["M6 物流"] --> M3["M3 MRP"]
+    M3 --> ORC["Orchestrator 状态更新"]
+    ORC --> CSV["CSV 日快照"]
+    ORC --> SUM["汇总报告生成"]
 ```
 
 ### 7.2 日度循环数据阶段
@@ -474,14 +469,12 @@ DuckDB 在本地版不作为长期主库，而作为高性能计算引擎：
 
 ### 8.3 快照与恢复机制
 
-```
-[日终状态] → [save_daily_state] → [10类CSV快照]
-                                          │
-                              [detect_last_complete_date]
-                                          │
-                              [restore_orchestrator_state]
-                                          │
-                              [从 next_date 继续仿真]
+```mermaid
+flowchart LR
+    A["日终状态"] --> B["save_daily_state"] --> C["10类CSV快照"]
+    C --> D["detect_last_complete_date"]
+    D --> E["restore_orchestrator_state"]
+    E --> F["从 next_date 继续仿真"]
 ```
 
 ### 8.4 日快照文件清单
@@ -524,16 +517,15 @@ DuckDB 以内存执行列式算子，对过滤、聚合、排序等分析型操�
 
 ### 9.3 并行执行设计
 
-```
-[按物料/节点分桶] → [ThreadPoolExecutor]
-                           │
-              ┌────────────┼────────────┐
-              ↓            ↓            ↓
-           [任务1]      [任务2]      [任务3]
-              │            │            │
-              └────────────┼────────────┘
-                           ↓
-                  [结果合并与校验]
+```mermaid
+flowchart TB
+    A["按物料/节点分桶"] --> B["ThreadPoolExecutor"]
+    B --> T1["任务1"]
+    B --> T2["任务2"]
+    B --> T3["任务3"]
+    T1 --> C["结果合并与校验"]
+    T2 --> C
+    T3 --> C
 ```
 
 并行任务必须满足两个条件：
@@ -650,22 +642,16 @@ ChainSight 数据库版是在本地版仿真引擎基础上的“企业级数据
 
 ### 1.1 PostgreSQL + DuckDB 混合架构图
 
-```
-[run.py --use-db] → [DatabaseInitializer] → [(PostgreSQL 配置+输出+历史)]
-                                                         │
-                                         [_load_config_from_database]
-                                                         │
-                                 [run_integrated_simulation_from_dict 标准仿真引擎]
-                                                         │
-                                              [ModuleDataWriter]
-                                                         │
-                                         [(PostgreSQL 配置+输出+历史)]
-                                                         │
-                                              [DuckDB 计算层]
-                                                         │
-                                 [optimized_processor / high_performance_engine]
-                                                         │
-                                         [(PostgreSQL 配置+输出+历史)]
+```mermaid
+flowchart TB
+    A["run.py --use-db"] --> B["DatabaseInitializer"]
+    B --> C["_load_config_from_database"]
+    C --> D["run_integrated_simulation_from_dict\n标准仿真引擎"]
+    D --> E["ModuleDataWriter"]
+    E --> PG["PostgreSQL 配置+输出+历史"]
+    PG --> F["DuckDB 计算层"]
+    F --> G["optimized_processor / high_performance_engine"]
+    G --> PG
 ```
 
 ### 1.2 与本地版的核心差异
@@ -838,20 +824,23 @@ with conn.transaction():
 
 ### 4.2 运行时主同步链路
 
-```
-┌────────────────────────────────────────────────────────────────────────────────────────────┐
-│  运行时主同步链路  参与方: run.py · DatabaseInitializer · PostgreSQL · SIM · ModuleDataWriter │
-└────────────────────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+sequenceDiagram
+    participant Run as run.py
+    participant DBI as DatabaseInitializer
+    participant PG as PostgreSQL
+    participant SIM as SimulationEngine
+    participant W as ModuleDataWriter
 
-Run →  DBI   initialize(config_name)
-DBI →  PG    检测/创建数据库、配置导入
-Run →  PG    _load_config_from_database()
-Run →  SIM   传入 config_dict 执行仿真
-SIM ──> Run  返回: all_results + output_directory
-Run →  W     write_module_results_from_dict(all_results)
-Run →  W     write_orchestrator_data(orchestrator_dir)
-Run →  W     generate_summary_reports_from_db(run_id)
-  W →  PG    模块/状态/汇总结果持久化
+    Run->>DBI: initialize(config_name)
+    DBI->>PG: 检测/创建数据库、配置导入
+    Run->>PG: _load_config_from_database()
+    Run->>SIM: 传入 config_dict 执行仿真
+    SIM-->>Run: 返回: all_results + output_directory
+    Run->>W: write_module_results_from_dict(all_results)
+    Run->>W: write_orchestrator_data(orchestrator_dir)
+    Run->>W: generate_summary_reports_from_db(run_id)
+    W->>PG: 模块/状态/汇总结果持久化
 ```
 
 ### 4.3 内存结果同步：DataFrame -> PostgreSQL
@@ -899,17 +888,17 @@ Run →  W     generate_summary_reports_from_db(run_id)
 
 ### 5.2 高性能计算流程
 
-```
-[模块输入DataFrame] → [预建索引/缓存] → [DuckDB向量化SQL] → [增量计算判定] → [线程池/进程池并行]
-                                                                                         │
-                                                                                  [计算结果]
-                                                                                         │
-                                                                              ┌──── <异常?> ────┐
-                                                                              │否               │是
-                                                                              ↓                 ↓
-                                                                         [输出结果]    [Pandas 回退执行]
-                                                                                                │
-                                                                                           [输出结果]
+```mermaid
+flowchart LR
+    A["模块输入DataFrame"] --> B["预建索引/缓存"]
+    B --> C["DuckDB向量化SQL"]
+    C --> D["增量计算判定"]
+    D --> E["线程池/进程池并行"]
+    E --> F["计算结果"]
+    F --> G{"异常?"}
+    G -->|否| H["输出结果"]
+    G -->|是| I["Pandas 回退执行"]
+    I --> H
 ```
 
 ### 5.3 核心优化手段
@@ -1003,12 +992,15 @@ def calc_net_demand(df, _use_duckdb=False):
 
 ### 7.4 诊断链路图
 
-```
-[仿真运行]
-    │
-    ├─→ [日志采集] ──────────────────────────────────→ [根因分析]
-    ├─→ [PerformanceDashboard] → [阈值告警] ─────────→ [根因分析]
-    └─→ [DB连接/表信息检查] ──────────────────────────→ [根因分析]
+```mermaid
+flowchart TB
+    A["仿真运行"]
+    A --> B["日志采集"]
+    A --> C["PerformanceDashboard"]
+    A --> D["DB连接/表信息检查"]
+    B --> E["根因分析"]
+    C --> F["阈值告警"] --> E
+    D --> E
 ```
 
 ### 7.5 生产环境建议
@@ -1031,15 +1023,14 @@ def calc_net_demand(df, _use_duckdb=False):
 
 ### 8.2 高可用参考架构
 
-```
-[ChainSight DB Mode] → [pgBouncer/连接池] → [(PostgreSQL Primary)]
-                                                      │
-                                         ┌────────────┴────────────┐
-                                         ↓                         ↓
-                                  [(Replica 1)]            [(Replica 2)]
-                                         │                         │
-                                         ↓                         ↓
-                                  [BI/报表查询]             [审计与回放]
+```mermaid
+flowchart LR
+    A["ChainSight DB Mode"] --> B["pgBouncer/连接池"]
+    B --> C["PostgreSQL Primary"]
+    C --> D["Replica 1"]
+    C --> E["Replica 2"]
+    D --> F["BI/报表查询"]
+    E --> G["审计与回放"]
 ```
 
 ### 8.3 落地建议

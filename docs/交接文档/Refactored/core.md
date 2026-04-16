@@ -402,21 +402,7 @@ def load_current_date_production_gr(
 
 ---
 
-#### 1.2.7 `load_module4_production_output()`
-
-**功能**: 从 Module4 输出文件加载生产计划（向后兼容）
-
-**处理逻辑**:
-- 读取 Excel → 解析 `ProductionPlan` sheet → 按 `available_date >= current_date` 过滤
-
-**使用示例**:
-```python
-production_df = load_module4_production_output("./outputs/Module4Output.xlsx", pd.Timestamp("2025-01-15"))
-```
-
----
-
-#### 1.2.8 `load_global_seed()`
+#### 1.2.7 `load_global_seed()`
 
 **功能**: 统一从 Global_Seed 读取随机种子
 
@@ -443,46 +429,22 @@ def load_global_seed(config_dict: dict) -> int
 
 ### 1.3 数据流图
 
-```
-[启动仿真]
-     │
-     ↓
-[配置校验]
-     │
-     ↓
-[检测断点]
-     │
-     ├─ [存在完整日期] ──→ [恢复状态] ──────────┐
-     │                                          │
-     └─ [无完整日期] ───→ [初始化 Orchestrator] ─┘
-                                                │
-                                                ↓
-                                        ┌─ 日度循环 ─────────────────────┐
-                                        │ [M1 需求与发货]                │
-                                        │       │                        │
-                                        │       ↓                        │
-                                        │ [M4 生产排程]                  │
-                                        │       │                        │
-                                        │       ↓                        │
-                                        │ [M5 调拨规划]                  │
-                                        │       │                        │
-                                        │       ↓                        │
-                                        │ [M6 物流执行]                  │
-                                        │       │                        │
-                                        │       ↓                        │
-                                        │ [M3 MRP补货]                   │
-                                        │       │                        │
-                                        │  [还有日期?] ──是──→ 回到循环顶 │
-                                        └───────┼────────────────────────┘
-                                                │ 否
-                                                ↓
-                                       [库存平衡校验]
-                                                │
-                                                ↓
-                                       [生成汇总报告]
-                                                │
-                                                ↓
-                                            [完成]
+```mermaid
+flowchart TB
+    A["启动仿真"] --> B["配置校验"]
+    B --> C{"检测断点"}
+    C -->|存在完整日期| D["恢复状态"]
+    C -->|无完整日期| E["初始化 Orchestrator"]
+    D --> LOOP
+    E --> LOOP
+
+    subgraph LOOP ["日度循环"]
+        M1["M1 需求与发货"] --> M4["M4 生产排程"] --> M5["M5 调拨规划"] --> M6["M6 物流执行"] --> M3["M3 MRP补货"]
+    end
+
+    LOOP --> F["库存平衡校验"]
+    F --> G["生成汇总报告"]
+    G --> H["完成"]
 ```
 
 ---
@@ -797,13 +759,21 @@ capacity - unrestricted_inventory（仿真日开始时）
 **功能**: Execute daily processing in correct order: M1 → M4 → M5 → M6
 
 **执行顺序**:
-```
-Orc → M1    处理发货
-Orc → M4    处理生产
-Orc → M5    处理部署
-Orc → M6    处理交付
-Orc → M3    MRP 补货
-Orc → Orc   保存每日状态
+```mermaid
+sequenceDiagram
+    participant Orc as Orchestrator
+    participant M1 as Module1
+    participant M4 as Module4
+    participant M5 as Module5
+    participant M6 as Module6
+    participant M3 as Module3
+
+    Orc->>M1: 处理发货
+    Orc->>M4: 处理生产
+    Orc->>M5: 处理部署
+    Orc->>M6: 处理交付
+    Orc->>M3: MRP 补货
+    Orc->>Orc: 保存每日状态
 ```
 
 **参数**:

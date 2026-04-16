@@ -32,29 +32,15 @@ ChainSight 本地版 API 采用“编排层 API + 业务模块 API + 工具层 A
 
 ### 1.2 调用流程图
 
-```
-[run_integrated_simulation]
-            │
-            ↓
-   [create_orchestrator]
-            │
-            ↓
-[M1 run_daily_order_generation]
-            │
-            ↓
-[M4 run_daily_production_planning]
-            │
-            ↓
-        [M5 main]
-            │
-            ↓
-[M6 run_daily_physical_flow]
-            │
-            ↓
-[M3 run_integrated_mode]
-            │
-            ↓
-[save_daily_state + SummaryReportGenerator]
+```mermaid
+flowchart TB
+    A["run_integrated_simulation"] --> B["create_orchestrator"]
+    B --> C["M1 run_daily_order_generation"]
+    C --> D["M4 run_daily_production_planning"]
+    D --> E["M5 main"]
+    E --> F["M6 run_daily_physical_flow"]
+    F --> G["M3 run_integrated_mode"]
+    G --> H["save_daily_state + SummaryReportGenerator"]
 ```
 
 ---
@@ -758,23 +744,14 @@ print(res.get("simulation_completed"), res.get("output_directory"))
 
 ### 1.2 典型调用流程
 
-```
-[DatabaseInitializer.initialize]
-            │
-            ↓
-[_load_config_from_database]
-            │
-            ↓
-[run_integrated_simulation_from_dict]
-            │
-    ┌───────┴───────┐
-    ↓               ↓
-[ModuleDataWriter]  [DuckDBProcessor /
-write_module_results OptimizedDataProcessor]
-    │               │
-    └───────┬───────┘
-            ↓
-     [(PostgreSQL)]
+```mermaid
+flowchart TB
+    A["DatabaseInitializer.initialize"] --> B["_load_config_from_database"]
+    B --> C["run_integrated_simulation_from_dict"]
+    C --> D["ModuleDataWriter\nwrite_module_results"]
+    C --> E["DuckDBProcessor /\nOptimizedDataProcessor"]
+    D --> PG["PostgreSQL"]
+    E --> PG
 ```
 
 ### 1.3 与本地版 API 的关系

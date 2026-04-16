@@ -583,8 +583,9 @@ delays = batch_sample_delivery_delays_duckdb(
 
 ### 6.2 数据流向图
 
-```
-[M1 订单/发货] → [M4 生产] → [M5 调拨] → [M6 物流] → [M3 MRP] → [次日计划输入]
+```mermaid
+flowchart LR
+    A["M1 订单/发货"] --> B["M4 生产"] --> C["M5 调拨"] --> D["M6 物流"] --> E["M3 MRP"] --> F["次日计划输入"]
 ```
 
 ### 6.3 状态共享说明
@@ -615,20 +616,13 @@ delays = batch_sample_delivery_delays_duckdb(
 
 ### 7.2 如何添加新模块
 
-```
-[在 src/modules/ 新增业务子包]
-             │
-             ↓
-[补充 __init__.py 公开入口]
-             │
-             ↓
-[在 src/core/main_integration/ 包内插入执行点]
-             │
-             ↓
-[在 src/core/orchestrator/processors.py 增加 process_moduleX 方法]
-             │
-             ↓
-[补充报告/数据库写入映射]
+```mermaid
+flowchart TB
+    A["在 src/modules/ 新增业务子包"]
+    A --> B["补充 __init__.py 公开入口"]
+    B --> C["在 src/core/main_integration/ 包内插入执行点"]
+    C --> D["在 src/core/orchestrator/processors.py 增加 process_moduleX 方法"]
+    D --> E["补充报告/数据库写入映射"]
 ```
 
 ### 7.3 如何集成自定义规则

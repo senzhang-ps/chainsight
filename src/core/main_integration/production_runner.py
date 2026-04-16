@@ -229,19 +229,8 @@ def run_module4_integrated(
             'current_allocated_capacity': {},
         }
 
-# ========== Module4 集成辅助函数（清理后） ==========
-
-# 以下兼容辅助函数仍基于文件读取，供旧路径或回退场景使用
-
-
-
-
-
-
-
-
-
-
+# ========== Module4 集成辅助函数 ==========
+# 以下辅助函数基于文件读取，供旧路径或回退场景使用
 
 
 def load_current_date_production_gr(module4_output_dir: str, current_date: pd.Timestamp, start_date: pd.Timestamp) -> pd.DataFrame:
@@ -298,42 +287,5 @@ def load_current_date_production_gr(module4_output_dir: str, current_date: pd.Ti
         ]
         
         return daily_available[['material', 'location', 'line', 'simulation_date', 'available_date', 'produced_qty']]
-    
+
     return pd.DataFrame()
-
-def load_module4_production_output(output_path: str, current_date: pd.Timestamp) -> pd.DataFrame:
-    """从 Module4 输出文件加载生产计划（向后兼容）
-
-    目的：
-    - 兼容旧流程，从单个输出文件读取生产计划，并筛选当日及未来的可用生产。
-
-    Args:
-        output_path: Module4 输出文件路径。
-        current_date: 当前日期。
-
-    Returns:
-        pd.DataFrame: 可用生产计划数据。
-
-    逻辑：
-        - 读取 Excel→解析 `ProductionPlan`→按 `available_date >= current_date` 过滤。
-    """
-    try:
-        if not os.path.exists(output_path):
-            return pd.DataFrame()
-            
-        xl = pd.ExcelFile(output_path)
-        if 'ProductionPlan' not in xl.sheet_names:
-            return pd.DataFrame()
-            
-        production_df = xl.parse('ProductionPlan')
-        
-        # 筛选当日的生产计划 (available_date = current_date)
-        if not production_df.empty and 'available_date' in production_df.columns:
-            production_df['available_date'] = pd.to_datetime(production_df['available_date'])
-            # 只返回当日或未来的生产计划
-            production_df = production_df[production_df['available_date'] >= current_date.normalize()]
-            
-        return production_df
-        
-    except Exception as e:
-        return pd.DataFrame()

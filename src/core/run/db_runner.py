@@ -206,7 +206,7 @@ def _run_with_database(ns: argparse.Namespace) -> int:
     
     total_start = time.time()
     program_start_datetime = datetime.now()
-    _run_completed = False  # [FIX-#8] 用于 finally 中判断是否异常退出
+    _run_completed = False  # 用于 finally 中判断是否异常退出
     temp_dir = None          # 运行结束后统一清理
     
     logger.info("\n" + "=" * 60)
@@ -283,12 +283,12 @@ def _run_with_database(ns: argparse.Namespace) -> int:
                 "已跳过预建输出表；请同步 `pgsql_db/module_data_writer.py` 与当前运行代码版本。"
             )
 
-        # [FIX-#7] 并发保护（最佳努力）：尝试避免同一 config_name 被多个进程同时运行
+        # 并发保护（最佳努力）：尝试避免同一 config_name 被多个进程同时运行
         from pgsql_db.checkpoint import try_acquire_run_lock, release_run_lock
         _lock_key = config_name
         if not try_acquire_run_lock(db, _lock_key):
             logger.error(
-                f"[ERROR] [FIX-#7] 已有另一个进程正在运行 config_name='{config_name}'。"
+                f"[ERROR] 已有另一个进程正在运行 config_name='{config_name}'。"
                 " 如需强制接管，请先终止已有进程或等待其完成后重试。"
             )
             return 1
@@ -300,7 +300,7 @@ def _run_with_database(ns: argparse.Namespace) -> int:
         temp_output = temp_dir / "output"
         temp_output.mkdir(exist_ok=True)
         
-        # [FIX §3.11] 始终使用标准仿真引擎（与文件模式相同的代码路径）
+        # 始终使用标准仿真引擎（与文件模式相同的代码路径）
         # 高性能DuckDB引擎(optimized_simulation)的M3/M4计算结果与标准引擎不一致，
         # 导致NetDemand、ProductionPlan等输出与Dev参考版本存在差异。
         # 标准引擎(run_integrated_simulation_from_dict)在当前回归样例中已与 Dev 输出对齐。
@@ -316,7 +316,7 @@ def _run_with_database(ns: argparse.Namespace) -> int:
         if not getattr(ns, 'force_restart', False):
             try:
                 from pgsql_db.checkpoint import load_checkpoint as _lc
-                _existing_cp = _lc(db, config_name, start_date=start_date, end_date=end_date)  # [FIX-#5]
+                _existing_cp = _lc(db, config_name, start_date=start_date, end_date=end_date)
                 if _existing_cp:
                     effective_run_id = _existing_cp['run_id']
                     resume_flag = True  # 自动启用断点续跑模式
@@ -363,7 +363,7 @@ def _run_with_database(ns: argparse.Namespace) -> int:
         logger.info("=" * 60)
         
         output_dir = result.get('output_directory')
-        # [FIX] 关键修复：使用仿真过程中实际使用的 run_id，而非重新生成
+        # 关键修复：使用仿真过程中实际使用的 run_id，而非重新生成
         # 仿真过程中 _flush_batch_to_db 使用 effective_run_id 写入模块数据，
         # 后续 Summary 和 Orchestrator 必须使用相同的 run_id 才能正确关联和查询数据
         run_id = result.get('run_id', effective_run_id)
@@ -403,7 +403,7 @@ def _run_with_database(ns: argparse.Namespace) -> int:
         else:
             logger.warning("[WARN] 无可用的模块输出数据写入数据库")
         
-        # [FIX] Orchestrator 状态数据写入
+        # Orchestrator 状态数据写入
         # 注意：模块每日输出已在 _flush_batch_to_db 中原子写入，
         # 但 Orchestrator CSV 文件是仿真过程中实时写到临时目录的，需要单独写入DB
         if output_dir and not all_results:
@@ -416,7 +416,7 @@ def _run_with_database(ns: argparse.Namespace) -> int:
         elif output_dir:
             logger.info("[OUT] Orchestrator 状态数据已在仿真过程中按天写入数据库，跳过最终整段重写")
         
-        # [FIX] Summary 汇总报告生成
+        # Summary 汇总报告生成
         # 必须使用与模块数据相同的 run_id 进行过滤，否则查不到数据
         logger.info(f"[DATA] 从数据库生成 Summary 汇总报告（run_id={run_id}）...")
         summary_success = False
@@ -433,7 +433,7 @@ def _run_with_database(ns: argparse.Namespace) -> int:
             import traceback
             logger.error(traceback.format_exc())
         
-        # [FIX] 状态更新：仅在所有 Summary 表生成完成后才将 checkpoint 标记为 completed
+        # 状态更新：仅在所有 Summary 表生成完成后才将 checkpoint 标记为 completed
         # 之前的 bug：simulation_db.py 在仿真循环结束后就标记 completed，
         # 但此时 Summary 表尚未生成，导致状态不一致
         if db is not None:
@@ -476,11 +476,11 @@ def _run_with_database(ns: argparse.Namespace) -> int:
         logger.info(f"   [INFO] 表前缀: {run_id}")
         logger.info("=" * 60)
 
-        _run_completed = True  # [FIX-#8]
+        _run_completed = True
         return 0
         
     except KeyboardInterrupt:
-        # [FIX-#8] Ctrl+C / SIGINT：不打印堆栈，仅记录中断
+        # Ctrl+C / SIGINT：不打印堆栈，仅记录中断
         # finally 块会将 checkpoint 标记为 interrupted
         logger.warning("\n[INTERRUPTED] 用户中断 (Ctrl+C)，正在保存状态...")
         return 130  # Unix 惯例: 128 + SIGINT(2)
@@ -491,7 +491,7 @@ def _run_with_database(ns: argparse.Namespace) -> int:
         logger.error(traceback.format_exc())
         return 1
     finally:
-        # [FIX-#8] 非正常退出时将 checkpoint 状态标记为 interrupted
+        # 非正常退出时将 checkpoint 状态标记为 interrupted
         # 这样断点续跑时能区分“正在运行”与“被中断”，也方便运维排查
         if not _run_completed:
             try:
@@ -500,10 +500,10 @@ def _run_with_database(ns: argparse.Namespace) -> int:
                 if _cp and _cp.get('status') == 'running':
                     update_checkpoint_status(db, _cp['run_id'], 'interrupted',
                                              error_message='进程异常退出（kill / crash / KeyboardInterrupt）')
-                    logger.info(f"[FIX-#8] checkpoint 状态已更新为 interrupted（run_id={_cp['run_id']}）")
+                    logger.info(f"checkpoint 状态已更新为 interrupted（run_id={_cp['run_id']}）")
             except Exception:
                 pass  # 连接已关闭或 DB 不可用时静默忽略
-        # [FIX-#7] 正常或异常退出时显式释放并发锁
+        # 正常或异常退出时显式释放并发锁
         try:
             from pgsql_db.checkpoint import release_run_lock
             release_run_lock(db, config_name)

@@ -24,7 +24,7 @@ from .production_runner import run_module4_integrated
 from .runtime_state import DbRuntimeState
 from .memory_store import (_ensure_memory_store_imported, _enable_memory_mode,
                           _disable_memory_mode, _is_memory_mode_enabled, _get_data_store)
-from .db_helpers import _flush_batch_to_db, _write_checkpoint_to_db
+from .db_helpers import _flush_batch_to_db
 
 
 def run_integrated_simulation_from_dict(
@@ -119,17 +119,17 @@ def run_integrated_simulation_from_dict(
     if db is not None:
         from pgsql_db.checkpoint import ensure_checkpoint_table, ensure_m4_state_table
         ensure_checkpoint_table(db)
-        ensure_m4_state_table(db)  # [FIX-#3]
+        ensure_m4_state_table(db)
 
     if resume and db is not None:
         from pgsql_db.checkpoint import load_checkpoint, next_day, deserialize_orchestrator_state
         _rk = run_key or config_name
-        checkpoint = load_checkpoint(db, _rk, start_date=start_date, end_date=end_date)  # [FIX-#5]
+        checkpoint = load_checkpoint(db, _rk, start_date=start_date, end_date=end_date)
 
     # DbRuntimeState：内存跨天状态（替代 M4 产线状态、已分配产能及 M3→M4 数据传递中的临时文件中转）。
     runtime_state = DbRuntimeState()
 
-    # 🔧 [FIX] m1_previous_orders 初始化：全新运行默认 None；断点续跑时由 checkpoint 恢复覆盖。
+    # m1_previous_orders 初始化：全新运行默认 None；断点续跑时由 checkpoint 恢复覆盖。
     # 必须在 if checkpoint 分支之前声明，防止后续无条件赋值覆盖已恢复的值。
     m1_previous_orders = None
 
@@ -149,7 +149,7 @@ def run_integrated_simulation_from_dict(
                 'run_id': run_id_override,
             }
         deserialize_orchestrator_state(orch, checkpoint['orch_state_json'])
-        # [FIX-#10] 从恢复后的 flat list 重建 *_by_date 索引字典
+        # 从恢复后的 flat list 重建 *_by_date 索引字典
         # deserialize_orchestrator_state 恢复了 delivery_gr / production_gr / shipment_log /
         # delivery_shipment_log 四个 flat list，但对应的 *_by_date 索引未序列化。
         # 这些索引是 views / inventory_change_log / DB 写入 / summary 的主要查询入口，
@@ -267,7 +267,7 @@ def run_integrated_simulation_from_dict(
         writer = None
     batch_results = {mod: [] for mod in all_results}
     batch_start_date = actual_start_date
-    # [FIX-风险A] 追踪每天每模块的失败情况，防止批次内数据静默缺失
+    # 追踪每天每模块的失败情况，防止批次内数据静默缺失
     batch_failed_modules = []  # list of (date_str, module_name, error_msg)
     # NOTE: m1_previous_orders 已在 checkpoint 分支之前初始化（=None），
     # 续跑时由 checkpoint 恢复覆盖，不在此重复赋值。
@@ -317,7 +317,7 @@ def run_integrated_simulation_from_dict(
                 pass
 
         except Exception as e:
-            # [FIX-风险B] GR入库是核心状态变更，失败后库存不正确，
+            # GR入库是核心状态变更，失败后库存不正确，
             # 后续所有模块在错误状态上运算，必须中止仿真而非静默继续。
             import traceback
             traceback.print_exc()
@@ -509,9 +509,8 @@ def run_integrated_simulation_from_dict(
         except Exception as e:
             pass
 
-        # ===== [FIX] checkpoint 由 _flush_batch_to_db 在事务内原子写入，不再提前单独写入 =====
-        # 移除了独立的 _write_checkpoint_to_db 调用，原因：
-        # 在批次写入数据库之前提前写 checkpoint，会产生“checkpoint 超前、模块数据滞后”的不一致窗口：
+        # ===== checkpoint 由 _flush_batch_to_db 在事务内原子写入，不再提前单独写入 =====
+        # 早期版本在此处调用独立 checkpoint 写入辅助函数，会产生“checkpoint 超前、模块数据滞后”的不一致窗口：
         # 用户在下一天运行时查询数据库，checkpoint 已显示当天完成，但当天模块数据尚未写入数据库。
         # 若在此窗口内崩溃，断点续跑会跳过该天，永久丢失模块数据。
         # 现在 checkpoint 仅在 _flush_batch_to_db 的原子事务内更新，保证数据与 checkpoint 严格一致。
@@ -520,7 +519,7 @@ def run_integrated_simulation_from_dict(
         is_last_day = (current_date == sim_dates_to_run[-1])
         if writer is not None and (i % batch_size == 0 or is_last_day):
             batch_end_str = current_date.strftime('%Y-%m-%d')
-            # [FIX-#4] 批次内有模块失败时，拒绝推进 checkpoint，避免缺口天被标为已完成
+            # 批次内有模块失败时，拒绝推进 checkpoint，避免缺口天被标为已完成
             if batch_failed_modules:
                 for fail_date, fail_mod, fail_err in batch_failed_modules:
                     pass
@@ -546,11 +545,11 @@ def run_integrated_simulation_from_dict(
                         m1_previous_orders=m1_previous_orders,
                         runtime_state=runtime_state,
                     )
-                    # [FIX-风险2] 仅在写入数据库成功后才清空 batch_results
+                    # 仅在写入数据库成功后才清空 batch_results
                     batch_results = {mod: [] for mod in all_results}
                     batch_start_date = (current_date + pd.Timedelta(days=1)).strftime('%Y-%m-%d')
-                    batch_failed_modules = []  # [FIX-风险A] 清空失败追踪
-                    # [FIX-风险E] 数据库模式下释放已写入数据库的历史数据，防止 all_results 无限增长导致 OOM
+                    batch_failed_modules = []  # 清空失败追踪
+                    # 数据库模式下释放已写入数据库的历史数据，防止 all_results 无限增长导致 OOM
                     # 将已写入数据库的结果替换为轻量级存根（保留 simulation_date 用于计数和日志）
                     if db is not None:
                         for mod in all_results:
@@ -598,7 +597,7 @@ def run_integrated_simulation_from_dict(
         final_stats = {}
     
 
-    # [FIX] 仿真循环完成后，不在此处设置 completed 状态。
+    # 仿真循环完成后，不在此处设置 completed 状态。
     # 原因：完整的数据流为 仿真循环完成 -> Summary表生成 -> Orchestrator写入 -> 标记completed。
     # Summary 和 Orchestrator 写入在 db_runner.py 的步骤3中完成，
     # 只有全部成功后才应该标记为 completed。

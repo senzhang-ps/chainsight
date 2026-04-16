@@ -1,5 +1,9 @@
-# summary_report_generator.py
-# 汇总报告生成器 - 全周期模拟结束后输出7类full报告
+"""汇总报告生成器
+
+在全周期仿真结束后，按照约定的目录结构输出 7 类完整报告：
+订单发运切分、产能超限、换型、调拨计划、生产计划、交付计划、车辆使用与历史库存。
+所有报告基于 Orchestrator 内存状态或既有 CSV/XLSX 落盘文件生成。
+"""
 
 import pandas as pd
 import numpy as np

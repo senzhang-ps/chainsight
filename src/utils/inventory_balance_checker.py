@@ -1,6 +1,11 @@
-# inventory_balance_checker.py（库存平衡检查器）
-# 库存平衡检查器 - 验证库存守恒原理
-# 期初库存 + 入库（生产+收货） - 出库（发货+部署） = 期末库存
+"""库存平衡检查器
+
+基于库存守恒原理对每日及全周期仿真结果进行账平校验：
+
+    期初库存 + 入库(生产 + 收货) - 出库(发货 + 调拨) = 期末库存
+
+数据来源统一由 Orchestrator 内存状态提供，不再回退到文件读取。
+"""
 
 import pandas as pd
 import numpy as np
@@ -316,19 +321,6 @@ class InventoryBalanceChecker:
                               f"Failed to get initial inventory from orchestrator: {str(e)}")
             return {}
     
-    def _get_inventory_from_state_file(self, date: str) -> Dict[Tuple[str, str], float]:
-        """
-        从Orchestrator获取指定日期的库存（不再从文件读取）
-        
-        Args:
-            date: 日期字符串
-            
-        Returns:
-            Dict: 库存字典 {(material, location): quantity}
-        """
-        # 直接使用_get_inventory_by_date方法
-        return self._get_inventory_by_date(date)
-    
     def _get_delivery_plans_from_module6(self, date: str) -> Dict[Tuple[str, str], float]:
         """
         从orchestrator内存获取指定日期的delivery plan出库记录
@@ -414,63 +406,7 @@ class InventoryBalanceChecker:
                               f"Failed to get shipments for {date}: {str(e)}")
             return {}
     
-    def _get_delivery_plans(self, date: str) -> Dict[Tuple[str, str], float]:
-        """
-        获取指定日期的实际发运出库（delivery plan执行后的出库）
-        注意：delivery GR是按actual_delivery_date记录的，表示当天交付到达的物料
-        这里需要获取的是从发送地点发出的物料（出库）
-        
-        Args:
-            date: 日期字符串
-            
-        Returns:
-            Dict: 发运出库字典 {(material, sending_location): quantity}
-        """
-        try:
-            date_obj = pd.to_datetime(date).normalize()
-            delivery_plans_dict = {}
-            
-            # 从 Orchestrator 的 delivery_gr 中获取数据
-            # delivery_gr 记录的是当日交付到达的物料（入库）
-            # 但我们需要的是发出时的出库记录
-            
-            # 方法1：直接从 Orchestrator 的 delivery_gr 获取
-            try:
-                delivery_gr_df = self.orchestrator.get_delivery_gr_view(date)
-                
-                # delivery_gr 记录的是交付到达，但我们需要的是发出出库
-                # 需要通过 in_transit 或者其他方式获取发出记录
-                
-                # 从 in_transit 中查找当日发出的记录（actual_ship_date == date）
-                in_transit_data = getattr(self.orchestrator, 'in_transit', {})
-                
-                for transit_uid, transit_record in in_transit_data.items():
-                    actual_ship_date = pd.to_datetime(transit_record.get('actual_ship_date'))
-                    if actual_ship_date.normalize() == date_obj:
-                        material = transit_record['material']
-                        sending = transit_record['sending']
-                        quantity = float(transit_record['quantity'])
-                        
-                        key = (material, sending)
-                        delivery_plans_dict[key] = delivery_plans_dict.get(key, 0) + quantity
-                        
-            except Exception as orchestrator_error:
-                self.vm.add_warning("InventoryBalance", "DataAccess", 
-                                  f"Failed to get delivery data from orchestrator for {date}: {orchestrator_error}")
-            
-            # 如果从Orchestrator内存获取不到数据，记录警告
-            if not delivery_plans_dict:
-                self.vm.add_warning("InventoryBalance", "DataAccess", 
-                                  f"No delivery plan data available from orchestrator memory for {date}. Using zero delivery plans.")
-            
-            return delivery_plans_dict
-            
-        except Exception as e:
-            self.vm.add_warning("InventoryBalance", "DataAccess", 
-                              f"Failed to get delivery plans for {date}: {str(e)}")
-            return {}
-    
-    def _validate_inventory_balance(self, date: str, beginning: Dict, production: Dict, 
+    def _validate_inventory_balance(self, date: str, beginning: Dict, production: Dict,
                                   delivery: Dict, shipments: Dict, delivery_plans: Dict, 
                                   ending: Dict) -> bool:
         """

@@ -699,8 +699,8 @@ class ModuleDataWriter:
                                 df['run_id'] = pd.Series(dtype='string')
                         else:
                             df['file_date'] = date_part
-                            # [FIX-风险6] 统一 sim_date 格式为 YYYY-MM-DD
-                            # 文件名日期可能为 YYYYMMDD，需要转换
+                             # 统一 sim_date 格式为 YYYY-MM-DD
+                             # 文件名日期可能为 YYYYMMDD，需要转换
                             if sim_date:
                                 df['sim_date'] = sim_date
                             elif len(date_part) == 8 and date_part.isdigit():
@@ -728,18 +728,18 @@ class ModuleDataWriter:
     
     def delete_batch_data(self, run_id: str, batch_start_date: str) -> None:
         """
-        删除指定批次起始日期及之后的模块输出数据（幂等保障）。
-        用于续跑时清理上次中断批次的残留数据，再重写。
+         删除指定批次起始日期及之后的模块输出数据（幂等保障）。
+         用于续跑时清理上次中断批次的残留数据，再重写。
 
-        [FIX-风险3] 区分可跳过异常与真正错误
-        [FIX-风险4] 覆盖 汇总与编排器 表
-        [FIX-风险5] 添加 run_id 过滤
+         区分可跳过异常与真正错误
+         覆盖 汇总与编排器 表
+         添加 run_id 过滤
 
-        参数：
+         参数：
             run_id: 运行ID，用于按 run_id 过滤删除
             batch_start_date: 批次第一天 (YYYY-MM-DD)，删除 sim_date >= 此值的行
         """
-        # [FIX-风险4] 完整表列表，与 truncate_output_tables 保持一致
+        # 完整表列表，与 truncate_output_tables 保持一致
         output_tables = [
             # 模块输出表
             'module1_output_orderlog',
@@ -803,7 +803,7 @@ class ModuleDataWriter:
                 )
                 if not sim_date_check or not sim_date_check[0][0]:
                     continue
-                # [FIX-风险5] 检查是否有 run_id 列，按 sim_date + run_id 删除
+                # 检查是否有 run_id 列，按 sim_date + run_id 删除
                 run_id_check = self.db.execute_query(
                     "SELECT EXISTS(SELECT 1 FROM information_schema.columns "
                     "WHERE table_name = %s AND column_name = 'run_id')",
@@ -826,7 +826,7 @@ class ModuleDataWriter:
                     )
                 deleted_total += 1
             except Exception as e:
-                # [FIX-风险3] 区分可跳过异常与真正错误
+                # 区分可跳过异常与真正错误
                 err_str = str(e).lower()
                 if 'does not exist' in err_str or 'column' in err_str:
                     continue  # 表或列不存在，合理跳过
@@ -1109,7 +1109,7 @@ class ModuleDataWriter:
             # 写入每个表
             for table_name, dfs in table_data.items():
                 if not dfs:
-                    # [FIX] FIX: 即使没有数据，也创建空表结构
+                    # 即使没有数据，也创建空表结构
                     # 创建带有 sim_date 和 run_id 列的空 DataFrame
                     combined_df = pd.DataFrame()
                     combined_df['sim_date'] = pd.Series(dtype='string')
@@ -1126,20 +1126,20 @@ class ModuleDataWriter:
                     except Exception as e:
                         results[table_name] = -1
                     continue
-                
+
                 combined_df = pd.concat(dfs, ignore_index=True)
-                
+
                 # 确保 sim_date 列存在（即使是空表）
                 if 'sim_date' not in combined_df.columns:
                     combined_df['sim_date'] = pd.Series(dtype='string')
-                
+
                 # 添加run_id列
                 if run_id:
                     if combined_df.empty:
                         combined_df['run_id'] = pd.Series(dtype='string')
                     else:
                         combined_df['run_id'] = run_id
-                
+
                 # 写入数据库 (即使 combined_df.empty 也会创建表结构，传入config_name)
                 try:
                     self.db.create_table_from_df(combined_df, table_name, if_exists, config_name=self.config_name)

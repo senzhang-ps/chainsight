@@ -49,7 +49,7 @@ class DatabaseConnection:
     def connect(self) -> psycopg.Connection:
         """建立数据库连接（autocommit=True 模式）
         
-        [FIX] 使用 autocommit=True 确保 conn.transaction() 始终创建真正的
+         使用 autocommit=True 确保 conn.transaction() 始终创建真正的
         BEGIN...COMMIT 事务块。在 autocommit=False（psycopg3 默认值）下，
         任何先前的 SQL 语句（包括 SELECT）都会隐式开启事务，导致后续的
         conn.transaction() 仅创建 SAVEPOINT 而非顶层事务。SAVEPOINT 退出时
@@ -88,7 +88,7 @@ class DatabaseConnection:
         参数：
             commit: 是否在事务中执行（True=包裹在 BEGIN...COMMIT 中，False=直接执行）
         
-        [FIX] autocommit=True 模式下：
+         autocommit=True 模式下：
         - commit=True: 使用 conn.transaction() 包裹，保证原子性
         - commit=False: 直接执行（每条语句自动提交，适用于只读查询）
         """
@@ -674,7 +674,7 @@ class DatabaseConnection:
                     except (ValueError, TypeError):
                         new_row.append(None)
                 elif j in text_col_indices:
-                    # [FIX] Convert booleans to "True"/"False" strings to match
+                    # Convert booleans to "True"/"False" strings to match
                     # 与 Dev/Src 的 xlsx 输出格式保持一致（避免 PG 将 bool->text 转成 `t`/`f`）
                     if isinstance(val, (bool, np.bool_)):
                         new_row.append(str(val))
@@ -706,7 +706,7 @@ class DatabaseConnection:
             if total_rows >= 10000:
                 pass
         except Exception as error:
-            # [FIX] autocommit=True 模式下，conn.transaction() 退出时已自动 ROLLBACK，
+             # autocommit=True 模式下，conn.transaction() 退出时已自动 ROLLBACK，
             # 无需手动 rollback
             raise error
     

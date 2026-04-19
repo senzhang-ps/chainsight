@@ -601,16 +601,7 @@ with PerformanceProfiler("Module5", enabled=True):
     run_module5()
 ```
 
-### 16.2 数据库模式诊断
-
-```python
-from pgsql_db.performance_dashboard import PerformanceDashboard
-
-dashboard = PerformanceDashboard(output_dir="./performance")
-dashboard.start_simulation()
-```
-
-### 16.3 DuckDB/Pandas 对比
+### 16.2 DuckDB/Pandas 对比
 
 ```python
 from pgsql_db.duckdb_integration import run_ab_comparison
@@ -619,7 +610,7 @@ result = run_ab_comparison(func_a=duck_func, func_b=pandas_func, test_data=df, i
 print(result)
 ```
 
-### 16.4 排障优先顺序
+### 16.3 排障优先顺序
 
 1. 先看日志是否有 ERROR；
 2. 再看模块耗时分布；

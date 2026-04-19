@@ -14,7 +14,7 @@ from ...utils.defaults import M6_RANDOM_SEED
 from ...utils.normalization import normalize_material
 
 
-def run_module4_integrated(
+def run_daily_production_planning_integrated(
     config_dict: dict,
     module3_output_dir: str,
     simulation_date: pd.Timestamp,

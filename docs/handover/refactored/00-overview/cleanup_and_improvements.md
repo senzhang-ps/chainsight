@@ -211,7 +211,7 @@ src/core/main_integration/module4_runner.py
 **之后**：
 ```
 src/core/main_integration/production_runner.py
-├─ run_module4_integrated()
+├─ run_daily_production_planning_integrated()
 └─ load_current_date_production_gr()
 ```
 

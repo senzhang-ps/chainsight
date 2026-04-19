@@ -1,7 +1,7 @@
 """Module4 集成模式入口（对齐其他模块的 `moduleN.run_*` 调用风格）。
 
 此文件仅提供薄包装，将 `module4.run_daily_production_planning_integrated(...)`
-委托给 `src.core.main_integration.production_runner.run_module4_integrated`。
+委托给 `src.core.main_integration.production_runner.run_daily_production_planning_integrated`。
 实际逻辑仍保留在 production_runner.py 中，便于和其余 main_integration 层协作。
 
 为避免 `src.modules.production_planning` ↔ `src.core.main_integration.production_runner`
@@ -28,11 +28,11 @@ def run_daily_production_planning_integrated(
 ) -> Dict[str, Any]:
     """集成模式运行 Module4 生产计划。
 
-    签名与返回结构与 production_runner.run_module4_integrated 保持一致。
+    签名与返回结构与 production_runner.run_daily_production_planning_integrated 保持一致。
     """
-    from src.core.main_integration.production_runner import run_module4_integrated
+    from src.core.main_integration.production_runner import run_daily_production_planning_integrated as _impl
 
-    return run_module4_integrated(
+    return _impl(
         config_dict=config_dict,
         module3_output_dir=module3_output_dir,
         simulation_date=simulation_date,

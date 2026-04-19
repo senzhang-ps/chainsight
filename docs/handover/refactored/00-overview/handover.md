@@ -26,11 +26,11 @@
 
 - `run.py`（仓库 CLI 入口）
 - `src/core/run/`（7 个文件：run_main, db_runner, db_config, local_writer, output_dir, utils）
-- `src/core/main_integration/`（13 个文件：simulation_file/db, production_runner, config_loader, resume, seed 等）
+- `src/core/main_integration/`（`simulation_file.py`、`simulation_db.py`、`production_runner.py`、`config_loader.py`、`resume.py`、`seed.py`、`runtime_state.py`、`memory_store.py`、`db_helpers.py`、`cli.py` 等）
 
 ### 2.2 共享状态
 
-- `src/core/orchestrator/`（9 个文件：orchestrator_main, daily_ops, processors, persistence, inventory_log, views, models, normalize）
+- `src/core/orchestrator/`（`orchestrator_main.py`、`daily_ops.py`、`processors.py`、`persistence.py`、`inventory_log.py`、`views.py`、`models.py` 等）
 - `src/core/parallel_executor/`（4 个文件：parallel_executor_main, convenience, models）
 
 ### 2.3 业务模块
@@ -43,9 +43,9 @@
 
 ### 2.4 数据库边界
 
-- `pgsql_db/`（19 个文件）
+- `pgsql_db/`（数据库边界、配置导入、结果落库与 DuckDB 桥接实现）
 
-### 2.5 共享工具层（src/utils/ — 15 个文件）
+### 2.5 共享工具层（`src/utils/`）
 
 - `defaults.py` — YAML 配置加载器，从 `config/defaults.yaml` 读取跨模块共享默认参数
 - `normalization.py` — 统一标识符归一化实现（单一真源，5 处重复 → 1 处）
@@ -109,7 +109,7 @@ from src.modules import logistics_execution as module6
 ### 4.2 M4 集成适配
 
 ```python
-from src.core.main_integration.production_runner import run_module4_integrated
+from src.core.main_integration.production_runner import run_daily_production_planning_integrated
 from src.core.main_integration.production_runner import load_current_date_production_gr
 ```
 

@@ -738,9 +738,9 @@ print(res.get("simulation_completed"), res.get("output_directory"))
 | 层级 | 主要文件 | API 类型 |
 |---|---|---|
 | 连接与会话层 | `db_connection.py`、`db_initializer.py` | 连接、事务、数据库初始化 |
-| 查询与处理层 | `duckdb_processor.py`、`optimized_processor.py` | SQL 查询、向量化处理、跨库计算 |
+| 查询与处理层 | `duckdb_integration.py`、`high_performance_engine.py` | DuckDB 批量算法桥接、混合查询、增量计算 |
 | 写入与汇总层 | `module_data_writer.py`、`excel_importer.py` | 模块输出落库、配置导入、汇总生成 |
-| 监控与诊断层 | `performance_dashboard.py`、`duckdb_integration.py` | 性能统计、A/B对比、告警 |
+| 监控与诊断层 | `src/services/performance_profiler.py`、`duckdb_integration.py` | 性能画像、A/B对比、统计汇总 |
 
 ### 1.2 典型调用流程
 
@@ -749,7 +749,7 @@ flowchart TB
     A["DatabaseInitializer.initialize"] --> B["_load_config_from_database"]
     B --> C["run_integrated_simulation_from_dict"]
     C --> D["ModuleDataWriter\nwrite_module_results"]
-    C --> E["DuckDBProcessor /\nOptimizedDataProcessor"]
+    C --> E["duckdb_integration /\nhigh_performance_engine"]
     D --> PG["PostgreSQL"]
     E --> PG
 ```
@@ -1182,11 +1182,11 @@ with db.get_cursor() as cur:
 
 | API | 说明 |
 |---|---|
-| `IncrementalProcessor.register_dataset()` | 注册增量检测数据集 |
-| `IncrementalProcessor.get_changes()` | 获取新增/修改/删除集合 |
-| `IncrementalProcessor.save_checkpoint()/load_checkpoint()` | 检查点持久化 |
-| `OptimizedDataProcessor.build_groupby_index()` | 构建热点索引缓存 |
-| `OptimizedDataProcessor.build_lookup_dict()` | 构建快速查找字典 |
+| `IncrementalComputeManager.register_dataset()` | 注册增量检测数据集 |
+| `IncrementalComputeManager.get_changes()` | 获取新增/修改/删除集合 |
+| `save_checkpoint()/load_checkpoint()` | 检查点持久化 |
+| `HybridQueryEngine.attach_postgres()` | 将 PostgreSQL 附加到 DuckDB |
+| `HybridQueryEngine.query_config()` | 读取配置表并复用缓存 |
 
 ### 7.3 索引管理 API
 
@@ -1222,27 +1222,29 @@ with db.get_cursor() as cur:
 
 ### 8.1 性能监控 API
 
-`PerformanceDashboard`（`performance_dashboard.py`）
+`PerformanceProfiler`（`src/services/performance_profiler.py`）
 
 ```python
-class PerformanceDashboard:
-    def start_simulation(self)
-    def end_simulation(self)
-    def start_day(self, date: str)
-    def end_day(self)
-    def track_module(self, module_name: str)
-    def record_operation(self, operation_name: str, elapsed: float, records: int = 0)
-    def get_summary(self) -> Dict[str, Any]
+class PerformanceProfiler:
+    def __enter__(self)
+    def __exit__(self, exc_type, exc_val, exc_tb)
 ```
 
 **示例**
 
 ```python
-dashboard.start_day("2025-01-02")
-with dashboard.track_module("Module5"):
+with PerformanceProfiler("Module5", enabled=True):
     run_module5()
-dashboard.end_day()
-print(dashboard.get_summary())
+```
+
+`duckdb_integration.get_perf_stats()` 提供 DuckDB/Pandas 运行统计：
+
+```python
+with performance_comparison("module5_ab") as run_id:
+    duck_func(df, run_id=run_id)
+    pandas_func(df, run_id=run_id)
+
+print(get_perf_stats().get_comparison(run_id))
 ```
 
 ### 8.2 DuckDB A/B 诊断 API
@@ -1284,7 +1286,7 @@ print(cnt)
 1. **连通性**：`test_connection()`；
 2. **配置完整性**：`check_config_data_exists(config_name)`；
 3. **输出完整性**：检查 M1/M3/M4/M5/M6 关键输出表是否存在当前 `run_id`；
-4. **性能定位**：`PerformanceDashboard.get_summary()` 查看慢模块；
+4. **性能定位**：查看 `PerformanceProfiler` 输出报告，或用 `get_perf_stats().get_comparison(run_id)` 比较 DuckDB/Pandas；
 5. **回退验证**：对慢查询执行 DuckDB/Pandas A/B，确认是否需要关闭 DuckDB 优化。
 
 该闭环可在 10-20 分钟内完成一次标准故障初判。
@@ -1328,7 +1330,7 @@ print(cnt)
 |---|---|---|
 | Core 编排 API | `run_integrated_simulation()`、`Orchestrator` | `run_integrated_simulation_from_dict()`、`DatabaseInitializer` |
 | 业务模块 API | 5 个业务子包（`demand_planning`、`mrp_planning`、`production_planning`、`deployment_planning`、`logistics_execution`，配合 `module1`~`module6` 兼容别名） | 保持兼容，通过 `ModuleDataWriter` 落库 |
-| 工具层 API | `DuckDBAccelerator`、`MemoryDataStore`、`PerformanceProfiler` | `DuckDBProcessor`、`OptimizedDataProcessor`、`PerformanceDashboard` |
+| 工具层 API | `DuckDBAccelerator`、`MemoryDataStore`、`PerformanceProfiler` | `HybridQueryEngine`、`IncrementalComputeManager`、`PerformanceStats` |
 | 数据操作 API | pandas DataFrame 操作 | `DatabaseConnection`、`execute_query()`、`create_table_from_df()` |
 
 ## 3.2 接口兼容性
@@ -1404,7 +1406,7 @@ orders_df = orders_df[orders_df["run_id"] == "BC_S5_20260305_101500"]
 | 配置加载 | `pd.read_excel()` | `db.read_table()` | DB 版适合多场景共享配置 |
 | 批量写入 | `df.to_csv()` | `db.create_table_from_df()` + COPY | DB 版约 50x 写入加速 |
 | 批量查询 | `df.groupby().sum()` | `duck.query("SELECT ... GROUP BY")` | DuckDB 向量化约 10x 查询加速 |
-| 监控统计 | `PerformanceProfiler` | `PerformanceDashboard` | DB 版增加维度（按 run_id、按表） |
+| 监控统计 | `PerformanceProfiler` | `PerformanceStats` | DB 版增加 DuckDB/Pandas 对比维度（按 run_id、按操作） |
 
 ## 3.5 推荐迁移路径
 
@@ -1494,8 +1496,8 @@ print(f"输出统计: {summary.to_dict('records')}")
 | 初始化并运行 | `run_integrated_simulation()` | `DatabaseInitializer.initialize()` + `run_integrated_simulation_from_dict()` |
 | 读取配置 | `pd.read_excel()` | `db.read_table("cfg_*")` |
 | 写入输出 | `df.to_csv()` | `db.create_table_from_df()` |
-| 批量查询 | `DuckDBAccelerator.query()` | `DuckDBProcessor.query()` |
-| 性能监控 | `PerformanceProfiler` | `PerformanceDashboard` |
+| 批量查询 | `DuckDBAccelerator.aggregate_by_groups()` | `HybridQueryEngine.query_config()` |
+| 性能监控 | `PerformanceProfiler` | `get_perf_stats()` / `performance_comparison()` |
 | 配置校验 | `ConfigValidator.validate_all_configurations()` | `DatabaseInitializer.check_config_data_exists()` |
 | 连接管理 | 不适用 | `DatabaseConnection.connect()` / `close()` |
 | 事务处理 | 不适用 | `db.get_cursor(commit=True)` |

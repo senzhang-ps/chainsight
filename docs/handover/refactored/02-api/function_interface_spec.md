@@ -33,7 +33,7 @@
 | 旧路径（文中仍可能出现） | 新实际位置 |
 |---|---|
 | `src/core/run.py` | 包 `src/core/run/`，主入口文件：`run_main.py` |
-| `src/core/main_integration.py` | 包 `src/core/main_integration/`，主要入口：`simulation_file.py`（本地模式）、`simulation_db.py`（DB 模式）、`production_integration.py`（M4 集成）、`resume.py`（断点续跑）、`config_loader.py`（配置加载） |
+| `src/core/main_integration.py` | 包 `src/core/main_integration/`，主要入口：`simulation_file.py`（本地模式）、`simulation_db.py`（DB 模式）、`production_runner.py`（M4 集成适配）、`resume.py`（断点续跑）、`config_loader.py`（配置加载） |
 | `src/core/orchestrator.py` | 包 `src/core/orchestrator/`，主类在 `orchestrator_main.py`；按模块的 `process_moduleX_*` 在 `processors.py`；视图在 `views.py`；快照持久化在 `persistence.py`；日常操作在 `daily_ops.py` |
 | `src/core/parallel_executor.py` | 包 `src/core/parallel_executor/`，主入口：`parallel_executor_main.py` |
 | `src/modules/module1.py` | `src/modules/demand_planning/`（入口 `integration.py`） |
@@ -58,7 +58,7 @@
 
 - 本文档专门回答三个问题：函数按什么顺序执行、每个关键函数吃什么数据、会吐出什么文件或内存结果。
 - 由于项目规模较大，本文以“主链路函数 + 核心公共函数 + 关键内部函数 + 所有标准输出格式”为主，覆盖交接和排障最常用的函数集合。
-- 更细的逐文件文档可继续参考：`docs/core.md`、`docs/modules_demand_planning.md`、`docs/modules_mrp_planning.md`、`docs/modules_production_planning.md`、`docs/modules_deployment_planning.md`、`docs/modules_logistics_execution.md`、`docs/services.md`、`docs/utils.md`。
+- 更细的逐文件文档可继续参考：`docs/handover/refactored/01-architecture/core.md`、`docs/handover/refactored/03-modules/modules_demand_planning.md`、`docs/handover/refactored/03-modules/modules_mrp_planning.md`、`docs/handover/refactored/03-modules/modules_production_planning.md`、`docs/handover/refactored/03-modules/modules_deployment_planning.md`、`docs/handover/refactored/03-modules/modules_logistics_execution.md`、`docs/handover/refactored/04-services-utils/services.md`、`docs/handover/refactored/04-services-utils/utils.md`。
 
 ## 2. 程序总运行顺序
 
@@ -75,9 +75,9 @@
    - `load_current_date_production_gr(...)`
    - `module1.run_daily_order_generation(...)`
    - `orchestrator.process_module1_shipments(...)`
-   - `run_module4_integrated(...)`
+   - `module4.run_daily_production_planning_integrated(...)`
    - `orchestrator.process_module4_production(...)`
-   - `module5.main(...)`
+   - `module5.run_daily_deployment_planning(...)`
    - `orchestrator.process_module5_deployment(...)`
    - `module6.run_daily_physical_flow(...)`
    - `orchestrator.process_module6_delivery(...)`
@@ -205,7 +205,7 @@
 - 输出：按 Sheet 语义组织的配置字典。
 - 表读取：`cfg_global_network`、`cfg_m1_demandforecast` 等。
 
-### 5.2 `src/core/main_integration/`（入口：`simulation_file.py` / `simulation_db.py` / `production_integration.py` / `resume.py`）
+### 5.2 `src/core/main_integration/`（入口：`simulation_file.py` / `simulation_db.py` / `production_runner.py` / `resume.py`）
 
 #### `run_integrated_simulation(config_path, start_date, end_date, output_base_dir, force_restart) -> dict`
 - 功能：本地模式主仿真入口。
@@ -234,7 +234,7 @@
 - 输入文件：`unrestricted_inventory_*`、`open_deployment_*`、`planning_intransit_*`、`production_gr_*`、`delivery_gr_*`、`shipment_log_*`、`delivery_shipment_log_*`、`daily_logs_*` 等。
 - 输出：不返回值，直接修改内存中的 Orchestrator。
 
-#### `run_module4_integrated(config_dict, module3_output_dir, simulation_date, simulation_start, output_dir, skip_file_output, module3_result) -> dict`
+#### `run_daily_production_planning_integrated(config_dict, module3_output_dir, simulation_date, simulation_start, output_dir, skip_file_output, module3_result, previous_line_states_override, allocated_capacity_override, skip_state_file_output) -> dict`
 - 功能：桥接 M4，使主流程能用统一方式调用生产计划。
 - 输入：M4 配置、Module3 输出目录或 `module3_result` 内存结果。
 - 输出：`production_df`、`exceed_log`、`issues_df`、`changeover_log`。
@@ -249,7 +249,7 @@
 - 功能：统一读取随机种子。
 - 输出：整数种子，默认 `42`。
 
-### 5.3 `src/core/orchestrator/`（入口：`orchestrator_main.py`；辅助：`processors.py`、`views.py`、`persistence.py`、`daily_ops.py`、`inventory_log.py`、`normalize.py`、`models.py`）
+### 5.3 `src/core/orchestrator/`（入口：`orchestrator_main.py`；辅助：`processors.py`、`views.py`、`persistence.py`、`daily_ops.py`、`inventory_log.py`、`models.py`）
 
 #### `initialize_inventory(initial_inventory_df) -> None`
 - 输入格式：DataFrame，列至少含 `material`, `location`, `quantity`。
@@ -667,7 +667,7 @@
   - `delivery_gr`
   - `delivery_shipment_log`
 
-#### `run_module4_integrated(...)`
+#### `run_daily_production_planning_integrated(...)`
 - 路径：主运行路径
 - 作用：统一桥接 M4 生产计划，优先从内存中的 `module3_result` 取净需求，必要时再回读文件。
 - 输入：
@@ -1645,34 +1645,22 @@
 
 ### 24.2 当前重要的优化/实验文件
 
-#### `optimized_processor.py`
-- `OptimizedDataProcessor`：高性能数据处理基础设施。
-
-#### `module_engine.py`
-- `ModuleCalculationEngine`：批量净需求、订单消耗、层需求收集等优化入口。
-
-#### `module_optimizers.py`
-- `Module5Optimizer`, `Module6Optimizer`：模块级 DuckDB 优化器。
-
-#### `optimized_simulation.py`
-- `run_optimized_simulation_from_dict`：优化版数据库仿真入口。
-- 说明：当前生产 DB 主链未强依赖它。
-
 #### `duckdb_integration.py`
 - `calculate_net_demand_batch_duckdb`、`apply_moq_rv_batch_duckdb`、`priority_allocation_batch_duckdb`：关键批量算法桥接函数。
+- `performance_comparison`、`run_ab_comparison`、`get_perf_stats`：DuckDB/Pandas A/B 对比与统计接口。
 
 #### `high_performance_engine.py`
-- `DuckDBCalculator`、`HybridQueryEngine`、`IncrementalComputeManager`：更高阶的性能实验基础设施。
+- `DuckDBCalculator`、`HybridQueryEngine`、`IncrementalComputeManager`、`HighPerformanceEngine`：DuckDB 计算、混合查询与增量计算基础设施。
 
-#### `performance_dashboard.py`
-- `PerformanceDashboard`：采集和输出性能指标。
-- `RealTimeMonitor`：实时进度监控。
+#### `src/services/performance_profiler.py`
+- `PerformanceProfiler`：按模块输出 cProfile 画像报告。
+- `profile_function`：单函数性能分析装饰器。
 
 ## 25. 五个业务子包的入口（第三阶段后）
 
 > **第三阶段更新（2026-04-10）**：原 `src/modules/module1.py`～`module6.py` 5 个单文件门面已全部删除。  
 > 外部代码现通过 `from src.modules.demand_planning import run_daily_order_generation` 等直接使用子包；  
-> 为兼容历史写法，`src/modules/__init__.py` 中保留 `module1 = demand_planning` 等别名，`import src.modules.module1` 仍可工作。
+> 为兼容历史写法，`src/modules/__init__.py` 中保留 `module1 = demand_planning` 等别名，`from src.modules import module1` 仍可工作。
 
 ### `src/modules/demand_planning/`（原 `module1.py`）
 - 入口文件：`integration.py`

@@ -78,7 +78,7 @@ from src.modules import logistics_execution as module6
 ### 4.2 M4 集成适配层
 
 ```python
-from src.core.main_integration.production_runner import run_module4_integrated
+from src.core.main_integration.production_runner import run_daily_production_planning_integrated
 from src.core.main_integration.production_runner import load_current_date_production_gr
 ```
 

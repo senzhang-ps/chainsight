@@ -31,7 +31,7 @@
 | 旧路径（本文正文中仍出现的写法） | 新实际位置 |
 |---|---|
 | `src/core/run.py` | 包 `src/core/run/`，入口：`run_main.py` |
-| `src/core/main_integration.py` | 包 `src/core/main_integration/`，入口：`simulation_file.py` / `simulation_db.py` / `production_integration.py` |
+| `src/core/main_integration.py` | 包 `src/core/main_integration/`，入口：`simulation_file.py` / `simulation_db.py` / `production_runner.py` |
 | `src/core/orchestrator.py` | 包 `src/core/orchestrator/`，入口：`orchestrator_main.py`；按模块处理在 `processors.py`；快照持久化在 `persistence.py` |
 | `src/core/parallel_executor.py` | 包 `src/core/parallel_executor/`，入口：`parallel_executor_main.py` |
 | `src/modules/module1.py` | `src/modules/demand_planning/`（兼容别名仍保留） |
@@ -59,9 +59,9 @@
 | 2 | `src/core/main_integration/simulation_file.py::run_integrated_simulation()` | Excel 配置 / `config_dict` | 启动 Orchestrator、按天驱动模块 | 各模块日输出 + Orchestrator 状态 |
 | 3 | `src/modules/demand_planning/integration.py::run_daily_order_generation()` | `M1_*` 配置、Orchestrator 库存 | `orders_df/shipment_df/cut_df/supply_demand_df` | `module1_output_YYYYMMDD.xlsx` |
 | 4 | `src/core/orchestrator/processors.py::process_module1_shipments()` | M1 `shipment_df` | 扣库存、记录 shipment log | `shipment_log_YYYYMMDD.csv` |
-| 5 | `src/core/main_integration/production_integration.py::run_module4_integrated()` | M4 配置、M3 净需求 | `production_df/exceed_log/issues_df/changeover_log` | `Module4Output_YYYYMMDD.xlsx` |
+| 5 | `src/core/main_integration/production_runner.py::run_daily_production_planning_integrated()` | M4 配置、M3 净需求 | `production_df/exceed_log/issues_df/changeover_log` | `Module4Output_YYYYMMDD.xlsx` |
 | 6 | `src/core/orchestrator/processors.py::process_module4_production()` | M4 `production_df` | backlog、production GR、增加库存 | `production_gr_YYYYMMDD.csv` / `production_plan_backlog_YYYYMMDD.csv` |
-| 7 | `src/modules/deployment_planning/main.py::main()` | M1 输出、M4 输出、Orchestrator 状态、M5 配置 | `deployment_plan/unfulfilled_log/stock_on_hand_log/validation_log` | `Module5Output_YYYYMMDD.xlsx` |
+| 7 | `src/modules/deployment_planning/main.py::run_daily_deployment_planning()` | M1 输出、M4 输出、Orchestrator 状态、M5 配置 | `deployment_plan/unfulfilled_log/stock_on_hand_log/validation_log` | `Module5Output_YYYYMMDD.xlsx` |
 | 8 | `src/core/orchestrator/processors.py::process_module5_deployment()` | M5 `deployment_plan` | 写 open deployment + UID | `open_deployment_YYYYMMDD.csv` |
 | 9 | `src/modules/logistics_execution/main.py::run_daily_physical_flow()` | OpenDeployment、M6 配置、当前库存 | `delivery_plan/vehicle_log/truck_usage/unsatisfied_log` | `Module6Output_YYYYMMDD.xlsx` |
 | 10 | `src/core/orchestrator/processors.py::process_module6_delivery()` | M6 `delivery_plan` | 扣 open deployment、扣发送库存、写在途或 delivery GR | `planning_intransit_YYYYMMDD.csv` / `delivery_gr_YYYYMMDD.csv` |
@@ -83,7 +83,7 @@
 | `_run_with_database()` | DB 连接参数、`config_name` | `DatabaseInitializer.initialize`, `_load_config_from_database`, `run_integrated_simulation_from_dict`, `ModuleDataWriter.*` | DB 模式端到端流程 |
 | `_load_config_from_database()` | `cfg_*` 配置表 | `config_dict` | 读 `cfg_global_network`, `cfg_m1_demandforecast`, `cfg_m4_linecapacity` 等 |
 
-### 3.2 `src/core/main_integration/`（入口：`simulation_file.py` / `simulation_db.py` / `production_integration.py`）
+### 3.2 `src/core/main_integration/`（入口：`simulation_file.py` / `simulation_db.py` / `production_runner.py`）
 
 | 函数 | 上游依赖 | 下游依赖 | 文件/表影响 |
 |---|---|---|---|
@@ -93,7 +93,7 @@
 | `detect_last_complete_date()` | `orchestrator/*.csv` | `check_resume_capability` | 扫描状态文件集 |
 | `check_resume_capability()` | 输出目录、日期范围 | 主流程 resume 决策 | 不直接写文件 |
 | `restore_orchestrator_state()` | `unrestricted_inventory_*`, `open_deployment_*`, `planning_intransit_*`, `production_gr_*`, `delivery_gr_*`, `shipment_log_*`, `delivery_shipment_log_*`, `daily_logs_*` | 恢复后的 `Orchestrator` | 读取状态 CSV |
-| `run_module4_integrated()` | M4 配置、M3 输出目录/内存结果 | M4 `production_df/exceed_log/issues_df/changeover_log` | `Module4Output_YYYYMMDD.xlsx` |
+| `run_daily_production_planning_integrated()` | M4 配置、M3 输出目录/内存结果 | M4 `production_df/exceed_log/issues_df/changeover_log` | `Module4Output_YYYYMMDD.xlsx` |
 | `load_current_date_production_gr()` | `Module4Output_YYYYMMDD.xlsx` | M1/M5/Orchestrator 的当日可入库生产供给 | 读取 `ProductionPlan` |
 
 ### 3.3 `src/core/orchestrator/`（入口：`orchestrator_main.py`）
@@ -156,7 +156,7 @@
 
 | 函数 | 上游依赖 | 下游依赖 | 文件/表影响 |
 |---|---|---|---|
-| `main()` | M1 输出、M4 输出、Orchestrator 视图、M5 配置、Global 配置 | 全层部署规划、push/soft-push、SOH 更新、输出写盘 | `Module5Output_YYYYMMDD.xlsx` |
+| `run_daily_deployment_planning()` | M1 输出、M4 输出、Orchestrator 视图、M5 配置、Global 配置 | 全层部署规划、push/soft-push、SOH 更新、输出写盘 | `Module5Output_YYYYMMDD.xlsx` |
 | `load_integrated_config()` | `config_dict`, `module1_output`, `module4_output`, Orchestrator | M5 运行配置包 | 内存字典 |
 | `_initialize_soh_dict()` | `InventoryLog`, `SupplyDemandLog`, `SafetyStock`, `OrderLog` | `soh_dict` | 内存字典 |
 | `_process_layer_demands()` | layer 节点、缓存、SDL/SS/Order/DeployConfig 索引 | `node_demands_map` | 内存字典 |
@@ -282,7 +282,7 @@
 | `_allocate_pipeline_sources()` | `future_intransit`, `open_deployment_inbound`, `future_production` | 回写 `demand_rows` pipeline 字段 |
 | `_process_gaps_and_create_plans()` | `demand_rows`, `adjusted_qtys`, `Network`, `LeadTime`, `PTF/LSK` | `deployment_plan_rows`, `unfulfilled_rows`, `up_gap_next` |
 | `_update_soh_dict()` | production GR、in transit、delivery GR、shipment、deployment_plan_rows | `soh_dict`, `stock_on_hand_log` |
-| `main()` | 全部配置和状态输入 | `DeploymentPlan`, `UnfulfilledLog`, `StockOnHandLog`, `Validation` |
+| `run_daily_deployment_planning()` | 全部配置和状态输入 | `DeploymentPlan`, `UnfulfilledLog`, `StockOnHandLog`, `Validation` |
 
 ### 11.3 `capacity_allocator.py`
 

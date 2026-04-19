@@ -300,10 +300,7 @@ def _run_with_database(ns: argparse.Namespace) -> int:
         temp_output = temp_dir / "output"
         temp_output.mkdir(exist_ok=True)
         
-        # 始终使用标准仿真引擎（与文件模式相同的代码路径）
-        # 高性能DuckDB引擎(optimized_simulation)的M3/M4计算结果与标准引擎不一致，
-        # 导致NetDemand、ProductionPlan等输出与Dev参考版本存在差异。
-        # 标准引擎(run_integrated_simulation_from_dict)在当前回归样例中已与 Dev 输出对齐。
+        # 使用与文件模式一致的标准仿真引擎。
         from ..main_integration import run_integrated_simulation_from_dict
         logger.info("[RUN] 使用标准仿真引擎运行（与文件模式一致）...")
         # 读取resume标志

@@ -211,7 +211,7 @@ from src.modules import logistics_execution as module6
 ```python
 from src.core.main_integration import run_integrated_simulation
 from src.core.main_integration import run_integrated_simulation_from_dict
-from src.core.main_integration.production_runner import run_module4_integrated
+from src.core.main_integration.production_runner import run_daily_production_planning_integrated
 from src.core.main_integration.production_runner import load_current_date_production_gr
 from src.core.orchestrator import create_orchestrator
 ```
@@ -235,7 +235,7 @@ from src.utils.date_helpers import compute_planning_window, calculate_transport_
 ### 不要再使用的旧导入
 
 ```python
-from src.core.main_integration.production_integration import ...  # 已删除
+from src.core.main_integration.production_integration import ...  # 已删除，请改用 production_runner
 from src.utils.runtime_defaults import ...  # 已删除
 from src.utils.normalization_common import ...  # 已删除
 from src.utils.cpu_config import ...  # 已删除

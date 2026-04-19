@@ -64,11 +64,11 @@ sequenceDiagram
         M1-->>MAIN: orders/shipment/cut/supply_demand
         MAIN->>ORC: process_module1_shipments(shipment_df)
 
-        MAIN->>M4: run_module4_integrated(...)
+        MAIN->>M4: run_daily_production_planning_integrated(...)
         M4-->>MAIN: production/exceed/validation/changeover
         MAIN->>ORC: process_module4_production(production_df)
 
-        MAIN->>M5: module5.main(...)
+        MAIN->>M5: run_daily_deployment_planning(...)
         M5-->>MAIN: deployment/unfulfilled/soh/validation
         MAIN->>ORC: process_module5_deployment(deployment_plan)
 
@@ -173,7 +173,7 @@ sequenceDiagram
     participant STATE as state
     participant ORC as Orchestrator
 
-    MAIN->>M4: run_module4_integrated(...)
+    MAIN->>M4: run_daily_production_planning_integrated(...)
     M4->>M4MAIN: run()
     M4MAIN->>M3OUT: load_daily_net_demand()
     M4MAIN->>STATE: get_or_init_simulation_start()
@@ -404,7 +404,7 @@ sequenceDiagram
 
 ## 11. 交接建议
 
-- 如果你是第一次接手项目，先把第 2 章到第 8 章通读一遍，再看 `docs/函数上下游依赖矩阵.md`。
+- 如果你是第一次接手项目，先把第 2 章到第 8 章通读一遍，再看 `docs/handover/refactored/02-api/function_dependency_matrix.md`。
 - 如果你在查某一天为什么结果变了，优先沿着“日初 -> M1 -> M4 -> M5 -> M6 -> M3 -> 日末”这个顺序追。
 - 如果你在查 UID、库存、在途或 DB 对账问题，优先看：
   - `src/core/orchestrator/`（原 `orchestrator.py`）

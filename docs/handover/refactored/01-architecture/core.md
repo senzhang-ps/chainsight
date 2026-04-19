@@ -39,20 +39,18 @@
 
 ### 1.1 模块概述
 
-**包路径**: `src/core/main_integration/`（原 `src/core/main_integration.py` 单体文件已拆分为 13 个文件）
+**包路径**: `src/core/main_integration/`（原 `src/core/main_integration.py` 单体文件已拆分为多个协作文件）
 
-**包内文件一览**（13 个）：
+**包内文件一览**：
 
 | 文件 | 职责 |
 |---|---|
-| `__init__.py` | 公共导出：`run_integrated_simulation`、`run_module4_integrated` 等核心入口 |
+| `__init__.py` | 公共导出：`run_integrated_simulation`、`run_integrated_simulation_from_dict`、配置加载与 CLI 入口 |
 | `cli.py` | 命令行参数解析与调用入口 |
 | `config_loader.py` | Excel 配置加载与校验、标识符标准化 |
 | `db_helpers.py` | 数据库模式辅助函数 |
 | `memory_store.py` | 内存数据存取辅助 |
-| `normalize.py` | `_normalize_location/material/sending/receiving/identifiers` 标识符规范化 |
-| `production_integration.py` | `run_module4_integrated` 核心实现（集成模式调用 M4） |
-| `production_runner.py` | Module4 生产运行辅助（原 `module4_runner.py`） |
+| `production_runner.py` | `run_daily_production_planning_integrated` 与 `load_current_date_production_gr` 的实现 |
 | `resume.py` | 断点续跑：`detect_last_complete_date`、`restore_orchestrator_state`、`check_resume_capability` |
 | `runtime_state.py` | 运行时状态维护 |
 | `seed.py` | `load_global_seed` 统一读取随机种子 |
@@ -308,21 +306,24 @@ identifier_cols = [
 
 ---
 
-#### 1.2.5 `run_module4_integrated()`
+#### 1.2.5 `run_daily_production_planning_integrated()`
 
 **功能**: 集成模式运行 Module4 生产计划（直接用 config_dict）
 
 **函数签名**:
 ```python
-def run_module4_integrated(
+def run_daily_production_planning_integrated(
     config_dict: dict,
     module3_output_dir: str,
     simulation_date: pd.Timestamp,
     simulation_start: pd.Timestamp,
     output_dir: str,
     skip_file_output: bool = False,
-    module3_result: Optional[Dict[str, Any]] = None
-) -> pd.DataFrame
+    module3_result: Optional[Dict[str, Any]] = None,
+    previous_line_states_override: Optional[dict] = None,
+    allocated_capacity_override: Optional[dict] = None,
+    skip_state_file_output: bool = False,
+) -> Dict[str, Any]
 ```
 
 **参数**:
@@ -453,15 +454,14 @@ flowchart TB
 
 ### 2.1 模块概述
 
-**包路径**: `src/core/orchestrator/`（原 `src/core/orchestrator.py` 单体文件已拆分为 9 个文件）
+**包路径**: `src/core/orchestrator/`（原 `src/core/orchestrator.py` 单体文件已拆分为多个协作文件）
 
-**包内文件一览**（9 个）：
+**包内文件一览**：
 
 | 文件 | 职责 |
 |---|---|
 | `__init__.py` | 对外导出 `Orchestrator`、`DeploymentUID` 及其他公共符号 |
 | `models.py` | `DeploymentUID` 等数据类定义 |
-| `normalize.py` | Orchestrator 内部的标识符规范化辅助 |
 | `orchestrator_main.py` | `Orchestrator` 主类、初始化与公共 API |
 | `processors.py` | `process_module1_shipments/4_production/5_deployment/6_delivery` 等按模块的状态写入 |
 | `views.py` | `get_unrestricted_inventory_view` 等各类视图方法 |
@@ -1118,8 +1118,8 @@ def run_parallel_modules(
 ```python
 m1_result, m4_result, m5_result, success = run_parallel_modules(
     m1_fn=lambda: module1.run_daily_order_generation(...),
-    m4_fn=lambda: run_module4_integrated(...),
-    m5_fn=lambda: module5.main(...),
+    m4_fn=lambda: module4.run_daily_production_planning_integrated(...),
+    m5_fn=lambda: module5.run_daily_deployment_planning(...),
 )
 ```
 

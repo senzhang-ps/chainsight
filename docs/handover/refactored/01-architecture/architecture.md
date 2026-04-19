@@ -101,10 +101,10 @@ def run_daily_cycle(orchestrator, current_date):
     m1_result = M1.run_daily_order_generation(...)
     orchestrator.process_module1_shipments(m1_result, current_date)
 
-    m4_result = run_module4_integrated(...)
+    m4_result = module4.run_daily_production_planning_integrated(...)
     orchestrator.process_module4_production(m4_result, current_date)
 
-    m5_result = M5.main(...)
+    m5_result = module5.run_daily_deployment_planning(...)
     orchestrator.process_module5_deployment(m5_result, current_date)
 
     m6_result = M6.run_daily_physical_flow(...)
@@ -650,7 +650,7 @@ flowchart TB
     D --> E["ModuleDataWriter"]
     E --> PG["PostgreSQL 配置+输出+历史"]
     PG --> F["DuckDB 计算层"]
-    F --> G["optimized_processor / high_performance_engine"]
+    F --> G["duckdb_integration / high_performance_engine"]
     G --> PG
 ```
 
@@ -667,7 +667,7 @@ flowchart TB
 ### 1.3 架构边界
 
 - **已实现主路径**：数据库读取配置 -> 标准仿真引擎执行 -> 数据写回 PostgreSQL；
-- **可选增强路径**：`optimized_simulation.py`、`high_performance_engine.py`、`duckdb_integration.py` 提供高性能计算能力；
+- **可选增强路径**：`high_performance_engine.py` 与 `duckdb_integration.py` 提供 DuckDB 加速、混合查询和性能对比能力；
 - **当前一致性策略**：数据库模式默认使用标准仿真引擎，优先保证与本地版结果一致性。
 
 ---
@@ -857,12 +857,12 @@ sequenceDiagram
 
 两种典型模式：
 
-1. `OptimizedDataProcessor.attach_postgres()`：DuckDB 直接附加 PostgreSQL，减少中间复制；
-2. `DuckDBProcessor.DataTransfer`：DuckDB SQL 处理后 DataFrame 回写 PostgreSQL。
+1. `HybridQueryEngine.attach_postgres()`：DuckDB 直接附加 PostgreSQL，减少中间复制；
+2. `HybridQueryEngine.bulk_write()`：DuckDB/Pandas 处理后的 DataFrame 批量写回 PostgreSQL。
 
 ### 4.5 增量同步机制
 
-`incremental_processor.py` 提供变化检测与增量计算基础：
+`high_performance_engine.py` 中的 `IncrementalComputeManager` 提供变化检测与增量计算基础：
 
 - 通过主键哈希识别新增/修改/删除；
 - 仅重算受影响的物料-地点组合；
@@ -881,10 +881,8 @@ sequenceDiagram
 | 组件 | 文件 | 角色 |
 |---|---|---|
 | 计算核心 | `high_performance_engine.py` | 整合批量计算、增量计算、并行执行 |
-| 数据处理器 | `optimized_processor.py` | DuckDB 向量化 SQL、索引缓存、PostgreSQL attach |
-| 模块引擎 | `module_engine.py` | 将模块热点计算改为批量向量化 |
 | 集成桥接 | `duckdb_integration.py` | DuckDB/Pandas 双实现切换与回退 |
-| 优化运行器 | `optimized_simulation.py` | 高性能仿真包装与性能统计 |
+| 性能画像 | `src/services/performance_profiler.py` | 模块级性能分析与报告输出 |
 
 ### 5.2 高性能计算流程
 
@@ -968,11 +966,11 @@ def calc_net_demand(df, _use_duckdb=False):
 
 ### 7.1 性能监控仪表盘
 
-`performance_dashboard.py` 提供模块级和日级监控：
+`src/services/performance_profiler.py` 与 `pgsql_db/duckdb_integration.py` 提供当前可用的性能诊断能力：
 
-- 模块调用次数、总耗时、均值、错误率；
-- 日度总耗时、处理记录数、吞吐；
-- 阈值告警（warning/critical）。
+- 模块级 cProfile 报告输出；
+- DuckDB/Pandas A/B 对比统计；
+- 单次运行内各操作的耗时、行数与加速比汇总。
 
 ### 7.2 运行健康检查
 
@@ -996,7 +994,7 @@ def calc_net_demand(df, _use_duckdb=False):
 flowchart TB
     A["仿真运行"]
     A --> B["日志采集"]
-    A --> C["PerformanceDashboard"]
+    A --> C["PerformanceProfiler / PerfStats"]
     A --> D["DB连接/表信息检查"]
     B --> E["根因分析"]
     C --> F["阈值告警"] --> E

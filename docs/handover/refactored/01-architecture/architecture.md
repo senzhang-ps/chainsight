@@ -1051,8 +1051,7 @@ flowchart LR
 | DB连接与写入 | `pgsql_db/db_connection.py`、`pgsql_db/module_data_writer.py` |
 | 初始化与导入 | `pgsql_db/db_initializer.py`、`pgsql_db/excel_importer.py` |
 | 映射与模式 | `pgsql_db/table_mapping.py`、`pgsql_db/table_schemas.py` |
-| 高性能计算 | `pgsql_db/optimized_processor.py`、`pgsql_db/high_performance_engine.py`、`pgsql_db/duckdb_integration.py` |
-| 监控诊断 | `pgsql_db/performance_dashboard.py` |
+| 高性能计算 | `pgsql_db/duckdb_integration.py` |
 
 ---
 
@@ -1115,8 +1114,7 @@ flowchart LR
 | DB连接与写入 | `pgsql_db/db_connection.py`、`pgsql_db/module_data_writer.py` |
 | 初始化与导入 | `pgsql_db/db_initializer.py`、`pgsql_db/excel_importer.py` |
 | 映射与模式 | `pgsql_db/table_mapping.py`、`pgsql_db/table_schemas.py` |
-| 高性能计算 | `pgsql_db/optimized_processor.py`、`pgsql_db/high_performance_engine.py`、`pgsql_db/duckdb_integration.py` |
-| 监控诊断 | `pgsql_db/performance_dashboard.py` |
+| 高性能计算 | `pgsql_db/duckdb_integration.py` |
 
 ## 附录 B：术语
 

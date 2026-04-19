@@ -43,8 +43,8 @@ def run_parallel_modules(
             run_parallel_modules(
                 m1_fn=lambda: module1.run_daily_order_generation(
                     ...),
-                m4_fn=lambda: run_module4_integrated(...),
-                m5_fn=lambda: module5.main(...),
+                m4_fn=lambda: module4.run_daily_production_planning_integrated(...),
+                m5_fn=lambda: module5.run_daily_deployment_planning(...),
             )
     """
     executor = ParallelExecutor(max_workers=max_workers,

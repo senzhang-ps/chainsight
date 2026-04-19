@@ -282,11 +282,9 @@ Important: if you do regression comparison, use your own comparison script/tool 
 ## Documentation Entry Points
 
 - [docs/INDEX.md](docs/INDEX.md)
-- [docs/QUICK_REFERENCE.md](docs/QUICK_REFERENCE.md)
-- [docs/用户使用入口说明.md](docs/用户使用入口说明.md)
-- [docs/交接文档/Refactored/项目交接文档.md](docs/交接文档/Refactored/项目交接文档.md)
-- [docs/交接文档/Refactored/setup.md](docs/交接文档/Refactored/setup.md)
-- [docs/交接文档/Refactored/API.md](docs/交接文档/Refactored/API.md)
+- [docs/handover/refactored/00-overview/handover.md](docs/handover/refactored/00-overview/handover.md)
+- [docs/handover/refactored/00-overview/setup.md](docs/handover/refactored/00-overview/setup.md)
+- [docs/handover/refactored/02-api/api.md](docs/handover/refactored/02-api/api.md)
 - [docs/_archive/](docs/_archive/)
 
 ---

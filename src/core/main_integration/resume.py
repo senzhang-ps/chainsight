@@ -53,7 +53,7 @@ def detect_last_complete_date(output_base_dir: str, start_date: str, end_date: s
         date_str = current_date.strftime('%Y%m%d')
         
         # 检查关键状态文件是否都存在
-        # 项目约定的完整性视图（文档参见 docs/交接文档/）
+        # 项目约定的完整性视图（文档参见 docs/handover/）
         # 新增 daily_logs 作为必须存在的 daily summary 日志
         required_files = [
             f"unrestricted_inventory_{date_str}.csv",

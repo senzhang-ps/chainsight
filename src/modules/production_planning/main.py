@@ -11,6 +11,7 @@ from typing import Optional
 import pandas as pd
 
 from ...utils.normalization import normalize_identifiers
+from ...utils.defaults import DEFAULT_RANDOM_SEED
 from .config_loader import load_config, validate_config
 from .demand_loader import load_daily_net_demand
 from .plan_builder import build_unconstrained_plan_for_single_day
@@ -276,7 +277,7 @@ class DailyProductionPlanner:
         返回：
             pd.DataFrame: 最终计划日志
         """
-        seed = cfg.get('RandomSeed', 42)
+        seed = cfg.get('RandomSeed', DEFAULT_RANDOM_SEED)
         plan_log = simulate_production(
             plan_log, cfg['ProductionReliability'], seed=seed
         )
@@ -540,7 +541,7 @@ def _run_legacy_mode(args) -> None:
 
     plan_log = simulate_production(
         plan_log, cfg['ProductionReliability'],
-        seed=cfg.get('RandomSeed', 42)
+        seed=cfg.get('RandomSeed', DEFAULT_RANDOM_SEED)
     )
 
     changeover_log = calculate_changeover_metrics(

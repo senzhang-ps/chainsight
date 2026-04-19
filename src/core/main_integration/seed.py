@@ -8,6 +8,8 @@ seed.py
 
 import numpy as np
 
+from ...utils.defaults import DEFAULT_RANDOM_SEED
+
 
 def load_global_seed(config_dict: dict) -> int:
     """从配置中加载全局随机种子
@@ -19,7 +21,7 @@ def load_global_seed(config_dict: dict) -> int:
         config_dict: 配置数据字典
 
     Returns:
-        int: 随机种子值，默认为 42
+        int: 随机种子值，默认为 DEFAULT_RANDOM_SEED
 
     逻辑：
         - 按优先级读取 → 打印提示 → 返回默认值或实际种子
@@ -35,7 +37,7 @@ def load_global_seed(config_dict: dict) -> int:
             seed_value = int(seed_df.iloc[0, 0])
             return seed_value
     
-    return 42
+    return DEFAULT_RANDOM_SEED
 
 
 def set_module_seeds(config_dict: dict, global_seed: int = None):

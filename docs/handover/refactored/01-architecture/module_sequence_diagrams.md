@@ -419,6 +419,6 @@ sequenceDiagram
 
 ## 附录 A. 推荐配套文档
 
-- `docs/项目交接文档.docx`
-- `docs/函数上下游依赖矩阵.docx`
-- `docs/函数级接口与文件格式总表.docx`
+- `docs/handover/refactored/00-overview/handover.md`
+- `docs/handover/refactored/02-api/function_dependency_matrix.md`
+- `docs/handover/refactored/02-api/function_interface_spec.md`

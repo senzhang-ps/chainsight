@@ -20,7 +20,6 @@ from ...utils.defaults import M6_MAX_WAIT_DAYS, M6_RANDOM_SEED
 from ...utils.normalization import normalize_identifiers
 from .config_loader import load_configuration_from_dict
 from .seed import set_module_seeds
-from .production_runner import run_module4_integrated
 from .runtime_state import DbRuntimeState
 from .memory_store import (_ensure_memory_store_imported, _enable_memory_mode,
                           _disable_memory_mode, _is_memory_mode_enabled, _get_data_store)
@@ -358,7 +357,7 @@ def run_integrated_simulation_from_dict(
             
             # ========== M4: 生产计划 ==========
             try:
-                m4_result = run_module4_integrated(
+                m4_result = module4.run_daily_production_planning_integrated(
                     config_dict=config_dict,
                     module3_output_dir=str(module_outputs['module3']),
                     simulation_date=current_date,
@@ -405,7 +404,7 @@ def run_integrated_simulation_from_dict(
             # ========== M5: 部署计划 ==========
             try:
                 # [DB-MEM] 传递 module4_result 内存数据，无需 M4 xlsx 文件
-                m5_result = module5.run_deployment_planning(
+                m5_result = module5.run_daily_deployment_planning(
                     config_dict=config_dict,
                     module1_output_dir=str(module_outputs['module1']),
                     module4_output_path=None,  # No file — using in-memory module4_result

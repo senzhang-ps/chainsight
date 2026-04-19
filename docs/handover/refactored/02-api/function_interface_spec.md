@@ -2405,10 +2405,10 @@
 
 ## 附录 A. 建议配套阅读
 
-- `docs/函数上下游依赖矩阵.docx`
-- `docs/模块级时序图文档.docx`
-- `docs/项目交接文档.docx`
-- `docs/ChainSight_Dev源码算法优化文档.docx`
+- `docs/handover/refactored/02-api/function_dependency_matrix.md`
+- `docs/handover/refactored/01-architecture/module_sequence_diagrams.md`
+- `docs/handover/refactored/00-overview/handover.md`
+- `archive/handover_docs/dev/chainsight_dev_source_summary.md`
 
 ## 附录 B. 更新规则
 

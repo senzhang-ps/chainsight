@@ -10,9 +10,9 @@ import numpy as np
 import pandas as pd
 
 from src.utils.normalization import (
-    normalize_identifiers_vectorized,
-    normalize_location_zero_fill_any,
-    normalize_material_basic,
+    normalize_identifiers as _canonical_normalize_identifiers,
+    normalize_location as _canonical_normalize_location,
+    normalize_material as _canonical_normalize_material,
 )
 
 from .constants import (
@@ -69,7 +69,7 @@ def normalize_location(location_str: Union[str, int, float, None]) -> str:
     返回：
         str: 规范化后的地点字符串
     """
-    return normalize_location_zero_fill_any(location_str)
+    return _canonical_normalize_location(location_str, mode="any")
 
 
 def normalize_material(material_str: Union[str, int, float, None]) -> str:
@@ -85,7 +85,7 @@ def normalize_material(material_str: Union[str, int, float, None]) -> str:
     返回：
         str: 规范化后的物料字符串
     """
-    return normalize_material_basic(material_str)
+    return _canonical_normalize_material(material_str, mode="basic")
 
 
 def normalize_identifiers(df: pd.DataFrame) -> pd.DataFrame:
@@ -105,7 +105,7 @@ def normalize_identifiers(df: pd.DataFrame) -> pd.DataFrame:
         for c in IDENTIFIER_COLUMNS
         if c not in LOCATION_TYPE_COLUMNS and c != COL_MATERIAL
     ]
-    return normalize_identifiers_vectorized(
+    return _canonical_normalize_identifiers(
         df,
         material_cols=(COL_MATERIAL,),
         location_cols=tuple(LOCATION_TYPE_COLUMNS),

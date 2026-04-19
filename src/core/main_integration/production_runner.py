@@ -118,21 +118,21 @@ def run_module4_integrated(
         # 🔧 关键修复：标准化uncon_plan中的material字段，确保与changeover matrix一致
         if not uncon_plan.empty and 'material' in uncon_plan.columns:
             uncon_plan['material'] = uncon_plan['material'].apply(normalize_material).astype('string')
-        
+
         # 设置产能分配参数
         # 🔧 关键修复：标准化 ChangeoverMatrix 中的字段为字符串类型
         co_mat_df = m4_config['M4_ChangeoverMatrix'].copy()
-        
+
         co_mat_df['from_material'] = co_mat_df['from_material'].astype(str)
         co_mat_df['to_material'] = co_mat_df['to_material'].astype(str)
         co_mat_df['changeover_id'] = co_mat_df['changeover_id'].astype(str)
-        
+
         # 注意：Changeover 去重已在 load_configuration 中完成
-        
+
         co_mat = co_mat_df.set_index(['from_material', 'to_material'])['changeover_id']
         # 对MultiIndex进行排序以避免性能警告
         co_mat = co_mat.sort_index()
-        
+
         # 🔧 关键修复：标准化 ChangeoverDefinition 中的 changeover_id 为字符串类型
         co_def_df = m4_config['M4_ChangeoverDefinition'].copy()
         co_def_df['changeover_id'] = co_def_df['changeover_id'].astype(str)
@@ -285,7 +285,7 @@ def load_current_date_production_gr(module4_output_dir: str, current_date: pd.Ti
         daily_available = combined_production[
             combined_production['available_date'].dt.normalize() == current_date.normalize()
         ]
-        
+
         return daily_available[['material', 'location', 'line', 'simulation_date', 'available_date', 'produced_qty']]
 
     return pd.DataFrame()

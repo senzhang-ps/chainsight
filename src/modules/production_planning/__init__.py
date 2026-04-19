@@ -56,6 +56,7 @@ from .capacity_allocator import (
 )
 from .output_writer import generate_consolidated_output, write_output
 from .main import DailyProductionPlanner, run_daily_production_planning
+from .integration import run_daily_production_planning_integrated
 
 
 __all__ = [
@@ -102,5 +103,6 @@ __all__ = [
     "write_output",
     "generate_consolidated_output",
     "run_daily_production_planning",
+    "run_daily_production_planning_integrated",
     "DailyProductionPlanner",
 ]

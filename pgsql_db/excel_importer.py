@@ -257,22 +257,24 @@ class ExcelImporter:
 
 
 def import_config_files(
-    db_host: str = "localhost",
-    db_port: int = 5432,
-    db_name: str = "test_db",
-    db_user: str = "postgres",
-    db_password: str = "123456"
+    db_host: Optional[str] = None,
+    db_port: Optional[int] = None,
+    db_name: Optional[str] = None,
+    db_user: Optional[str] = None,
+    db_password: Optional[str] = None
 ) -> bool:
     """
     导入所有配置文件到数据库
-    
+
+    未显式传入的字段将从 ``config/defaults.yaml`` 的 ``database:`` 节点读取。
+
     参数：
         db_host: 数据库主机
         db_port: 数据库端口
         db_name: 数据库名称
         db_user: 用户名
         db_password: 密码
-    
+
     返回：
         bool: 是否成功
     """

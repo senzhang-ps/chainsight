@@ -59,8 +59,7 @@
 
 ### 2.6 配置与工具
 
-- `config/defaults.yaml` — YAML 形式的跨模块共享默认参数（单一真源）
-- `config/database.json` — 数据库连接配置
+- `config/defaults.yaml` — YAML 形式的跨模块共享默认参数（单一真源）。数据库连接配置位于其 `database:` 节点，由 `pgsql_db/settings.py` 读取
 - `config/*.xlsx` — 仿真输入配置（BC_S5, BC_S9, OC_Paste_S1_20251224, PDS1）
 
 ## 3. 这次收口具体做了什么
@@ -327,11 +326,8 @@ checkpoint 关键指标：
 
 ## 12. 与本交接文档配套阅读
 
-- `docs/交接文档/Refactored/CLEANUP_AND_IMPROVEMENTS.md` — 第三阶段清理详细记录
-- `docs/用户使用入口说明.md`
-- `docs/QUICK_REFERENCE.md`
-- `docs/OPTIMIZED_CODE_STRUCTURE_DIAGRAM.md`
-- `docs/交接文档/Refactored/setup.md`
-- `docs/交接文档/Refactored/API.md`
-- `docs/交接文档/Refactored/modules_compat.md`
-- `docs/交接文档/Refactored/utils.md`
+- `docs/handover/refactored/00-overview/cleanup_and_improvements.md` — 第三阶段清理详细记录
+- `docs/handover/refactored/00-overview/setup.md`
+- `docs/handover/refactored/02-api/api.md`
+- `docs/handover/refactored/03-modules/modules_compat.md`
+- `docs/handover/refactored/04-services-utils/utils.md`

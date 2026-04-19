@@ -27,7 +27,7 @@ from ...utils.defaults import M6_MAX_WAIT_DAYS, M6_RANDOM_SEED
 from ...utils.normalization import normalize_identifiers
 from .resume import check_resume_capability, restore_orchestrator_state
 from .seed import set_module_seeds
-from .production_runner import run_module4_integrated, load_current_date_production_gr
+from .production_runner import load_current_date_production_gr
 from .config_loader import load_configuration
 
 
@@ -258,7 +258,7 @@ def run_integrated_simulation(
             # ========== M4: 生产计划 + 立即当日生产入库 ==========
             try:
                 # 使用集成模式直接调用 Module4 (改进的解决方案)
-                m4_result = run_module4_integrated(
+                m4_result = module4.run_daily_production_planning_integrated(
                     config_dict=config_dict,
                     module3_output_dir=str(module_outputs['module3']),
                     simulation_date=current_date,
@@ -291,7 +291,7 @@ def run_integrated_simulation(
             try:
                 # 启用性能分析
                 with PerformanceProfiler("Module5", output_dir=Path(output_base_dir) / "performance", enabled=True):
-                    m5_result = module5.run_deployment_planning(
+                    m5_result = module5.run_daily_deployment_planning(
                         # 集成模式参数
                         config_dict=config_dict,
                         module1_output_dir=str(module_outputs['module1']),
@@ -305,7 +305,7 @@ def run_integrated_simulation(
                 # 获取部署计划数据
                 if m5_result and 'deployment_plan' in m5_result:
                     deployment_plan_df = m5_result['deployment_plan']
-                    
+
                     if not deployment_plan_df.empty:
                         # 过滤出有实际部署量的计划，排除自循环（sending=receiving）
                         valid_deployment = deployment_plan_df[
@@ -331,7 +331,7 @@ def run_integrated_simulation(
                             
                             # 🔧 标准化标识符字段，确保数据类型一致性
                             m5_deployment_df = normalize_identifiers(m5_deployment_df)
-                            
+
                             # 🔄 立即处理M5 deployment，更新open deployment
                             orchestrator.process_module5_deployment(m5_deployment_df, current_date.strftime('%Y-%m-%d'))
                             

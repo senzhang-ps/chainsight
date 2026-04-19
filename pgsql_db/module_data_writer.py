@@ -1700,20 +1700,22 @@ class ModuleDataWriter:
 
 def write_run_data_to_db(
     run_output_dir: str,
-    db_host: str = "localhost",
-    db_port: int = 5432,
-    db_name: str = "test_db",
-    db_user: str = "postgres",
-    db_password: str = "123456"
+    db_host: Optional[str] = None,
+    db_port: Optional[int] = None,
+    db_name: Optional[str] = None,
+    db_user: Optional[str] = None,
+    db_password: Optional[str] = None
 ) -> bool:
     """
     将运行输出数据写入数据库
-    
+
+    未显式传入的字段将从 ``config/defaults.yaml`` 的 ``database:`` 节点读取。
+
     优化流程：
     1. 批量写入所有表数据（不创建索引）
     2. 完成所有写入后，批量创建所有索引
     3. 显著提升总体性能（避免写入期间的I/O竞争）
-    
+
     参数：
         run_output_dir: 运行输出目录
         db_host: 数据库主机
@@ -1721,7 +1723,7 @@ def write_run_data_to_db(
         db_name: 数据库名称
         db_user: 用户名
         db_password: 密码
-    
+
     返回：
         bool: 是否成功
     """

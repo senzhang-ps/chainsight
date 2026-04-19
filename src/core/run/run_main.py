@@ -112,32 +112,32 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--db-host",
         type=str,
-        default="localhost",
-        help="数据库主机地址 (默认: localhost)",
+        default=None,
+        help="数据库主机地址 (默认读取自 config/defaults.yaml)",
     )
     parser.add_argument(
         "--db-port",
         type=int,
-        default=5432,
-        help="数据库端口 (默认: 5432)",
+        default=None,
+        help="数据库端口 (默认读取自 config/defaults.yaml)",
     )
     parser.add_argument(
         "--db-name",
         type=str,
-        default="test_db",
-        help="数据库名称 (默认: test_db)",
+        default=None,
+        help="数据库名称 (默认读取自 config/defaults.yaml)",
     )
     parser.add_argument(
         "--db-user",
         type=str,
-        default="postgres",
-        help="数据库用户名 (默认: postgres)",
+        default=None,
+        help="数据库用户名 (默认读取自 config/defaults.yaml)",
     )
     parser.add_argument(
         "--db-password",
         type=str,
-        default="123456",
-        help="数据库密码 (默认: 123456)",
+        default=None,
+        help="数据库密码 (默认读取自 config/defaults.yaml)",
     )
     parser.add_argument(
         "--run-suffix",

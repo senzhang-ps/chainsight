@@ -18,15 +18,17 @@ class DatabaseConnection:
     
     def __init__(
         self,
-        host: str = "localhost",
-        port: int = 5432,
-        database: str = "test_db",
-        user: str = "postgres",
-        password: str = "123456"
+        host: Optional[str] = None,
+        port: Optional[int] = None,
+        database: Optional[str] = None,
+        user: Optional[str] = None,
+        password: Optional[str] = None
     ):
         """
         初始化数据库连接参数
-        
+
+        未显式传入的字段将从 ``config/defaults.yaml`` 的 ``database:`` 节点读取。
+
         参数：
             host: 数据库主机地址
             port: 数据库端口
@@ -34,11 +36,15 @@ class DatabaseConnection:
             user: 用户名
             password: 密码
         """
-        self.host = host
-        self.port = port
-        self.database = database
-        self.user = user
-        self.password = password
+        from .settings import resolve_database_config
+        cfg = resolve_database_config(
+            host=host, port=port, database=database, user=user, password=password
+        )
+        self.host = cfg["host"]
+        self.port = cfg["port"]
+        self.database = cfg["database"]
+        self.user = cfg["user"]
+        self.password = cfg["password"]
         self._connection = None
     
     @property

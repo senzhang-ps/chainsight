@@ -39,6 +39,7 @@ from src.utils.defaults import (
     DEFAULT_LSK,
     DEFAULT_LEAD_TIME,
     DEFAULT_PUSH_LEVELS,
+    M5_DEFAULT_HORIZON_DAYS,
 )
 
 # 标识符列名

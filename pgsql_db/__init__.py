@@ -6,8 +6,6 @@ PostgreSQL数据库连接组件
 - DatabaseConnection: PostgreSQL数据库连接
 - ExcelImporter: Excel文件导入器
 - ModuleDataWriter: 模块数据写入器
-- DuckDBProcessor: DuckDB数据处理器
-- DataPipeline: 数据处理管道（DuckDB + PostgreSQL）
 - DatabaseInitializer: 数据库初始化器（自动检测、创建数据库和表）
 - OptimizedDataProcessor: 高性能数据处理器（DuckDB向量化）
 - ModuleCalculationEngine: 模块计算引擎
@@ -21,8 +19,6 @@ PostgreSQL数据库连接组件
 from .db_connection import DatabaseConnection
 from .excel_importer import ExcelImporter
 from .module_data_writer import ModuleDataWriter
-from .duckdb_processor import DuckDBProcessor
-from .data_pipeline import DataPipeline
 from .db_initializer import DatabaseInitializer, initialize_database
 from .optimized_processor import OptimizedDataProcessor
 from .module_engine import ModuleCalculationEngine, create_calculation_engine
@@ -55,11 +51,9 @@ from . import table_mapping
 
 __all__ = [
     # 数据库连接
-    'DatabaseConnection', 
-    'ExcelImporter', 
+    'DatabaseConnection',
+    'ExcelImporter',
     'ModuleDataWriter',
-    'DuckDBProcessor',
-    'DataPipeline',
     'DatabaseInitializer',
     'initialize_database',
     

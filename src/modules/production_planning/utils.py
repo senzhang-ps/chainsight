@@ -14,7 +14,7 @@ from src.utils.date_helpers import (
 )
 from src.utils.normalization import (
     cast_identifier_columns,
-    normalize_location_preserve_non_numeric,
+    normalize_location as _canonical_normalize_location,
 )
 
 from .constants import IDENTIFIER_COLS
@@ -37,7 +37,7 @@ def normalize_location(location_str: str) -> str:
         >>> normalize_location("A888")
         'A888'
     """
-    return normalize_location_preserve_non_numeric(location_str)
+    return _canonical_normalize_location(location_str)
 
 
 def cast_identifiers_to_str(

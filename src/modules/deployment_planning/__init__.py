@@ -68,7 +68,7 @@ from .push_allocation import push_softpush_allocation
 from .validation import validate_config_before_run, log_outputs
 
 # 主函数
-from .main import run_deployment_planning
+from .main import run_daily_deployment_planning
 
 __all__ = [
     # 数据加载函数
@@ -107,5 +107,5 @@ __all__ = [
     'validate_config_before_run',
     'log_outputs',
     # 主函数
-    'run_deployment_planning',
+    'run_daily_deployment_planning',
 ]

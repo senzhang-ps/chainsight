@@ -197,15 +197,6 @@ class SummaryReportGenerator:
             if original_count != dedup_count:
                 print(f"📊 OrderLog 去重：原始 {original_count} 条 → 去重后 {dedup_count} 条（移除了 {original_count - dedup_count} 条重复的 AO 订单）")
         
-        # 🔍 调试：显示 CutLog 数据
-        # print(f"\n🔍 Order Shipment Cut Report 数据统计:")
-        # print(f"  OrderLog 记录数: {len(combined_orders)}")
-        # print(f"  ShipmentLog 记录数: {len(combined_shipments)}")
-        # print(f"  CutLog 记录数: {len(combined_cuts)}")
-        # if not combined_cuts.empty:
-        #     print(f"  CutLog 前5条记录:")
-        #     print(combined_cuts.head())
-        
         # 构建汇总表
         if not combined_orders.empty or not combined_shipments.empty or not combined_cuts.empty:
             # 准备订单数据（去掉 demand_type，合并所有类型的订单）

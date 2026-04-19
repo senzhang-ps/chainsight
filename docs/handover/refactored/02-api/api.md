@@ -919,24 +919,13 @@ def read_table(self, table_name: str) -> pd.DataFrame
 
 ### 3.2 DuckDB 查询 API
 
-`DuckDBProcessor` 提供与 PostgreSQL 解耦的查询加速接口。
-
-| API | 说明 |
-|---|---|
-| `execute(sql, params=None)` | 执行 SQL |
-| `query(sql)` | 返回 DataFrame |
-| `query_to_arrow(sql)` | 返回 Arrow 表（高效传输） |
-| `bulk_transform(source_dfs, sql)` | 多表注册后批量 SQL 处理 |
-
-**示例：DuckDB 批量聚合**
+DuckDB 查询加速统一通过 `src/utils/duckdb_accelerator.py` 的 `DuckDBAccelerator` 暴露；原 `pgsql_db/duckdb_processor.py`（`DuckDBProcessor` / `DuckDBToPostgres`）及其 `DataPipeline` 组合器已作为死代码删除。
 
 ```python
-from pgsql_db.duckdb_processor import DuckDBProcessor
+from src.utils.duckdb_accelerator import get_accelerator
 
-duck = DuckDBProcessor()
-duck.register_dataframe(df_orders, "orders")
-res = duck.query("SELECT material, SUM(quantity) qty FROM orders GROUP BY material")
-duck.unregister_table("orders")
+acc = get_accelerator()
+res = acc.query("SELECT material, SUM(quantity) qty FROM orders GROUP BY material")
 ```
 
 ---

@@ -77,6 +77,9 @@ DEFAULT_CHANGEOVER_TIME: float = float(_prod["default_changeover_time"])
 #: 默认推送层级 —— deployment_planning 使用
 DEFAULT_PUSH_LEVELS: List[float] = [float(x) for x in _deploy["default_push_levels"]]
 
+#: 默认需求收集视界天数 —— deployment_planning 使用（LeadTime 配置缺失时兜底）
+M5_DEFAULT_HORIZON_DAYS: int = int(_deploy["default_horizon_days"])
+
 # ---------------------------------------------------------------------------
 # 物流执行 (Module6) 默认值
 # ---------------------------------------------------------------------------
@@ -86,3 +89,19 @@ M6_MAX_WAIT_DAYS: int = int(_logistics["max_wait_days"])
 
 #: 随机种子默认值
 M6_RANDOM_SEED: int = int(_logistics["random_seed"])
+
+# ---------------------------------------------------------------------------
+# 跨分支兼容别名 —— 与源 main 分支命名对齐
+# ---------------------------------------------------------------------------
+
+#: 全局随机种子别名（指向 M6_RANDOM_SEED，便于源 main 分支模块复用）
+DEFAULT_RANDOM_SEED: int = M6_RANDOM_SEED
+
+#: M6 最大等待天数别名
+DEFAULT_MAX_WAIT_DAYS: int = M6_MAX_WAIT_DAYS
+
+#: M1 未来截断天数别名
+DEFAULT_FUTURE_CUTOFF_DAYS: int = M1_FUTURE_CUTOFF_DAYS
+
+#: M1 最大AO提前天数别名
+DEFAULT_MAX_ADVANCE_DAYS: int = M1_DEFAULT_MAX_ADVANCE_DAYS

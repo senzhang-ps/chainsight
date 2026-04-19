@@ -733,7 +733,7 @@ def _update_soh_dict(
         })
 
 
-def run_deployment_planning(
+def run_daily_deployment_planning(
     input_path: str = None,
     output_path: str = None,
     sim_start: str = None,
@@ -1131,4 +1131,4 @@ if __name__ == '__main__':
     )
     args = parser.parse_args()
 
-    main(args.input, args.output, args.sim_start, args.sim_end)
+    run_daily_deployment_planning(args.input, args.output, args.sim_start, args.sim_end)

@@ -307,15 +307,14 @@ def normalize_identifiers(df, extra_columns=None):
 
 档案库中保留了所有阶段性文档，可从以下入口查阅：
 - `docs/_archive/` —— 优化过程文档
-- `docs/交接文档/dev/` —— 原始代码说明
+- `archive/handover_docs/dev/` —— 原始代码说明
 
 ---
 
 ## 7. 相关链接
 
-- [代码结构图](./OPTIMIZED_CODE_STRUCTURE_DIAGRAM.md) —— 当前目录树与旧版映射
-- [快速参考](./QUICK_REFERENCE.md) —— 常用导入路径、运行命令
-- [交接文档](./交接文档/Refactored/项目交接文档.md) —— 整体交接说明
+- [交接文档](./handover.md) —— 整体交接说明
+- [API 参考](../02-api/api.md) —— 当前 `src/` 与 `pgsql_db/` 的接口
 
 ---
 

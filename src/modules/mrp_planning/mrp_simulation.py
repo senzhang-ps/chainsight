@@ -25,12 +25,12 @@ from ...utils.resource_config import get_optimal_workers
 from .layer_assignment import assign_location_layers
 from .node_processor import NodeProcessor
 from .utils import (
-    build_ptf_lsk_cache,
     normalize_identifiers,
     apply_moq_rv,
     lookup_moq_rv_three_keys,
     apportion_largest_remainder,
 )
+from src.utils.ptf_lsk import build_ptf_lsk_cache
 from .constants import (
     USE_DUCKDB_BATCH_CALCULATION,
     BATCH_CALCULATION_THRESHOLD,

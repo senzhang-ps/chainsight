@@ -11,8 +11,9 @@ import pandas as pd
 import numpy as np
 
 from .constants import DEFAULT_CHANGEOVER_TIME
-from .utils import compute_planning_window, safe_float_conversion
+from .utils import safe_float_conversion
 from .plan_builder import optimal_changeover_sequence
+from src.utils.date_helpers import compute_planning_window
 
 # 尝试导入 DuckDB 优化实现
 try:

@@ -15,7 +15,7 @@ from .constants import (
     LOCATION_TYPE_DC,
     LOCATION_TYPE_PLANT,
 )
-from .utils import get_ptf_lsk
+from src.utils.ptf_lsk import get_ptf_lsk
 
 
 def compute_root_horizon(

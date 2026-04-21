@@ -39,16 +39,15 @@ from .inventory import (
 
 # 缓存工具函数
 from .cache_utils import (
-    build_ptf_lsk_cache,
     build_lead_time_cache,
     build_active_network_cache,
-    get_ptf_lsk,
     get_upstream,
     get_active_network,
     assign_location_layers,
     determine_lead_time,
     get_sending_location_type,
 )
+from src.utils.ptf_lsk import build_ptf_lsk_cache, get_ptf_lsk
 
 # 需求收集函数
 from .demand_collector import collect_node_demands

@@ -13,11 +13,11 @@ import pandas as pd
 
 from .cache_utils import (
     determine_lead_time,
-    get_ptf_lsk,
     get_sending_location_type
 )
 from .constants import DEFAULT_PUSH_LEVELS
 from .demand_collector import collect_node_demands
+from src.utils.ptf_lsk import get_ptf_lsk
 
 
 def _calculate_receiving_ss_data(

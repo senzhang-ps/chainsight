@@ -7,33 +7,49 @@
 数据来源统一由 Orchestrator 内存状态提供，不再回退到文件读取。
 """
 
-import pandas as pd
-import numpy as np
 import os
-from typing import Dict, List, Tuple, Optional
 from collections import defaultdict
+from typing import Any, Dict, List, Optional, Tuple
+
+import numpy as np
+import pandas as pd
+
+from .normalization import normalize_location
 from .validation_manager import ValidationManager
 
-def _normalize_location(location_str: str) -> str:
-    """标准化location为4位补0格式"""
-    try:
-        if pd.isna(location_str):
-            return ""
-        return str(int(float(location_str))).zfill(4)
-    except (ValueError, TypeError):
-        location_str = str(location_str).strip()
-        if location_str.isdigit():
-            return location_str.zfill(4)
-        return location_str
 
-def _normalize_inventory_keys(inventory_dict: Dict) -> Dict:
-    """标准化库存字典的keys中的location"""
-    normalized_dict = {}
-    for (material, location), quantity in inventory_dict.items():
-        normalized_location = _normalize_location(location)
-        normalized_key = (str(material), normalized_location)
-        normalized_dict[normalized_key] = quantity
-    return normalized_dict
+def _normalize_location(value: Any) -> str:
+    """规范化 location 为 4 位补零格式 (薄封装,委托至共享真源)。
+
+    底层调用 ``src.utils.normalization.normalize_location`` 的 ``mode="any"`` 分支:
+    优先按 ``int(float(x))`` 解析后 zfill(4);非数字文本原样保留。
+
+    本封装保留是因为 ``_normalize_inventory_keys`` 及多处 ``.apply`` 按名引用,
+    收敛底层实现即满足"一个功能一个函数"。
+
+    Args:
+        value: 原始 location 标识 (int / float / str / None)。
+
+    Returns:
+        规范化后的字符串。None / NaN → ""。
+    """
+    return normalize_location(value, mode="any")
+
+
+def _normalize_inventory_keys(inventory: Dict[Tuple[Any, Any], float]) -> Dict[Tuple[str, str], float]:
+    """规范化库存字典 keys 中的 (material, location) 元组。
+
+    Args:
+        inventory: 原始库存字典,key 为 (material, location) 二元组。
+
+    Returns:
+        新字典,key 元组中的 material 转 str,location 走 ``_normalize_location``。
+    """
+    normalized_inventory: Dict[Tuple[str, str], float] = {}
+    for (material, location), quantity in inventory.items():
+        normalized_key = (str(material), _normalize_location(location))
+        normalized_inventory[normalized_key] = quantity
+    return normalized_inventory
 
 class InventoryBalanceChecker:
     """库存平衡检查器"""

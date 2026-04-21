@@ -23,10 +23,8 @@ from .types import (
 )
 from .utils import (
     cast_identifiers_to_str,
-    compute_planning_window,
     dedup_issues,
     ensure_dataframe_columns,
-    is_review_day,
     round_up_to_batch,
     safe_float_conversion,
     validate_merge_keys,
@@ -76,8 +74,6 @@ __all__ = [
     "ValidationIssue",
     "cast_identifiers_to_str",
     "validate_merge_keys",
-    "compute_planning_window",
-    "is_review_day",
     "dedup_issues",
     "round_up_to_batch",
     "safe_float_conversion",

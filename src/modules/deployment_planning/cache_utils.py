@@ -16,6 +16,7 @@ from src.utils.date_helpers import (
     calculate_transport_lead_time,
     is_calendar_review_day,
 )
+from src.utils.ptf_lsk import get_ptf_lsk
 
 from .constants import DEFAULT_PTF, DEFAULT_LSK, DEFAULT_LEAD_TIME
 
@@ -193,98 +194,6 @@ def get_from_index(
         pd.DataFrame: 匹配的记录或空DataFrame
     """
     return index.get(key, pd.DataFrame())
-
-
-def build_ptf_lsk_cache(
-    m4_mlcfg_df: Optional[pd.DataFrame]
-) -> Dict[Tuple[str, str], Tuple[int, int]]:
-    """
-    构建PTF/LSK缓存。
-
-    用途：为Plant口径的lead time计算提供PTF/LSK值。
-
-    参数：
-        m4_mlcfg_df: M4_MaterialLocationLineCfg DataFrame
-
-    返回：
-        dict: (material, location) -> (ptf, lsk)
-    """
-    cache = {}
-    if m4_mlcfg_df is None or m4_mlcfg_df.empty:
-        return cache
-
-    for row in m4_mlcfg_df.itertuples():
-        material = getattr(row, 'material', None)
-        location = getattr(row, 'location', None)
-        if material is None or location is None:
-            continue
-
-        ptf = DEFAULT_PTF
-        lsk = DEFAULT_LSK
-
-        # 尝试小写和大写列名
-        ptf_val = getattr(row, 'ptf', None) or getattr(row, 'PTF', None)
-        lsk_val = getattr(row, 'lsk', None) or getattr(row, 'LSK', None)
-
-        if ptf_val is not None and not pd.isna(ptf_val):
-            ptf = int(ptf_val)
-        if lsk_val is not None and not pd.isna(lsk_val):
-            lsk = int(lsk_val)
-
-        cache[(str(material), str(location))] = (ptf, lsk)
-
-    return cache
-
-
-def get_ptf_lsk(
-    material: str,
-    site: str,
-    m4_mlcfg_df: Optional[pd.DataFrame],
-    cache: Optional[Dict[Tuple[str, str], Tuple[int, int]]] = None
-) -> Tuple[int, int]:
-    """
-    获取指定(material, site)的PTF/LSK。
-
-    参数：
-        material: 物料编码
-        site: 站点编码
-        m4_mlcfg_df: M4_MaterialLocationLineCfg DataFrame
-        cache: PTF/LSK缓存
-
-    返回：
-        tuple: (ptf, lsk)
-    """
-    # 使用缓存
-    if cache is not None:
-        return cache.get(
-            (str(material), str(site)),
-            (DEFAULT_PTF, DEFAULT_LSK)
-        )
-
-    # 回退到DataFrame查询
-    ptf, lsk = DEFAULT_PTF, DEFAULT_LSK
-    if m4_mlcfg_df is None or m4_mlcfg_df.empty:
-        return ptf, lsk
-
-    ml = m4_mlcfg_df[
-        (m4_mlcfg_df['material'] == material) &
-        (m4_mlcfg_df['location'] == site)
-    ]
-    if ml.empty:
-        return ptf, lsk
-
-    row = ml.iloc[0]
-    if 'ptf' in ml.columns and pd.notna(row.get('ptf')):
-        ptf = int(row['ptf'])
-    elif 'PTF' in ml.columns and pd.notna(row.get('PTF')):
-        ptf = int(row['PTF'])
-
-    if 'lsk' in ml.columns and pd.notna(row.get('lsk')):
-        lsk = int(row['lsk'])
-    elif 'LSK' in ml.columns and pd.notna(row.get('LSK')):
-        lsk = int(row['LSK'])
-
-    return ptf, lsk
 
 
 def build_lead_time_cache(

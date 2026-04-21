@@ -119,6 +119,7 @@ def normalize_location(
     value: Any,
     *,
     mode: LocationMode = "numeric_only",
+    treat_missing_tokens: bool = False,
 ) -> str:
     """规范化地点标识符。
 
@@ -126,7 +127,11 @@ def normalize_location(
         value: 原始地点标识
         mode:
             "numeric_only" (默认) —— 纯数字 zfill(4);非数字(如 "A888")原样保留
-            "any"                 —— 无条件 zfill(4),非数字文本也补零
+            "any"                 —— 优先按数值解析后 zfill(4)(如 "99.0" → "0099");
+                                       数值解析失败的非数字文本原样保留(不再补零,避免
+                                       "nan"→"0nan" 这类损坏)
+        treat_missing_tokens: 是否把 ``'' / 'nan' / 'none' / '<na>'`` 字符串视为缺失
+            (返回 "")。默认 False(保持原值)。
 
     Returns:
         规范化后的字符串。None / NaN → ""
@@ -134,11 +139,20 @@ def normalize_location(
     if value is None or pd.isna(value):
         return ""
 
+    if treat_missing_tokens:
+        text_check = str(value).strip()
+        if text_check == "" or text_check.lower() in ["nan", "none", "<na>"]:
+            return ""
+
     if mode == "any":
+        # 优先尝试 int(float(x)) 以处理 "99.0" / 99.0 → "0099"
         try:
-            return str(int(value)).zfill(4)
+            return str(int(float(value))).zfill(4)
         except (ValueError, TypeError):
-            return str(value).zfill(4)
+            text = str(value).strip()
+            if text.isdigit():
+                return text.zfill(4)
+            return text
 
     text = str(value).strip()
     try:

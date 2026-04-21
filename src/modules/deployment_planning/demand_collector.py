@@ -12,11 +12,11 @@ import pandas as pd
 from .cache_utils import (
     get_active_network,
     get_from_index,
-    get_ptf_lsk,
     get_sending_location_type,
     determine_lead_time
 )
 from .constants import DEFAULT_MOQ, DEFAULT_RV
+from src.utils.ptf_lsk import get_ptf_lsk
 
 
 def _lookup_moq_rv(

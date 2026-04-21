@@ -4,11 +4,16 @@ simulation_db.py
 数据库模式仿真入口点模块。
 """
 
+import logging
 import pandas as pd
 import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
+
+# 复用 src/utils/logger_config.py::DualLogger 创建的同名 logger，
+# 这样消息既能进控制台又能进 simulation_log_*.txt。
+logger = logging.getLogger("SupplyChainSimulation")
 
 from .. import orchestrator
 from ..orchestrator import create_orchestrator
@@ -60,8 +65,15 @@ def run_integrated_simulation_from_dict(
     import time
     simulation_start_time = time.time()
     simulation_start_datetime = datetime.now()
-    
-    
+
+    logger.info("\n" + "=" * 60)
+    logger.info("🕐 程序时间信息")
+    logger.info("=" * 60)
+    logger.info(f"📅 程序开始时间: {simulation_start_datetime.strftime('%Y-%m-%d %H:%M:%S')}")
+    logger.info(f"🚀 开始集成仿真 (数据库模式): {start_date} 至 {end_date}")
+    logger.info(f"📋 配置: {config_name}")
+    logger.info("=" * 60)
+
     # 🦆 启用DuckDB内存模式（加速模块间数据传递）
     _ensure_memory_store_imported()
     if _enable_memory_mode:
@@ -72,10 +84,11 @@ def run_integrated_simulation_from_dict(
             memory_limit = get_optimal_memory()
         except ImportError:
             memory_limit = "4GB"
-    
+        logger.info(f"🦆 DuckDB内存模式已启用（{memory_limit}限制）")
+
     # 跳过预验证（数据库数据已经过验证）
     if skip_validation:
-        pass
+        logger.info("✅ 跳过预验证（数据库模式）")
     
     # 创建输出目录
     output_dir = Path(output_base_dir)
@@ -94,6 +107,7 @@ def run_integrated_simulation_from_dict(
         module_dir.mkdir(parents=True, exist_ok=True)
     
     # 🦆 使用DuckDB处理配置数据（无需临时Excel文件）
+    logger.info("🦆 DuckDB处理配置数据...")
     config_dict = load_configuration_from_dict(config_data, config_name)
     
     # 设置全局随机种子
@@ -103,6 +117,7 @@ def run_integrated_simulation_from_dict(
     time_manager = initialize_time_manager(start_date)
     
     # 初始化Orchestrator
+    logger.info("🎯 初始化Orchestrator")
     orch = create_orchestrator(
         start_date=start_date,
         output_dir=str(orchestrator_output_dir)
@@ -135,7 +150,9 @@ def run_integrated_simulation_from_dict(
     if checkpoint:
         run_id_override = checkpoint['run_id']
         actual_start_date = next_day(checkpoint['last_batch_end'])
+        logger.info(f"🔄 断点续跑模式：检测到 checkpoint，最后完成批次末日 = {checkpoint['last_batch_end']}")
         if pd.to_datetime(actual_start_date) > pd.to_datetime(end_date):
+            logger.info("✅ 断点续跑检测：所有日期已处理完毕，无需重跑")
             return {
                 'validation_passed': True,
                 'simulation_completed': True,
@@ -174,16 +191,18 @@ def run_integrated_simulation_from_dict(
                     _idx[_dk] = []
                 _idx[_dk].append(_rec)
             setattr(orch, _idx_attr, _idx)
+            logger.info(f"  ✅ 重建 *_by_date 索引: {_idx_attr} ({len(_idx)} 个日期)")
         # 🔧 从 checkpoint 恢复 m1_previous_orders（断点续跑可靠性关键）
         from pgsql_db.checkpoint import deserialize_m1_previous_orders
         m1_previous_orders = deserialize_m1_previous_orders(
             checkpoint['orch_state_json'].get('m1_previous_orders')
         )
         if m1_previous_orders is not None:
-            pass
+            logger.info(f"  ✅ 从checkpoint恢复历史订单: {len(m1_previous_orders)} 条")
         else:
             # 兼容兜底：旧版 checkpoint 中无 m1_previous_orders 字段（序列化前中断）
             # 从 module1_output_orderlog 按 run_id + sim_date < actual_start_date 读取历史订单
+            logger.warning("  ⚠️ checkpoint 中无 m1_previous_orders，尝试从 DB orderlog 表回退读取...")
             if db is not None:
                 try:
                     _prev_date = checkpoint['last_batch_end']  # 上一批次结束日（e.g. "2025-12-15"）
@@ -202,10 +221,11 @@ def run_integrated_simulation_from_dict(
                             m1_previous_orders[_col] = pd.to_datetime(
                                 m1_previous_orders[_col], errors='coerce'
                             )
+                        logger.info(f"  ✅ 从DB orderlog 回退恢复历史订单: {len(m1_previous_orders)} 条")
                     else:
-                        pass
+                        logger.warning(f"  ⚠️ DB orderlog 中未找到 run_id={run_id_override} 的历史订单")
                 except Exception as _e:
-                    pass
+                    logger.warning(f"  ⚠️ 从DB orderlog 回退读取失败: {_e}")
             # 安全防护：续跑模式下若历史订单仍无法恢复，中止运行以避免静默错算
             if m1_previous_orders is None:
                 raise RuntimeError(
@@ -218,6 +238,7 @@ def run_integrated_simulation_from_dict(
         _db_rt_data = checkpoint['orch_state_json'].get('db_runtime_state')
         if _db_rt_data:
             runtime_state = DbRuntimeState.from_dict(_db_rt_data)
+            logger.info("  ✅ 从DB恢复 DbRuntimeState: M4 产线状态/已分配产能/M3 结果")
         else:
             # 向后兼容：旧版 checkpoint 在 sim_m4_state 表中使用基于文件的 M4 状态。
             # 回退到从 DB 恢复文件（旧版路径）。
@@ -229,22 +250,28 @@ def run_integrated_simulation_from_dict(
                     m4_output_dir=str(module_outputs['module4']),
                 )
                 if _restored > 0:
-                    pass
+                    logger.warning(f"  ⚠️ 使用旧版文件恢复路径（兼容），恢复了 {_restored} 个M4状态文件")
+        logger.info(f"  📅 断点续跑起始日: {actual_start_date}")
     else:
         # 设置初始库存
+        logger.info("🆕 全新开始：设置初始状态")
         if 'M1_InitialInventory' in config_dict and not config_dict['M1_InitialInventory'].empty:
             orch.initialize_inventory(config_dict['M1_InitialInventory'])
         else:
             orch.initialize_inventory(pd.DataFrame(columns=['material', 'location', 'quantity']))
+            logger.warning("⚠️ 未找到初始库存配置，使用空库存")
         # 设置空间容量
         if 'Global_SpaceCapacity' in config_dict and not config_dict['Global_SpaceCapacity'].empty:
             orch.set_space_capacity(config_dict['Global_SpaceCapacity'])
         else:
-            pass
+            logger.warning("⚠️ 未找到空间容量配置")
 
     # 生成仿真日期范围
     sim_dates = pd.date_range(start_date, end_date, freq='D')
     sim_dates_to_run = pd.date_range(actual_start_date, end_date, freq='D')
+
+    logger.info(f"📅 总仿真日期: {len(sim_dates)} 天")
+    logger.info(f"📅 本次运行日期: {len(sim_dates_to_run)} 天（从 {actual_start_date} 开始）")
     
     
     # 数据库模式保持与文件模式一致的核心计算顺序；模块间状态优先通过内存对象与 Orchestrator 视图传递，不再依赖临时文件中转。
@@ -273,18 +300,23 @@ def run_integrated_simulation_from_dict(
 
 
     for i, current_date in enumerate(sim_dates_to_run, 1):
-        
+        logger.info(f"{'='*20} 第 {i}/{len(sim_dates_to_run)} 天: {current_date.strftime('%Y-%m-%d')} {'='*20}")
+
         # 🎲 注意：不在每日开始时重置种子，以匹配本地模式和ChainSight_Dev的随机数行为
         # ChainSight_Dev没有每日种子重置，随机状态自然演变
         # 全局种子只在仿真开始时设置一次 (在set_module_seeds中)
-        
+
         # ==================== 每日开始：GR入库处理 ====================
         try:
+            logger.info("🌅 每日开始状态更新")
+            logger.info("💾 保存期初库存快照...")
             orch.save_beginning_inventory(current_date.strftime('%Y-%m-%d'))
             runtime_state.cleanup_audit_df = orch.cleanup_past_due_open_deployments(current_date.strftime('%Y-%m-%d'), grace_days=getattr(orch, "cleanup_grace_days", 0), write_audit=True)
-            
+
+            logger.info("📦 处理当日delivery GR到达...")
             orch._process_delivery_arrivals(current_date.strftime('%Y-%m-%d'))
-            
+
+            logger.info("🏭 处理历史生产当日入库...")
             # [DB-MEM] 从 orchestrator production_plan_backlog 查询当日GR，替代 xlsx 扫描
             _backlog = getattr(orch, 'production_plan_backlog', [])
             if _backlog:
@@ -312,14 +344,16 @@ def run_integrated_simulation_from_dict(
             if not current_date_production_gr.empty:
                 current_date_production_gr_normalized = normalize_identifiers(current_date_production_gr)
                 orch.process_module4_production(current_date_production_gr_normalized, current_date.strftime('%Y-%m-%d'))
+                logger.info(f"📦 当日需要入库的历史生产: {len(current_date_production_gr)} 条记录")
             else:
-                pass
+                logger.info("📦 当日无历史生产入库")
 
         except Exception as e:
             # GR入库是核心状态变更，失败后库存不正确，
             # 后续所有模块在错误状态上运算，必须中止仿真而非静默继续。
             import traceback
             traceback.print_exc()
+            logger.error(f"FATAL: 每日开始处理失败 (GR入库): {e}")
             raise RuntimeError(f"每日GR入库处理失败，中止仿真以防止数据错误: {e}") from e
 
         # ==================== 模块运行序列 ====================
@@ -332,6 +366,7 @@ def run_integrated_simulation_from_dict(
         try:
             # ========== M1: 订单生成 ==========
             try:
+                logger.info("1️⃣ 运行 Module1 - 订单生成")
                 m1_result = module1.run_daily_order_generation(
                     config_dict=config_dict,
                     simulation_date=current_date,
@@ -343,7 +378,9 @@ def run_integrated_simulation_from_dict(
                 
                 if not m1_shipments.empty:
                     m1_shipments_normalized = normalize_identifiers(m1_shipments)
+                    logger.info("🚚 立即处理M1 shipment，扣减库存...")
                     orch.process_module1_shipments(m1_shipments_normalized, current_date.strftime('%Y-%m-%d'))
+                    logger.info(f"✅ 已扣减 {len(m1_shipments_normalized)} 个shipment的库存")
                 
                 if m1_result is not None:
                     m1_result['simulation_date'] = current_date
@@ -351,12 +388,15 @@ def run_integrated_simulation_from_dict(
                 batch_results['module1'].append(m1_result)
                 # 🔧 修复：保存累积订单供下一天使用（DB模式不依赖文件读取历史订单）
                 m1_previous_orders = m1_result.get('all_orders_for_next_day', None)
+                logger.info(f"✅ Module1 完成 - 生成 {len(m1_result.get('orders_df', []))} 个订单, {len(m1_shipments)} 个发货")
             except Exception as e:
+                logger.error(f"❌ Module1 失败: {e}")
                 batch_failed_modules.append((current_date.strftime('%Y-%m-%d'), 'module1', str(e)))
                 m1_shipments = pd.DataFrame()
             
             # ========== M4: 生产计划 ==========
             try:
+                logger.info("2️⃣ 运行 Module4 - 生产计划")
                 m4_result = module4.run_daily_production_planning_integrated(
                     config_dict=config_dict,
                     module3_output_dir=str(module_outputs['module3']),
@@ -387,22 +427,27 @@ def run_integrated_simulation_from_dict(
                     future_plans = m4_production[m4_production['available_date'].dt.normalize() > current_date.normalize()]
                     if not future_plans.empty:
                         future_plans_normalized = normalize_identifiers(future_plans)
+                        logger.info("🗂️ 持久化未来生产计划（不触发当日GR）...")
                         orch.process_module4_production(future_plans_normalized, current_date.strftime('%Y-%m-%d'))
+                        logger.info(f"✅ 已写入未来计划回补: {len(future_plans_normalized)} 条")
                     else:
-                        pass
+                        logger.info("📦 当日无未来 available_date 的计划需要持久化")
                 else:
-                    pass
+                    logger.info("📦 M4当日未生成生产计划或缺少 available_date 列")
                 
                 # 存储完整的Module4结果（包含所有输出表）
                 m4_result['simulation_date'] = current_date
                 all_results['module4'].append(m4_result)
                 batch_results['module4'].append(m4_result)
+                logger.info(f"✅ Module4 完成 - 生成生产计划: {len(m4_production)} 条记录")
             except Exception as e:
+                logger.error(f"❌ Module4 失败: {e}")
                 batch_failed_modules.append((current_date.strftime('%Y-%m-%d'), 'module4', str(e)))
                 m4_production = pd.DataFrame()
 
             # ========== M5: 部署计划 ==========
             try:
+                logger.info("3️⃣ 运行 Module5 - 部署计划")
                 # [DB-MEM] 传递 module4_result 内存数据，无需 M4 xlsx 文件
                 m5_result = module5.run_daily_deployment_planning(
                     config_dict=config_dict,
@@ -423,8 +468,9 @@ def run_integrated_simulation_from_dict(
                             (deployment_plan_df['deployed_qty_invCon'].notna()) &
                             (deployment_plan_df['sending'] != deployment_plan_df['receiving'])
                         ].copy()
-                        
-                        
+
+                        logger.info(f"    🎯 有效部署计划: {len(valid_deployment)}/{len(deployment_plan_df)} 条")
+
                         if not valid_deployment.empty:
                             if 'deployed_qty' in valid_deployment.columns:
                                 m5_deployment_df = valid_deployment[[
@@ -435,20 +481,25 @@ def run_integrated_simulation_from_dict(
                                     'date': 'planned_deployment_date',
                                     'deployed_qty_invCon': 'deployed_qty'
                                 })[['material', 'sending', 'receiving', 'planned_deployment_date', 'deployed_qty', 'demand_element']]
-                            
+
                             m5_deployment_df = normalize_identifiers(m5_deployment_df)
+                            logger.info("\n    📦 立即处理M5 deployment，更新open deployment...")
                             orch.process_module5_deployment(m5_deployment_df, current_date.strftime('%Y-%m-%d'))
-                
+                            logger.info(f"    ✅ 已更新 {len(m5_deployment_df)} 条部署计划到open deployment")
+
                 if m5_result is not None:
                     m5_result['simulation_date'] = current_date
                 all_results['module5'].append(m5_result)
                 batch_results['module5'].append(m5_result)
+                logger.info(f"\n  ✅ Module5 完成 - 生成 {len(valid_deployment) if 'valid_deployment' in dir() else 0} 条有效部署计划")
             except Exception as e:
+                logger.error(f"❌ Module5 失败: {e}")
                 batch_failed_modules.append((current_date.strftime('%Y-%m-%d'), 'module5', str(e)))
                 m5_deployment_df = pd.DataFrame()
 
             # ========== M6: 物流执行 ==========
             try:
+                logger.info("4️⃣ 运行 Module6 - 物流执行")
                 m6_result = module6.run_daily_physical_flow(
                     config_dict=config_dict,
                     orchestrator=orch,
@@ -463,17 +514,21 @@ def run_integrated_simulation_from_dict(
                     if not m6_delivery_df.empty:
                         m6_delivery_normalized = normalize_identifiers(m6_delivery_df)
                         orch.process_module6_delivery(m6_delivery_normalized, current_date.strftime('%Y-%m-%d'))
+                        logger.info(f"    ✅ 已处理 {len(m6_delivery_normalized)} 条delivery计划")
                 
                 if m6_result is not None:
                     m6_result['simulation_date'] = current_date
                 all_results['module6'].append(m6_result)
                 batch_results['module6'].append(m6_result)
+                logger.info(f"\n  ✅ Module6 完成 - 生成 {len(m6_delivery_df) if 'm6_delivery_df' in dir() else 0} 条交付计划")
             except Exception as e:
+                logger.error(f"❌ Module6 失败: {e}")
                 batch_failed_modules.append((current_date.strftime('%Y-%m-%d'), 'module6', str(e)))
                 m6_delivery_df = pd.DataFrame()
 
             # ========== M3: 净需求计算 ==========
             try:
+                logger.info("5️⃣ 运行 Module3 - 净需求计算")
                 m3_result = module3.run_integrated_mode(
                     module1_output_dir=str(module_outputs['module1']),
                     orchestrator=orch,
@@ -488,15 +543,19 @@ def run_integrated_simulation_from_dict(
                     runtime_state.previous_m3_result = m3_result
                 all_results['module3'].append(m3_result)
                 batch_results['module3'].append(m3_result)
+                logger.info("  ✅ Module3 完成")
             except Exception as e:
+                logger.error(f"❌ Module3 失败: {e}")
                 batch_failed_modules.append((current_date.strftime('%Y-%m-%d'), 'module3', str(e)))
 
         except Exception as e:
             import traceback
             traceback.print_exc()
+            logger.error(f"❌ 当日模块执行失败: {e}")
         
         # ==================== 每日结束：状态保存 ====================
         try:
+            logger.info("💾 每日结束状态保存")
             # 保存期末库存快照
             orch.save_ending_inventory(current_date.strftime('%Y-%m-%d'))
             # 输出每日库存汇总
@@ -505,8 +564,10 @@ def run_integrated_simulation_from_dict(
             orch.save_daily_state(current_date.strftime('%Y-%m-%d'))
             # 获取当日统计
             stats = orch.get_summary_statistics(current_date.strftime('%Y-%m-%d'))
+            logger.info(f"📊 当日统计: {stats}")
+            logger.info(f"✅ 第 {i} 天处理完成")
         except Exception as e:
-            pass
+            logger.error(f"❌ 每日状态保存失败: {e}")
 
         # ===== checkpoint 由 _flush_batch_to_db 在事务内原子写入，不再提前单独写入 =====
         # 早期版本在此处调用独立 checkpoint 写入辅助函数，会产生“checkpoint 超前、模块数据滞后”的不一致窗口：
@@ -520,8 +581,11 @@ def run_integrated_simulation_from_dict(
             batch_end_str = current_date.strftime('%Y-%m-%d')
             # 批次内有模块失败时，拒绝推进 checkpoint，避免缺口天被标为已完成
             if batch_failed_modules:
+                logger.warning(f"\n⚠️  警告: 当前批次({batch_start_date}~{batch_end_str})中有模块执行失败:")
                 for fail_date, fail_mod, fail_err in batch_failed_modules:
-                    pass
+                    logger.warning(f"    {fail_date} {fail_mod}: {fail_err[:120]}")
+                logger.warning(f"  共 {len(batch_failed_modules)} 项失败。")
+                logger.warning("  [FIX-#4] 跳过本批次 checkpoint 推进，断点续跑时将重新处理这些天。")
                 # 不清空 batch_results / batch_start_date，让下一批次重新尝试这些天
                 # （注意：batch_size=1 时每天独立，失败天的数据不进入下一天的 batch_results）
                 batch_results = {mod: [] for mod in all_results}  # 丢弃本批次不完整数据
@@ -560,6 +624,7 @@ def run_integrated_simulation_from_dict(
                 except Exception as flush_err:
                     import traceback
                     traceback.print_exc()
+                    logger.error(f"❌ 批次写入失败，中止仿真以保留内存数据: {flush_err}")
                     raise  # 中止仿真，避免后续批次覆盖丢失数据
     
     # 仿真结束统计
@@ -573,6 +638,7 @@ def run_integrated_simulation_from_dict(
     
     # 生成汇总报告
     try:
+        logger.info("📊 正在生成汇总报告...")
         report_generator = SummaryReportGenerator(
             output_base_dir=str(output_dir),
             config_dict=config_dict
@@ -582,19 +648,25 @@ def run_integrated_simulation_from_dict(
             start_date=start_date,
             end_date=end_date
         )
+        logger.info(f"✅ 汇总报告生成完成，输出目录: {output_dir / 'summary'}")
     except Exception as e:
         import traceback
         traceback.print_exc()
+        logger.warning(f"⚠️ 汇总报告生成失败: {e}")
         summary_reports = {}
     
     # 最终统计
     try:
         final_stats = orch.get_summary_statistics(end_date)
+        logger.info("🎯 最终Orchestrator状态:")
         for key, value in final_stats.items():
-            pass
+            logger.info(f"{key}: {value}")
     except Exception as e:
+        logger.warning(f"⚠️ 获取最终统计失败: {e}")
         final_stats = {}
-    
+
+    logger.info("🎉 集成仿真完成!")
+    logger.info(f"总共处理: {len(sim_dates)} 天")
 
     # 仿真循环完成后，不在此处设置 completed 状态。
     # 原因：完整的数据流为 仿真循环完成 -> Summary表生成 -> Orchestrator写入 -> 标记completed。
@@ -603,20 +675,32 @@ def run_integrated_simulation_from_dict(
     # 在此处提前标记会导致：如果 Summary 生成失败，checkpoint 已经是 completed，
     # 断点续跑时将无法检测到未完成状态，Summary 数据会永久缺失。
     if db is not None:
-        pass
+        logger.info("ℹ️  仿真循环完成，checkpoint 状态保持 running（待 Summary 完成后由 db_runner 更新为 completed）")
     
     # 🦆 禁用DuckDB内存模式并打印统计
     _ensure_memory_store_imported()
     if _is_memory_mode_enabled and _is_memory_mode_enabled():
+        logger.info("\n" + "=" * 60)
+        logger.info("🦆 DuckDB内存模式统计")
+        logger.info("=" * 60)
         if _get_data_store:
             store = _get_data_store()
             if store:
                 store.print_stats()
         if _disable_memory_mode:
             _disable_memory_mode()
+        logger.info("🦆 DuckDB内存模式已禁用")
     
     # 输出运行时间统计
     simulation_end_datetime = datetime.now()
+    logger.info("\n" + "=" * 60)
+    logger.info("🕐 程序时间统计")
+    logger.info("=" * 60)
+    logger.info(f"📅 开始时间: {simulation_start_datetime.strftime('%Y-%m-%d %H:%M:%S')}")
+    logger.info(f"📅 结束时间: {simulation_end_datetime.strftime('%Y-%m-%d %H:%M:%S')}")
+    logger.info(f"⏱️  总运行时间: {runtime_str}")
+    logger.info(f"📊 平均每天耗时: {total_runtime_seconds / max(len(sim_dates_to_run), 1):.2f}秒")
+    logger.info("=" * 60)
     
     return {
         'validation_passed': True,

@@ -6,12 +6,17 @@ production_runner.py
 
 import pandas as pd
 import os
+import logging
 from pathlib import Path
 from typing import Any, Dict, Optional
 
 from ...modules import module4
 from ...utils.defaults import M6_RANDOM_SEED
 from ...utils.normalization import normalize_material
+
+# 复用 src/utils/logger_config.py::DualLogger 创建的同名 logger，
+# 这样消息既能进控制台又能进 simulation_log_*.txt。
+logger = logging.getLogger("SupplyChainSimulation")
 
 
 def run_daily_production_planning_integrated(
@@ -98,7 +103,7 @@ def run_daily_production_planning_integrated(
             net_demand_df['material'] = net_demand_df['material'].apply(normalize_material).astype('string')
         
         if net_demand_df.empty:
-            pass
+            logger.warning(f"⚠️ {simulation_date.strftime('%Y-%m-%d')} 无 NetDemand 数据，生成空输出。")
         
         # 确保 requirement_date 是 datetime 类型
         if not net_demand_df.empty and 'requirement_date' in net_demand_df.columns:
@@ -147,14 +152,30 @@ def run_daily_production_planning_integrated(
         # 加载前一天产线状态用于跨天转产连续性
         if previous_line_states_override is not None:
             previous_line_states = previous_line_states_override
+            if previous_line_states:
+                logger.info(f"[DB-MEM] 使用内存中的产线状态: {list(previous_line_states.keys())}")
+            else:
+                logger.info("[DB-MEM] 内存中无前一天产线状态 - 全新开始")
         else:
             previous_line_states = module4.load_line_state(output_dir, simulation_date)
+            if previous_line_states:
+                logger.info(f"加载前一天产线状态: {list(previous_line_states.keys())}")
+            else:
+                logger.info("无前一天产线状态 - 全新开始")
         
         # 加载之前所有仿真日期已分配的产能
         if allocated_capacity_override is not None:
             previously_allocated_capacity = allocated_capacity_override
+            if previously_allocated_capacity:
+                logger.info(f"[DB-MEM] 使用内存中的已分配产能: {len(previously_allocated_capacity)} 个产能分配")
+            else:
+                logger.info("[DB-MEM] 内存中无之前已分配产能 - 全新开始")
         else:
             previously_allocated_capacity = module4.load_all_previous_capacity(output_dir, simulation_date)
+            if previously_allocated_capacity:
+                logger.info(f"加载之前已分配产能: {len(previously_allocated_capacity)} 个产能分配")
+            else:
+                logger.info("无之前已分配产能 - 全新开始")
         
         # 分配产能（支持跨天转产连续性和产能跟踪）
         plan_log, exceed_log = module4.centralized_capacity_allocation_with_changeover(
@@ -174,11 +195,17 @@ def run_daily_production_planning_integrated(
         current_line_states = module4.extract_line_states_from_plan(plan_log, cap_df, co_def, simulation_date, rate_map.to_dict())
         if current_line_states and not skip_state_file_output:
             module4.save_line_state(output_dir, simulation_date, current_line_states)
+            logger.info(f"保存产线状态: {list(current_line_states.keys())}")
+        elif current_line_states:
+            logger.info(f"[DB-MEM] 已提取产线状态（跳过文件写入）: {list(current_line_states.keys())}")
         
         # 提取并保存当天分配的产能供后续仿真日期使用
         current_allocated_capacity = module4.extract_allocated_capacity_from_plan(plan_log, rate_map.to_dict(), co_def)
         if current_allocated_capacity and not skip_state_file_output:
             module4.save_allocated_capacity(output_dir, simulation_date, current_allocated_capacity)
+            logger.info(f"保存已分配产能: {len(current_allocated_capacity)} 条产能分配（小时）")
+        elif current_allocated_capacity:
+            logger.info(f"[DB-MEM] 已提取已分配产能（跳过文件写入）: {len(current_allocated_capacity)} 条")
         
         # 去重问题
         issues = module4.dedup_issues(issues)
@@ -193,6 +220,7 @@ def run_daily_production_planning_integrated(
                 plan_log, exceed_log, issues, changeover_log, 
                 base_output_file, simulation_date
             )
+            logger.info(f"Module4 每日输出已生成: {daily_output_path}")
         
         # 返回完整的Module4结果（包含所有输出表）
         # production_df 与 Dev 版本一致：只返回当日及未来可用的生产
@@ -219,6 +247,8 @@ def run_daily_production_planning_integrated(
         
     except Exception as e:
         import traceback
+        logger.error(f'[错误] Module4 集成执行失败，日期 {simulation_date.strftime("%Y-%m-%d")}: {str(e)}')
+        logger.error("完整错误堆栈:\n" + traceback.format_exc())
         # 返回空结构
         return {
             'production_df': pd.DataFrame(),
@@ -271,6 +301,7 @@ def load_current_date_production_gr(module4_output_dir: str, current_date: pd.Ti
                         all_production_plans.append(production_df)
                         
             except Exception as e:
+                logger.warning(f"⚠️ 读取 {m4_file} 失败: {e}")
                 continue
     
     if not all_production_plans:

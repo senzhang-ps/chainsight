@@ -11,7 +11,10 @@ import logging
 
 from ...utils.normalization import normalize_identifiers
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("SupplyChainSimulation." + __name__)
+# 复用 src/utils/logger_config.py::DualLogger 创建的同�?logger�?
+# 这样进度信息既能进控制台又能�?simulation_log_*.txt�?
+sim_logger = logging.getLogger("SupplyChainSimulation")
 
 
 def detect_last_complete_date(output_base_dir: str, start_date: str, end_date: str) -> str:
@@ -37,11 +40,13 @@ def detect_last_complete_date(output_base_dir: str, start_date: str, end_date: s
     逻辑：
         - 按日期遍历并检查必需文件是否存在且可解析；若全部存在则记录为最后完整日期并继续；遇到缺失或异常则停止并返回当前记录。
     """
-    
+    sim_logger.info(f"🔍 检测中断点...")
+
     output_dir = Path(output_base_dir)
     orchestrator_dir = output_dir / "orchestrator"
-    
+
     if not orchestrator_dir.exists():
+        sim_logger.info(f"📁 输出目录不存在，将从头开始: {orchestrator_dir}")
         return None
     
     # 生成日期范围
@@ -108,18 +113,21 @@ def detect_last_complete_date(output_base_dir: str, start_date: str, end_date: s
                 df = pd.read_csv(inventory_file)
                 if len(df) >= 0:  # 允许空库存，但文件格式要正确
                     last_complete_date = current_date.strftime('%Y-%m-%d')
+                    sim_logger.info(f"✅ 发现完整日期: {last_complete_date}")
                 else:
                     break
             except Exception as e:
+                sim_logger.warning(f"⚠️ 日期 {current_date.strftime('%Y-%m-%d')} 文件损坏: {e}")
                 break
         else:
+            sim_logger.warning(f"❌ 日期 {current_date.strftime('%Y-%m-%d')} 文件不完整")
             break
-    
+
     if last_complete_date:
-        pass
+        sim_logger.info(f"🎯 检测到最后完整日期: {last_complete_date}")
     else:
-        pass
-        
+        sim_logger.info("📑 未发现完整日期，将从头开始")
+
     return last_complete_date
 
 def restore_orchestrator_state(orchestrator, restore_date: str, output_base_dir: str):
@@ -142,7 +150,8 @@ def restore_orchestrator_state(orchestrator, restore_date: str, output_base_dir:
     逻辑：
         - 逐类文件读取→标准化标识符→重建映射与列表→构建日期索引→设置当前日期，期间对空文件与解析异常采取容错策略。
     """
-    
+    sim_logger.info(f"🔄 从日期 {restore_date} 恢复Orchestrator状态...")
+
     output_dir = Path(output_base_dir)
     orchestrator_dir = output_dir / "orchestrator"
     date_str = pd.to_datetime(restore_date).strftime('%Y%m%d')
@@ -173,6 +182,7 @@ def restore_orchestrator_state(orchestrator, restore_date: str, output_base_dir:
                     except Exception:
                         qty = 0.0
                 orchestrator.unrestricted_inventory[key] = qty
+            sim_logger.info(f"  ✅ 恢复库存记录: {len(inventory_df)} 条")
         else:
             orchestrator.unrestricted_inventory = {}
         
@@ -217,6 +227,7 @@ def restore_orchestrator_state(orchestrator, restore_date: str, output_base_dir:
                             'ori_deployment_uid': str(row.get('ori_deployment_uid', '')),
                             'vehicle_uid': str(row.get('vehicle_uid', ''))
                         }
+                sim_logger.info(f"  ✅ 恢复在途记录: {len(orchestrator.in_transit)} 条")
             else:
                 orchestrator.in_transit = {}
         else:
@@ -251,6 +262,7 @@ def restore_orchestrator_state(orchestrator, restore_date: str, output_base_dir:
                             'deployed_qty': deployed_qty,
                             'demand_element': str(row.get('demand_element', ''))
                         }
+                sim_logger.info(f"  ✅ 恢复调拨记录: {len(orchestrator.open_deployment)} 条")
             else:
                 orchestrator.open_deployment = {}
         else:
@@ -277,6 +289,7 @@ def restore_orchestrator_state(orchestrator, restore_date: str, output_base_dir:
                     except Exception:
                         total = 0.0
                     orchestrator.space_quota[key] = {'used': used, 'total': total}
+                sim_logger.info(f"  ✅ 恢复空间配额: {len(space_df)} 条")
             else:
                 orchestrator.space_quota = {}
         else:
@@ -300,6 +313,7 @@ def restore_orchestrator_state(orchestrator, restore_date: str, output_base_dir:
                 
                 # 转为字典列表并保持类型（高效，无需 iterrows）
                 orchestrator.production_plan_backlog = backlog_df.to_dict('records')
+                sim_logger.info(f"  ✅ 恢复生产计划backlog: {len(orchestrator.production_plan_backlog)} 条")
             else:
                 orchestrator.production_plan_backlog = []
         else:
@@ -389,8 +403,15 @@ def restore_orchestrator_state(orchestrator, restore_date: str, output_base_dir:
             
             current_scan_date += pd.Timedelta(days=1)
         
-        
+        sim_logger.info(f"  ✅ 恢复发货日志: {len(orchestrator.shipment_log)} 条")
+        sim_logger.info(f"  ✅ 恢复生产日志: {len(orchestrator.production_gr)} 条")
+        sim_logger.info(f"  ✅ 恢复收货日志: {len(orchestrator.delivery_gr)} 条")
+        sim_logger.info(f"  ✅ 恢复站点间发运日志: {len(orchestrator.delivery_shipment_log)} 条")
+        sim_logger.info(f"  ✅ 恢复库存变动日志: {len(orchestrator.inventory_change_log)} 条")
+        sim_logger.info(f"  ✅ 恢复daily_logs: {len(orchestrator.daily_logs)} 条")
+
         # 6. 重建按日期索引的字典（用于阶段 6 优化）
+        sim_logger.info(f"  🔧 重建日期索引字典...")
         orchestrator.production_gr_by_date = {}
         orchestrator.delivery_gr_by_date = {}
         orchestrator.shipment_log_by_date = {}
@@ -424,12 +445,20 @@ def restore_orchestrator_state(orchestrator, restore_date: str, output_base_dir:
                 orchestrator.delivery_shipment_log_by_date[date_key] = []
             orchestrator.delivery_shipment_log_by_date[date_key].append(record)
         
-        
+        sim_logger.info(
+            f"  ✅ 日期索引重建完成: production_gr={len(orchestrator.production_gr_by_date)} 天, "
+            f"delivery_gr={len(orchestrator.delivery_gr_by_date)} 天, "
+            f"shipment_log={len(orchestrator.shipment_log_by_date)} 天, "
+            f"delivery_shipment_log={len(orchestrator.delivery_shipment_log_by_date)} 天"
+        )
+
         # 7. 设置当前日期
         orchestrator.current_date = restore_date_obj
         
-        
+        sim_logger.info(f"  🎯 Orchestrator状态恢复完成")
+
     except Exception as e:
+        sim_logger.error(f"  ❌ 状态恢复失败: {e}")
         raise
 
 def check_resume_capability(output_base_dir: str, start_date: str, end_date: str):

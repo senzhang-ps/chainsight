@@ -452,35 +452,3 @@ class DuckDBOptimizer:
 def get_duckdb_optimizer() -> DuckDBOptimizer:
     """获取 DuckDB 优化器实例。"""
     return DuckDBOptimizer.get_instance()
-
-
-def build_indexes_with_duckdb(
-    supply_demand_log: pd.DataFrame,
-    safety_stock: pd.DataFrame,
-    order_df: pd.DataFrame,
-    sim_date: pd.Timestamp,
-    horizon_end: pd.Timestamp
-) -> Tuple[Dict, Dict, Dict]:
-    """
-    使用 DuckDB 批量构建所有索引。
-    
-    Returns:
-        tuple: (sdl_index, ss_index, order_index)
-    """
-    optimizer = get_duckdb_optimizer()
-    
-    t_start = time.perf_counter()
-    
-    sdl_index = optimizer.batch_build_sdl_index(
-        supply_demand_log, sim_date, horizon_end
-    )
-    ss_index = optimizer.batch_build_ss_index(
-        safety_stock, horizon_end
-    )
-    order_index = optimizer.batch_build_order_index(
-        order_df, sim_date, horizon_end
-    )
-    
-    elapsed = time.perf_counter() - t_start
-    
-    return sdl_index, ss_index, order_index

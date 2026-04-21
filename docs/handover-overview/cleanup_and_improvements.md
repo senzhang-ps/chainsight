@@ -1,4 +1,4 @@
-# 零漂移重构清理总结
+﻿# 零漂移重构清理总结
 
 **更新时间：2026-04-15**
 
@@ -314,7 +314,7 @@ def normalize_identifiers(df, extra_columns=None):
 ## 7. 相关链接
 
 - [交接文档](./handover.md) —— 整体交接说明
-- [API 参考](../02-api/api.md) —— 当前 `src/` 与 `pgsql_db/` 的接口
+- [API 参考](../api/api.md) —— 当前 `src/` 与 `pgsql_db/` 的接口
 
 ---
 

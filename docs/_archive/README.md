@@ -1,4 +1,4 @@
-# docs/_archive 归档说明
+﻿# docs/_archive 归档说明
 
 ## 目录用途
 
@@ -14,10 +14,10 @@
 
 1. 清理范围仅限 `docs/`。
 2. 优先归档，不直接删除；唯一允许直接删除的是确认为空文件的 `docs/OPTIMIZATION_PROGRESS.md`。
-3. 当前交接材料主体为 `docs/handover/refactored/` 与 `archive/handover_docs/dev/`，默认不归档。
+3. 当前交接材料主体为 `docs/` 与 `archive/handover_docs/dev/`，默认不归档。
 4. `ChainSight 性能优化.docx`、`ChainSight Design Document.docx` 这类仍可能作为外部交付或背景材料使用的二进制文档，默认保留在原位置，不在本次归档范围内。
 
 ## 使用建议
 
-- 若需要查阅项目最终交接资料，优先从 `docs/INDEX.md` 与 `docs/handover/refactored/` 开始。
+- 若需要查阅项目最终交接资料，优先从 `docs/INDEX.md` 与 `docs/` 开始。
 - 若需要追溯某次优化过程、重构中间结论或阶段性测试职责说明，可再回看本目录中的历史文档。

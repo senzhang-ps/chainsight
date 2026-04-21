@@ -456,11 +456,6 @@ def write_module4_output(date_str: str, production_plan: pd.DataFrame = None,
     return success
 
 
-def read_module4_production_plan(date_str: str) -> Optional[pd.DataFrame]:
-    """读取Module4生产计划的便捷函数"""
-    return get_data_store().read_module_output('module4', 'ProductionPlan', date_str)
-
-
 def write_module3_output(date_str: str, net_demand: pd.DataFrame = None) -> bool:
     """写入Module3输出的便捷函数"""
     store = get_data_store()
@@ -470,49 +465,3 @@ def write_module3_output(date_str: str, net_demand: pd.DataFrame = None) -> bool
     if net_demand is not None:
         return store.write_module_output('module3', 'NetDemand', date_str, net_demand)
     return True
-
-
-def read_module3_net_demand(date_str: str) -> Optional[pd.DataFrame]:
-    """读取Module3净需求的便捷函数"""
-    return get_data_store().read_module_output('module3', 'NetDemand', date_str)
-
-
-def write_module5_output(date_str: str, deployment_plan: pd.DataFrame = None) -> bool:
-    """写入Module5输出的便捷函数"""
-    store = get_data_store()
-    if not store.is_enabled:
-        return False
-    
-    if deployment_plan is not None:
-        return store.write_module_output('module5', 'DeploymentPlan', date_str, deployment_plan)
-    return True
-
-
-def write_module6_output(date_str: str, delivery_plan: pd.DataFrame = None) -> bool:
-    """写入Module6输出的便捷函数"""
-    store = get_data_store()
-    if not store.is_enabled:
-        return False
-    
-    if delivery_plan is not None:
-        return store.write_module_output('module6', 'DeliveryPlan', date_str, delivery_plan)
-    return True
-
-
-def write_module1_output(date_str: str, order_log: pd.DataFrame = None,
-                         shipment_log: pd.DataFrame = None,
-                         cut_log: pd.DataFrame = None) -> bool:
-    """写入Module1输出的便捷函数"""
-    store = get_data_store()
-    if not store.is_enabled:
-        return False
-    
-    success = True
-    if order_log is not None:
-        success &= store.write_module_output('module1', 'OrderLog', date_str, order_log)
-    if shipment_log is not None:
-        success &= store.write_module_output('module1', 'ShipmentLog', date_str, shipment_log)
-    if cut_log is not None:
-        success &= store.write_module_output('module1', 'CutLog', date_str, cut_log)
-    
-    return success

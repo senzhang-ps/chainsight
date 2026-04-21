@@ -1,4 +1,4 @@
-# ChainSight 模块级时序图文档
+﻿# ChainSight 模块级时序图文档
 
 ## 封面信息
 
@@ -404,7 +404,7 @@ sequenceDiagram
 
 ## 11. 交接建议
 
-- 如果你是第一次接手项目，先把第 2 章到第 8 章通读一遍，再看 `docs/handover/refactored/02-api/function_dependency_matrix.md`。
+- 如果你是第一次接手项目，先把第 2 章到第 8 章通读一遍，再看 `docs/api/function_dependency_matrix.md`。
 - 如果你在查某一天为什么结果变了，优先沿着“日初 -> M1 -> M4 -> M5 -> M6 -> M3 -> 日末”这个顺序追。
 - 如果你在查 UID、库存、在途或 DB 对账问题，优先看：
   - `src/core/orchestrator/`（原 `orchestrator.py`）
@@ -419,6 +419,6 @@ sequenceDiagram
 
 ## 附录 A. 推荐配套文档
 
-- `docs/handover/refactored/00-overview/handover.md`
-- `docs/handover/refactored/02-api/function_dependency_matrix.md`
-- `docs/handover/refactored/02-api/function_interface_spec.md`
+- `docs/handover-overview/handover.md`
+- `docs/api/function_dependency_matrix.md`
+- `docs/api/function_interface_spec.md`

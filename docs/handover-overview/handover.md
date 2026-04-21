@@ -1,4 +1,4 @@
-# ChainSight 项目交接文档
+﻿# ChainSight 项目交接文档
 
 **编写人**：陈显跃  
 **更新时间**：2026-04-15  
@@ -326,8 +326,8 @@ checkpoint 关键指标：
 
 ## 12. 与本交接文档配套阅读
 
-- `docs/handover/refactored/00-overview/cleanup_and_improvements.md` — 第三阶段清理详细记录
-- `docs/handover/refactored/00-overview/setup.md`
-- `docs/handover/refactored/02-api/api.md`
-- `docs/handover/refactored/03-modules/modules_compat.md`
-- `docs/handover/refactored/04-services-utils/utils.md`
+- `docs/handover-overview/cleanup_and_improvements.md` — 第三阶段清理详细记录
+- `docs/handover-overview/setup.md`
+- `docs/api/api.md`
+- `docs/legacy/modules_compat.md`
+- `docs/services-utils/utils.md`

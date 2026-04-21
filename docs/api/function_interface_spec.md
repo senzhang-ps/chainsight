@@ -1,4 +1,4 @@
-# ChainSight 函数级接口与文件格式总表
+﻿# ChainSight 函数级接口与文件格式总表
 
 ## 封面信息
 
@@ -58,7 +58,7 @@
 
 - 本文档专门回答三个问题：函数按什么顺序执行、每个关键函数吃什么数据、会吐出什么文件或内存结果。
 - 由于项目规模较大，本文以“主链路函数 + 核心公共函数 + 关键内部函数 + 所有标准输出格式”为主，覆盖交接和排障最常用的函数集合。
-- 更细的逐文件文档可继续参考：`docs/handover/refactored/01-architecture/core.md`、`docs/handover/refactored/03-modules/modules_demand_planning.md`、`docs/handover/refactored/03-modules/modules_mrp_planning.md`、`docs/handover/refactored/03-modules/modules_production_planning.md`、`docs/handover/refactored/03-modules/modules_deployment_planning.md`、`docs/handover/refactored/03-modules/modules_logistics_execution.md`、`docs/handover/refactored/04-services-utils/services.md`、`docs/handover/refactored/04-services-utils/utils.md`。
+- 更细的逐文件文档可继续参考：`docs/architecture/core.md`、`docs/modules/modules_demand_planning.md`、`docs/modules/modules_mrp_planning.md`、`docs/modules/modules_production_planning.md`、`docs/modules/modules_deployment_planning.md`、`docs/modules/modules_logistics_execution.md`、`docs/services-utils/services.md`、`docs/services-utils/utils.md`。
 
 ## 2. 程序总运行顺序
 
@@ -2393,9 +2393,9 @@
 
 ## 附录 A. 建议配套阅读
 
-- `docs/handover/refactored/02-api/function_dependency_matrix.md`
-- `docs/handover/refactored/01-architecture/module_sequence_diagrams.md`
-- `docs/handover/refactored/00-overview/handover.md`
+- `docs/api/function_dependency_matrix.md`
+- `docs/architecture/module_sequence_diagrams.md`
+- `docs/handover-overview/handover.md`
 - `archive/handover_docs/dev/chainsight_dev_source_summary.md`
 
 ## 附录 B. 更新规则

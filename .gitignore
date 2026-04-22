@@ -81,5 +81,8 @@ archive/ChainSight_Dev/**/run_*/
 .opencode/
 AGENTS.md
 
+# Sisyphus plans
+.sisyphus/
+
 # csv
 *.csv

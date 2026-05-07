@@ -9,11 +9,11 @@
 import pandas as pd
 
 from .models import DeploymentUID
-from .normalize import (
-    _normalize_location,
-    _normalize_material,
-    _normalize_receiving,
-    _normalize_sending,
+from ...utils.normalization import (
+    normalize_location,
+    normalize_material,
+    normalize_receiving,
+    normalize_sending,
 )
 
 
@@ -43,8 +43,8 @@ class OrchestratorProcessorsMixin:
         # 更新非限制库存
         for row in daily_shipments.itertuples():
             key = (
-                _normalize_material(row.material),
-                _normalize_location(row.location),
+                normalize_material(row.material),
+                normalize_location(row.location),
             )
             if key in self.unrestricted_inventory:
                 old_qty = self.unrestricted_inventory[key]
@@ -56,10 +56,10 @@ class OrchestratorProcessorsMixin:
             # 记录发货日志
             record = {
                 'date': date_obj,
-                'material': _normalize_material(
+                'material': normalize_material(
                     row.material
                 ),
-                'location': _normalize_location(
+                'location': normalize_location(
                     row.location
                 ),
                 'quantity': int(row.quantity),
@@ -81,7 +81,6 @@ class OrchestratorProcessorsMixin:
                 f"Processed {len(daily_shipments)} "
                 f"shipments"
             )
-            print(f"✅ {msg} for {date}")
             self._log_event("M1_SHIPMENTS", msg)
 
     def process_module4_production(
@@ -125,7 +124,7 @@ class OrchestratorProcessorsMixin:
             tmp = tmp[keep].copy()
             tmp['material'] = tmp['material'].astype(str)
             tmp['location'] = tmp['location'].apply(
-                _normalize_location
+                normalize_location
             )
             tmp['quantity'] = (
                 tmp['quantity'].fillna(0).astype(int)
@@ -205,8 +204,8 @@ class OrchestratorProcessorsMixin:
         # 更新非限制库存并记录生产 GR
         for row in daily_production.itertuples():
             key = (
-                _normalize_material(row.material),
-                _normalize_location(row.location),
+                normalize_material(row.material),
+                normalize_location(row.location),
             )
             quantity = int(row.produced_qty)
 
@@ -220,10 +219,10 @@ class OrchestratorProcessorsMixin:
             # 记录生产 GR
             record = {
                 'date': date_obj,
-                'material': _normalize_material(
+                'material': normalize_material(
                     row.material
                 ),
-                'location': _normalize_location(
+                'location': normalize_location(
                     row.location
                 ),
                 'quantity': quantity,
@@ -244,7 +243,6 @@ class OrchestratorProcessorsMixin:
                 f"Processed {len(daily_production)} "
                 f"production receipts"
             )
-            print(f"✅ {msg} for {date}")
             self._log_event("M4_PRODUCTION", msg)
 
     def process_module5_deployment(
@@ -262,10 +260,9 @@ class OrchestratorProcessorsMixin:
         """
         date_obj = pd.to_datetime(date).normalize()
 
-        # 每日重置 UID 序列计数器，与 Dev 版本行为一致
-        # （Dev 在续跑模式下每天重新创建 Orchestrator，
-        #   uid_sequence 自然从 0 开始）
-        self.uid_sequence = 0
+        # uid_sequence 不重置，跨天持续累加，与 Dev 行为一致
+        # （Dev 的 Orchestrator 在整个 run 期间为同一实例，
+        #   uid_sequence 在 __init__ 中初始化为 0 后仅做 +=1）
 
         # 为保证可复现，在生成 UID 之前稳定排序
         sort_cols = [
@@ -306,13 +303,13 @@ class OrchestratorProcessorsMixin:
             )
 
             self.open_deployment[uid] = {
-                'material': _normalize_material(
+                'material': normalize_material(
                     row.material
                 ),
-                'sending': _normalize_sending(
+                'sending': normalize_sending(
                     row.sending
                 ),
-                'receiving': _normalize_receiving(
+                'receiving': normalize_receiving(
                     row.receiving
                 ),
                 'planned_deployment_date': pdd,
@@ -330,7 +327,6 @@ class OrchestratorProcessorsMixin:
                 f"Added {len(deployment_df)} "
                 f"deployment plans"
             )
-            print(f"✅ {msg} for {date}")
             self._log_event("M5_DEPLOYMENT", msg)
 
     def process_module6_delivery(
@@ -352,7 +348,6 @@ class OrchestratorProcessorsMixin:
             f"[M6->Orch] incoming rows: "
             f"{len(delivery_df)}; date={date}"
         )
-        print(msg)
 
         # 处理每条交付记录
         for row in delivery_df.itertuples():
@@ -362,8 +357,8 @@ class OrchestratorProcessorsMixin:
             sending = str(row.sending)
             receiving = str(row.receiving)
 
-            norm_mat = _normalize_material(material)
-            norm_rcv = _normalize_receiving(receiving)
+            norm_mat = normalize_material(material)
+            norm_rcv = normalize_receiving(receiving)
             ship_date = pd.to_datetime(
                 row.actual_ship_date
             )
@@ -396,8 +391,8 @@ class OrchestratorProcessorsMixin:
 
             # 减少发货地非限制库存
             sending_key = (
-                _normalize_material(material),
-                _normalize_location(sending),
+                normalize_material(material),
+                normalize_location(sending),
             )
             if sending_key in (
                 self.unrestricted_inventory
@@ -413,7 +408,7 @@ class OrchestratorProcessorsMixin:
             shipment_record = {
                 'date': date_obj,
                 'material': norm_mat,
-                'sending': _normalize_sending(sending),
+                'sending': normalize_sending(sending),
                 'receiving': norm_rcv,
                 'quantity': quantity,
                 'ori_deployment_uid': uid,
@@ -448,7 +443,7 @@ class OrchestratorProcessorsMixin:
                 )
                 self.in_transit[transit_uid] = {
                     'material': norm_mat,
-                    'sending': _normalize_sending(
+                    'sending': normalize_sending(
                         sending
                     ),
                     'receiving': norm_rcv,
@@ -529,7 +524,6 @@ class OrchestratorProcessorsMixin:
                 f"Processed {len(delivery_df)} "
                 f"delivery plans"
             )
-            print(f"✅ {msg} for {date}")
             self._log_event("M6_DELIVERY", msg)
 
     def process_delivery_plan(

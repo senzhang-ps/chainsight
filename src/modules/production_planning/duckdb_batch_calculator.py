@@ -60,12 +60,10 @@ def simulate_production_batch_duckdb(plan, pr_cfg, seed=None, run_id=None):
         
         plan['produced_qty'] = produced
         elapsed_ms = (time.perf_counter() - t0) * 1000
-        print(f'[M4-Pandas] Production simulation {len(plan)} records: {elapsed_ms:.1f}ms')
         if run_id and DuckDBConfig.collect_stats:
             get_perf_stats().record(run_id, 'simulate_production', 'pandas', len(plan), elapsed_ms)
         return plan
     except Exception as e:
-        print(f'[M4-DuckDB] Error, fallback to Pandas: {e}')
         if DuckDBConfig.fallback_on_error:
             return _simulate_production_pandas(plan, pr_cfg, seed, run_id)
         raise
@@ -90,7 +88,6 @@ def _simulate_production_pandas(plan, pr_cfg, seed=None, run_id=None):
         return rng.binomial(int(row['con_planned_qty']), pr)
     plan['produced_qty'] = plan.apply(simulate_row, axis=1)
     elapsed_ms = (time.perf_counter() - t0) * 1000
-    print(f'[M4-Pandas] Production simulation {len(plan)} records: {elapsed_ms:.1f}ms')
     if run_id and DUCKDB_INTEGRATION_AVAILABLE and DuckDBConfig.collect_stats:
         get_perf_stats().record(run_id, 'simulate_production', 'pandas', len(plan), elapsed_ms)
     return plan

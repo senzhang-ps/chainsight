@@ -66,12 +66,23 @@ outputs/
 ChainSight_Dev/*/
 !ChainSight_Dev/.vscode/
 !ChainSight_Dev/.vscode/**
+archive/ChainSight_Dev/*/
+!archive/ChainSight_Dev/.vscode/
+!archive/ChainSight_Dev/.vscode/**
 
 # ChainSight Dev run outputs
 ChainSight_Dev/**/run_*/
+archive/ChainSight_Dev/**/run_*/
 
 # Claude
 .claude/
+
+# OpenCode (local agent context, not shared)
+.opencode/
+AGENTS.md
+
+# Sisyphus plans
+.sisyphus/
 
 # csv
 *.csv

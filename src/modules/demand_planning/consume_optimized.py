@@ -45,14 +45,12 @@ def consume_orders_duckdb(
         consumed_forecast = _consume_orders_by_type_duckdb(
             conn, 'AO', orders_df, consumed_forecast, offsets
         )
-        print(f"[M1] AO消耗完成(DuckDB)，耗时: {time.perf_counter()-t1:.3f}s")
         
         # 普通订单消耗
         t2 = time.perf_counter()
         consumed_forecast = _consume_orders_by_type_duckdb(
             conn, 'normal', orders_df, consumed_forecast, offsets
         )
-        print(f"[M1] Normal消耗完成(DuckDB)，耗时: {time.perf_counter()-t2:.3f}s")
         
     finally:
         conn.close()
@@ -181,7 +179,6 @@ def consume_orders_vectorized(
         )
         t1 = time.perf_counter()
         _consume_orders_fast(ao_orders, quantities, idx_map, offsets)
-        print(f"[M1] AO消耗完成(向量化)，耗时: {time.perf_counter()-t1:.3f}s")
     
     # 普通订单消耗
     normal_orders = orders_df[orders_df['demand_type'] == 'normal'].copy()
@@ -191,7 +188,6 @@ def consume_orders_vectorized(
         )
         t2 = time.perf_counter()
         _consume_orders_fast(normal_orders, quantities, idx_map, offsets)
-        print(f"[M1] Normal消耗完成(向量化)，耗时: {time.perf_counter()-t2:.3f}s")
     
     result['quantity'] = quantities.astype(int)
     result = result.drop(columns=['_idx'])

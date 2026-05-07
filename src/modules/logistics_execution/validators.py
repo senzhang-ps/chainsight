@@ -55,8 +55,6 @@ def check_and_deduplicate(
     # 只有真正有重复时才记录和打印
     if dup_info['unique_count'] > 0:
         _log_duplicate_warning(sheet_name, key_column, dup_info, validation_log)
-        print(f"  ⚠️  发现{sheet_name}中有 {dup_info['unique_count']} 个重复的"
-              f"{key_column}（共 {dup_info['total_count']} 条记录），将去重保留第一条")
     
     return df.drop_duplicates(subset=[key_column], keep='first')
 
@@ -351,7 +349,6 @@ def validate_deployment_plan(
     
     missing_cols = [col for col in required_cols if col not in dp.columns]
     if missing_cols:
-        print(f"  ⚠️  DeploymentPlan缺失列: {missing_cols}")
         for col in missing_cols:
             dp[col] = required_cols[col]
     
@@ -381,7 +378,6 @@ def validate_truck_config(
     if not missing_cols:
         return truck_con
     
-    print(f"  ⚠️  TruckReleaseCon缺失列: {missing_cols}")
     
     for col in missing_cols:
         if col in ['sending', 'receiving', 'truck_type']:
@@ -416,8 +412,6 @@ def validate_priority_mapping(
     missing_elements = missing_prio['demand_element'].unique()
     _log_missing_priority(missing_prio, missing_elements, validation_log)
     
-    print(f"  ⚠️  发现 {len(missing_elements)} 个缺失的demand_element配置，"
-          f"将过滤 {len(missing_prio)} 条记录")
     
     return dp[dp['demand_element'].isin(prio_map.keys())]
 

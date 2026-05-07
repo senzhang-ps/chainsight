@@ -27,8 +27,10 @@ def _load_yaml() -> Dict[str, Any]:
 
 _cfg = _load_yaml()
 _shared: Dict[str, Any] = _cfg.get("shared", {})
+_demand: Dict[str, Any] = _cfg.get("demand_planning", {})
 _prod: Dict[str, Any] = _cfg.get("production_planning", {})
 _deploy: Dict[str, Any] = _cfg.get("deployment_planning", {})
+_logistics: Dict[str, Any] = _cfg.get("logistics_execution", {})
 
 # ---------------------------------------------------------------------------
 # 跨模块共享默认值
@@ -52,6 +54,19 @@ DEFAULT_LEAD_TIME: int = int(_shared["default_lead_time"])
 #: MRP 默认时间窗口 —— mrp_planning 使用
 DEFAULT_HORIZON: int = int(_shared["default_horizon"])
 
+#: 资源利用率 —— cpu_config, resource_config 共用
+RESOURCE_UTILIZATION: float = float(_shared["resource_utilization"])
+
+# ---------------------------------------------------------------------------
+# 需求规划 (Module1) 默认值
+# ---------------------------------------------------------------------------
+
+#: 未来截断天数 —— 用于截取消耗后预测的时间窗口
+M1_FUTURE_CUTOFF_DAYS: int = int(_demand["future_cutoff_days"])
+
+#: 最大AO提前天数
+M1_DEFAULT_MAX_ADVANCE_DAYS: int = int(_demand["default_max_advance_days"])
+
 # ---------------------------------------------------------------------------
 # 模块专属默认值
 # ---------------------------------------------------------------------------
@@ -61,3 +76,32 @@ DEFAULT_CHANGEOVER_TIME: float = float(_prod["default_changeover_time"])
 
 #: 默认推送层级 —— deployment_planning 使用
 DEFAULT_PUSH_LEVELS: List[float] = [float(x) for x in _deploy["default_push_levels"]]
+
+#: 默认需求收集视界天数 —— deployment_planning 使用（LeadTime 配置缺失时兜底）
+M5_DEFAULT_HORIZON_DAYS: int = int(_deploy["default_horizon_days"])
+
+# ---------------------------------------------------------------------------
+# 物流执行 (Module6) 默认值
+# ---------------------------------------------------------------------------
+
+#: 最大等待天数
+M6_MAX_WAIT_DAYS: int = int(_logistics["max_wait_days"])
+
+#: 随机种子默认值
+M6_RANDOM_SEED: int = int(_logistics["random_seed"])
+
+# ---------------------------------------------------------------------------
+# 跨分支兼容别名 —— 与源 main 分支命名对齐
+# ---------------------------------------------------------------------------
+
+#: 全局随机种子别名（指向 M6_RANDOM_SEED，便于源 main 分支模块复用）
+DEFAULT_RANDOM_SEED: int = M6_RANDOM_SEED
+
+#: M6 最大等待天数别名
+DEFAULT_MAX_WAIT_DAYS: int = M6_MAX_WAIT_DAYS
+
+#: M1 未来截断天数别名
+DEFAULT_FUTURE_CUTOFF_DAYS: int = M1_FUTURE_CUTOFF_DAYS
+
+#: M1 最大AO提前天数别名
+DEFAULT_MAX_ADVANCE_DAYS: int = M1_DEFAULT_MAX_ADVANCE_DAYS

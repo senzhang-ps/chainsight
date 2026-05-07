@@ -19,14 +19,11 @@ MRP Planning Module (MRP计划模块)
 from .constants import DEFAULT_MOQ, DEFAULT_RV, DEFAULT_HORIZON
 from .utils import (
     apply_moq_rv,
-    normalize_location,
-    normalize_material,
     normalize_identifiers,
     apportion_largest_remainder,
     lookup_moq_rv_three_keys,
-    build_ptf_lsk_cache,
-    get_ptf_lsk,
 )
+from src.utils.ptf_lsk import build_ptf_lsk_cache, get_ptf_lsk
 from .config_loader import (
     load_config,
     load_module1_daily_outputs,
@@ -49,8 +46,6 @@ __all__ = [
     'DEFAULT_HORIZON',
     # 工具函数
     'apply_moq_rv',
-    'normalize_location',
-    'normalize_material',
     'normalize_identifiers',
     'apportion_largest_remainder',
     'lookup_moq_rv_three_keys',
@@ -69,27 +64,5 @@ __all__ = [
     # 核心功能
     'calculate_daily_net_demand',
     'run_mrp_layered_simulation_daily',
-    'run_integrated_mode',
-]
-
-__all__ = [
-    # 常量
-    'DEFAULT_MOQ',
-    'DEFAULT_RV',
-    'DEFAULT_HORIZON',
-    # 工具函数
-    'apply_moq_rv',
-    'normalize_location',
-    'normalize_material',
-    'normalize_identifiers',
-    'apportion_largest_remainder',
-    # 配置加载
-    'load_config',
-    'load_module1_daily_outputs',
-    'load_excel_with_sheets',
-    # 核心功能
-    'calculate_daily_net_demand',
-    'run_mrp_layered_simulation_daily',
-    'assign_location_layers',
     'run_integrated_mode',
 ]

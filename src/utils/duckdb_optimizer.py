@@ -22,7 +22,7 @@ import pandas as pd
 import numpy as np
 
 # 使用统一的 CPU 配置
-from src.utils.cpu_config import CPU_COUNT, MAX_WORKERS
+from src.utils.resource_config import CPU_COUNT, MAX_WORKERS
 
 
 class DuckDBOptimizer:
@@ -34,7 +34,6 @@ class DuckDBOptimizer:
     
     def __init__(self):
         """初始化 DuckDB 连接。"""
-        pass
     
     @classmethod
     def get_instance(cls) -> 'DuckDBOptimizer':
@@ -150,7 +149,6 @@ class DuckDBOptimizer:
             for (mat, loc), group in result.groupby(['material', 'location']):
                 index[(str(mat), str(loc))] = group.reset_index(drop=True)
             
-            # print(f"[DuckDB] SDL index built in {time.perf_counter() - t_start:.3f}s, {len(index)} pairs")
             return index
             
         finally:
@@ -454,36 +452,3 @@ class DuckDBOptimizer:
 def get_duckdb_optimizer() -> DuckDBOptimizer:
     """获取 DuckDB 优化器实例。"""
     return DuckDBOptimizer.get_instance()
-
-
-def build_indexes_with_duckdb(
-    supply_demand_log: pd.DataFrame,
-    safety_stock: pd.DataFrame,
-    order_df: pd.DataFrame,
-    sim_date: pd.Timestamp,
-    horizon_end: pd.Timestamp
-) -> Tuple[Dict, Dict, Dict]:
-    """
-    使用 DuckDB 批量构建所有索引。
-    
-    Returns:
-        tuple: (sdl_index, ss_index, order_index)
-    """
-    optimizer = get_duckdb_optimizer()
-    
-    t_start = time.perf_counter()
-    
-    sdl_index = optimizer.batch_build_sdl_index(
-        supply_demand_log, sim_date, horizon_end
-    )
-    ss_index = optimizer.batch_build_ss_index(
-        safety_stock, horizon_end
-    )
-    order_index = optimizer.batch_build_order_index(
-        order_df, sim_date, horizon_end
-    )
-    
-    elapsed = time.perf_counter() - t_start
-    # print(f"[DuckDB] All indexes built in {elapsed:.3f}s")
-    
-    return sdl_index, ss_index, order_index

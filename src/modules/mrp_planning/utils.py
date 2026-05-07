@@ -4,15 +4,13 @@ Module3 工具函数模块。
 提供MOQ/RV计算、标识符规范化、分配算法等通用功能。
 """
 
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
 
-from src.utils.normalization_common import (
-    normalize_identifiers_vectorized,
-    normalize_location_zero_fill_any,
-    normalize_material_basic,
+from src.utils.normalization import (
+    normalize_identifiers as _canonical_normalize_identifiers,
 )
 
 from .constants import (
@@ -59,35 +57,6 @@ def apply_moq_rv(
     return int(np.ceil(qty / rv)) * rv
 
 
-def normalize_location(location_str: Union[str, int, float, None]) -> str:
-    """
-    将地点标识符规范化为4位前导零字符串。
-
-    参数：
-        location_str: 地点标识符
-
-    返回：
-        str: 规范化后的地点字符串
-    """
-    return normalize_location_zero_fill_any(location_str)
-
-
-def normalize_material(material_str: Union[str, int, float, None]) -> str:
-    """
-    将物料标识符规范化为字符串。
-
-    作用：统一 material 字段格式，与code_v0保持一致。
-    注意：直接转换为字符串，不做额外处理，以确保与code_v0输出一致。
-
-    参数：
-        material_str: 物料标识符
-
-    返回：
-        str: 规范化后的物料字符串
-    """
-    return normalize_material_basic(material_str)
-
-
 def normalize_identifiers(df: pd.DataFrame) -> pd.DataFrame:
     """
     规范化DataFrame中的标识符列。
@@ -105,7 +74,7 @@ def normalize_identifiers(df: pd.DataFrame) -> pd.DataFrame:
         for c in IDENTIFIER_COLUMNS
         if c not in LOCATION_TYPE_COLUMNS and c != COL_MATERIAL
     ]
-    return normalize_identifiers_vectorized(
+    return _canonical_normalize_identifiers(
         df,
         material_cols=(COL_MATERIAL,),
         location_cols=tuple(LOCATION_TYPE_COLUMNS),
@@ -225,100 +194,3 @@ def _compute_floors(
         rem = float(exact - fval)
         floors.append((pos, fval, rem, orig, pos))
     return floors
-
-
-def build_ptf_lsk_cache(
-    m4_mlcfg_df: Optional[pd.DataFrame]
-) -> Dict[Tuple[str, str], Tuple[int, int]]:
-    """
-    构建PTF/LSK查询缓存。
-
-    参数：
-        m4_mlcfg_df: M4配置DataFrame
-
-    返回：
-        Dict: (material, location) -> (ptf, lsk) 缓存
-    """
-    cache = {}
-    if m4_mlcfg_df is None or m4_mlcfg_df.empty:
-        return cache
-
-    for row in m4_mlcfg_df.itertuples():
-        material = getattr(row, 'material', None)
-        location = getattr(row, 'location', None)
-        if material is None or location is None:
-            continue
-
-        ptf, lsk = _extract_ptf_lsk_from_row(row)
-        cache[(str(material), str(location))] = (ptf, lsk)
-
-    return cache
-
-
-def _extract_ptf_lsk_from_row(row) -> Tuple[int, int]:
-    """从行数据提取PTF/LSK值。"""
-    ptf = 0
-    lsk = 1
-
-    ptf_val = getattr(row, 'ptf', None) or getattr(row, 'PTF', None)
-    lsk_val = getattr(row, 'lsk', None) or getattr(row, 'LSK', None)
-
-    if ptf_val is not None and not pd.isna(ptf_val):
-        ptf = int(ptf_val)
-    if lsk_val is not None and not pd.isna(lsk_val):
-        lsk = int(lsk_val)
-
-    return ptf, lsk
-
-
-def get_ptf_lsk(
-    material: str,
-    site: str,
-    m4_mlcfg_df: Optional[pd.DataFrame],
-    cache: Optional[Dict[Tuple[str, str], Tuple[int, int]]] = None
-) -> Tuple[int, int]:
-    """
-    从M4配置读取PTF/LSK值。
-
-    参数：
-        material: 物料编码
-        site: 地点编码
-        m4_mlcfg_df: M4配置DataFrame
-        cache: PTF/LSK缓存
-
-    返回：
-        Tuple[int, int]: (ptf, lsk) 元组
-    """
-    if cache is not None:
-        return cache.get((str(material), str(site)), (0, 1))
-
-    ptf, lsk = 0, 1
-    if m4_mlcfg_df is None or m4_mlcfg_df.empty:
-        return ptf, lsk
-
-    ml = m4_mlcfg_df[
-        (m4_mlcfg_df['material'] == material) &
-        (m4_mlcfg_df['location'] == site)
-    ]
-    if ml.empty:
-        return ptf, lsk
-
-    return _extract_ptf_lsk_from_df(ml)
-
-
-def _extract_ptf_lsk_from_df(ml: pd.DataFrame) -> Tuple[int, int]:
-    """从DataFrame提取PTF/LSK值。"""
-    ptf, lsk = 0, 1
-    row = ml.iloc[0]
-
-    if 'ptf' in ml.columns and pd.notna(row.get('ptf')):
-        ptf = int(row['ptf'])
-    elif 'PTF' in ml.columns and pd.notna(row.get('PTF')):
-        ptf = int(row['PTF'])
-
-    if 'lsk' in ml.columns and pd.notna(row.get('lsk')):
-        lsk = int(row['lsk'])
-    elif 'LSK' in ml.columns and pd.notna(row.get('LSK')):
-        lsk = int(row['LSK'])
-
-    return ptf, lsk

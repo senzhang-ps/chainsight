@@ -15,7 +15,7 @@ from typing import Dict, Optional
 
 import pandas as pd
 
-from .normalizer import normalize_identifiers
+from ...utils.normalization import normalize_identifiers
 from .constants import (
     DATE_FIELDS_MAP,
     REQUIRED_SHEETS,
@@ -88,24 +88,20 @@ def load_module1_daily_shipment(
         module1_file = f"{module1_output_dir}/module1_output_{date_str}.xlsx"
 
         if not os.path.exists(module1_file):
-            print(f"⚠️  Module1输出文件不存在: {module1_file}")
             return pd.DataFrame(columns=required_cols)
 
         xl = pd.ExcelFile(module1_file)
         if 'ShipmentLog' not in xl.sheet_names:
-            print(f"⚠️  Module1输出文件中无ShipmentLog表: {module1_file}")
             return pd.DataFrame(columns=required_cols)
 
         shipment_df = xl.parse('ShipmentLog')
         if not all(col in shipment_df.columns for col in required_cols):
-            print(f"⚠️  Module1输出文件缺少必要字段: {module1_file}")
             return pd.DataFrame(columns=required_cols)
 
         result_df = shipment_df[required_cols].copy()
         return normalize_identifiers(result_df)
 
     except Exception as e:
-        print(f"⚠️  加载Module1发货数据失败: {e}")
         return pd.DataFrame(columns=required_cols)
 
 
@@ -135,12 +131,10 @@ def load_module1_daily_orders(
         module1_file = f"{module1_output_dir}/module1_output_{date_str}.xlsx"
 
         if not os.path.exists(module1_file):
-            print(f"⚠️  Module1输出文件不存在: {module1_file}")
             return pd.DataFrame(columns=cols)
 
         xl = pd.ExcelFile(module1_file)
         if 'OrderLog' not in xl.sheet_names:
-            print(f"⚠️  Module1输出文件中无OrderLog表: {module1_file}")
             return pd.DataFrame(columns=cols)
 
         df = xl.parse('OrderLog')
@@ -163,7 +157,6 @@ def load_module1_daily_orders(
         return normalize_identifiers(result_df)
 
     except Exception as e:
-        print(f"⚠️  加载Module1订单数据失败: {e}")
         return pd.DataFrame(columns=cols)
 
 
@@ -193,7 +186,6 @@ def load_orchestrator_delivery_gr(
         delivery_gr_view = orchestrator.get_delivery_gr_view(date_str)
 
         if not isinstance(delivery_gr_view, pd.DataFrame):
-            print("⚠️Orchestrator返回空的delivery_gr_view", flush=True)
             return pd.DataFrame(columns=required_cols)
 
         if delivery_gr_view.empty:
@@ -209,17 +201,12 @@ def load_orchestrator_delivery_gr(
             if col not in renamed_df.columns
         ]
         if missing_cols:
-            print(
-                f"⚠️Orchestrator delivery_gr_view缺少字段: {missing_cols}",
-                flush=True
-            )
             return pd.DataFrame(columns=required_cols)
 
         result_df = renamed_df[required_cols].copy()
         return normalize_identifiers(result_df)
 
     except Exception as e:
-        print(f"⚠️从Orchestrator加载收货数据失败: {e}", flush=True)
         return pd.DataFrame(columns=required_cols)
 
 
@@ -249,7 +236,6 @@ def load_orchestrator_open_deployment(
         open_deployment_view = orchestrator.get_open_deployment_view(date_str)
 
         if not isinstance(open_deployment_view, pd.DataFrame):
-            print("⚠️Orchestrator返回空的open_deployment_view", flush=True)
             return pd.DataFrame(columns=required_cols)
 
         if open_deployment_view.empty:
@@ -265,17 +251,12 @@ def load_orchestrator_open_deployment(
             if col not in renamed_df.columns
         ]
         if missing_cols:
-            print(
-                f"⚠️Orchestrator open_deployment_view缺少字段: {missing_cols}",
-                flush=True
-            )
             return pd.DataFrame(columns=required_cols)
 
         result_df = renamed_df[required_cols].copy()
         return normalize_identifiers(result_df)
 
     except Exception as e:
-        print(f"⚠️从Orchestrator加载开放调拨数据失败: {e}", flush=True)
         return pd.DataFrame(columns=required_cols)
 
 
@@ -380,7 +361,6 @@ def _load_module1_data_from_file(
         try:
             return load_module1_daily_orders(module1_output_dir, current_date)
         except Exception as e:
-            print(f"  ⚠️  加载OrderLog失败: {e}")
             return pd.DataFrame()
 
     def _load_supplydemand():
@@ -392,14 +372,12 @@ def _load_module1_data_from_file(
                     return df if isinstance(df, pd.DataFrame) else pd.DataFrame()
             return pd.DataFrame()
         except Exception as e:
-            print(f"  ⚠️  加载SupplyDemandLog失败: {e}")
             return pd.DataFrame()
 
     def _load_todayshipment():
         try:
             return load_module1_daily_shipment(module1_output_dir, current_date)
         except Exception as e:
-            print(f"  ⚠️  加载TodayShipment失败: {e}")
             return pd.DataFrame()
 
     try:
@@ -424,7 +402,6 @@ def _load_module1_data_from_file(
                 else pd.DataFrame()
             )
     except Exception as e:
-        print(f"⚠️并行加载 Module1 数据失败，回退串行: {e}")
         config['OrderLog'] = load_module1_daily_orders(
             module1_output_dir, current_date
         )
@@ -465,9 +442,9 @@ def _load_production_from_orchestrator(
                     ).fillna(0)
             config['ProductionPlan'] = prod_gr
         else:
-            print("⚠️Orchestrator当日无历史生产GR数据", flush=True)
+            pass
     except Exception as e:
-        print(f"⚠️从 Orchestrator 加载生产计划失败: {e}", flush=True)
+        pass
 
 
 def _load_production_from_module4(
@@ -512,7 +489,7 @@ def _load_production_from_module4(
 
         config['ProductionPlan'] = m4_production
     except Exception as e:
-        print(f"  ⚠️  无法从 Module4 加载 ProductionPlan: {e}")
+        pass
 
 
 def _load_orchestrator_dynamic_data(
@@ -534,35 +511,30 @@ def _load_orchestrator_dynamic_data(
         try:
             return orchestrator.get_beginning_inventory_view(date_str)
         except Exception as e:
-            print(f"  ⚠️  加载BeginningInventory失败: {e}")
             return pd.DataFrame()
 
     def _get_intransit():
         try:
             return orchestrator.get_planning_intransit_view(date_str)
         except Exception as e:
-            print(f"  ⚠️  加载InTransit失败: {e}")
             return pd.DataFrame()
 
     def _get_delivery_gr():
         try:
             return load_orchestrator_delivery_gr(orchestrator, current_date)
         except Exception as e:
-            print(f"  ⚠️  加载DeliveryGR失败: {e}")
             return pd.DataFrame()
 
     def _get_open_deployment():
         try:
             return load_orchestrator_open_deployment(orchestrator, current_date)
         except Exception as e:
-            print(f"  ⚠️  加载OpenDeployment失败: {e}")
             return pd.DataFrame()
 
     def _get_space_quota():
         try:
             return orchestrator.get_space_quota_view(date_str)
         except Exception as e:
-            print(f"  ⚠️  加载ReceivingSpace失败: {e}")
             return pd.DataFrame()
 
     try:
@@ -585,11 +557,9 @@ def _load_orchestrator_dynamic_data(
                 if isinstance(df, pd.DataFrame):
                     config[key] = df
                 else:
-                    print(f"  ⚠️  并行加载 {key} 返回非DataFrame，回退为空表")
                     config[key] = pd.DataFrame()
 
     except Exception as e:
-        print(f"  ⚠️  并行加载 Orchestrator 数据失败，回退串行: {e}")
         try:
             config['InventoryLog'] = orchestrator.get_beginning_inventory_view(
                 date_str
@@ -607,7 +577,7 @@ def _load_orchestrator_dynamic_data(
                 date_str
             )
         except Exception as e2:
-            print(f"  ⚠️  从 Orchestrator 加载动态数据失败: {e2}")
+            pass
 
 
 def _process_date_fields(config: dict) -> None:
@@ -753,7 +723,6 @@ def load_integrated_config(
             config[sheet_name] = normalize_identifiers(df)
 
     config['ValidationLog'] = validation_log
-    print(f"[M5] load_integrated_config 用时: {time.perf_counter()-t0:.3f}s")
     return config
 
 
@@ -816,7 +785,6 @@ def clear_static_config_cache():
     """
     global _static_config_cache
     _static_config_cache.clear()
-    print("[M5] 静态配置缓存已清除")
 
 
 def get_static_config_cache_status() -> dict:

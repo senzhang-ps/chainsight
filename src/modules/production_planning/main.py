@@ -10,6 +10,8 @@ from typing import Optional
 
 import pandas as pd
 
+from ...utils.normalization import normalize_identifiers
+from ...utils.defaults import DEFAULT_RANDOM_SEED
 from .config_loader import load_config, validate_config
 from .demand_loader import load_daily_net_demand
 from .plan_builder import build_unconstrained_plan_for_single_day
@@ -68,7 +70,6 @@ def run_daily_production_planning(
         return planner.run()
     except Exception as e:
         date_str = simulation_date.strftime('%Y-%m-%d')
-        print(f'[ERROR] Module4每日执行失败 {date_str}: {str(e)}')
         raise
 
 
@@ -171,17 +172,7 @@ class DailyProductionPlanner:
         """
         mlcfg = cfg['MaterialLocationLineCfg']
 
-        try:
-            # 使用正确的导入路径
-            from src.core.orchestrator import _normalize_identifiers
-            mlcfg = _normalize_identifiers(mlcfg)
-        except ImportError:
-            try:
-                # 备用导入路径
-                from orchestrator import _normalize_identifiers
-                mlcfg = _normalize_identifiers(mlcfg)
-            except ImportError:
-                pass
+        mlcfg = normalize_identifiers(mlcfg)
 
         return mlcfg
 
@@ -199,17 +190,7 @@ class DailyProductionPlanner:
         返回：
             pd.DataFrame: 无约束计划
         """
-        try:
-            # 使用正确的导入路径
-            from src.core.orchestrator import _normalize_identifiers
-            net_demand = _normalize_identifiers(net_demand)
-        except ImportError:
-            try:
-                # 备用导入路径
-                from orchestrator import _normalize_identifiers
-                net_demand = _normalize_identifiers(net_demand)
-            except ImportError:
-                pass
+        net_demand = normalize_identifiers(net_demand)
 
         return build_unconstrained_plan_for_single_day(
             net_demand, mlcfg,
@@ -296,7 +277,7 @@ class DailyProductionPlanner:
         返回：
             pd.DataFrame: 最终计划日志
         """
-        seed = cfg.get('RandomSeed', 42)
+        seed = cfg.get('RandomSeed', DEFAULT_RANDOM_SEED)
         plan_log = simulate_production(
             plan_log, cfg['ProductionReliability'], seed=seed
         )
@@ -404,7 +385,6 @@ class DailyProductionPlanner:
                 f'发现关键校验错误 {date_str}! '
                 f'请查看Validation工作表。'
             )
-            print(f"WARNING: {msg}")
 
 
 def main():
@@ -421,7 +401,6 @@ def main():
         else:
             _run_legacy_mode(args)
     except Exception as e:
-        print(f'[ERROR]: {str(e)}')
         raise
 
 
@@ -562,7 +541,7 @@ def _run_legacy_mode(args) -> None:
 
     plan_log = simulate_production(
         plan_log, cfg['ProductionReliability'],
-        seed=cfg.get('RandomSeed', 42)
+        seed=cfg.get('RandomSeed', DEFAULT_RANDOM_SEED)
     )
 
     changeover_log = calculate_changeover_metrics(
@@ -592,7 +571,6 @@ def _check_legacy_critical_issues(issues: list) -> None:
             '发现关键校验错误! 请查看输出文件的Validation工作表。\n' +
             '\n'.join(str(x['issue']) for x in critical)
         )
-        print(msg)
         raise Exception(msg)
 
 

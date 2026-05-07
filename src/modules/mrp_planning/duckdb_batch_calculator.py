@@ -280,7 +280,6 @@ def batch_calculate_net_demand_duckdb(
             gaps[key] = (float(row['ao_gap']), float(row['fc_gap']), float(row['ss_gap']))
         
         elapsed_ms = (time.perf_counter() - t0) * 1000
-        print(f"[M3-DuckDB] 批量计算 {len(nodes)} 节点净需求: {elapsed_ms:.1f}ms, input={len(nodes)}, output={len(gaps)}")
         
         if run_id and DuckDBConfig.collect_stats:
             get_perf_stats().record(run_id, 'batch_net_demand', 'duckdb', 
@@ -290,8 +289,6 @@ def batch_calculate_net_demand_duckdb(
         
     except Exception as e:
         import traceback
-        print(f"[M3-DuckDB] 批量计算出错，回退到Pandas: {e}", flush=True)
-        print(f"[M3-DuckDB] Traceback:\n{traceback.format_exc()}", flush=True)
         if DuckDBConfig.fallback_on_error:
             return _batch_calculate_pandas(
                 nodes, sim_date, beginning_inventory_df, in_transit_df,
@@ -344,7 +341,6 @@ def _batch_calculate_pandas(
         gaps[(material, location)] = (ao_gap, fc_gap, ss_gap)
     
     elapsed_ms = (time.perf_counter() - t0) * 1000
-    print(f"[M3-Pandas] 批量计算 {len(nodes)} 节点净需求: {elapsed_ms:.1f}ms")
     
     if run_id and DUCKDB_INTEGRATION_AVAILABLE and DuckDBConfig.collect_stats:
         get_perf_stats().record(run_id, 'batch_net_demand', 'pandas', 

@@ -13,9 +13,11 @@ from .constants import UNCONSTRAINED_PLAN_COLUMNS
 from .utils import (
     cast_identifiers_to_str,
     validate_merge_keys,
-    compute_planning_window,
-    is_review_day,
     round_up_to_batch,
+)
+from src.utils.date_helpers import (
+    compute_planning_window,
+    is_offset_review_day,
 )
 
 
@@ -94,7 +96,7 @@ def _build_plan_for_material(
         lsk = int(row['lsk'])
         day = int(row['day'])
 
-    if not is_review_day(simulation_date, simulation_start, lsk, day):
+    if not is_offset_review_day(simulation_date, simulation_start, lsk, day):
         return None
 
     nd_sub = _get_material_demands(

@@ -434,7 +434,6 @@ def apply_receiving_space_quota(
     # 无跨节点行
     if df_cross.empty:
         elapsed = time.perf_counter() - t0
-        print(f"[M5] Receiving Space Quota 用时: {elapsed:.3f}s，受限条目: 0")
         return df, []
 
     # 合并配额
@@ -524,9 +523,5 @@ def apply_receiving_space_quota(
     df['quota'] = df['quota'].fillna(np.nan)
 
     elapsed = time.perf_counter() - t0
-    print(
-        f"[M5] Receiving Space Quota 用时: {elapsed:.3f}s，"
-        f"受限条目: {len(unfulfilled)}"
-    )
 
     return df, unfulfilled

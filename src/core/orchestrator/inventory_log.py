@@ -118,7 +118,6 @@ class OrchestratorInventoryLogMixin:
             f"  📊 从内存获取发运出库 [{date}]: "
             f"{len(delivery_ship_data)} 项"
         )
-        print(msg)
 
         change_log = []
 

@@ -15,7 +15,8 @@ import numpy as np
 import pandas as pd
 
 from .constants import DEFAULT_MAX_ADVANCE_DAYS
-from .normalization import normalize_identifiers
+from ...utils.defaults import M1_FUTURE_CUTOFF_DAYS
+from ...utils.normalization import normalize_identifiers
 from .dps import apply_dps, apply_supply_choice
 from .forecast import expand_forecast_to_days_integer_split
 from .order import generate_daily_orders
@@ -64,7 +65,6 @@ def run_daily_order_generation(
             ao_config, order_calendar, forecast_error
         )
         elapsed = time.perf_counter() - t0
-        print(f"[M1] 当日订单生成完成，订单数: {len(today_orders_df)}，耗时: {elapsed:.3f}s")
 
         # 4) 合并历史订单（用于内部计算，如发货检查）
         all_orders_df = _merge_with_history(
@@ -84,7 +84,6 @@ def run_daily_order_generation(
             daily_for_supply, consumed_supply, simulation_date
         )
         elapsed = time.perf_counter() - t3
-        print(f"[M1] 供需日志生成完成，条目: {len(supply_demand_df)}，耗时: {elapsed:.3f}s")
 
         # 7) 保存输出（使用累积订单，与Dev版本兼容）
         output_file = _save_output(
@@ -109,7 +108,6 @@ def run_daily_order_generation(
         }
 
     except Exception as e:
-        print(f"❌ Module1 集成模式失败: {e}")
         import traceback
         traceback.print_exc()
         return _empty_result()
@@ -250,10 +248,8 @@ def _merge_with_history(
     # 🦆 如果提供了内存中的历史订单数据（DB模式），则直接使用，跳过文件读取
     if previous_orders_df is not None and not previous_orders_df.empty:
         previous_orders = previous_orders_df.copy()
-        print(f"[M1] 使用内存历史订单数据，条目: {len(previous_orders)}，耗时: {time.perf_counter()-t1:.3f}s")
     else:
         previous_orders = load_previous_orders(output_dir, simulation_date, max_advance)
-        print(f"[M1] 历史订单合并前过滤完成，耗时: {time.perf_counter()-t1:.3f}s")
 
     previous_orders = _filter_future_orders(previous_orders, simulation_date)
     previous_orders = _deduplicate_orders(previous_orders)
@@ -317,7 +313,6 @@ def _generate_shipments(
 ) -> tuple:
     """生成发货与缺货。"""
     if orchestrator is None:
-        print("  ⚠️  警告：没有Orchestrator，无法生成基于库存的shipment")
         return pd.DataFrame(), pd.DataFrame()
 
     t2 = time.perf_counter()
@@ -325,10 +320,6 @@ def _generate_shipments(
         orders_df, simulation_date, orchestrator, daily_for_orders, None
     )
     elapsed = time.perf_counter() - t2
-    print(
-        f"[M1] 发货与缺货计算完成，shipment: {len(shipment_df)}，"
-        f"cut: {len(cut_df)}，耗时: {elapsed:.3f}s"
-    )
     return shipment_df, cut_df
 
 
@@ -458,7 +449,7 @@ def generate_supply_demand_log_for_integration(
     if consumed_forecast.empty or 'date' not in consumed_forecast.columns:
         return pd.DataFrame(columns=empty_cols)
 
-    future_cutoff = simulation_date + pd.Timedelta(days=90)
+    future_cutoff = simulation_date + pd.Timedelta(days=M1_FUTURE_CUTOFF_DAYS)
 
     future_demand = consumed_forecast[
         (pd.to_datetime(consumed_forecast['date']) > simulation_date) &

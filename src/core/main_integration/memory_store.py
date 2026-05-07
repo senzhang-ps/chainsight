@@ -8,7 +8,7 @@ DuckDB 内存模式懒加载模块。
 
 import logging
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("SupplyChainSimulation." + __name__)
 
 # 懒加载 DuckDB 内存存储函数的全局变量
 _memory_store_imported = False

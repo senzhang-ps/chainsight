@@ -12,7 +12,7 @@ from typing import Any, Dict, Optional, Tuple
 import numpy as np
 import pandas as pd
 
-from .normalization import (
+from ...utils.normalization import (
     normalize_identifiers,
     normalize_location,
     normalize_material,
@@ -247,8 +247,13 @@ def _to_ml_granularity(
     if df is None or df.empty:
         return pd.DataFrame(columns=['material', 'location', 'quantity'])
 
-    o = df[['material', loc_col, 'quantity']].copy()
-    o['material'] = o['material'].astype(str)
-    o['location'] = o[loc_col].astype(str).str.zfill(4)
+    ml_subset = df[['material', loc_col, 'quantity']].copy()
+    ml_subset['material'] = ml_subset['material'].astype(str)
+    # 等价于 .astype(str).str.zfill(4),但走统一入口 (mode='any':无条件 zfill)
+    ml_subset['location'] = ml_subset[loc_col].apply(
+        lambda v: normalize_location(v, mode="any")
+    )
 
-    return o.groupby(['material', 'location'], as_index=False)['quantity'].sum()
+    return ml_subset.groupby(
+        ['material', 'location'], as_index=False
+    )['quantity'].sum()

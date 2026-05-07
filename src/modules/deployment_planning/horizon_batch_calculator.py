@@ -15,13 +15,13 @@ from typing import Dict, List, Optional, Tuple, Set
 import pandas as pd
 
 from .cache_utils import (
-    get_ptf_lsk,
     get_active_network,
     get_sending_location_type,
     determine_lead_time,
     DEFAULT_LEAD_TIME
 )
 from .constants import DEFAULT_PTF, DEFAULT_LSK
+from src.utils.ptf_lsk import get_ptf_lsk
 
 
 def build_horizon_cache(
@@ -90,7 +90,7 @@ def build_horizon_cache(
                 network_index=network_index,
                 location_layer_map=location_layer_map
             )
-            
+
             horizon, err = determine_lead_time(
                 sending=str(upstream),
                 receiving=loc_str,

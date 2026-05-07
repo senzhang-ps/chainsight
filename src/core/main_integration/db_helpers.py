@@ -5,64 +5,18 @@ db_helpers.py
 """
 
 import json
+import logging
 from datetime import datetime
 from typing import Dict, List, Optional
 
 from psycopg import sql as psql
 import pandas as pd
 
+from ...utils.normalization import normalize_identifiers
 
-def _write_checkpoint_to_db(
-    db,
-    run_id: str,
-    run_key: str,
-    config_name: str,
-    start_date: str,
-    end_date: str,
-    current_date_str: str,
-    orch,
-    m1_previous_orders=None,
-) -> None:
-    """
-    兼容保留的 checkpoint 写入辅助函数。
-
-    当前主流程已改为在 `_flush_batch_to_db()` 的事务内统一写入
-    sim_checkpoint，以保证批次数据与 checkpoint 的原子一致性；
-    本函数仅用于旧路径或排障场景，不是默认写入机制。
-    """
-    import json
-    from pgsql_db.checkpoint import serialize_orchestrator_state, _json_serializer
-
-    # 序列化 Orchestrator 状态
-    orch_state = serialize_orchestrator_state(orch)
-    orch_json = json.dumps(orch_state, default=_json_serializer, ensure_ascii=False)
-    orch_json_bytes = len(orch_json.encode('utf-8'))
-    if orch_json_bytes >= 16 * 1024 * 1024:
-        print(f"  [WARN] checkpoint JSON size={orch_json_bytes / 1024 / 1024:.2f} MB")
-
-    conn = db.connect()
-    try:
-        with conn.transaction():
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    INSERT INTO sim_checkpoint
-                        (run_key, run_id, config_name, start_date, end_date,
-                         last_batch_end, orch_state_json, status)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb, 'running')
-                    ON CONFLICT (run_id) DO UPDATE SET
-                        last_batch_end  = EXCLUDED.last_batch_end,
-                        orch_state_json = EXCLUDED.orch_state_json,
-                        status          = 'running',
-                        updated_at      = NOW()
-                    """,
-                    (run_key, run_id, config_name, start_date,
-                     end_date, current_date_str, orch_json),
-                )
-        print(f"  💾 checkpoint 实时写入: {current_date_str}")
-    except Exception as e:
-        # checkpoint 写入失败不中止仿真，仅警告
-        print(f"  ⚠️ checkpoint 实时写入失败（不影响仿真继续）: {e}")
+# 复用 src/utils/logger_config.py::DualLogger 创建的同名 logger，
+# 这样消息既能进控制台又能进 simulation_log_*.txt。
+logger = logging.getLogger("SupplyChainSimulation")
 
 
 def _flush_batch_to_db(
@@ -83,7 +37,7 @@ def _flush_batch_to_db(
     """
     原子写入一个批次的模块结果到数据库，成功后更新 sim_checkpoint。
 
-    [FIX-风险1] 真正的原子性保障：
+    真正的原子性保障：
     所有 DELETE + COPY + UPSERT 在同一个 PostgreSQL 事务中执行，
     任何步骤异常都会整体 ROLLBACK，确保数据一致性。
 
@@ -91,11 +45,9 @@ def _flush_batch_to_db(
         runtime_state: DbRuntimeState 实例。若提供，其序列化形式将写入
                        checkpoint JSON，以支持断点续跑。
     """
-    import json
     from pgsql_db.checkpoint import serialize_orchestrator_state, _json_serializer
-    from psycopg import sql as psql
 
-    print(f"\n💾 批次写入: {batch_start_date} ~ {batch_end_date}")
+    logger.info(f"\n💾 批次写入: {batch_start_date} ~ {batch_end_date}")
 
     # 步骤 0：在事务外先序列化编排器状态（纯 CPU 操作，无 DB 交互）
     orch_state = serialize_orchestrator_state(orch)
@@ -106,7 +58,7 @@ def _flush_batch_to_db(
     orch_json = json.dumps(orch_state, default=_json_serializer, ensure_ascii=False)
     orch_json_bytes = len(orch_json.encode('utf-8'))
     if orch_json_bytes >= 16 * 1024 * 1024:
-        print(f"  [WARN] checkpoint JSON size={orch_json_bytes / 1024 / 1024:.2f} MB")
+        logger.warning(f"  [WARN] checkpoint JSON size={orch_json_bytes / 1024 / 1024:.2f} MB")
 
     # 步骤 0b：在事务外预处理批次数据为可写入的 DataFrame
     prepared_tables = writer.prepare_batch_dataframes(batch_results, run_id=run_id)
@@ -130,15 +82,15 @@ def _flush_batch_to_db(
         )
     if orchestrator_tables:
         orch_total_rows = sum(df.shape[0] for df, _ in orchestrator_tables.values())
-        print(f"  📋 Orchestrator 当日数据: {len(orchestrator_tables)} 张表, 共 {orch_total_rows} 行")
+        logger.info(f"  📋 Orchestrator 当日数据: {len(orchestrator_tables)} 张表, 共 {orch_total_rows} 行")
         for tbl_name, (df, _) in orchestrator_tables.items():
-            print(f"    - {tbl_name}: {len(df)} 行")
+            logger.info(f"    - {tbl_name}: {len(df)} 行")
     prepared_tables.update(orchestrator_tables)
 
     # 获取底层连接
     conn = db.connect()
 
-    # [FIX-风险H] 步骤 0c：在事务外预查表元数据，减少事务内 information_schema 查询
+    # 步骤 0c：在事务外预查表元数据，减少事务内 information_schema 查询
     # autocommit=True 模式下，SELECT 语句自动提交，不会开启隐式事务，
     # 因此后续 conn.transaction() 始终创建顶层 BEGIN...COMMIT 事务。
     table_meta = _precheck_table_metadata(conn)
@@ -169,15 +121,15 @@ def _flush_batch_to_db(
                      end_date, batch_end_date, orch_json),
                 )
         # 事务成功提交
-        print(f"  ✅ checkpoint 更新至 {batch_end_date}")
+        logger.info(f"  ✅ checkpoint 更新至 {batch_end_date}")
     except Exception:
         # conn.transaction() 退出时已自动 ROLLBACK
-        print(f"  ❌ 批次 {batch_start_date}~{batch_end_date} 写入失败，已回滚")
+        logger.error(f"  ❌ 批次 {batch_start_date}~{batch_end_date} 写入失败，已回滚")
         raise
 
 
 def _precheck_table_metadata(conn) -> dict:
-    """[FIX-风险H] 在事务外一次性查询所有输出表的元数据（表存在性、列存在性）。
+    """在事务外一次性查询所有输出表的元数据（表存在性、列存在性）。
 
     返回：{表名: {'has_sim_date': bool, 'has_run_id': bool}}，不存在的表不出现在 dict 中
     """
@@ -204,12 +156,10 @@ def _precheck_table_metadata(conn) -> dict:
 def _atomic_delete_batch(cur, run_id: str, batch_start_date: str, table_meta: dict = None) -> None:
     """在已有事务内删除批次数据（含模块输出 + Summary + Orchestrator 表）。
 
-    [FIX-风险H] 当 table_meta 已提供时，直接使用缓存的表元数据，
+    当 table_meta 已提供时，直接使用缓存的表元数据，
     避免在事务内执行大量 information_schema 查询（减少锁持有时间）。
     """
-    from psycopg import sql as psql
-    # [FIX-风险4] 完整表列表，与 truncate_output_tables 保持一致
-    # [FIX-风险5] 添加 run_id 过滤
+    # 完整表列表，与 truncate_output_tables 保持一致；按 sim_date + run_id 过滤
     output_tables = [
         # Module 输出表
         'module1_output_orderlog',
@@ -287,7 +237,7 @@ def _atomic_delete_batch(cur, run_id: str, batch_start_date: str, table_meta: di
 
         if not has_sim_date:
             continue
-        # [FIX-风险5] 按 sim_date + run_id 删除
+        # 按 sim_date + run_id 删除
         if has_run_id and run_id:
             cur.execute(
                 psql.SQL('DELETE FROM {} WHERE sim_date >= %s AND run_id = %s').format(
@@ -304,7 +254,7 @@ def _atomic_delete_batch(cur, run_id: str, batch_start_date: str, table_meta: di
             )
         deleted_total += 1
     if deleted_total > 0:
-        print(f"  🗑️  已清理批次 {batch_start_date} 起的旧数据（{deleted_total} 张表）")
+        logger.info(f"  🗑️ 已清理批次 {batch_start_date} 起的旧数据（{deleted_total} 张表）")
 
 
 def _atomic_copy_batch(conn, cur, prepared_tables: dict, db) -> None:
@@ -330,7 +280,7 @@ def _atomic_copy_batch(conn, cur, prepared_tables: dict, db) -> None:
         for row in cur.fetchall():
             col_types[row[0]] = row[1]
 
-        # [FIX] 自动添加表中不存在的列（不同 config 的模块输出列可能不同）
+        # 自动添加表中不存在的列（不同 config 的模块输出列可能不同）
         if col_types:  # 表已存在时才需要检查
             for col_name in clean_columns:
                 if col_name not in col_types:
@@ -340,7 +290,7 @@ def _atomic_copy_batch(conn, cur, prepared_tables: dict, db) -> None:
                     pg_type = db._pandas_to_pg_type(df_dtype, col_name=col_name)
                     cur.execute(f'ALTER TABLE "{table_name}" ADD COLUMN IF NOT EXISTS "{col_name}" {pg_type}')
                     col_types[col_name] = pg_type
-                    print(f'    [ALTER] 为 {table_name} 添加新列: {col_name} ({pg_type})')
+                    logger.info(f'    [ALTER] 为 {table_name} 添加新列: {col_name} ({pg_type})')
         import numpy as np
         records = df.values.tolist()
         col_name_to_idx = {col: idx for idx, col in enumerate(clean_columns)}
@@ -387,7 +337,7 @@ def _atomic_copy_batch(conn, cur, prepared_tables: dict, db) -> None:
                     except (ValueError, TypeError):
                         new_row.append(None)
                 elif j in text_col_indices:
-                    # [FIX] 布尔值转为 "True"/"False" 字符串，与 Dev/Src xlsx 输出格式保持一致
+                    # 布尔值转为 "True"/"False" 字符串，与 Dev/Src xlsx 输出格式保持一致
                     # （避免 PG bool 转 text 时产生 "t"/"f"）
                     if isinstance(val, (bool, np.bool_)):
                         new_row.append(str(val))
@@ -433,12 +383,12 @@ def prepare_orchestrator_day_dataframes_from_orch(
         ``{表名: (DataFrame, 清洗后列名列表)}``
 
     列处理规则：
-    - 除 daily_logs 外，所有视图均应用 ``_normalize_identifiers()``
+    - 除 daily_logs 外，所有视图均应用 ``normalize_identifiers()``
       （与 ``persistence.py:save_daily_state`` 保持一致）。
     - 追加 5 列元数据：file_date、sim_date、run_id、config_name、db_write_time。
     - 所有列名均应用 ``_clean_name()`` 清洗。
     """
-    from .normalize import _normalize_identifiers
+    from ...utils.normalization import normalize_identifiers
 
     date_key = pd.to_datetime(sim_date).strftime("%Y%m%d")
     sim_date_str = pd.to_datetime(sim_date).strftime("%Y-%m-%d")
@@ -532,7 +482,7 @@ def prepare_orchestrator_day_dataframes_from_orch(
 
         df = df.copy()
         if apply_norm:
-            df = _normalize_identifiers(df)
+            df = normalize_identifiers(df)
 
         # 追加元数据列（与 ModuleDataWriter.prepare_orchestrator_day_dataframes 相同）
         df["file_date"] = date_key
@@ -561,7 +511,7 @@ def _safe_view(orch, method_name: str, date_arg: str) -> pd.DataFrame:
             return pd.DataFrame()
         return result
     except Exception as e:
-        print(f"  [警告] {method_name}({date_arg}) 调用失败: {e}")
+        logger.warning(f"  [警告] {method_name}({date_arg}) 调用失败: {e}")
         return pd.DataFrame()
 
 

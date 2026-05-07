@@ -13,7 +13,7 @@ import pandas as pd
 
 from .daily_ops import OrchestratorDailyOpsMixin
 from .inventory_log import OrchestratorInventoryLogMixin
-from .normalize import _normalize_identifiers
+from ...utils.normalization import normalize_identifiers
 from .persistence import OrchestratorPersistenceMixin
 from .processors import OrchestratorProcessorsMixin
 from .views import OrchestratorViewsMixin
@@ -128,7 +128,6 @@ class Orchestrator(
             f"✅ Orchestrator initialized for "
             f"simulation starting {start_date}"
         )
-        print(msg)
 
     def initialize_inventory(
         self, initial_inventory_df: pd.DataFrame
@@ -143,7 +142,7 @@ class Orchestrator(
         self.initial_inventory.clear()
 
         # 确保标识符字段为字符串格式
-        normalized_df = _normalize_identifiers(
+        normalized_df = normalize_identifiers(
             initial_inventory_df
         )
 
@@ -168,7 +167,7 @@ class Orchestrator(
                                capacity]
         """
         # 确保标识符字段为字符串格式
-        self.space_capacity = _normalize_identifiers(
+        self.space_capacity = normalize_identifiers(
             space_capacity_df.copy()
         )
         self.space_capacity["eff_from"] = (
@@ -211,7 +210,6 @@ class Orchestrator(
                         f"    ⚠️  Series有多个值，"
                         f"取第一个: {value.iloc[0]}"
                     )
-                    print(msg)
                     value = value.iloc[0]
                 else:
                     # 空Series
@@ -234,7 +232,6 @@ class Orchestrator(
                 f"    ⚠️  数值转换错误: {value} "
                 f"(类型: {type(value)}) -> {e}"
             )
-            print(msg)
             return 0
 
 

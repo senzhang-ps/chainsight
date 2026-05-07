@@ -96,7 +96,6 @@ def calculate_daily_net_demand(
         )
 
     except Exception as e:
-        print(f"Warning: Error in net demand for {material}-{location}: {e}")
         return 0.0, 0.0, 0.0
 
 
@@ -529,5 +528,4 @@ def calculate_daily_net_demand_indexed(
         )
 
     except Exception as e:
-        print(f"Warning: Error in indexed net demand for {material}-{location}: {e}")
         return 0.0, 0.0, 0.0

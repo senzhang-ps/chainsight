@@ -9,9 +9,12 @@ from pathlib import Path
 from pandas.errors import EmptyDataError, ParserError
 import logging
 
-from .normalize import _normalize_identifiers
+from ...utils.normalization import normalize_identifiers
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("SupplyChainSimulation." + __name__)
+# 复用 src/utils/logger_config.py::DualLogger 创建的同�?logger�?
+# 这样进度信息既能进控制台又能�?simulation_log_*.txt�?
+sim_logger = logging.getLogger("SupplyChainSimulation")
 
 
 def detect_last_complete_date(output_base_dir: str, start_date: str, end_date: str) -> str:
@@ -37,13 +40,13 @@ def detect_last_complete_date(output_base_dir: str, start_date: str, end_date: s
     逻辑：
         - 按日期遍历并检查必需文件是否存在且可解析；若全部存在则记录为最后完整日期并继续；遇到缺失或异常则停止并返回当前记录。
     """
-    print(f"🔍 检测中断点...")
-    
+    sim_logger.info(f"🔍 检测中断点...")
+
     output_dir = Path(output_base_dir)
     orchestrator_dir = output_dir / "orchestrator"
-    
+
     if not orchestrator_dir.exists():
-        print(f"📁 输出目录不存在，将从头开始: {orchestrator_dir}")
+        sim_logger.info(f"📁 输出目录不存在，将从头开始: {orchestrator_dir}")
         return None
     
     # 生成日期范围
@@ -55,7 +58,7 @@ def detect_last_complete_date(output_base_dir: str, start_date: str, end_date: s
         date_str = current_date.strftime('%Y%m%d')
         
         # 检查关键状态文件是否都存在
-        # 项目约定的完整性视图（见 .github/copilot-instructions.md §6）
+        # 项目约定的完整性视图（文档参见 docs/handover/）
         # 新增 daily_logs 作为必须存在的 daily summary 日志
         required_files = [
             f"unrestricted_inventory_{date_str}.csv",
@@ -110,21 +113,21 @@ def detect_last_complete_date(output_base_dir: str, start_date: str, end_date: s
                 df = pd.read_csv(inventory_file)
                 if len(df) >= 0:  # 允许空库存，但文件格式要正确
                     last_complete_date = current_date.strftime('%Y-%m-%d')
-                    print(f"✅ 发现完整日期: {last_complete_date}")
+                    sim_logger.info(f"✅ 发现完整日期: {last_complete_date}")
                 else:
                     break
             except Exception as e:
-                print(f"⚠️日期 {current_date.strftime('%Y-%m-%d')} 文件损坏: {e}")
+                sim_logger.warning(f"⚠️ 日期 {current_date.strftime('%Y-%m-%d')} 文件损坏: {e}")
                 break
         else:
-            print(f"❌ 日期 {current_date.strftime('%Y-%m-%d')} 文件不完整")
+            sim_logger.warning(f"❌ 日期 {current_date.strftime('%Y-%m-%d')} 文件不完整")
             break
-    
+
     if last_complete_date:
-        print(f"🎯 检测到最后完整日期: {last_complete_date}")
+        sim_logger.info(f"🎯 检测到最后完整日期: {last_complete_date}")
     else:
-        print("📝 未发现完整日期，将从头开始")
-        
+        sim_logger.info("📑 未发现完整日期，将从头开始")
+
     return last_complete_date
 
 def restore_orchestrator_state(orchestrator, restore_date: str, output_base_dir: str):
@@ -147,8 +150,8 @@ def restore_orchestrator_state(orchestrator, restore_date: str, output_base_dir:
     逻辑：
         - 逐类文件读取→标准化标识符→重建映射与列表→构建日期索引→设置当前日期，期间对空文件与解析异常采取容错策略。
     """
-    print(f"🔄 从日期 {restore_date} 恢复Orchestrator状态...")
-    
+    sim_logger.info(f"🔄 从日期 {restore_date} 恢复Orchestrator状态...")
+
     output_dir = Path(output_base_dir)
     orchestrator_dir = output_dir / "orchestrator"
     date_str = pd.to_datetime(restore_date).strftime('%Y%m%d')
@@ -164,7 +167,7 @@ def restore_orchestrator_state(orchestrator, restore_date: str, output_base_dir:
                 inventory_df = pd.read_csv(inventory_file, dtype=object)
             except EmptyDataError:
                 inventory_df = pd.DataFrame()
-            inventory_df = _normalize_identifiers(inventory_df) if isinstance(inventory_df, pd.DataFrame) and not inventory_df.empty else pd.DataFrame()
+            inventory_df = normalize_identifiers(inventory_df) if isinstance(inventory_df, pd.DataFrame) and not inventory_df.empty else pd.DataFrame()
             # 重建库存字典
             orchestrator.unrestricted_inventory = {}
             for _, row in inventory_df.iterrows():
@@ -179,7 +182,7 @@ def restore_orchestrator_state(orchestrator, restore_date: str, output_base_dir:
                     except Exception:
                         qty = 0.0
                 orchestrator.unrestricted_inventory[key] = qty
-            print(f"  ✅ 恢复库存记录: {len(inventory_df)} 条")
+            sim_logger.info(f"  ✅ 恢复库存记录: {len(inventory_df)} 条")
         else:
             orchestrator.unrestricted_inventory = {}
         
@@ -191,7 +194,7 @@ def restore_orchestrator_state(orchestrator, restore_date: str, output_base_dir:
             except EmptyDataError:
                 intransit_df = pd.DataFrame()
             if not intransit_df.empty:
-                intransit_df = _normalize_identifiers(intransit_df)
+                intransit_df = normalize_identifiers(intransit_df)
                 # 重建 in_transit 字典：transit_uid -> transit_record
                 orchestrator.in_transit = {}
                 for _, row in intransit_df.iterrows():
@@ -224,9 +227,9 @@ def restore_orchestrator_state(orchestrator, restore_date: str, output_base_dir:
                             'ori_deployment_uid': str(row.get('ori_deployment_uid', '')),
                             'vehicle_uid': str(row.get('vehicle_uid', ''))
                         }
+                sim_logger.info(f"  ✅ 恢复在途记录: {len(orchestrator.in_transit)} 条")
             else:
                 orchestrator.in_transit = {}
-            print(f"  ✅ 恢复在途记录: {len(orchestrator.in_transit)} 条")
         else:
             orchestrator.in_transit = {}
         
@@ -238,7 +241,7 @@ def restore_orchestrator_state(orchestrator, restore_date: str, output_base_dir:
             except EmptyDataError:
                 deployment_df = pd.DataFrame()
             if not deployment_df.empty:
-                deployment_df = _normalize_identifiers(deployment_df)
+                deployment_df = normalize_identifiers(deployment_df)
                 # 重建为字典：uid -> deployment_record
                 orchestrator.open_deployment = {}
                 for _, row in deployment_df.iterrows():
@@ -259,9 +262,9 @@ def restore_orchestrator_state(orchestrator, restore_date: str, output_base_dir:
                             'deployed_qty': deployed_qty,
                             'demand_element': str(row.get('demand_element', ''))
                         }
+                sim_logger.info(f"  ✅ 恢复调拨记录: {len(orchestrator.open_deployment)} 条")
             else:
                 orchestrator.open_deployment = {}
-            print(f"  ✅ 恢复调拨记录: {len(orchestrator.open_deployment)} 条")
         else:
             orchestrator.open_deployment = {}
         
@@ -273,7 +276,7 @@ def restore_orchestrator_state(orchestrator, restore_date: str, output_base_dir:
             except EmptyDataError:
                 space_df = pd.DataFrame()
             if not space_df.empty:
-                space_df = _normalize_identifiers(space_df)
+                space_df = normalize_identifiers(space_df)
                 orchestrator.space_quota = {}
                 for _, row in space_df.iterrows():
                     key = str(row.get('location', '')).strip()
@@ -286,9 +289,9 @@ def restore_orchestrator_state(orchestrator, restore_date: str, output_base_dir:
                     except Exception:
                         total = 0.0
                     orchestrator.space_quota[key] = {'used': used, 'total': total}
+                sim_logger.info(f"  ✅ 恢复空间配额: {len(space_df)} 条")
             else:
                 orchestrator.space_quota = {}
-            print(f"  ✅ 恢复空间配额: {len(space_df)} 条")
         else:
             orchestrator.space_quota = {}
         
@@ -300,7 +303,7 @@ def restore_orchestrator_state(orchestrator, restore_date: str, output_base_dir:
             except EmptyDataError:
                 backlog_df = pd.DataFrame()
             if not backlog_df.empty:
-                backlog_df = _normalize_identifiers(backlog_df)
+                backlog_df = normalize_identifiers(backlog_df)
                 # 将 quantity 转为 int
                 if 'quantity' in backlog_df.columns:
                     backlog_df['quantity'] = pd.to_numeric(backlog_df['quantity'], errors='coerce').fillna(0).astype(int)
@@ -310,9 +313,9 @@ def restore_orchestrator_state(orchestrator, restore_date: str, output_base_dir:
                 
                 # 转为字典列表并保持类型（高效，无需 iterrows）
                 orchestrator.production_plan_backlog = backlog_df.to_dict('records')
+                sim_logger.info(f"  ✅ 恢复生产计划backlog: {len(orchestrator.production_plan_backlog)} 条")
             else:
                 orchestrator.production_plan_backlog = []
-            print(f"  ✅ 恢复生产计划backlog: {len(orchestrator.production_plan_backlog)} 条")
         else:
             orchestrator.production_plan_backlog = []
         
@@ -339,7 +342,7 @@ def restore_orchestrator_state(orchestrator, restore_date: str, output_base_dir:
                 except EmptyDataError:
                     shipment_df = pd.DataFrame()
                 if not shipment_df.empty:
-                    shipment_df = _normalize_identifiers(shipment_df)
+                    shipment_df = normalize_identifiers(shipment_df)
                     orchestrator.shipment_log.extend(shipment_df.to_dict('records'))
             
             # 恢复生产入库日志
@@ -350,7 +353,7 @@ def restore_orchestrator_state(orchestrator, restore_date: str, output_base_dir:
                 except EmptyDataError:
                     production_df = pd.DataFrame()
                 if not production_df.empty:
-                    production_df = _normalize_identifiers(production_df)
+                    production_df = normalize_identifiers(production_df)
                     orchestrator.production_gr.extend(production_df.to_dict('records'))
             
             # 恢复收货日志
@@ -361,7 +364,7 @@ def restore_orchestrator_state(orchestrator, restore_date: str, output_base_dir:
                 except EmptyDataError:
                     delivery_df = pd.DataFrame()
                 if not delivery_df.empty:
-                    delivery_df = _normalize_identifiers(delivery_df)
+                    delivery_df = normalize_identifiers(delivery_df)
                     orchestrator.delivery_gr.extend(delivery_df.to_dict('records'))
             
             # 恢复站点间发运日志 (delivery_shipment_log)
@@ -372,7 +375,7 @@ def restore_orchestrator_state(orchestrator, restore_date: str, output_base_dir:
                 except EmptyDataError:
                     dship_df = pd.DataFrame()
                 if not dship_df.empty:
-                    dship_df = _normalize_identifiers(dship_df)
+                    dship_df = normalize_identifiers(dship_df)
                     orchestrator.delivery_shipment_log.extend(dship_df.to_dict('records'))
             
             # 恢复库存变动日志 (inventory_change_log)
@@ -383,7 +386,7 @@ def restore_orchestrator_state(orchestrator, restore_date: str, output_base_dir:
                 except EmptyDataError:
                     invchg_df = pd.DataFrame()
                 if not invchg_df.empty:
-                    invchg_df = _normalize_identifiers(invchg_df)
+                    invchg_df = normalize_identifiers(invchg_df)
                     orchestrator.inventory_change_log.extend(invchg_df.to_dict('records'))
             
             # 恢复 daily_logs（汇总日志）
@@ -395,20 +398,20 @@ def restore_orchestrator_state(orchestrator, restore_date: str, output_base_dir:
                     daily_df = pd.DataFrame()
                 if not daily_df.empty:
                     # daily_logs 可能不含标准标识符列，但调用normalize不会有害
-                    daily_df = _normalize_identifiers(daily_df)
+                    daily_df = normalize_identifiers(daily_df)
                     orchestrator.daily_logs.extend(daily_df.to_dict('records'))
             
             current_scan_date += pd.Timedelta(days=1)
         
-        print(f"  ✅ 恢复发货日志: {len(orchestrator.shipment_log)} 条")
-        print(f"  ✅ 恢复生产日志: {len(orchestrator.production_gr)} 条")
-        print(f"  ✅ 恢复收货日志: {len(orchestrator.delivery_gr)} 条")
-        print(f"  ✅ 恢复站点间发运日志: {len(orchestrator.delivery_shipment_log)} 条")
-        print(f"  ✅ 恢复库存变动日志: {len(orchestrator.inventory_change_log)} 条")
-        print(f"  ✅ 恢复daily_logs: {len(orchestrator.daily_logs)} 条")
-        
+        sim_logger.info(f"  ✅ 恢复发货日志: {len(orchestrator.shipment_log)} 条")
+        sim_logger.info(f"  ✅ 恢复生产日志: {len(orchestrator.production_gr)} 条")
+        sim_logger.info(f"  ✅ 恢复收货日志: {len(orchestrator.delivery_gr)} 条")
+        sim_logger.info(f"  ✅ 恢复站点间发运日志: {len(orchestrator.delivery_shipment_log)} 条")
+        sim_logger.info(f"  ✅ 恢复库存变动日志: {len(orchestrator.inventory_change_log)} 条")
+        sim_logger.info(f"  ✅ 恢复daily_logs: {len(orchestrator.daily_logs)} 条")
+
         # 6. 重建按日期索引的字典（用于阶段 6 优化）
-        print(f"  🔧 重建日期索引字典...")
+        sim_logger.info(f"  🔧 重建日期索引字典...")
         orchestrator.production_gr_by_date = {}
         orchestrator.delivery_gr_by_date = {}
         orchestrator.shipment_log_by_date = {}
@@ -442,18 +445,20 @@ def restore_orchestrator_state(orchestrator, restore_date: str, output_base_dir:
                 orchestrator.delivery_shipment_log_by_date[date_key] = []
             orchestrator.delivery_shipment_log_by_date[date_key].append(record)
         
-        print(f"  ✅ 日期索引重建完成: production_gr={len(orchestrator.production_gr_by_date)} 天, "
-              f"delivery_gr={len(orchestrator.delivery_gr_by_date)} 天, "
-              f"shipment_log={len(orchestrator.shipment_log_by_date)} 天, "
-              f"delivery_shipment_log={len(orchestrator.delivery_shipment_log_by_date)} 天")
-        
+        sim_logger.info(
+            f"  ✅ 日期索引重建完成: production_gr={len(orchestrator.production_gr_by_date)} 天, "
+            f"delivery_gr={len(orchestrator.delivery_gr_by_date)} 天, "
+            f"shipment_log={len(orchestrator.shipment_log_by_date)} 天, "
+            f"delivery_shipment_log={len(orchestrator.delivery_shipment_log_by_date)} 天"
+        )
+
         # 7. 设置当前日期
         orchestrator.current_date = restore_date_obj
         
-        print(f"  🎯 Orchestrator状态恢复完成")
-        
+        sim_logger.info(f"  🎯 Orchestrator状态恢复完成")
+
     except Exception as e:
-        print(f"  ❌ 状态恢复失败: {e}")
+        sim_logger.error(f"  ❌ 状态恢复失败: {e}")
         raise
 
 def check_resume_capability(output_base_dir: str, start_date: str, end_date: str):

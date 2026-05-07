@@ -1108,29 +1108,13 @@ class HighPerformanceEngine:
     def print_stats(self):
         """打印统计信息。"""
         stats = self.get_stats()
-        print("\n" + "=" * 60)
-        print("📊 HighPerformanceEngine 性能统计")
-        print("=" * 60)
         
         calc = stats['calculator']
-        print(f"DuckDB计算器:")
-        print(f"  查询次数: {calc['queries']}")
-        print(f"  处理行数: {calc['rows_processed']:,}")
-        print(f"  总耗时: {calc['total_time_ms']:.1f}ms")
         
         inc = stats['incremental']
-        print(f"增量计算:")
-        print(f"  全量重算: {inc['full_recalcs']}")
-        print(f"  增量重算: {inc['incremental_recalcs']}")
-        print(f"  缓存命中: {inc['cache_hits']}")
         
         par = stats['parallel']
-        print(f"并行执行:")
-        print(f"  提交任务: {par['tasks_submitted']}")
-        print(f"  完成任务: {par['tasks_completed']}")
-        print(f"  总耗时: {par['total_time_ms']:.1f}ms")
         
-        print("=" * 60)
     
     def close(self):
         """关闭所有连接。"""

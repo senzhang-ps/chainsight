@@ -11,8 +11,9 @@ import pandas as pd
 import numpy as np
 
 from .constants import DEFAULT_CHANGEOVER_TIME
-from .utils import compute_planning_window, safe_float_conversion
+from .utils import safe_float_conversion
 from .plan_builder import optimal_changeover_sequence
+from src.utils.date_helpers import compute_planning_window
 
 # 尝试导入 DuckDB 优化实现
 try:
@@ -383,7 +384,6 @@ class CapacityAllocator:
             return coid, self.co_def[(coid, line)]
 
         except Exception as e:
-            print(f"换产查找异常: {e}")
             return None, 0
 
     def _allocate_to_horizon(
@@ -1027,10 +1027,6 @@ def _create_changeover_record(
             mu_loss_per = float(definition.iloc[0].get('mu_loss', 0))
 
     except KeyError:
-        print(
-            f"警告: 未找到换产定义 "
-            f"changeover_id={changeover_id}, line={line}"
-        )
         time_per = cost_per = mu_loss_per = 0
 
     return {
@@ -1065,7 +1061,7 @@ def simulate_production(
         try:
             return simulate_production_batch_duckdb(plan, pr_cfg, seed)
         except Exception as e:
-            print(f"[M4] DuckDB optimization failed, using pandas: {e}")
+            pass
     
     # 原始 Pandas 实现
     if plan.empty or 'con_planned_qty' not in plan.columns:

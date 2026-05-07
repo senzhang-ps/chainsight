@@ -14,16 +14,18 @@ class DatabaseInitializer:
     
     def __init__(
         self,
-        host: str = "localhost",
-        port: int = 5432,
-        database: str = "test_db",
-        user: str = "postgres",
-        password: str = "123456",
+        host: Optional[str] = None,
+        port: Optional[int] = None,
+        database: Optional[str] = None,
+        user: Optional[str] = None,
+        password: Optional[str] = None,
         config_search_paths: Optional[List[Path]] = None
     ):
         """
         初始化数据库初始化器
-        
+
+        未显式传入的字段将从 ``config/defaults.yaml`` 的 ``database:`` 节点读取。
+
         参数：
             host: 数据库主机
             port: 数据库端口
@@ -32,11 +34,15 @@ class DatabaseInitializer:
             password: 密码
             config_search_paths: 配置文件搜索路径列表
         """
-        self.host = host
-        self.port = port
-        self.database = database
-        self.user = user
-        self.password = password
+        from .settings import resolve_database_config
+        cfg = resolve_database_config(
+            host=host, port=port, database=database, user=user, password=password
+        )
+        self.host = cfg["host"]
+        self.port = cfg["port"]
+        self.database = cfg["database"]
+        self.user = cfg["user"]
+        self.password = cfg["password"]
         
         # 默认配置文件搜索路径
         if config_search_paths is None:
@@ -297,7 +303,7 @@ class DatabaseInitializer:
         def log(msg):
             result["messages"].append(msg)
             if verbose:
-                print(msg)
+                pass
         
         # ========== 步骤1: 检测数据库 ==========
         log(f"\n🔍 检测数据库 '{self.database}'...")
@@ -434,17 +440,19 @@ class DatabaseInitializer:
 
 def initialize_database(
     config_name: Optional[str] = None,
-    host: str = "localhost",
-    port: int = 5432,
-    database: str = "test_db",
-    user: str = "postgres",
-    password: str = "123456",
+    host: Optional[str] = None,
+    port: Optional[int] = None,
+    database: Optional[str] = None,
+    user: Optional[str] = None,
+    password: Optional[str] = None,
     auto_import: bool = True,
     verbose: bool = True
 ) -> Dict[str, any]:
     """
     便捷函数：初始化数据库
-    
+
+    未显式传入的字段将从 ``config/defaults.yaml`` 的 ``database:`` 节点读取。
+
     参数：
         config_name: 配置名称（如 BC_S5）
         host: 数据库主机
@@ -454,7 +462,7 @@ def initialize_database(
         password: 密码
         auto_import: 是否自动导入缺失的配置
         verbose: 是否输出详细信息
-        
+
     返回：
         Dict: 初始化结果
     """

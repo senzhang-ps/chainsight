@@ -6,14 +6,20 @@ production_runner.py
 
 import pandas as pd
 import os
+import logging
 from pathlib import Path
 from typing import Any, Dict, Optional
 
 from ...modules import module4
-from .normalize import _normalize_material
+from ...utils.defaults import M6_RANDOM_SEED
+from ...utils.normalization import normalize_material
+
+# 复用 src/utils/logger_config.py::DualLogger 创建的同名 logger，
+# 这样消息既能进控制台又能进 simulation_log_*.txt。
+logger = logging.getLogger("SupplyChainSimulation")
 
 
-def run_module4_integrated(
+def run_daily_production_planning_integrated(
     config_dict: dict,
     module3_output_dir: str,
     simulation_date: pd.Timestamp,
@@ -94,10 +100,10 @@ def run_module4_integrated(
         
         # 🔧 修复Module3→Module4数据流：标准化material字段，移除.0后缀
         if not net_demand_df.empty and 'material' in net_demand_df.columns:
-            net_demand_df['material'] = net_demand_df['material'].apply(_normalize_material).astype('string')
+            net_demand_df['material'] = net_demand_df['material'].apply(normalize_material).astype('string')
         
         if net_demand_df.empty:
-            print(f"警告：{simulation_date.strftime('%Y-%m-%d')} 无 NetDemand 数据，生成空输出。")
+            logger.warning(f"⚠️ {simulation_date.strftime('%Y-%m-%d')} 无 NetDemand 数据，生成空输出。")
         
         # 确保 requirement_date 是 datetime 类型
         if not net_demand_df.empty and 'requirement_date' in net_demand_df.columns:
@@ -116,49 +122,22 @@ def run_module4_integrated(
         
         # 🔧 关键修复：标准化uncon_plan中的material字段，确保与changeover matrix一致
         if not uncon_plan.empty and 'material' in uncon_plan.columns:
-            # print(f"\n🔍 DEBUG uncon_plan 标准化前:")
-            # print(f"  material dtype: {uncon_plan['material'].dtype}")
-            # print(f"  前5个 material: {list(uncon_plan['material'].head())}")
-            
-            uncon_plan['material'] = uncon_plan['material'].apply(_normalize_material).astype('string')
-            
-            # print(f"\n  标准化后:")
-            # print(f"  material dtype: {uncon_plan['material'].dtype}")
-            # print(f"  前5个 material: {list(uncon_plan['material'].head())}")
-            # print(f"  Line 列: {list(uncon_plan['line'].unique())}")
-        
+            uncon_plan['material'] = uncon_plan['material'].apply(normalize_material).astype('string')
+
         # 设置产能分配参数
         # 🔧 关键修复：标准化 ChangeoverMatrix 中的字段为字符串类型
         co_mat_df = m4_config['M4_ChangeoverMatrix'].copy()
-        
-        # 🔍 调试：显示原始数据类型
-        # print(f"\n🔍 DEBUG M4 ChangeoverMatrix 数据类型:")
-        # print(f"  原始 from_material dtype: {co_mat_df['from_material'].dtype}")
-        # print(f"  原始 to_material dtype: {co_mat_df['to_material'].dtype}")
-        # print(f"  原始 changeover_id dtype: {co_mat_df['changeover_id'].dtype}")
-        # print(f"  前5条记录:")
-        # print(co_mat_df.head())
-        
+
         co_mat_df['from_material'] = co_mat_df['from_material'].astype(str)
         co_mat_df['to_material'] = co_mat_df['to_material'].astype(str)
         co_mat_df['changeover_id'] = co_mat_df['changeover_id'].astype(str)
-        
-        # print(f"\n  转换后 from_material dtype: {co_mat_df['from_material'].dtype}")
-        # print(f"  转换后 to_material dtype: {co_mat_df['to_material'].dtype}")
-        # print(f"  转换后 changeover_id dtype: {co_mat_df['changeover_id'].dtype}")
-        # print(f"  转换后前5条记录:")
-        # print(co_mat_df.head())
-        
+
         # 注意：Changeover 去重已在 load_configuration 中完成
-        
+
         co_mat = co_mat_df.set_index(['from_material', 'to_material'])['changeover_id']
         # 对MultiIndex进行排序以避免性能警告
         co_mat = co_mat.sort_index()
-        
-        # print(f"\n  Co_mat 索引类型: {co_mat.index.dtypes}")
-        # print(f"  Co_mat 总条目数: {len(co_mat)}")
-        # print(f"  前5个索引: {list(co_mat.index[:5])}")
-        
+
         # 🔧 关键修复：标准化 ChangeoverDefinition 中的 changeover_id 为字符串类型
         co_def_df = m4_config['M4_ChangeoverDefinition'].copy()
         co_def_df['changeover_id'] = co_def_df['changeover_id'].astype(str)
@@ -174,29 +153,29 @@ def run_module4_integrated(
         if previous_line_states_override is not None:
             previous_line_states = previous_line_states_override
             if previous_line_states:
-                print(f"[DB-MEM] 使用内存中的产线状态: {list(previous_line_states.keys())}")
+                logger.info(f"[DB-MEM] 使用内存中的产线状态: {list(previous_line_states.keys())}")
             else:
-                print("[DB-MEM] 内存中无前一天产线状态 - 全新开始")
+                logger.info("[DB-MEM] 内存中无前一天产线状态 - 全新开始")
         else:
             previous_line_states = module4.load_line_state(output_dir, simulation_date)
             if previous_line_states:
-                print(f"加载前一天产线状态: {list(previous_line_states.keys())}")
+                logger.info(f"加载前一天产线状态: {list(previous_line_states.keys())}")
             else:
-                print("无前一天产线状态 - 全新开始")
+                logger.info("无前一天产线状态 - 全新开始")
         
         # 加载之前所有仿真日期已分配的产能
         if allocated_capacity_override is not None:
             previously_allocated_capacity = allocated_capacity_override
             if previously_allocated_capacity:
-                print(f"[DB-MEM] 使用内存中的已分配产能: {len(previously_allocated_capacity)} 个产能分配")
+                logger.info(f"[DB-MEM] 使用内存中的已分配产能: {len(previously_allocated_capacity)} 个产能分配")
             else:
-                print("[DB-MEM] 内存中无之前已分配产能 - 全新开始")
+                logger.info("[DB-MEM] 内存中无之前已分配产能 - 全新开始")
         else:
             previously_allocated_capacity = module4.load_all_previous_capacity(output_dir, simulation_date)
             if previously_allocated_capacity:
-                print(f"加载之前已分配产能: {len(previously_allocated_capacity)} 个产能分配")
+                logger.info(f"加载之前已分配产能: {len(previously_allocated_capacity)} 个产能分配")
             else:
-                print("无之前已分配产能 - 全新开始")
+                logger.info("无之前已分配产能 - 全新开始")
         
         # 分配产能（支持跨天转产连续性和产能跟踪）
         plan_log, exceed_log = module4.centralized_capacity_allocation_with_changeover(
@@ -206,7 +185,7 @@ def run_module4_integrated(
         )
         
         # 仿真生产可靠性
-        random_seed = m4_config.get('RandomSeed', 42)
+        random_seed = m4_config.get('RandomSeed', M6_RANDOM_SEED)
         plan_log = module4.simulate_production(plan_log, m4_config['M4_ProductionReliability'], seed=random_seed)
         
         # 计算换产指标
@@ -216,17 +195,17 @@ def run_module4_integrated(
         current_line_states = module4.extract_line_states_from_plan(plan_log, cap_df, co_def, simulation_date, rate_map.to_dict())
         if current_line_states and not skip_state_file_output:
             module4.save_line_state(output_dir, simulation_date, current_line_states)
-            print(f"保存产线状态: {list(current_line_states.keys())}")
+            logger.info(f"保存产线状态: {list(current_line_states.keys())}")
         elif current_line_states:
-            print(f"[DB-MEM] 已提取产线状态（跳过文件写入）: {list(current_line_states.keys())}")
+            logger.info(f"[DB-MEM] 已提取产线状态（跳过文件写入）: {list(current_line_states.keys())}")
         
         # 提取并保存当天分配的产能供后续仿真日期使用
         current_allocated_capacity = module4.extract_allocated_capacity_from_plan(plan_log, rate_map.to_dict(), co_def)
         if current_allocated_capacity and not skip_state_file_output:
             module4.save_allocated_capacity(output_dir, simulation_date, current_allocated_capacity)
-            print(f"保存已分配产能: {len(current_allocated_capacity)} 条产能分配（小时）")
+            logger.info(f"保存已分配产能: {len(current_allocated_capacity)} 条产能分配（小时）")
         elif current_allocated_capacity:
-            print(f"[DB-MEM] 已提取已分配产能（跳过文件写入）: {len(current_allocated_capacity)} 条")
+            logger.info(f"[DB-MEM] 已提取已分配产能（跳过文件写入）: {len(current_allocated_capacity)} 条")
         
         # 去重问题
         issues = module4.dedup_issues(issues)
@@ -241,13 +220,13 @@ def run_module4_integrated(
                 plan_log, exceed_log, issues, changeover_log, 
                 base_output_file, simulation_date
             )
-            print(f"Module4 每日输出已生成: {daily_output_path}")
+            logger.info(f"Module4 每日输出已生成: {daily_output_path}")
         
         # 返回完整的Module4结果（包含所有输出表）
         # production_df 与 Dev 版本一致：只返回当日及未来可用的生产
-        # 🔧 修复：不对 production_df 应用 _normalize_identifiers
+        # 🔧 修复：不对 production_df 应用 normalize_identifiers
         # Dev 版本的 M4 输出 Excel 使用原始 location（如 386），不做 zfill(4)
-        # _normalize_identifiers 仅在传入 orchestrator 时由调用方应用
+        # normalize_identifiers 仅在传入 orchestrator 时由调用方应用
         production_df = pd.DataFrame()
         if not plan_log.empty and 'available_date' in plan_log.columns:
             plan_log['available_date'] = pd.to_datetime(plan_log['available_date'])
@@ -268,9 +247,8 @@ def run_module4_integrated(
         
     except Exception as e:
         import traceback
-        print(f'[错误] Module4 集成执行失败，日期 {simulation_date.strftime("%Y-%m-%d")}: {str(e)}')
-        print("完整错误堆栈:")
-        traceback.print_exc()
+        logger.error(f'[错误] Module4 集成执行失败，日期 {simulation_date.strftime("%Y-%m-%d")}: {str(e)}')
+        logger.error("完整错误堆栈:\n" + traceback.format_exc())
         # 返回空结构
         return {
             'production_df': pd.DataFrame(),
@@ -281,19 +259,8 @@ def run_module4_integrated(
             'current_allocated_capacity': {},
         }
 
-# ========== Module4 集成辅助函数（清理后） ==========
-
-# 以下兼容辅助函数仍基于文件读取，供旧路径或回退场景使用
-
-
-
-
-
-
-
-
-
-
+# ========== Module4 集成辅助函数 ==========
+# 以下辅助函数基于文件读取，供旧路径或回退场景使用
 
 
 def load_current_date_production_gr(module4_output_dir: str, current_date: pd.Timestamp, start_date: pd.Timestamp) -> pd.DataFrame:
@@ -334,7 +301,7 @@ def load_current_date_production_gr(module4_output_dir: str, current_date: pd.Ti
                         all_production_plans.append(production_df)
                         
             except Exception as e:
-                print(f"警告：读取 {m4_file} 失败: {e}")
+                logger.warning(f"⚠️ 读取 {m4_file} 失败: {e}")
                 continue
     
     if not all_production_plans:
@@ -349,52 +316,7 @@ def load_current_date_production_gr(module4_output_dir: str, current_date: pd.Ti
         daily_available = combined_production[
             combined_production['available_date'].dt.normalize() == current_date.normalize()
         ]
-        
-        # if not daily_available.empty:
-        #     print(f"  📦 发现当日入库的历史生产: {len(daily_available)} 条记录")
-        #     for _, row in daily_available.iterrows():
-        #         print(f"    {row['material']}@{row['location']}: {row['produced_qty']} (生产日期: {row['source_date'].strftime('%Y-%m-%d')})")
-        
+
         return daily_available[['material', 'location', 'line', 'simulation_date', 'available_date', 'produced_qty']]
-    
+
     return pd.DataFrame()
-
-def load_module4_production_output(output_path: str, current_date: pd.Timestamp) -> pd.DataFrame:
-    """从 Module4 输出文件加载生产计划（向后兼容）
-
-    目的：
-    - 兼容旧流程，从单个输出文件读取生产计划，并筛选当日及未来的可用生产。
-
-    Args:
-        output_path: Module4 输出文件路径。
-        current_date: 当前日期。
-
-    Returns:
-        pd.DataFrame: 可用生产计划数据。
-
-    逻辑：
-        - 读取 Excel→解析 `ProductionPlan`→按 `available_date >= current_date` 过滤。
-    """
-    try:
-        if not os.path.exists(output_path):
-            print(f"警告：Module4 输出文件不存在: {output_path}")
-            return pd.DataFrame()
-            
-        xl = pd.ExcelFile(output_path)
-        if 'ProductionPlan' not in xl.sheet_names:
-            print(f"警告：{output_path} 中未找到 ProductionPlan 工作表")
-            return pd.DataFrame()
-            
-        production_df = xl.parse('ProductionPlan')
-        
-        # 筛选当日的生产计划 (available_date = current_date)
-        if not production_df.empty and 'available_date' in production_df.columns:
-            production_df['available_date'] = pd.to_datetime(production_df['available_date'])
-            # 只返回当日或未来的生产计划
-            production_df = production_df[production_df['available_date'] >= current_date.normalize()]
-            
-        return production_df
-        
-    except Exception as e:
-        print(f"加载 Module4 生产输出时出错: {e}")
-        return pd.DataFrame()

@@ -1,7 +1,6 @@
 """Production planning package public API.
 
-This package contains the refactored Module4 implementation while preserving
-legacy names that older callers still import.
+This package contains the refactored Module4 public API.
 """
 
 from .constants import (
@@ -24,11 +23,8 @@ from .types import (
 )
 from .utils import (
     cast_identifiers_to_str,
-    compute_planning_window,
     dedup_issues,
     ensure_dataframe_columns,
-    is_review_day,
-    normalize_location,
     round_up_to_batch,
     safe_float_conversion,
     validate_merge_keys,
@@ -57,28 +53,8 @@ from .capacity_allocator import (
     validate_capacity_allocation,
 )
 from .output_writer import generate_consolidated_output, write_output
-from .main import DailyProductionPlanner, main, run_daily_production_planning
-
-_normalize_location = normalize_location
-_cast_identifiers_to_str = cast_identifiers_to_str
-_validate_merge_keys = validate_merge_keys
-
-
-def analyze_end_of_day_changeover_state(
-    plan_df,
-    cap_df,
-    co_def,
-    simulation_date,
-    rate_map,
-):
-    """Backward-compatible alias for the legacy module4 helper name."""
-    return _analyze_end_of_day_changeover(
-        plan_df,
-        cap_df,
-        co_def,
-        simulation_date,
-        rate_map,
-    )
+from .main import DailyProductionPlanner, run_daily_production_planning
+from .integration import run_daily_production_planning_integrated
 
 
 __all__ = [
@@ -96,14 +72,8 @@ __all__ = [
     "PlanRecord",
     "ExceedRecord",
     "ValidationIssue",
-    "normalize_location",
-    "_normalize_location",
     "cast_identifiers_to_str",
-    "_cast_identifiers_to_str",
     "validate_merge_keys",
-    "_validate_merge_keys",
-    "compute_planning_window",
-    "is_review_day",
     "dedup_issues",
     "round_up_to_batch",
     "safe_float_conversion",
@@ -123,12 +93,12 @@ __all__ = [
     "extract_allocated_capacity_from_plan",
     "validate_capacity_allocation",
     "extract_line_states_from_plan",
-    "analyze_end_of_day_changeover_state",
+    "_analyze_end_of_day_changeover",
     "calculate_changeover_metrics",
     "simulate_production",
     "write_output",
     "generate_consolidated_output",
     "run_daily_production_planning",
-    "main",
+    "run_daily_production_planning_integrated",
     "DailyProductionPlanner",
 ]

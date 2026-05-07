@@ -97,14 +97,14 @@ def load_checkpoint(
 ) -> Optional[dict]:
     """按 run_key 查询最近一条可用于断点续跑的 checkpoint（status=running/failed/interrupted），返回 dict 或 None。
 
-    [FIX-#5] 当调用方传入 start_date / end_date 时，仅匹配日期区间完全相同的 checkpoint，
+    当调用方传入 start_date / end_date 时，仅匹配日期区间完全相同的 checkpoint，
     防止因日期区间变更后错误接续旧 run（会导致断点续跑从错误起点开始）。
     """
     rows = db.execute_query(
         "SELECT run_key, run_id, config_name, start_date::text, end_date::text, "
         "last_batch_end::text, orch_state_json::text, "
         "COALESCE(status, 'running'), error_message "
-        "FROM sim_checkpoint WHERE run_key = %s AND status IN ('running', 'failed', 'interrupted') "  # [FIX-#8] interrupted 也可用于断点续跑
+        "FROM sim_checkpoint WHERE run_key = %s AND status IN ('running', 'failed', 'interrupted') "  # interrupted 也可用于断点续跑
         "ORDER BY updated_at DESC LIMIT 1",
         (run_key,),
     )
@@ -122,18 +122,10 @@ def load_checkpoint(
         "status":          row[7],
         "error_message":   row[8],
     }
-    # [FIX-#5] 校验日期区间一致性
+    # 校验日期区间一致性
     if start_date is not None and cp["start_date"] != str(start_date):
-        print(
-            f"  [WARN][FIX-#5] checkpoint start_date 不匹配 "
-            f"（DB: {cp['start_date']}，请求: {start_date}）。忽略旧 checkpoint，全新开始。"
-        )
         return None
     if end_date is not None and cp["end_date"] != str(end_date):
-        print(
-            f"  [WARN][FIX-#5] checkpoint end_date 不匹配 "
-            f"（DB: {cp['end_date']}，请求: {end_date}）。忽略旧 checkpoint，全新开始。"
-        )
         return None
     return cp
 
@@ -157,13 +149,13 @@ def delete_checkpoint(db: "DatabaseConnection", run_id: str) -> None:
 def serialize_orchestrator_state(orch, max_log_entries: int = 1000) -> dict:
     """将 Orchestrator 内存状态序列化为纯 Python dict（可 JSON 存储）
 
-    [FIX-风险D] max_log_entries 限制历史日志列表的最大条目数（保留最新的 N 条），
+    max_log_entries 限制历史日志列表的最大条目数（保留最新的 N 条），
     防止长仿真中 orch_state_json 膨胀导致 checkpoint 写入超时。
     核心状态（inventory/in_transit/open_deployment/space_quota）不受限制。
     """
     # 历史日志类状态已按天落库，checkpoint 仅保留断点续跑所需的轻量状态。
     def _inv_key(k):
-        # [FIX-风险G] 使用 JSON array 替代 ||| 分隔符，避免 material/location 包含 ||| 导致反序列化错误
+        # 使用 JSON array 替代 ||| 分隔符，避免 material/location 包含 ||| 导致反序列化错误
         if isinstance(k, tuple):
             return json.dumps([k[0], k[1]], ensure_ascii=False)
         return str(k)
@@ -178,9 +170,8 @@ def serialize_orchestrator_state(orch, max_log_entries: int = 1000) -> dict:
         return v
 
     def _truncate(lst, name):
-        """[FIX-风险D] 截断过长的历史日志，仅保留最近 max_log_entries 条"""
+        """截断过长的历史日志，仅保留最近 max_log_entries 条"""
         if len(lst) > max_log_entries:
-            print(f"  [WARN] checkpoint: {name} 有 {len(lst)} 条记录，截断为最近 {max_log_entries} 条")
             return lst[-max_log_entries:]
         return lst
 
@@ -196,7 +187,7 @@ def serialize_orchestrator_state(orch, max_log_entries: int = 1000) -> dict:
 
     space = {str(k): v for k, v in getattr(orch, 'space_quota', {}).items()}
 
-    # [FIX-#1] 序列化原始 space_capacity DataFrame（M5 收货空间约束的数据源）
+    # 序列化原始 space_capacity DataFrame（M5 收货空间约束的数据源）
     _sc = getattr(orch, 'space_capacity', None)
     if _sc is not None and not _sc.empty:
         space_capacity_records = []
@@ -218,7 +209,7 @@ def serialize_orchestrator_state(orch, max_log_entries: int = 1000) -> dict:
     cur_date = getattr(orch, 'current_date', None)
     cur_date_str = cur_date.isoformat() if isinstance(cur_date, (date, datetime, pd.Timestamp)) else str(cur_date) if cur_date else None
 
-    # [FIX-#2] 序列化 production_plan_backlog（M3 需求净计算的供给数据源）
+    # 序列化 production_plan_backlog（M3 需求净计算的供给数据源）
     _ppb = getattr(orch, 'production_plan_backlog', [])
     production_plan_backlog = []
     if isinstance(_ppb, list):
@@ -228,7 +219,7 @@ def serialize_orchestrator_state(orch, max_log_entries: int = 1000) -> dict:
             else:
                 production_plan_backlog.append(_val(rec))
 
-    # [FIX-#9] 保存 numpy 全局 PRNG 状态，确保断点续跑时随机序列连续
+    # 保存 numpy 全局 PRNG 状态，确保断点续跑时随机序列连续
     # np.random.get_state() 返回 ('MT19937', ndarray(624,), pos, has_gauss, cached_gauss)
     # ndarray 不可直接 JSON 序列化，转为 list
     try:
@@ -241,7 +232,6 @@ def serialize_orchestrator_state(orch, max_log_entries: int = 1000) -> dict:
             'cached_gauss': float(_rng[4]),       # 缓存的高斯值
         }
     except Exception as _e:
-        print(f"  [WARN][FIX-#9] 保存 numpy random state 失败: {_e}")
         numpy_random_state = None
 
     return {
@@ -249,10 +239,10 @@ def serialize_orchestrator_state(orch, max_log_entries: int = 1000) -> dict:
         "in_transit":             in_transit,
         "open_deployment":        open_dep,
         "space_quota":            space,
-        "space_capacity":         space_capacity_records,       # [FIX-#1]
-        "production_plan_backlog": production_plan_backlog,     # [FIX-#2]
-        "uid_sequence":           getattr(orch, 'uid_sequence', 0),  # [FIX-#6]
-        "numpy_random_state":     numpy_random_state,           # [FIX-#9]
+        "space_capacity":         space_capacity_records,
+        "production_plan_backlog": production_plan_backlog,
+        "uid_sequence":           getattr(orch, 'uid_sequence', 0),
+        "numpy_random_state":     numpy_random_state,
         "delivery_gr":            delivery_gr,
         "production_gr":          production_gr,
         "shipment_log":           shipment_log,
@@ -265,11 +255,11 @@ def serialize_orchestrator_state(orch, max_log_entries: int = 1000) -> dict:
 def deserialize_orchestrator_state(orch, state_dict: dict) -> None:
     """将 sim_checkpoint.orch_state_json 反序列化回 Orchestrator 属性
 
-    [FIX-风险7] 对 `_DATE_KEYS` 中声明的日期字段执行 pd.to_datetime 反解析，
+    对 `_DATE_KEYS` 中声明的日期字段执行 pd.to_datetime 反解析，
     避免后续模块因类型不匹配（str vs datetime）产生逻辑错误。
     """
     def _inv_key(s):
-        # [FIX-风险G] 兼容旧格式 "MAT|||LOC" 和新格式 '["MAT", "LOC"]'
+        # 兼容旧格式 "MAT|||LOC" 和新格式 '["MAT", "LOC"]'
         if s.startswith('['):
             try:
                 parts = json.loads(s)
@@ -280,7 +270,7 @@ def deserialize_orchestrator_state(orch, state_dict: dict) -> None:
         parts = s.split("|||", 1)
         return (parts[0], parts[1]) if len(parts) == 2 else (s, "")
 
-    # [FIX-风险7] 恢复嵌套字典中的日期字段
+    # 恢复嵌套字典中的日期字段
     _DATE_KEYS = frozenset({
         'eta', 'start_date', 'end_date', 'date', 'planned_deployment_date',
         'arrival_date', 'ship_date', 'delivery_date', 'available_date',
@@ -315,7 +305,7 @@ def deserialize_orchestrator_state(orch, state_dict: dict) -> None:
         for k, v in state_dict.get("space_quota", {}).items()
     }
 
-    # [FIX-#1] 恢复 space_capacity DataFrame（M5 收货空间约束的数据源）
+    # 恢复 space_capacity DataFrame（M5 收货空间约束的数据源）
     _sc_records = state_dict.get("space_capacity", [])
     if _sc_records:
         _sc_df = pd.DataFrame(_sc_records)
@@ -327,7 +317,7 @@ def deserialize_orchestrator_state(orch, state_dict: dict) -> None:
     else:
         orch.space_capacity = pd.DataFrame()
 
-    # [FIX-#2] 恢复 production_plan_backlog（M3 净需求计算的供给数据源）
+    # 恢复 production_plan_backlog（M3 净需求计算的供给数据源）
     _ppb_records = state_dict.get("production_plan_backlog", [])
     if _ppb_records:
         _ppb_df = pd.DataFrame(_ppb_records)
@@ -338,9 +328,9 @@ def deserialize_orchestrator_state(orch, state_dict: dict) -> None:
     else:
         orch.production_plan_backlog = []
 
-    # [FIX-#6] 恢复 uid_sequence，防止断点续跑后 UID 重置覆盖已有 open_deployment 键
+    # 恢复 uid_sequence，防止断点续跑后 UID 重置覆盖已有 open_deployment 键
     orch.uid_sequence = int(state_dict.get("uid_sequence", 0))
-    # [FIX-风险C] 对日志列表同样应用日期恢复，避免断点续跑后日期字段仍为字符串
+    # 对日志列表同样应用日期恢复，避免断点续跑后日期字段仍为字符串
     orch.delivery_gr           = [_restore_dates(r) if isinstance(r, dict) else r
                                   for r in state_dict.get("delivery_gr", [])]
     orch.production_gr         = [_restore_dates(r) if isinstance(r, dict) else r
@@ -357,7 +347,7 @@ def deserialize_orchestrator_state(orch, state_dict: dict) -> None:
     if cur:
         orch.current_date = pd.to_datetime(cur)
 
-    # [FIX-#9] 恢复 numpy 全局 PRNG 状态
+    # 恢复 numpy 全局 PRNG 状态
     _rng_data = state_dict.get("numpy_random_state")
     if _rng_data and isinstance(_rng_data, dict):
         try:
@@ -369,18 +359,11 @@ def deserialize_orchestrator_state(orch, state_dict: dict) -> None:
                 float(_rng_data['cached_gauss']),                     # 缓存的高斯值
             )
             np.random.set_state(_state_tuple)
-            print(f"  [OK][FIX-#9] Restored numpy random state (pos={_rng_data['pos']})")
         except Exception as _e:
-            print(f"  [WARN][FIX-#9] 恢复 numpy random state 失败: {_e}，PRNG 状态可能不连续")
+            pass
     else:
-        print(f"  [WARN][FIX-#9] checkpoint 中无 numpy_random_state，PRNG 状态可能不连续（旧版 checkpoint）")
+        pass
 
-    print(f"  [OK] Restored unrestricted_inventory from DB: {len(orch.unrestricted_inventory)} records")
-    print(f"  [OK] Restored in_transit from DB: {len(orch.in_transit)} records")
-    print(f"  [OK] Restored open_deployment from DB: {len(orch.open_deployment)} records")
-    print(f"  [OK] Restored space_capacity from DB: {len(orch.space_capacity)} rows")          # [FIX-#1]
-    print(f"  [OK] Restored production_plan_backlog from DB: {len(orch.production_plan_backlog)} records")  # [FIX-#2]
-    print(f"  [OK] Restored uid_sequence from DB: {orch.uid_sequence}")                      # [FIX-#6]
 
 def serialize_m1_previous_orders(df) -> Optional[list]:
     """将 m1_previous_orders DataFrame 序列化为 JSON 兼容的 list[dict]"""
@@ -438,7 +421,7 @@ def next_day(date_str: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# [FIX-#3] M4 跨天文件持久化：将 line_states / allocated_capacity / Module4输出
+# M4 跨天文件持久化：将 line_states / allocated_capacity / Module4输出
 # 存入 DB 表 sim_m4_state，在断点续跑时恢复到临时目录，替代对本地文件的依赖。
 # ---------------------------------------------------------------------------
 
@@ -500,7 +483,7 @@ def save_m4_state_files(
                 (run_id, sim_date_str, file_type, content),
             )
         except Exception as e:
-            print(f"  [WARN][FIX-#3] Failed to upload M4 state file {file_type} ({sim_date_str}): {e}")
+            pass
 
 
 def restore_m4_state_files(
@@ -544,14 +527,13 @@ def restore_m4_state_files(
                 fh.write(raw)
             restored += 1
         except Exception as e:
-            print(f"  [WARN][FIX-#3] Failed to restore M4 state file {file_name}: {e}")
+            pass
 
-    print(f"  [OK][FIX-#3] 已从 DB 恢复 {restored} 个 M4 状态文件")
     return restored
 
 
 # ---------------------------------------------------------------------------
-# [FIX-#7] 并发保护：PostgreSQL advisory lock。
+# 并发保护：PostgreSQL advisory lock。
 # 当前 lock key 基于 Python 内置 hash() 折叠，属于最佳努力保护；
 # 在未改为稳定哈希前，不应将其表述为严格的跨进程互斥保障。
 # ---------------------------------------------------------------------------

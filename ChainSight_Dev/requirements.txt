@@ -1,7 +1,0 @@
-# Core dependencies inferred from project imports
-pandas==2.2.3
-numpy==2.2.5
-scipy==1.16.0
-# Excel engines commonly needed by pandas
-openpyxl==3.1.5
-xlsxwriter==3.2.5

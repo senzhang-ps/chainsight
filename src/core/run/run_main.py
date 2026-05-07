@@ -112,32 +112,32 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--db-host",
         type=str,
-        default="localhost",
-        help="数据库主机地址 (默认: localhost)",
+        default=None,
+        help="数据库主机地址 (默认读取自 config/defaults.yaml)",
     )
     parser.add_argument(
         "--db-port",
         type=int,
-        default=5432,
-        help="数据库端口 (默认: 5432)",
+        default=None,
+        help="数据库端口 (默认读取自 config/defaults.yaml)",
     )
     parser.add_argument(
         "--db-name",
         type=str,
-        default="test_db",
-        help="数据库名称 (默认: test_db)",
+        default=None,
+        help="数据库名称 (默认读取自 config/defaults.yaml)",
     )
     parser.add_argument(
         "--db-user",
         type=str,
-        default="postgres",
-        help="数据库用户名 (默认: postgres)",
+        default=None,
+        help="数据库用户名 (默认读取自 config/defaults.yaml)",
     )
     parser.add_argument(
         "--db-password",
         type=str,
-        default="123456",
-        help="数据库密码 (默认: 123456)",
+        default=None,
+        help="数据库密码 (默认读取自 config/defaults.yaml)",
     )
     parser.add_argument(
         "--run-suffix",
@@ -187,38 +187,22 @@ def main(argv: list[str] | None = None) -> int:
 
     # 处理 --list-runs 命令
     if ns.list_runs:
-        print("\n" + "="*80)
-        print("[INFO] 可用的运行目录列表")
-        print("="*80)
         
         run_infos = _list_existing_runs(root_dir, simulation_start, end_date)
         
         if not run_infos:
-            print("\n[ERROR] 未找到任何运行目录")
-            print(f"   目录: {root_dir}")
             return 0
         
         for idx, info in enumerate(run_infos, 1):
             resume_info = info['resume_info']
-            print(f"\n[{idx}] {info['name']}")
-            print(f"    📂 路径: {info['path']}")
             
             if resume_info.get('already_completed', False):
-                print(f"    [OK] 状态: 已完成")
-                print(f"    📅 最后日期: {resume_info['last_complete_date']}")
-                print(f"    [DATA] 完成天数: {resume_info['days_completed']}")
+                pass
             elif resume_info['can_resume']:
-                print(f"    🔄 状态: 可续跑")
-                print(f"    📅 已完成: {resume_info['days_completed']} 天 (截至 {resume_info['last_complete_date']})")
-                print(f"    📅 剩余: {resume_info['days_remaining']} 天 (从 {resume_info['resume_from_date']} 开始)")
+                pass
             else:
-                print(f"    [LOG] 状态: 无可续跑数据")
-                print(f"    [DATA] 需处理: {resume_info['days_remaining']} 天")
+                pass
         
-        print("\n" + "="*80)
-        print(f"[TIP] 续跑提示:")
-        print(f"   python run.py --config {cfg_path} --end-date {end_date} --resume-from <run_dir_name>")
-        print("="*80)
         return 0
 
     # 确定输出目录与续跑模式
@@ -322,7 +306,6 @@ def main(argv: list[str] | None = None) -> int:
         # 恢复原始输出
         if redirector:
             redirector.stop_redirect()
-            print(f"[LOG] 完整日志已保存到: {output_base_dir}")  # 这条会显示在terminal
 
 
 if __name__ == "__main__":

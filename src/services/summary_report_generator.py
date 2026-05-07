@@ -1,12 +1,21 @@
-# summary_report_generator.py
-# 汇总报告生成器 - 全周期模拟结束后输出7类full报告
+"""汇总报告生成器
+
+在全周期仿真结束后，按照约定的目录结构输出 7 类完整报告：
+订单发运切分、产能超限、换型、调拨计划、生产计划、交付计划、车辆使用与历史库存。
+所有报告基于 Orchestrator 内存状态或既有 CSV/XLSX 落盘文件生成。
+"""
 
 import pandas as pd
 import numpy as np
 import os
-from typing import Dict, List, Optional
+import logging
+from typing import Any, Dict, List, Optional
 from pathlib import Path
 import glob
+
+from src.utils.normalization import normalize_material, normalize_location
+
+logger = logging.getLogger("SupplyChainSimulation." + __name__)
 
 class SummaryReportGenerator:
     """汇总报告生成器"""
@@ -36,31 +45,15 @@ class SummaryReportGenerator:
     
     @staticmethod
     def _normalize_material_value(material_str: str) -> str:
-        """标准化 material 值：移除.0后缀"""
-        if not material_str or material_str in ['nan', 'None', '']:
-            return ""
-        try:
-            # 如果是数字，移除.0后缀
-            if '.' in material_str and material_str.replace('.', '').replace('-', '').isdigit():
-                return str(int(float(material_str)))
-            return material_str.strip()
-        except:
-            return material_str.strip()
-    
+        """标准化 material 值：移除.0后缀 (薄封装,统一委托 src.utils.normalization)。"""
+        return normalize_material(material_str, treat_missing_tokens=True)
+
     @staticmethod
     def _normalize_location_value(location_str: str) -> str:
-        """标准化 location 值：纯数字补齐为4位，字母数字保持原样"""
-        if not location_str or location_str in ['nan', 'None', '']:
-            return ""
-        location_str = str(location_str).strip()
-        try:
-            # 如果是纯数字，补齐为4位
-            if location_str.isdigit():
-                return str(int(location_str)).zfill(4)
-            # 字母数字混合，保持原样
-            return location_str
-        except:
-            return location_str
+        """标准化 location 值：纯数字补齐为4位，字母数字保持原样 (薄封装,统一委托)。"""
+        return normalize_location(
+            location_str, mode="numeric_only", treat_missing_tokens=True
+        )
     
     def generate_all_reports(self, start_date: str, end_date: str) -> Dict[str, str]:
         """
@@ -73,7 +66,7 @@ class SummaryReportGenerator:
         Returns:
             Dict[str, str]: 报告名称到文件路径的映射
         """
-        print(f"📊 开始生成汇总报告 ({start_date} 到 {end_date})")
+        logger.info(f"开始生成汇总报告 ({start_date} 到 {end_date})")
         
         # 保存日期范围，用于后续过滤
         self.start_date = pd.to_datetime(start_date)
@@ -94,7 +87,7 @@ class SummaryReportGenerator:
         report_files['truck_usage'] = self._generate_truck_usage_report(daily_files)
         report_files['historical_inventory'] = self._generate_historical_inventory_report(start_date, end_date)
         
-        print(f"✅ 汇总报告生成完成，输出目录: {self.summary_dir}")
+        logger.info(f"汇总报告生成完成，输出目录: {self.summary_dir}")
         return report_files
     
     def _collect_daily_files(self, start_date: str, end_date: str) -> Dict[str, List[str]]:
@@ -166,7 +159,7 @@ class SummaryReportGenerator:
                         cuts_df['simulation_date'] = simulation_date
                     all_cuts.append(cuts_df)
             except Exception as e:
-                print(f"Warning: Failed to read {file_path}: {e}")
+                logger.warning(f"Failed to read {file_path}: {e}")
         
         # 合并并汇总数据
         summary_data = []
@@ -191,16 +184,7 @@ class SummaryReportGenerator:
             combined_orders = combined_orders.drop_duplicates(subset=dedup_cols, keep='first')
             dedup_count = len(combined_orders)
             if original_count != dedup_count:
-                print(f"📊 OrderLog 去重：原始 {original_count} 条 → 去重后 {dedup_count} 条（移除了 {original_count - dedup_count} 条重复的 AO 订单）")
-        
-        # 🔍 调试：显示 CutLog 数据
-        # print(f"\n🔍 Order Shipment Cut Report 数据统计:")
-        # print(f"  OrderLog 记录数: {len(combined_orders)}")
-        # print(f"  ShipmentLog 记录数: {len(combined_shipments)}")
-        # print(f"  CutLog 记录数: {len(combined_cuts)}")
-        # if not combined_cuts.empty:
-        #     print(f"  CutLog 前5条记录:")
-        #     print(combined_cuts.head())
+                logger.info(f"OrderLog 去重：原始 {original_count} 条 → 去重后 {dedup_count} 条（移除了 {original_count - dedup_count} 条重复的 AO 订单）")
         
         # 构建汇总表
         if not combined_orders.empty or not combined_shipments.empty or not combined_cuts.empty:
@@ -258,7 +242,7 @@ class SummaryReportGenerator:
                 summary = summary[summary['date'] <= self.end_date]
                 filtered_count = len(summary)
                 if original_count != filtered_count:
-                    print(f"📊 过滤超出日期范围的记录：{original_count} 条 → {filtered_count} 条（移除了 {original_count - filtered_count} 条超出 {self.end_date.date()} 的记录）")
+                    logger.info(f"过滤超出日期范围的记录：{original_count} 条 → {filtered_count} 条（移除了 {original_count - filtered_count} 条超出 {self.end_date.date()} 的记录）")
             
             # 🔧 修复：直接使用计算值覆盖 cut_qty，确保数据一致性
             summary['calculated_cut'] = (summary['order_qty'] - summary['shipment_qty']).clip(lower=0)
@@ -266,8 +250,8 @@ class SummaryReportGenerator:
             # 检查并记录不一致的记录（仅用于调试日志）
             inconsistent = summary[summary['cut_qty'] != summary['calculated_cut']]
             if not inconsistent.empty:
-                print(f"\n⚠️  发现 {len(inconsistent)} 条 cut_qty 不一致的记录，已自动修正")
-                print(f"  (cut_qty 已修正为 = max(0, order_qty - shipment_qty))")
+                logger.warning(f"\n  发现 {len(inconsistent)} 条 cut_qty 不一致的记录，已自动修正")
+                logger.info(f"  (cut_qty 已修正为 = max(0, order_qty - shipment_qty))")
             
             # 🔧 关键修复：用计算值覆盖原始 cut_qty
             summary['cut_qty'] = summary['calculated_cut']
@@ -309,7 +293,7 @@ class SummaryReportGenerator:
                     delivery_df['date'] = file_date
                     all_deliveries.append(delivery_df)
             except Exception as e:
-                print(f"Warning: Failed to read {file_path}: {e}")
+                logger.warning(f"Failed to read {file_path}: {e}")
         
         if all_deliveries:
             # 🔧 FIX: Filter empty DataFrames before concat
@@ -335,7 +319,7 @@ class SummaryReportGenerator:
                     
                     filtered_count = len(combined_deliveries)
                     if original_count != filtered_count:
-                        print(f"📊 Delivery Plan 过滤：{original_count} 条 → {filtered_count} 条（移除了 {original_count - filtered_count} 条超出日期范围的记录）")
+                        logger.info(f"Delivery Plan 过滤：{original_count} 条 → {filtered_count} 条（移除了 {original_count - filtered_count} 条超出日期范围的记录）")
                 
                 if 'date' in combined_deliveries.columns:
                     ordered_columns = ['date'] + [
@@ -374,7 +358,7 @@ class SummaryReportGenerator:
                     usage_df = xl.parse('TruckUsageLog')
                     all_usage.append(usage_df)
             except Exception as e:
-                print(f"Warning: Failed to read {file_path}: {e}")
+                logger.warning(f"Failed to read {file_path}: {e}")
         
         if all_usage:
             # 🔧 FIX: Filter empty DataFrames before concat
@@ -392,7 +376,7 @@ class SummaryReportGenerator:
                     ]
                     filtered_count = len(combined_usage)
                     if original_count != filtered_count:
-                        print(f"📊 Truck Usage 过滤：{original_count} 条 → {filtered_count} 条（移除了 {original_count - filtered_count} 条超出日期范围的记录）")
+                        logger.info(f"Truck Usage 过滤：{original_count} 条 → {filtered_count} 条（移除了 {original_count - filtered_count} 条超出日期范围的记录）")
                 
                 # 按需求字段: date, sending, receiving, truck_type, available_trucks, used_trucks, wfr, vfr
                 
@@ -424,7 +408,7 @@ class SummaryReportGenerator:
                     exceed_df = xl.parse('CapacityExceed')
                     all_exceeds.append(exceed_df)
             except Exception as e:
-                print(f"Warning: Failed to read {file_path}: {e}")
+                logger.warning(f"Failed to read {file_path}: {e}")
         
         if all_exceeds:
             # 🔧 FIX: Filter empty DataFrames before concat to avoid FutureWarning
@@ -442,7 +426,7 @@ class SummaryReportGenerator:
                     ]
                     filtered_count = len(combined_exceeds)
                     if original_count != filtered_count:
-                        print(f"📊 Capacity Exceed 过滤：{original_count} 条 → {filtered_count} 条（移除了 {original_count - filtered_count} 条超出日期范围的记录）")
+                        logger.info(f"Capacity Exceed 过滤：{original_count} 条 → {filtered_count} 条（移除了 {original_count - filtered_count} 条超出日期范围的记录）")
                 
                 with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
                     combined_exceeds.to_excel(writer, sheet_name='FullCapacityExceed', index=False)
@@ -472,7 +456,7 @@ class SummaryReportGenerator:
                     changeover_df = xl.parse('ChangeoverLog')
                     all_changeovers.append(changeover_df)
             except Exception as e:
-                print(f"Warning: Failed to read {file_path}: {e}")
+                logger.warning(f"Failed to read {file_path}: {e}")
         
         if all_changeovers:
             # 过滤掉空的 DataFrame 以避免 FutureWarning
@@ -495,7 +479,7 @@ class SummaryReportGenerator:
                     ]
                     filtered_count = len(combined_changeovers)
                     if original_count != filtered_count:
-                        print(f"📊 Changeover Log 过滤：{original_count} 条 → {filtered_count} 条（移除了 {original_count - filtered_count} 条超出日期范围的记录）")
+                        logger.info(f"Changeover Log 过滤：{original_count} 条 → {filtered_count} 条（移除了 {original_count - filtered_count} 条超出日期范围的记录）")
                 
                 with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
                     combined_changeovers.to_excel(writer, sheet_name='FullChangeoverLog', index=False)
@@ -527,7 +511,7 @@ class SummaryReportGenerator:
                     deployment_df = xl.parse('DeploymentPlan')
                     all_deployments.append(deployment_df)
             except Exception as e:
-                print(f"Warning: Failed to read {file_path}: {e}")
+                logger.warning(f"Failed to read {file_path}: {e}")
         
         if all_deployments:
             # 🔧 FIX: Filter empty DataFrames before concat
@@ -552,7 +536,7 @@ class SummaryReportGenerator:
                 combined_deployments = combined_deployments[mask]
                 filtered_count = len(combined_deployments)
                 if original_count != filtered_count:
-                    print(f"📊 Deployment Plan 过滤：{original_count} 条 → {filtered_count} 条（移除了 {original_count - filtered_count} 条超出日期范围的记录）")
+                    logger.info(f"Deployment Plan 过滤：{original_count} 条 → {filtered_count} 条（移除了 {original_count - filtered_count} 条超出日期范围的记录）")
 
                 sort_cols = [
                     c for c in [
@@ -574,7 +558,7 @@ class SummaryReportGenerator:
                 # 🔧 FIX: 检查数据量，超过 Excel 限制则使用 CSV
                 EXCEL_MAX_ROWS = 1048576
                 if len(combined_deployments) > EXCEL_MAX_ROWS - 1:  # -1 for header
-                    print(f"📊 Deployment Plan 数据量 ({len(combined_deployments)} 行) 超过 Excel 限制，使用 CSV 格式")
+                    logger.info(f"Deployment Plan 数据量 ({len(combined_deployments)} 行) 超过 Excel 限制，使用 CSV 格式")
                     combined_deployments.to_csv(output_file_csv, index=False)
                     return str(output_file_csv)
                 else:
@@ -607,7 +591,7 @@ class SummaryReportGenerator:
                     production_df = xl.parse('ProductionPlan')
                     all_productions.append(production_df)
             except Exception as e:
-                print(f"Warning: Failed to read {file_path}: {e}")
+                logger.warning(f"Failed to read {file_path}: {e}")
         
         if all_productions:
             # 🔧 FIX: Filter empty DataFrames before concat
@@ -630,7 +614,7 @@ class SummaryReportGenerator:
                     ]
                     filtered_count = len(combined_productions)
                     if original_count != filtered_count:
-                        print(f"📊 Production Plan 过滤：{original_count} 条 → {filtered_count} 条（移除了 {original_count - filtered_count} 条超出日期范围的记录）")
+                        logger.info(f"Production Plan 过滤：{original_count} 条 → {filtered_count} 条（移除了 {original_count - filtered_count} 条超出日期范围的记录）")
                 
                 with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
                     combined_productions.to_excel(writer, sheet_name='FullProductionPlan', index=False)
@@ -709,7 +693,7 @@ class SummaryReportGenerator:
                         key = (material, location)
                         ending_inv_dict[key] = int(row['quantity'])
                 except Exception as e:
-                    print(f"Warning: Failed to read {inv_file}: {e}")
+                    logger.warning(f"Failed to read {inv_file}: {e}")
             
             # 2. 读取在途库存 (planning_intransit)
             intransit_file = orchestrator_dir / f"planning_intransit_{date_str_file}.csv"
@@ -724,7 +708,7 @@ class SummaryReportGenerator:
                             key = (material, location)
                             in_transit_dict[key] = in_transit_dict.get(key, 0) + int(row['quantity'])
                 except Exception as e:
-                    print(f"Warning: Failed to read {intransit_file}: {e}")
+                    logger.warning(f"Failed to read {intransit_file}: {e}")
             
             # 3. 读取生产入库 (production_gr)
             prod_gr_file = orchestrator_dir / f"production_gr_{date_str_file}.csv"
@@ -738,7 +722,7 @@ class SummaryReportGenerator:
                             key = (material, location)
                             production_gr_dict[key] = production_gr_dict.get(key, 0) + int(row['quantity'])
                 except Exception as e:
-                    print(f"Warning: Failed to read {prod_gr_file}: {e}")
+                    logger.warning(f"Failed to read {prod_gr_file}: {e}")
             
             # 4. 读取配送入库 (delivery_gr)
             del_gr_file = orchestrator_dir / f"delivery_gr_{date_str_file}.csv"
@@ -752,7 +736,7 @@ class SummaryReportGenerator:
                             key = (material, location)
                             delivery_gr_dict[key] = delivery_gr_dict.get(key, 0) + int(row['quantity'])
                 except Exception as e:
-                    print(f"Warning: Failed to read {del_gr_file}: {e}")
+                    logger.warning(f"Failed to read {del_gr_file}: {e}")
             
             # 5. 读取订单 (order from module1)
             order_file = module1_dir / f"module1_output_{date_str_file}.xlsx"
@@ -784,7 +768,7 @@ class SummaryReportGenerator:
                                     # 汇总所有demand_element的quantity
                                     supply_demand_dict[key] = supply_demand_dict.get(key, 0) + int(row.get('quantity', 0))
                 except Exception as e:
-                    print(f"Warning: Failed to read orders/supply-demand from {order_file}: {e}")
+                    logger.warning(f"Failed to read orders/supply-demand from {order_file}: {e}")
             
             # 6. 读取发货 (shipment from orchestrator)
             shipment_file = orchestrator_dir / f"shipment_log_{date_str_file}.csv"
@@ -798,7 +782,7 @@ class SummaryReportGenerator:
                             key = (material, location)
                             shipment_dict[key] = shipment_dict.get(key, 0) + int(row['quantity'])
                 except Exception as e:
-                    print(f"Warning: Failed to read {shipment_file}: {e}")
+                    logger.warning(f"Failed to read {shipment_file}: {e}")
             
             # 7. 读取配送发货 (delivery_shipment from orchestrator)
             del_ship_file = orchestrator_dir / f"delivery_shipment_log_{date_str_file}.csv"
@@ -812,7 +796,7 @@ class SummaryReportGenerator:
                             key = (material, location)
                             delivery_ship_dict[key] = delivery_ship_dict.get(key, 0) + int(row['quantity'])
                 except Exception as e:
-                    print(f"Warning: Failed to read {del_ship_file}: {e}")
+                    logger.warning(f"Failed to read {del_ship_file}: {e}")
             
             # 整合所有数据 - 以期末库存为基准，包含所有出现过的 (material, location)
             all_keys = set()
@@ -847,13 +831,13 @@ class SummaryReportGenerator:
         if all_records:
             historical_df = pd.DataFrame(all_records)
             historical_df.to_csv(output_file, index=False)
-            print(f"📊 历史库存记录已生成: {output_file} ({len(historical_df)} 条记录)")
+            logger.info(f"历史库存记录已生成: {output_file} ({len(historical_df)} 条记录)")
         else:
             # 创建空文件，包含列头
             empty_df = pd.DataFrame(columns=['date', 'material', 'location', 'ending_inventory', 
                                             'in_transit', 'production_gr', 'delivery_gr', 
                                             'order', 'shipment', 'delivery_ship', 'supply_demand', 'safety_stock'])
             empty_df.to_csv(output_file, index=False)
-            print(f"⚠️  历史库存记录为空，已创建空文件: {output_file}")
+            logger.warning(f"历史库存记录为空，已创建空文件: {output_file}")
         
         return str(output_file)

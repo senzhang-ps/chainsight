@@ -2,22 +2,32 @@
 """
 normalization.py - 标识符规范化统一实现
 
-本模块是 material / location / sending / receiving 等标识符列
-规范化处理的 **唯一真源 (single source of truth)**。
+本模块是 material / location / sending / receiving 等标识符列规范化处理的
+**唯一真源 (single source of truth)**。所有模块均从此模块导入,不应自行定义。
 
-所有模块（demand_planning、deployment_planning、orchestrator、main_integration）
-均应从此模块导入，而非自行定义。
+对外 API:
+    标量层:
+        normalize_material(value, *, mode, treat_missing_tokens)
+        normalize_location(value, *, mode)
+        normalize_sending / normalize_receiving / normalize_sourcing
+            —— location 的业务语义别名(等价于 normalize_location 默认模式)
 
-规范化规则：
-    material   : 数值型 → int(float(x)) 去除 .0 后缀；其他 → str(x).strip()
-    location   : 纯数字 → zfill(4)；非数字(如 A888) → 原样保留
-    sending    : 同 location 规则
-    receiving  : 同 location 规则
-    sourcing   : 同 location 规则
-    dps_location : 同 location 规则
+    DataFrame 层:
+        normalize_identifiers(df, *, material_cols=None, location_cols=None,
+                               other_identifier_cols=None, extra_columns=None)
+            —— 不传显式列集时使用模块默认列集 + 可选 extra_columns;
+               传入任一显式列集参数则按自定义列集规范化
+        cast_identifier_columns(df, *, cols, normalized_location_cols)
+            —— 仅做类型转换 + 可选 location 规范化
+
+规范化规则:
+    material  mode="numeric" (默认): 数值型 → int(float(x)) 去 .0;其他 str().strip()
+    material  mode="basic":           仅 None/NaN → "";其他直接 str()
+    location  mode="numeric_only" (默认): 纯数字 zfill(4);非数字原样
+    location  mode="any":                   无条件 zfill(4),非数字文本也补零
 """
 
-from typing import Any, List, Optional, Sequence
+from typing import Any, Iterable, List, Literal, Optional, Sequence
 
 import pandas as pd
 
@@ -26,12 +36,12 @@ import pandas as pd
 # 标识符列名常量
 # ---------------------------------------------------------------------------
 
-#: 地点类列：纯数字补零至 4 位
+#: 地点类列:纯数字补零至 4 位
 LOCATION_COLUMNS: List[str] = [
     'location', 'dps_location', 'sending', 'receiving', 'sourcing',
 ]
 
-#: 物料类列：去除 .0 后缀
+#: 物料类列:去除 .0 后缀
 MATERIAL_COLUMNS: List[str] = [
     'material', 'from_material', 'to_material',
 ]
@@ -41,64 +51,119 @@ STRING_ONLY_COLUMNS: List[str] = [
     'line', 'delegate_line', 'changeover_id',
 ]
 
-#: 全部标识符列（superset）
+#: 全部标识符列 (superset)
 ALL_IDENTIFIER_COLUMNS: List[str] = (
     MATERIAL_COLUMNS + LOCATION_COLUMNS + STRING_ONLY_COLUMNS
 )
 
+#: 字符串化后等同于缺失值的 token 集合
+_MISSING_STRING_TOKENS = ["nan", "None", "<NA>", "NaN"]
+
 
 # ---------------------------------------------------------------------------
-# 标量函数
+# 标量函数 —— material
 # ---------------------------------------------------------------------------
 
-def normalize_material(material_str: Any) -> str:
-    """规范化物料编码：数值型去除 .0 后缀。
+MaterialMode = Literal["numeric", "basic"]
+
+
+def normalize_material(
+    value: Any,
+    *,
+    mode: MaterialMode = "numeric",
+    treat_missing_tokens: bool = False,
+) -> str:
+    """规范化物料标识符。
 
     Args:
-        material_str: 原始物料标识（int / float / str / None）
+        value: 原始物料标识 (int / float / str / None)
+        mode:
+            "numeric" (默认) —— 数值型 → 去 .0 后缀;其他 str().strip()
+            "basic"          —— 仅 None/NaN → "";其他直接 str(),不 strip、不去 .0
+        treat_missing_tokens: 仅在 mode="numeric" 下生效;是否把
+            ``'nan' / 'none' / '<na>'`` 字符串也视为缺失(返回 "")
 
     Returns:
         规范化后的字符串。None / NaN → ""
     """
-    if material_str is None or pd.isna(material_str):
+    if value is None or pd.isna(value):
+        return ""
+
+    if mode == "basic":
+        return str(value)
+
+    if treat_missing_tokens and (
+        value == "" or str(value).lower() in ["nan", "none", "<na>"]
+    ):
         return ""
 
     try:
         if (
-            isinstance(material_str, (int, float))
-            or str(material_str).replace('.', '').replace('-', '').isdigit()
+            isinstance(value, (int, float))
+            or str(value).replace(".", "").replace("-", "").isdigit()
         ):
-            return str(int(float(material_str)))
-        else:
-            return str(material_str).strip()
+            return str(int(float(value)))
+        return str(value).strip()
     except (ValueError, TypeError):
-        return str(material_str).strip()
+        return str(value).strip()
 
 
-def normalize_location(location_str: Any) -> str:
-    """规范化地点编码：纯数字补零至 4 位，非数字原样保留。
+# ---------------------------------------------------------------------------
+# 标量函数 —— location
+# ---------------------------------------------------------------------------
+
+LocationMode = Literal["numeric_only", "any"]
+
+
+def normalize_location(
+    value: Any,
+    *,
+    mode: LocationMode = "numeric_only",
+    treat_missing_tokens: bool = False,
+) -> str:
+    """规范化地点标识符。
 
     Args:
-        location_str: 原始地点标识
+        value: 原始地点标识
+        mode:
+            "numeric_only" (默认) —— 纯数字 zfill(4);非数字(如 "A888")原样保留
+            "any"                 —— 优先按数值解析后 zfill(4)(如 "99.0" → "0099");
+                                       数值解析失败的非数字文本原样保留(不再补零,避免
+                                       "nan"→"0nan" 这类损坏)
+        treat_missing_tokens: 是否把 ``'' / 'nan' / 'none' / '<na>'`` 字符串视为缺失
+            (返回 "")。默认 False(保持原值)。
 
     Returns:
         规范化后的字符串。None / NaN → ""
     """
-    if location_str is None or pd.isna(location_str):
+    if value is None or pd.isna(value):
         return ""
 
-    location_str = str(location_str).strip()
+    if treat_missing_tokens:
+        text_check = str(value).strip()
+        if text_check == "" or text_check.lower() in ["nan", "none", "<na>"]:
+            return ""
 
+    if mode == "any":
+        # 优先尝试 int(float(x)) 以处理 "99.0" / 99.0 → "0099"
+        try:
+            return str(int(float(value))).zfill(4)
+        except (ValueError, TypeError):
+            text = str(value).strip()
+            if text.isdigit():
+                return text.zfill(4)
+            return text
+
+    text = str(value).strip()
     try:
-        if location_str.isdigit():
-            return str(int(location_str)).zfill(4)
-        else:
-            return location_str
+        if text.isdigit():
+            return str(int(text)).zfill(4)
+        return text
     except (ValueError, TypeError):
-        return str(location_str)
+        return str(text)
 
 
-# sending / receiving / sourcing 复用 location 规则
+# sending / receiving / sourcing 复用 location 规则(业务语义别名)
 normalize_sending = normalize_location
 normalize_receiving = normalize_location
 normalize_sourcing = normalize_location
@@ -110,51 +175,95 @@ normalize_sourcing = normalize_location
 
 def normalize_identifiers(
     df: pd.DataFrame,
+    *,
+    material_cols: Optional[Iterable[str]] = None,
+    location_cols: Optional[Iterable[str]] = None,
+    other_identifier_cols: Optional[Iterable[str]] = None,
     extra_columns: Optional[Sequence[str]] = None,
 ) -> pd.DataFrame:
-    """将 DataFrame 中的标识符列规范化为统一字符串格式。
+    """DataFrame 级标识符规范化 (单一入口)。
 
-    使用向量化操作提升性能。处理规则：
-    - material / from_material / to_material: 去除 .0 后缀
-    - location / dps_location / sending / receiving / sourcing: 纯数字补零 4 位
-    - line / delegate_line / changeover_id: 仅 str 转换
+    两种调用形态:
 
-    Args:
-        df: 待规范化的 DataFrame
-        extra_columns: 额外需要 str 转换的列名（可选）
+    1. **默认列集 + 可选 extra_columns** (18 处旧调用的形态):
+       ``normalize_identifiers(df)`` 或 ``normalize_identifiers(df, extra_columns=[...])``
+       - material / from_material / to_material: 去 .0 后缀
+       - location / dps_location / sending / receiving / sourcing: 纯数字补零 4 位
+       - line / delegate_line / changeover_id: 仅 str 转换
+       - ``extra_columns`` 内不重复的列并入 "仅 str 转换" 集合
+
+    2. **完全显式列集** (M3 等需要自定义列集的场景):
+       ``normalize_identifiers(df, material_cols=(...), location_cols=(...), other_identifier_cols=(...))``
+       传入任一显式列集参数即视为进入自定义模式:未显式指定的列集按空集处理,
+       ``extra_columns`` 在此模式下被忽略。
 
     Returns:
-        标识符已规范化的 DataFrame 副本；空表原样返回
+        标识符已规范化的 DataFrame 副本;空表原样返回。
     """
     if df.empty:
         return df
 
+    explicit_mode = (
+        material_cols is not None
+        or location_cols is not None
+        or other_identifier_cols is not None
+    )
+
+    if explicit_mode:
+        mcols: Iterable[str] = material_cols if material_cols is not None else ()
+        lcols: Iterable[str] = location_cols if location_cols is not None else ()
+        ocols: Iterable[str] = (
+            other_identifier_cols if other_identifier_cols is not None else ()
+        )
+    else:
+        mcols = MATERIAL_COLUMNS
+        lcols = LOCATION_COLUMNS
+        other_default: List[str] = list(STRING_ONLY_COLUMNS)
+        if extra_columns:
+            other_default.extend(
+                c for c in extra_columns if c not in ALL_IDENTIFIER_COLUMNS
+            )
+        ocols = other_default
+
     df = df.copy()
 
-    # --- material 类列：去除 .0 后缀 ---
-    for col in MATERIAL_COLUMNS:
+    for col in mcols:
         if col in df.columns:
-            df[col] = df[col].fillna('').astype(str)
-            df[col] = df[col].replace(['nan', 'None', '<NA>', 'NaN'], '')
-            df[col] = df[col].str.replace(r'\.0$', '', regex=True)
+            df[col] = df[col].astype(str)
+            df[col] = df[col].replace(_MISSING_STRING_TOKENS, "")
+            df[col] = df[col].str.replace(r"\.0$", "", regex=True)
 
-    # --- location 类列：纯数字补零 4 位 ---
-    for col in LOCATION_COLUMNS:
+    for col in lcols:
         if col in df.columns:
-            df[col] = df[col].fillna('').astype(str).str.strip()
-            df[col] = df[col].replace(['nan', 'None', '<NA>', 'NaN'], '')
-            is_numeric = df[col].str.match(r'^\d+$', na=False)
+            df[col] = df[col].astype(str).str.strip()
+            df[col] = df[col].replace(_MISSING_STRING_TOKENS, "")
+            is_numeric = df[col].str.match(r"^\d+$", na=False)
             df.loc[is_numeric, col] = df.loc[is_numeric, col].str.zfill(4)
 
-    # --- 仅需 str 转换的列 ---
-    for col in STRING_ONLY_COLUMNS:
+    for col in ocols:
         if col in df.columns:
-            df[col] = df[col].fillna('').astype(str)
+            df[col] = df[col].fillna("").astype(str)
 
-    # --- 额外列 ---
-    if extra_columns:
-        for col in extra_columns:
-            if col in df.columns and col not in ALL_IDENTIFIER_COLUMNS:
-                df[col] = df[col].fillna('').astype(str)
+    return df
+
+
+def cast_identifier_columns(
+    df: pd.DataFrame,
+    *,
+    cols: Iterable[str],
+    normalized_location_cols: Iterable[str] = (),
+) -> pd.DataFrame:
+    """将标识符列转为 string,并对指定 location 列做 numeric_only 规范化。"""
+    if df is None or df.empty:
+        return df
+
+    normalized_location_cols = set(normalized_location_cols)
+    df = df.copy()
+
+    for col in cols:
+        if col in df.columns:
+            df[col] = df[col].astype("string")
+            if col in normalized_location_cols:
+                df[col] = df[col].apply(normalize_location)
 
     return df

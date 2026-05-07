@@ -496,7 +496,6 @@ def _generate_shipment_records(
                 routes, prepared_data['delay_dist'], seed=random_seed
             )
         except Exception as e:
-            print(f"[M6] Batch delay sampling failed, using single-record mode: {e}")
             delays = None
     else:
         delays = None

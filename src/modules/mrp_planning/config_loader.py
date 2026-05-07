@@ -99,16 +99,13 @@ def load_module1_daily_outputs(
         module1_file = _find_module1_file(module1_output_dir, date_str)
 
         if not module1_file:
-            print(f"Warning: Module1 output not found for {date_str}.")
             return _empty_module1_data()
 
         data = _read_module1_file(module1_file, simulation_date)
         elapsed = time.perf_counter() - t_start
-        print(f"[M3] load_module1 total: {elapsed:.3f}s")
         return data
 
     except Exception as e:
-        print(f"Warning: Error loading Module1 outputs: {e}")
         return _empty_module1_data()
 
 

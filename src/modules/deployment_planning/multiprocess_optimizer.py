@@ -16,7 +16,7 @@ from typing import Dict, List, Optional, Set, Tuple, Any
 import pandas as pd
 
 # 使用统一的CPU配置
-from ...utils.cpu_config import MAX_WORKERS, get_optimal_workers
+from ...utils.resource_config import MAX_WORKERS, get_optimal_workers
 
 
 def _serialize_config(config: dict) -> bytes:
@@ -138,11 +138,9 @@ def process_layer_multiprocess(
                     mat, loc, demands = future.result()
                     result[(mat, loc)] = demands
                 except Exception as e:
-                    print(f"[M5 MultiProcess] Node {key} failed: {e}")
                     result[key] = []
                     
     except Exception as e:
-        print(f"[M5 MultiProcess] Failed: {e}, falling back to serial")
         # 回退到串行处理
         from .demand_collector import collect_node_demands
         for mat, loc in sorted_pairs:

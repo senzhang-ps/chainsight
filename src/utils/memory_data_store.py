@@ -86,7 +86,6 @@ class MemoryDataStore:
             bool: 是否成功启用
         """
         if not DUCKDB_AVAILABLE:
-            print("⚠️ DuckDB未安装，内存模式不可用")
             return False
         
         if self._enabled and self._conn is not None:
@@ -113,11 +112,9 @@ class MemoryDataStore:
             })
             
             self._enabled = True
-            print(f"✅ DuckDB内存模式已启用 (threads={threads}, memory={memory_limit})")
             return True
             
         except Exception as e:
-            print(f"❌ 启用DuckDB内存模式失败: {e}")
             self._enabled = False
             return False
     
@@ -132,7 +129,6 @@ class MemoryDataStore:
         
         self._enabled = False
         self._table_registry.clear()
-        print("🔒 DuckDB内存模式已禁用")
     
     @property
     def is_enabled(self) -> bool:
@@ -216,7 +212,6 @@ class MemoryDataStore:
             return True
             
         except Exception as e:
-            print(f"❌ 写入DuckDB表失败 [{module}/{sheet}/{date_str}]: {e}")
             return False
     
     def read_module_output(
@@ -261,7 +256,6 @@ class MemoryDataStore:
             return result
             
         except Exception as e:
-            print(f"❌ 读取DuckDB表失败 [{module}/{sheet}/{date_str}]: {e}")
             return None
     
     def table_exists(self, module: str, sheet: str, date_str: str) -> bool:
@@ -381,13 +375,6 @@ class MemoryDataStore:
     def print_stats(self):
         """打印性能统计"""
         stats = self.get_stats()
-        print("\n📊 DuckDB内存存储统计:")
-        print(f"   状态: {'✅ 启用' if stats['enabled'] else '❌ 禁用'}")
-        print(f"   表数量: {stats['tables_count']}")
-        print(f"   写入次数: {stats['writes']} ({stats['rows_written']} 行)")
-        print(f"   读取次数: {stats['reads']} ({stats['rows_read']} 行)")
-        print(f"   平均写入耗时: {stats['avg_write_time_ms']:.2f}ms")
-        print(f"   平均读取耗时: {stats['avg_read_time_ms']:.2f}ms")
     
     def export_to_parquet(self, output_dir: str, module: str = None):
         """
@@ -411,7 +398,7 @@ class MemoryDataStore:
                     f"COPY {table_name} TO '{output_path}' (FORMAT PARQUET, COMPRESSION SNAPPY)"
                 )
             except Exception as e:
-                print(f"⚠️ 导出Parquet失败 [{table_name}]: {e}")
+                pass
 
 
 # 全局单例访问函数
@@ -469,11 +456,6 @@ def write_module4_output(date_str: str, production_plan: pd.DataFrame = None,
     return success
 
 
-def read_module4_production_plan(date_str: str) -> Optional[pd.DataFrame]:
-    """读取Module4生产计划的便捷函数"""
-    return get_data_store().read_module_output('module4', 'ProductionPlan', date_str)
-
-
 def write_module3_output(date_str: str, net_demand: pd.DataFrame = None) -> bool:
     """写入Module3输出的便捷函数"""
     store = get_data_store()
@@ -483,49 +465,3 @@ def write_module3_output(date_str: str, net_demand: pd.DataFrame = None) -> bool
     if net_demand is not None:
         return store.write_module_output('module3', 'NetDemand', date_str, net_demand)
     return True
-
-
-def read_module3_net_demand(date_str: str) -> Optional[pd.DataFrame]:
-    """读取Module3净需求的便捷函数"""
-    return get_data_store().read_module_output('module3', 'NetDemand', date_str)
-
-
-def write_module5_output(date_str: str, deployment_plan: pd.DataFrame = None) -> bool:
-    """写入Module5输出的便捷函数"""
-    store = get_data_store()
-    if not store.is_enabled:
-        return False
-    
-    if deployment_plan is not None:
-        return store.write_module_output('module5', 'DeploymentPlan', date_str, deployment_plan)
-    return True
-
-
-def write_module6_output(date_str: str, delivery_plan: pd.DataFrame = None) -> bool:
-    """写入Module6输出的便捷函数"""
-    store = get_data_store()
-    if not store.is_enabled:
-        return False
-    
-    if delivery_plan is not None:
-        return store.write_module_output('module6', 'DeliveryPlan', date_str, delivery_plan)
-    return True
-
-
-def write_module1_output(date_str: str, order_log: pd.DataFrame = None,
-                         shipment_log: pd.DataFrame = None,
-                         cut_log: pd.DataFrame = None) -> bool:
-    """写入Module1输出的便捷函数"""
-    store = get_data_store()
-    if not store.is_enabled:
-        return False
-    
-    success = True
-    if order_log is not None:
-        success &= store.write_module_output('module1', 'OrderLog', date_str, order_log)
-    if shipment_log is not None:
-        success &= store.write_module_output('module1', 'ShipmentLog', date_str, shipment_log)
-    if cut_log is not None:
-        success &= store.write_module_output('module1', 'CutLog', date_str, cut_log)
-    
-    return success

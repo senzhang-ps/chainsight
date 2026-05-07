@@ -63,7 +63,6 @@ def run_integrated_mode(
     返回：
         dict: 包含输出结果的字典
     """
-    print("🔄 Module3 运行于集成模式")
     t_total = time.perf_counter()
 
     # 加载配置（来自main_integration的数据已被规范化，跳过重复规范化）
@@ -89,8 +88,6 @@ def run_integrated_mode(
     result = _build_result(all_net_demand, date_range)
 
     elapsed = time.perf_counter() - t_total
-    print(f"✅ Module3 集成模式完成")
-    print(f"[M3] total: {elapsed:.3f}s, days={len(date_range)}, records={len(all_net_demand)}")
 
     return result
 
@@ -208,7 +205,6 @@ def _load_module1_data(
         
         return data
     except Exception as e:
-        print(f"  ⚠️ Module1数据加载失败: {e}")
         return {
             'supply_demand_df': pd.DataFrame(),
             'shipment_df': pd.DataFrame(),
@@ -239,7 +235,6 @@ def _load_orchestrator_data(
         return data
 
     except Exception as e:
-        print(f"  ⚠️ Orchestrator数据加载失败: {e}")
         return {
             'beginning_inventory_df': pd.DataFrame(),
             'in_transit_df': pd.DataFrame(),
@@ -276,7 +271,6 @@ def _calculate_net_demand(
             deploy_config_df=configs['deploy_config_df'],
         )
     except Exception as e:
-        print(f"  ❌ 净需求计算失败: {e}")
         import traceback
         traceback.print_exc()
         return pd.DataFrame()
@@ -309,7 +303,7 @@ def _save_daily_output(
             output_df.to_excel(writer, index=False, sheet_name='NetDemand')
 
     except Exception as e:
-        print(f"  ⚠️ 保存失败: {e}")
+        pass
 
 
 def _build_result(all_net_demand: list, date_range) -> dict:

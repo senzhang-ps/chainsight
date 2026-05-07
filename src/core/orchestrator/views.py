@@ -8,11 +8,11 @@ from typing import Dict, Tuple
 
 import pandas as pd
 
-from .normalize import (
-    _normalize_location,
-    _normalize_material,
-    _normalize_receiving,
-    _normalize_sending,
+from ...utils.normalization import (
+    normalize_location,
+    normalize_material,
+    normalize_receiving,
+    normalize_sending,
 )
 
 
@@ -40,8 +40,8 @@ class OrchestratorViewsMixin:
         ):
             records.append({
                 'date': date_obj,
-                'material': _normalize_material(mat),
-                'location': _normalize_location(loc),
+                'material': normalize_material(mat),
+                'location': normalize_location(loc),
                 'quantity': qty,
             })
 
@@ -68,8 +68,8 @@ class OrchestratorViewsMixin:
             self.unrestricted_inventory.items()
         ):
             key = (
-                _normalize_material(mat),
-                _normalize_location(loc),
+                normalize_material(mat),
+                normalize_location(loc),
             )
             result[key] = qty
         return result
@@ -96,7 +96,7 @@ class OrchestratorViewsMixin:
             records.append({
                 'transit_uid': uid,
                 'date': date_obj,
-                'material': _normalize_material(
+                'material': normalize_material(
                     rec['material']
                 ),
                 'sending': rec.get('sending', ''),
@@ -164,13 +164,13 @@ class OrchestratorViewsMixin:
         records = []
         for uid, rec in self.open_deployment.items():
             records.append({
-                'material': _normalize_material(
+                'material': normalize_material(
                     rec['material']
                 ),
-                'sending': _normalize_sending(
+                'sending': normalize_sending(
                     rec['sending']
                 ),
-                'receiving': _normalize_receiving(
+                'receiving': normalize_receiving(
                     rec['receiving']
                 ),
                 'planned_deployment_date': pd.to_datetime(
@@ -469,8 +469,8 @@ class OrchestratorViewsMixin:
         for (mat, loc), qty in inv.items():
             records.append({
                 'date': date_obj,
-                'material': _normalize_material(mat),
-                'location': _normalize_location(loc),
+                'material': normalize_material(mat),
+                'location': normalize_location(loc),
                 'quantity': qty,
             })
 

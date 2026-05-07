@@ -6,38 +6,11 @@
 
 import pandas as pd
 import numpy as np
-from typing import List, Tuple, Optional, Any
+from typing import List, Optional, Any
 
-from src.utils.date_helpers import (
-    compute_planning_window as compute_shared_planning_window,
-    is_offset_review_day,
-)
-from src.utils.normalization_common import (
-    cast_identifier_columns,
-    normalize_location_preserve_non_numeric,
-)
+from src.utils.normalization import cast_identifier_columns
 
 from .constants import IDENTIFIER_COLS
-
-
-def normalize_location(location_str: str) -> str:
-    """标准化地点字符串。
-
-    将纯数字地点左补零至4位，非数字地点保持原样。
-
-    参数：
-        location_str: 地点字符串（如 "386"/"0386"/"A888"）
-
-    返回：
-        str: 标准化后的地点字符串
-
-    示例：
-        >>> normalize_location("386")
-        '0386'
-        >>> normalize_location("A888")
-        'A888'
-    """
-    return normalize_location_preserve_non_numeric(location_str)
 
 
 def cast_identifiers_to_str(
@@ -83,52 +56,6 @@ def validate_merge_keys(
                     f"合并键 '{key}' 的dtype不匹配: "
                     f"{df1[key].dtype} vs {df2[key].dtype}"
                 )
-
-
-def compute_planning_window(
-    simulation_date: pd.Timestamp,
-    ptf: int,
-    lsk: int
-) -> Tuple[pd.Timestamp, pd.Timestamp]:
-    """计算计划窗口的起止日期。
-
-    根据计划冻结期(PTF)和批量周期键(LSK)计算计划窗口。
-
-    参数：
-        simulation_date: 当前仿真日期（审查日）
-        ptf: 计划冻结期（天）
-        lsk: 批量周期键（规划视窗天数）
-
-    返回：
-        Tuple[pd.Timestamp, pd.Timestamp]: (窗口起始日, 窗口结束日)
-
-    示例：
-        >>> compute_planning_window(pd.Timestamp('2024-01-01'), 2, 7)
-        (Timestamp('2024-01-03'), Timestamp('2024-01-09'))
-    """
-    return compute_shared_planning_window(simulation_date, ptf, lsk)
-
-
-def is_review_day(
-    simulation_date: pd.Timestamp,
-    simulation_start: pd.Timestamp,
-    lsk: int,
-    day: int
-) -> bool:
-    """判断是否为物料的审查日。
-
-    基于LSK周期和首次审查偏移判断当前日期是否为审查日。
-
-    参数：
-        simulation_date: 当前仿真日期
-        simulation_start: 仿真起始日期
-        lsk: 审查间隔天数
-        day: 首次审查相对起始的偏移天数
-
-    返回：
-        bool: 若是审查日返回True
-    """
-    return is_offset_review_day(simulation_date, simulation_start, lsk, day)
 
 
 def dedup_issues(issues: List[dict]) -> List[dict]:

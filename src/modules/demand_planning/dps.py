@@ -12,7 +12,7 @@ import time
 import numpy as np
 import pandas as pd
 
-from .normalization import normalize_identifiers
+from ...utils.normalization import normalize_identifiers
 
 
 def apply_dps(df: pd.DataFrame, dps_cfg: pd.DataFrame) -> pd.DataFrame:
@@ -70,7 +70,6 @@ def apply_dps(df: pd.DataFrame, dps_cfg: pd.DataFrame) -> pd.DataFrame:
     out['quantity'] = out['quantity'].astype(int)
 
     elapsed = time.perf_counter() - t0
-    print(f"[M1] DPS拆分完成，条目: {len(out)}，耗时: {elapsed:.3f}s")
 
     return normalize_identifiers(out)
 
@@ -109,9 +108,5 @@ def apply_supply_choice(
     out = m[['material', 'location', 'week', 'quantity']]
 
     elapsed = time.perf_counter() - t0
-    print(
-        f"[M1] SupplyChoice调整完成，条目: {len(out)}，"
-        f"耗时: {elapsed:.3f}s"
-    )
 
     return normalize_identifiers(out)

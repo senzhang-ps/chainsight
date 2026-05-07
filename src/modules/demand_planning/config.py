@@ -11,7 +11,7 @@ from typing import Any, Dict, Optional, Tuple
 
 import pandas as pd
 
-from .normalization import normalize_identifiers
+from ...utils.normalization import normalize_identifiers
 
 
 def load_config(

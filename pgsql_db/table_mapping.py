@@ -228,18 +228,9 @@ def get_all_output_tables() -> List[str]:
 
 def print_table_mapping():
     """打印表映射关系"""
-    print("\n" + "=" * 70)
-    print("📋 配置表映射关系")
-    print("=" * 70)
-    print(f"{'Excel Sheet':<40} {'数据库表名':<30}")
-    print("-" * 70)
     for sheet, table in CONFIG_TABLE_MAPPING.items():
-        print(f"{sheet:<40} {table:<30}")
+        pass
     
-    print("\n" + "=" * 70)
-    print("📋 输出表映射关系")
-    print("=" * 70)
     for module, tables in OUTPUT_TABLE_MAPPING.items():
-        print(f"\n📁 {module}:")
         for pattern, table in tables.items():
-            print(f"   {pattern:<45} → {table}")
+            pass

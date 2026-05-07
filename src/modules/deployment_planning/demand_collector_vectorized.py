@@ -19,7 +19,7 @@ from typing import Dict, List, Optional, Tuple, Set
 import numpy as np
 import pandas as pd
 
-from .constants import DEFAULT_MOQ, DEFAULT_RV
+from .constants import DEFAULT_MOQ, DEFAULT_RV, M5_DEFAULT_HORIZON_DAYS
 
 
 def collect_demands_batch_vectorized(
@@ -91,7 +91,6 @@ def collect_demands_batch_vectorized(
     )
     
     elapsed = time.perf_counter() - t_start
-    # print(f"[M5] Batch demand collection: {elapsed:.3f}s for {len(pairs)} pairs")
     
     return result
 
@@ -114,11 +113,11 @@ def _batch_get_upstream_horizon(
     
     # 默认值
     nodes_df['upstream'] = ''
-    nodes_df['horizon'] = 7  # 默认 horizon
+    nodes_df['horizon'] = M5_DEFAULT_HORIZON_DAYS  # 默认 horizon
     nodes_df['leadtime'] = 0
-    
+
     if network_df.empty:
-        nodes_df['horizon_end'] = sim_date + timedelta(days=7)
+        nodes_df['horizon_end'] = sim_date + timedelta(days=M5_DEFAULT_HORIZON_DAYS)
         return nodes_df
     
     # 准备 network 数据
@@ -157,7 +156,7 @@ def _batch_get_upstream_horizon(
         nodes_df['horizon'] = horizons
     else:
         # 无缓存时使用默认值
-        nodes_df['horizon'] = 7
+        nodes_df['horizon'] = M5_DEFAULT_HORIZON_DAYS
     
     # 优化：向量化计算leadtime（替代apply）
     # 有upstream时使用horizon，否则为0
@@ -176,7 +175,7 @@ def _batch_get_upstream_horizon(
 def _get_horizon_from_cache(upstream: str, location: str, lead_time_cache: dict) -> int:
     """从缓存获取horizon值（辅助函数）。"""
     if not upstream or str(upstream).strip() == '':
-        return 7  # 根节点默认
+        return M5_DEFAULT_HORIZON_DAYS  # 根节点默认
     key = (str(upstream), str(location))
     if key in lead_time_cache:
         vals = lead_time_cache[key]
@@ -186,7 +185,7 @@ def _get_horizon_from_cache(upstream: str, location: str, lead_time_cache: dict)
             return max(1, horizon)
         elif isinstance(vals, (int, float)):
             return max(1, int(vals))
-    return 7
+    return M5_DEFAULT_HORIZON_DAYS
 
 
 def _batch_collect_sdl_demands(

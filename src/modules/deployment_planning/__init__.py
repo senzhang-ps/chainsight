@@ -18,13 +18,6 @@ Deployment Planning Module (部署规划模块)
 - ReceivingSpace：按 (receiving, date) 维护 max_qty
 - Network：按 (material, location) 维护 sourcing
 """
-# 规范化函数
-from .normalizer import (
-    normalize_identifiers,
-    normalize_location,
-    normalize_material,
-)
-
 # 数据加载函数
 from .data_loader import (
     load_config,
@@ -46,16 +39,15 @@ from .inventory import (
 
 # 缓存工具函数
 from .cache_utils import (
-    build_ptf_lsk_cache,
     build_lead_time_cache,
     build_active_network_cache,
-    get_ptf_lsk,
     get_upstream,
     get_active_network,
     assign_location_layers,
     determine_lead_time,
     get_sending_location_type,
 )
+from src.utils.ptf_lsk import build_ptf_lsk_cache, get_ptf_lsk
 
 # 需求收集函数
 from .demand_collector import collect_node_demands
@@ -75,13 +67,9 @@ from .push_allocation import push_softpush_allocation
 from .validation import validate_config_before_run, log_outputs
 
 # 主函数
-from .main import main
+from .main import run_daily_deployment_planning
 
 __all__ = [
-    # 规范化函数
-    'normalize_identifiers',
-    'normalize_location',
-    'normalize_material',
     # 数据加载函数
     'load_config',
     'load_integrated_config',
@@ -118,5 +106,5 @@ __all__ = [
     'validate_config_before_run',
     'log_outputs',
     # 主函数
-    'main',
+    'run_daily_deployment_planning',
 ]

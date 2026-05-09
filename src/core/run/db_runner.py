@@ -417,13 +417,22 @@ def _run_with_database(ns: argparse.Namespace) -> int:
         # 必须使用与模块数据相同的 run_id 进行过滤，否则查不到数据
         logger.info(f"[DATA] 从数据库生成 Summary 汇总报告（run_id={run_id}）...")
         summary_success = False
+        summary_results = {}
         try:
-            writer.generate_summary_reports_from_db(
+            summary_results = writer.generate_summary_reports_from_db(
                 run_id=run_id,
                 start_date=start_date,
                 end_date=end_date,
                 if_exists='replace'
             )
+            failed_summary_tables = [
+                name for name, rows in summary_results.items()
+                if isinstance(rows, int) and rows < 0
+            ]
+            if failed_summary_tables:
+                raise RuntimeError(
+                    "Summary 表生成失败: " + ", ".join(failed_summary_tables)
+                )
             summary_success = True
         except Exception as summary_err:
             logger.error(f"[ERROR] Summary 汇总报告生成失败: {summary_err}")
@@ -435,12 +444,38 @@ def _run_with_database(ns: argparse.Namespace) -> int:
         # 但此时 Summary 表尚未生成，导致状态不一致
         if db is not None:
             from pgsql_db.checkpoint import update_checkpoint_status
+            def _update_checkpoint_status_with_retry(status: str, error_message: str | None = None) -> None:
+                last_err = None
+                for attempt in range(3):
+                    try:
+                        update_checkpoint_status(db, run_id, status, error_message=error_message)
+                        return
+                    except Exception as cp_err:
+                        last_err = cp_err
+                        try:
+                            db.close()
+                        except Exception:
+                            pass
+                        if attempt < 2:
+                            wait_seconds = 5 * (2 ** attempt)
+                            logger.warning(
+                                f"[WARN] 更新 checkpoint 状态失败，{wait_seconds}s 后重试 "
+                                f"({attempt + 1}/3, run_id={run_id}): {cp_err}"
+                            )
+                            time.sleep(wait_seconds)
+                raise last_err
+
             if summary_success:
-                update_checkpoint_status(db, run_id, 'completed')
+                _update_checkpoint_status_with_retry('completed')
                 logger.info(f"[OK] 运行状态已更新为 completed（所有 Summary 已生成，run_id={run_id}）")
             else:
-                update_checkpoint_status(db, run_id, 'failed', error_message='Summary 汇总报告生成失败')
+                _update_checkpoint_status_with_retry(
+                    'failed',
+                    error_message='Summary 汇总报告生成失败'
+                )
                 logger.warning(f"[WARN] 运行状态已更新为 failed（Summary 生成失败，run_id={run_id}）")
+                _run_completed = True
+                return 1
         
         db_write_time = time.time() - db_write_start
         logger.info(f"[TIME]  数据库写入耗时: {db_write_time:.2f}秒")

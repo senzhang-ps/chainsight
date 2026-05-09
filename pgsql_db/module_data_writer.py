@@ -3,6 +3,7 @@
 将各Module的输入/输出数据写入PostgreSQL数据库
 """
 
+import logging
 import pandas as pd
 from pathlib import Path
 from typing import Dict, List, Optional, Any
@@ -10,9 +11,11 @@ import time
 import os
 from datetime import datetime
 
-from psycopg import sql
+from psycopg import errors, sql
 from .db_connection import DatabaseConnection
 from .table_schemas import MODULE6_OUTPUT_SCHEMAS, get_columns
+
+_summary_logger = logging.getLogger("SupplyChainSimulation")
 
 
 class ModuleDataWriter:
@@ -29,6 +32,22 @@ class ModuleDataWriter:
         self.db = db
         self.config_name = config_name
         self.written_tables: Dict[str, Dict] = {}
+
+    def _read_table_for_run(self, table_name: str, run_id: str | None = None) -> pd.DataFrame:
+        """Read only the current run when the table has run_id metadata."""
+        if not run_id:
+            return self.db.read_table(table_name)
+
+        try:
+            return self.db.read_table(table_name, filters={"run_id": run_id})
+        except errors.UndefinedColumn:
+            # Older tables may not have run_id. Fall back to the legacy behavior.
+            df = self.db.read_table(table_name)
+            if "run_id" in df.columns:
+                return df[df["run_id"] == run_id].reset_index(drop=True)
+            return df
+        except errors.UndefinedTable:
+            return pd.DataFrame()
     
     def truncate_output_tables(self, run_id: str = None) -> int:
         """
@@ -98,6 +117,31 @@ class ModuleDataWriter:
         ]
 
         deleted_count = 0
+
+        for table_name in output_tables:
+            try:
+                with self.db.get_cursor() as cursor:
+                    cursor.execute("""
+                        SELECT EXISTS (
+                            SELECT FROM information_schema.tables
+                            WHERE table_schema = 'public'
+                            AND table_name = %s
+                        )
+                    """, (table_name,))
+                    exists = cursor.fetchone()[0]
+
+                    if exists:
+                        cursor.execute(
+                            sql.SQL('DELETE FROM {} WHERE run_id = %s').format(
+                                sql.Identifier(table_name)
+                            ),
+                            (run_id,)
+                        )
+                        deleted_count += 1
+            except Exception:
+                pass
+
+        return deleted_count
 
     # 所有输出表的完整列表（类级别常量，供预建表和清理复用）
     ALL_OUTPUT_TABLES = [
@@ -181,35 +225,6 @@ class ModuleDataWriter:
         else:
             pass
         return created
-
-        try:
-            with self.db.get_cursor() as cursor:
-                for table_name in output_tables:
-                    try:
-                        # 检查表是否存在
-                        cursor.execute("""
-                            SELECT EXISTS (
-                                SELECT FROM information_schema.tables
-                                WHERE table_schema = 'public'
-                                AND table_name = %s
-                            )
-                        """, (table_name,))
-                        exists = cursor.fetchone()[0]
-
-                        if exists:
-                            cursor.execute(
-                                f'DELETE FROM "{table_name}" WHERE run_id = %s',
-                                (run_id,)
-                            )
-                            deleted_count += 1
-                    except Exception as e:
-                        pass
-
-
-        except Exception as e:
-            pass
-
-        return deleted_count
 
     def prepare_orchestrator_day_dataframes(
         self,
@@ -1230,7 +1245,10 @@ class ModuleDataWriter:
             )
         except Exception as e:
             results['summary_output_ordershipmentcutsummary'] = -1
-        
+            _summary_logger.exception(
+                f"[ERROR] Summary 子表生成失败 summary_output_ordershipmentcutsummary: {e}"
+            )
+
         # 2. 生成 changeover 汇总报告
         try:
             results['summary_output_fullchangeoverlog'] = self._generate_changeover_summary(
@@ -1238,7 +1256,10 @@ class ModuleDataWriter:
             )
         except Exception as e:
             results['summary_output_fullchangeoverlog'] = -1
-        
+            _summary_logger.exception(
+                f"[ERROR] Summary 子表生成失败 summary_output_fullchangeoverlog: {e}"
+            )
+
         # 3. 生成 capacity_exceed 汇总报告
         try:
             results['summary_output_fullcapacityexceed'] = self._generate_capacity_exceed_summary(
@@ -1246,7 +1267,10 @@ class ModuleDataWriter:
             )
         except Exception as e:
             results['summary_output_fullcapacityexceed'] = -1
-        
+            _summary_logger.exception(
+                f"[ERROR] Summary 子表生成失败 summary_output_fullcapacityexceed: {e}"
+            )
+
         # 4. 生成 production_plan 汇总报告
         try:
             results['summary_output_fullproductionplan'] = self._generate_production_plan_summary(
@@ -1254,7 +1278,10 @@ class ModuleDataWriter:
             )
         except Exception as e:
             results['summary_output_fullproductionplan'] = -1
-        
+            _summary_logger.exception(
+                f"[ERROR] Summary 子表生成失败 summary_output_fullproductionplan: {e}"
+            )
+
         # 5. 生成 deployment_plan 汇总报告
         try:
             results['summary_output_fulldeploymentplan'] = self._generate_deployment_plan_summary(
@@ -1262,7 +1289,10 @@ class ModuleDataWriter:
             )
         except Exception as e:
             results['summary_output_fulldeploymentplan'] = -1
-        
+            _summary_logger.exception(
+                f"[ERROR] Summary 子表生成失败 summary_output_fulldeploymentplan: {e}"
+            )
+
         # 6. 生成 delivery_plan 汇总报告
         try:
             results['summary_output_fulldeliveryplan'] = self._generate_delivery_plan_summary(
@@ -1270,7 +1300,10 @@ class ModuleDataWriter:
             )
         except Exception as e:
             results['summary_output_fulldeliveryplan'] = -1
-        
+            _summary_logger.exception(
+                f"[ERROR] Summary 子表生成失败 summary_output_fulldeliveryplan: {e}"
+            )
+
         # 7. 生成 truck_usage 汇总报告
         try:
             results['summary_output_fulltruckusage'] = self._generate_truck_usage_summary(
@@ -1278,6 +1311,9 @@ class ModuleDataWriter:
             )
         except Exception as e:
             results['summary_output_fulltruckusage'] = -1
+            _summary_logger.exception(
+                f"[ERROR] Summary 子表生成失败 summary_output_fulltruckusage: {e}"
+            )
         
         elapsed = time.time() - start_time
         total_tables = sum(1 for v in results.values() if isinstance(v, int) and v >= 0)
@@ -1296,18 +1332,18 @@ class ModuleDataWriter:
         table_name = "summary_output_ordershipmentcutsummary"
         
         try:
-            orders_df = self.db.read_table("module1_output_orderlog")
-        except:
+            orders_df = self._read_table_for_run("module1_output_orderlog", run_id)
+        except errors.UndefinedTable:
             orders_df = pd.DataFrame()
         
         try:
-            shipments_df = self.db.read_table("module1_output_shipmentlog")
-        except:
+            shipments_df = self._read_table_for_run("module1_output_shipmentlog", run_id)
+        except errors.UndefinedTable:
             shipments_df = pd.DataFrame()
         
         try:
-            cuts_df = self.db.read_table("module1_output_cutlog")
-        except:
+            cuts_df = self._read_table_for_run("module1_output_cutlog", run_id)
+        except errors.UndefinedTable:
             cuts_df = pd.DataFrame()
         
         if run_id:
@@ -1338,6 +1374,12 @@ class ModuleDataWriter:
                     df_ref['simulation_date'] = config_sim_date
                 elif 'simulation_date' not in df_ref.columns and 'sim_date' in df_ref.columns:
                     df_ref['simulation_date'] = df_ref['sim_date']
+                # 统一 simulation_date 类型为 datetime，避免三张 DF 来源不同
+                # （DB 列类型 TEXT vs TIMESTAMP）导致 merge 时 dtype 不一致而失败
+                if 'simulation_date' in df_ref.columns:
+                    df_ref['simulation_date'] = pd.to_datetime(
+                        df_ref['simulation_date'], errors='coerce'
+                    )
         
         # 去重（与 Dev 一致：按 date, material, location, quantity, simulation_date [+ demand_type]）
         if not orders_df.empty:
@@ -1429,8 +1471,8 @@ class ModuleDataWriter:
         table_name = "summary_output_fullchangeoverlog"
         
         try:
-            df = self.db.read_table("module4_output_changeoverlog")
-        except:
+            df = self._read_table_for_run("module4_output_changeoverlog", run_id)
+        except errors.UndefinedTable:
             return 0
         
         if df.empty:
@@ -1491,8 +1533,8 @@ class ModuleDataWriter:
         table_name = "summary_output_fullcapacityexceed"
         
         try:
-            df = self.db.read_table("module4_output_capacityexceed")
-        except:
+            df = self._read_table_for_run("module4_output_capacityexceed", run_id)
+        except errors.UndefinedTable:
             return 0
         
         if df.empty:
@@ -1530,8 +1572,8 @@ class ModuleDataWriter:
         table_name = "summary_output_fullproductionplan"
         
         try:
-            df = self.db.read_table("module4_output_productionplan")
-        except:
+            df = self._read_table_for_run("module4_output_productionplan", run_id)
+        except errors.UndefinedTable:
             return 0
         
         if df.empty:
@@ -1568,8 +1610,8 @@ class ModuleDataWriter:
         table_name = "summary_output_fulldeploymentplan"
         
         try:
-            df = self.db.read_table("module5_output_deploymentplan")
-        except:
+            df = self._read_table_for_run("module5_output_deploymentplan", run_id)
+        except errors.UndefinedTable:
             return 0
         
         if df.empty:
@@ -1618,8 +1660,8 @@ class ModuleDataWriter:
         table_name = "summary_output_fulldeliveryplan"
         
         try:
-            df = self.db.read_table("module6_output_deliveryplan")
-        except:
+            df = self._read_table_for_run("module6_output_deliveryplan", run_id)
+        except errors.UndefinedTable:
             return 0
         
         if df.empty:
@@ -1668,8 +1710,8 @@ class ModuleDataWriter:
         table_name = "summary_output_fulltruckusage"
         
         try:
-            df = self.db.read_table("module6_output_truckusagelog")
-        except:
+            df = self._read_table_for_run("module6_output_truckusagelog", run_id)
+        except errors.UndefinedTable:
             return 0
         
         if df.empty:

@@ -54,7 +54,7 @@ class DatabaseConnection:
     
     def connect(self) -> psycopg.Connection:
         """建立数据库连接（autocommit=True 模式）
-        
+
          使用 autocommit=True 确保 conn.transaction() 始终创建真正的
         BEGIN...COMMIT 事务块。在 autocommit=False（psycopg3 默认值）下，
         任何先前的 SQL 语句（包括 SELECT）都会隐式开启事务，导致后续的
@@ -62,23 +62,35 @@ class DatabaseConnection:
         只发出 RELEASE SAVEPOINT 而非 COMMIT，数据不会持久化到磁盘。
         进程被 KeyboardInterrupt 终止后，PostgreSQL 回滚整个未提交的外层事务，
         所有已写入的数据全部丢失。
-        
+
         使用 autocommit=True 后：
         - conn.transaction() 始终发出 BEGIN...COMMIT（数据真正持久化）
         - 每次 flush 的数据在事务退出时即刻可见且不可丢失
         - 无需在 conn.transaction() 前手动 conn.commit() 清理隐式事务
         """
-        if self._connection is None or self._connection.closed:
-            self._connection = psycopg.connect(
-                host=self.host,
-                port=self.port,
-                dbname=self.database,
-                user=self.user,
-                password=self.password,
-                client_encoding='UTF8',
-                autocommit=True,
-            )
-        return self._connection
+        if self._connection is not None and not self._connection.closed:
+            return self._connection
+        # 重试退避：Summary 等长查询结束后 PostgreSQL 可能短暂繁忙
+        last_err = None
+        for attempt in range(3):
+            try:
+                self._connection = psycopg.connect(
+                    host=self.host,
+                    port=self.port,
+                    dbname=self.database,
+                    user=self.user,
+                    password=self.password,
+                    client_encoding='UTF8',
+                    autocommit=True,
+                    connect_timeout=30,
+                )
+                return self._connection
+            except (psycopg.OperationalError, psycopg.errors.ConnectionTimeout) as e:
+                last_err = e
+                self._connection = None
+                if attempt < 2:
+                    time.sleep(5 * (2 ** attempt))  # 5s, 10s
+        raise last_err
     
     def close(self):
         """关闭数据库连接"""
@@ -793,10 +805,28 @@ class DatabaseConnection:
         if indexes_created:
             pass
     
-    def read_table(self, table_name: str) -> pd.DataFrame:
-        """读取表数据到DataFrame"""
+    def read_table(self, table_name: str, filters: Optional[Dict[str, Any]] = None) -> pd.DataFrame:
+        """读取表数据到DataFrame，可选按列等值过滤。"""
+        query = sql.SQL("SELECT * FROM {}").format(sql.Identifier(table_name))
+        params = None
+        if filters:
+            conditions = []
+            params_list = []
+            for column, value in filters.items():
+                identifier = sql.Identifier(self._clean_name(str(column)))
+                if value is None:
+                    conditions.append(sql.SQL("{} IS NULL").format(identifier))
+                else:
+                    conditions.append(sql.SQL("{} = %s").format(identifier))
+                    params_list.append(value)
+            query = sql.SQL("SELECT * FROM {} WHERE {}").format(
+                sql.Identifier(table_name),
+                sql.SQL(" AND ").join(conditions),
+            )
+            params = tuple(params_list)
+
         with self.get_cursor(commit=False) as cursor:
-            cursor.execute(sql.SQL("SELECT * FROM {}").format(sql.Identifier(table_name)))
+            cursor.execute(query, params)
             columns = [desc[0] for desc in cursor.description]
             data = cursor.fetchall()
             return pd.DataFrame(data, columns=columns)

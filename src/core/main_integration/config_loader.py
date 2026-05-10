@@ -23,13 +23,15 @@ _EXCEL_SUFFIXES = {".xlsx", ".xlsm", ".xls"}
 def discover_csv_override_files(excel_path: str) -> tuple[dict, list[str]]:
     """解析某个 Excel 配置文件允许使用的 CSV 覆盖文件。
 
-    为避免一个目录下的通用命名 CSV（例如 ``M3_SafetyStock.csv``）误覆盖多个
-    Excel 配置文件，重构版仅支持两种安全模式：
+    支持两种来源（合并；显式子目录优先）：
 
     1. 显式专属目录：
        - ``<excel_stem>_csv/``
        - ``<excel_stem>.csv_overrides/``
-    2. 兼容旧行为，但仅在目录中只有这一个 Excel 文件时才启用同目录 ``*.csv``。
+    2. 同目录 ``*.csv``（不再要求目录中只有一个 Excel 文件）。
+
+    覆盖语义由调用方决定（当前 ``load_configuration`` 仅在 Excel 内对应 sheet
+    为空时才使用 CSV，所以多 Excel 共享同名 CSV 不会引发误覆盖）。
 
     Returns:
         tuple[dict, list[str]]:
@@ -48,12 +50,10 @@ def discover_csv_override_files(excel_path: str) -> tuple[dict, list[str]]:
         config_dir / f"{config_file.stem}_csv",
         config_dir / f"{config_file.stem}.csv_overrides",
     ]
-    explicit_found = False
 
     for override_dir in explicit_dirs:
         if not override_dir.is_dir():
             continue
-        explicit_found = True
         for csv_path in sorted(override_dir.glob("*.csv")):
             sheet_name = csv_path.stem
             if sheet_name in csv_files:
@@ -63,28 +63,12 @@ def discover_csv_override_files(excel_path: str) -> tuple[dict, list[str]]:
                 continue
             csv_files[sheet_name] = csv_path
 
-    if explicit_found or csv_files:
-        return csv_files, messages
+    # 同目录 *.csv：作为补充来源，不覆盖显式子目录中的同名 CSV
+    for csv_path in sorted(config_dir.glob("*.csv")):
+        sheet_name = csv_path.stem
+        if sheet_name not in csv_files:
+            csv_files[sheet_name] = csv_path
 
-    same_dir_csv_files = sorted(config_dir.glob("*.csv"))
-    if not same_dir_csv_files:
-        return csv_files, messages
-
-    excel_siblings = sorted(
-        p for p in config_dir.iterdir()
-        if p.is_file() and p.suffix.lower() in _EXCEL_SUFFIXES
-    )
-
-    if len(excel_siblings) == 1 and excel_siblings[0].resolve() == config_file:
-        for csv_path in same_dir_csv_files:
-            csv_files[csv_path.stem] = csv_path
-        return csv_files, messages
-
-    messages.append(
-        "检测到当前目录存在多个 Excel 配置文件，已跳过目录级 CSV 覆盖。"
-        f" 若需为 {config_file.name} 启用 CSV 覆盖，请将 CSV 放入专属目录 "
-        f"{config_file.stem}_csv\\"
-    )
     return csv_files, messages
 
 
@@ -348,8 +332,23 @@ def load_configuration(config_path: str) -> dict:
             config_dict[sheet_name] = xl.parse(sheet_name)
             logger.info(f"  ✅ [Excel] {sheet_name} ({len(config_dict[sheet_name])} 行)")
 
-        # 汇总（CSV 覆盖机制已禁用，与 Dev 版本保持一致：仅从 Excel 加载）
-        logger.info(f"📊 配置加载汇总: 共 {len(xl.sheet_names)} 个配置表 (Excel: {len(xl.sheet_names)})")
+        # CSV 覆盖：仅当 Excel 中对应 sheet 为空时，才使用同名 CSV 数据
+        csv_messages: list[str] = []
+        csv_overrides = load_csv_overrides(config_path, csv_messages)
+        for msg in csv_messages:
+            logger.info(f"  ℹ️ {msg}")
+        applied_csv_count = 0
+        for sheet_name, csv_df in csv_overrides.items():
+            existing = config_dict.get(sheet_name)
+            if existing is None or (isinstance(existing, pd.DataFrame) and existing.empty):
+                config_dict[sheet_name] = csv_df
+                applied_csv_count += 1
+                logger.info(f"  ✅ [CSV] {sheet_name} ({len(csv_df)} 行) — Excel 中该 sheet 为空，使用 CSV 数据")
+
+        logger.info(
+            f"📊 配置加载汇总: 共 {len(config_dict)} 个配置表 "
+            f"(Excel: {len(xl.sheet_names)}, CSV 覆盖空 sheet: {applied_csv_count})"
+        )
 
         # 确保必要的配置表存在
         required_sheets = [

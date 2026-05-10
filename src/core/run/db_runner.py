@@ -48,7 +48,7 @@ def _find_local_config_file(config_name: str) -> Path | None:
 
 
 def _build_expected_local_config(config_name: str) -> dict:
-    """构建本地期望配置（仅 Excel，保持与 Dev 一致）。"""
+    """构建本地期望配置（Excel + CSV 覆盖空 sheet，与文件模式语义一致）。"""
     config_file = _find_local_config_file(config_name)
     if config_file is None:
         return {}
@@ -61,10 +61,20 @@ def _build_expected_local_config(config_name: str) -> dict:
         ExcelImporter._patch_openpyxl_font_family()
         xl = pd.ExcelFile(str(config_file))
 
-    expected = {}
-
+    sheet_data: dict[str, pd.DataFrame] = {}
     for sheet_name in xl.sheet_names:
-        df = xl.parse(sheet_name)
+        sheet_data[sheet_name] = xl.parse(sheet_name)
+
+    # CSV 覆盖：仅当 Excel 中对应 sheet 为空时使用同名 CSV，保持与 load_configuration 一致
+    from src.core.main_integration.config_loader import load_csv_overrides
+    csv_overrides = load_csv_overrides(str(config_file))
+    for sheet_name, csv_df in csv_overrides.items():
+        existing = sheet_data.get(sheet_name)
+        if existing is None or existing.empty:
+            sheet_data[sheet_name] = csv_df
+
+    expected = {}
+    for sheet_name, df in sheet_data.items():
         table_name = table_mapping.get_config_table_name(sheet_name)
         db_key = table_name[4:] if table_name.startswith("cfg_") else table_name
         expected[db_key] = df

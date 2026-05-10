@@ -51,7 +51,8 @@ def expand_forecast_to_days_integer_split(
         (demand_weekly['week'] - 1) * 7, unit='D'
     )
 
-    # 计算每日基础数量和余数
+    # 计算每日基础数量和余数（NaN quantity 视为 0）
+    demand_weekly['quantity'] = demand_weekly['quantity'].fillna(0)
     demand_weekly['base_qty'] = (demand_weekly['quantity'] // 7).astype(int)
     demand_weekly['remainder'] = (demand_weekly['quantity'] % 7).astype(int)
 

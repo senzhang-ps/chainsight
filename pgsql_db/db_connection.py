@@ -576,7 +576,8 @@ class DatabaseConnection:
             # 注意：某些包含 "date" 的列可能存储 "ALL" 等特殊值，需要使用 TEXT
             # `file_date` 和 `sim_date` 作为标识符使用 `TEXT` 类型（格式：YYYYMMDD）
             date_specific_names = [
-                'start_date', 'end_date', 'order_date', 'delivery_date', 
+                'date',
+                'start_date', 'end_date', 'order_date', 'delivery_date',
                 'ship_date', 'arrival_date', 'due_date', 'created_date',
                 'updated_date', 'forecast_date', 'plan_date', 'production_plan_date'
             ]
@@ -654,7 +655,13 @@ class DatabaseConnection:
         int_col_indices = set()
         float_col_indices = set()
         text_col_indices = set()
-        
+        datetime_col_indices = set()
+
+        _TIMESTAMP_TYPES = {
+            'TIMESTAMP', 'TIMESTAMP WITHOUT TIME ZONE', 'TIMESTAMP WITH TIME ZONE',
+            'DATE',
+        }
+
         for col_name, col_type in col_types.items():
             if col_name in col_name_to_idx:
                 idx = col_name_to_idx[col_name]
@@ -665,10 +672,16 @@ class DatabaseConnection:
                     float_col_indices.add(idx)
                 elif ct_upper in ('TEXT', 'VARCHAR', 'CHARACTER VARYING', 'CHAR', 'CHARACTER'):
                     text_col_indices.add(idx)
-        
+                elif ct_upper in _TIMESTAMP_TYPES:
+                    datetime_col_indices.add(idx)
+
         # 准备插入数据
         records = df.values.tolist()
-        
+
+        # Excel 序列日期 epoch（1899-12-30）
+        from datetime import timedelta as _timedelta
+        _EXCEL_EPOCH = datetime(1899, 12, 30)
+
         # 处理NaN值和数据类型转换
         import numpy as np
         for i, row in enumerate(records):
@@ -698,6 +711,15 @@ class DatabaseConnection:
                         new_row.append(str(val))
                     else:
                         new_row.append(str(val) if val is not None else None)
+                elif j in datetime_col_indices:
+                    # Excel 将日期存为整数序列号时，转换为 datetime；已是 datetime 则直接使用
+                    if isinstance(val, (int, float, np.integer, np.floating)):
+                        try:
+                            new_row.append(_EXCEL_EPOCH + _timedelta(days=float(val)))
+                        except (ValueError, OverflowError):
+                            new_row.append(None)
+                    else:
+                        new_row.append(val)
                 else:
                     new_row.append(val)
             records[i] = tuple(new_row)

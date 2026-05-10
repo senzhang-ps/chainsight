@@ -483,6 +483,10 @@ class DatabaseConnection:
                 self._clean_name(str(col)): df[col].dtype
                 for col in df.columns
             }
+            # cleaned name -> 原始列名映射，用于按 cleaned name 取回原列数据
+            df_clean_to_orig = {
+                self._clean_name(str(col)): col for col in df.columns
+            }
             
             # 如果现有表缺少db_write_time列，自动添加
             if 'db_write_time' not in existing_cols and 'db_write_time' in df_cols:
@@ -494,6 +498,9 @@ class DatabaseConnection:
             
             # 列类型升级：BIGINT → DOUBLE PRECISION（防止浮点数截断）
             INT_TYPES = {'BIGINT', 'INTEGER', 'SMALLINT', 'INT', 'INT4', 'INT8', 'INT2'}
+            DATE_LIKE_TYPES = {
+                'DATE', 'TIMESTAMP', 'TIMESTAMP WITHOUT TIME ZONE', 'TIMESTAMP WITH TIME ZONE',
+            }
             for col_name in (df_cols & existing_cols):  # 仅检查已存在的公共列
                 df_dtype = df_col_types.get(col_name)
                 if df_dtype is None:
@@ -510,6 +517,29 @@ class DatabaseConnection:
                             sql.Identifier(col_name),
                             sql.Identifier(col_name)
                         ))
+                # DataFrame 期望 TEXT、DB 现有列是 DATE/TIMESTAMP：数据驱动判断
+                # - 全部值都能解析为日期 → 保持 DATE/TIMESTAMP，让真日期字符串如 "2026-04-01" 直接 COPY
+                # - 含非日期值（如 "ALL" 通配符）→ ALTER 到 TEXT
+                elif expected_pg_type == 'TEXT' and existing_pg_type in DATE_LIKE_TYPES:
+                    orig_col = df_clean_to_orig.get(col_name)
+                    needs_demote = True
+                    if orig_col is not None:
+                        non_null = df[orig_col].dropna()
+                        if non_null.empty:
+                            needs_demote = False
+                        else:
+                            parsed = pd.to_datetime(non_null.astype(str), errors='coerce')
+                            if not parsed.isna().any():
+                                needs_demote = False
+                    if needs_demote:
+                        with self.get_cursor() as cursor:
+                            cursor.execute(sql.SQL("""
+                                ALTER TABLE {} ALTER COLUMN {} TYPE TEXT USING {}::TEXT
+                            """).format(
+                                sql.Identifier(table_name),
+                                sql.Identifier(col_name),
+                                sql.Identifier(col_name)
+                            ))
             
             # 检查DataFrame的列是否都在现有表中（允许现有表有额外列）
             missing_cols = df_cols - existing_cols
@@ -576,7 +606,6 @@ class DatabaseConnection:
             # 注意：某些包含 "date" 的列可能存储 "ALL" 等特殊值，需要使用 TEXT
             # `file_date` 和 `sim_date` 作为标识符使用 `TEXT` 类型（格式：YYYYMMDD）
             date_specific_names = [
-                'date',
                 'start_date', 'end_date', 'order_date', 'delivery_date',
                 'ship_date', 'arrival_date', 'due_date', 'created_date',
                 'updated_date', 'forecast_date', 'plan_date', 'production_plan_date'

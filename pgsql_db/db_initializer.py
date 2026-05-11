@@ -234,6 +234,14 @@ class DatabaseInitializer:
                 config_file = search_path / name
                 if config_file.exists():
                     return config_file
+
+            for name in possible_names:
+                try:
+                    matches = sorted(search_path.rglob(name))
+                except OSError:
+                    continue
+                if matches:
+                    return matches[0]
         
         return None
     

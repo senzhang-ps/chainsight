@@ -874,6 +874,17 @@ class ModuleDataWriter:
         sim_dates = pd.to_datetime(filtered['simulation_date'], errors='coerce').dt.strftime('%Y-%m-%d')
         return filtered[sim_dates == day_sim_date].copy()
 
+    def _zero_fill_quantity_for_db(self, df: pd.DataFrame, table_name: str) -> pd.DataFrame:
+        """Normalize nullable order quantities at the DB write boundary."""
+        if df.empty or table_name != 'module1_output_orderlog' or 'quantity' not in df.columns:
+            return df
+
+        cleaned = df.copy()
+        quantity = pd.to_numeric(cleaned['quantity'], errors='coerce')
+        quantity = quantity.mask(quantity.isin([float('inf'), float('-inf')]), 0)
+        cleaned['quantity'] = quantity.fillna(0)
+        return cleaned
+
     def prepare_batch_dataframes(
         self,
         all_results: Dict[str, Any],
@@ -979,6 +990,7 @@ class ModuleDataWriter:
                     combined_df['db_write_time'] = datetime.now()
                 else:
                     combined_df['db_write_time'] = pd.Series(dtype='datetime64[ns]')
+                combined_df = self._zero_fill_quantity_for_db(combined_df, table_name)
                 # 清理列名
                 clean_columns = [self._clean_name(str(col)) for col in combined_df.columns]
                 combined_df.columns = clean_columns
@@ -1156,6 +1168,7 @@ class ModuleDataWriter:
                         combined_df['run_id'] = run_id
 
                 # 写入数据库 (即使 combined_df.empty 也会创建表结构，传入config_name)
+                combined_df = self._zero_fill_quantity_for_db(combined_df, table_name)
                 try:
                     self.db.create_table_from_df(combined_df, table_name, if_exists, config_name=self.config_name)
                     results[table_name] = len(combined_df)

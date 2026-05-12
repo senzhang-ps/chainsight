@@ -118,4 +118,4 @@ def _cleanup_data_files(output_dir: str, log_dir: Path):
                 except:
                     pass
         except Exception as e:
-            break
+            raise e

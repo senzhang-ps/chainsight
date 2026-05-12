@@ -887,6 +887,13 @@ class DatabaseConnection:
         with self.get_cursor(commit=False) as cursor:
             cursor.execute(query, params)
             return cursor.fetchall()
+
+    def execute_query_df(self, query: str, params: tuple = None) -> pd.DataFrame:
+        """执行查询并以带列名的DataFrame返回结果。"""
+        with self.get_cursor(commit=False) as cursor:
+            cursor.execute(query, params)
+            columns = [desc[0] for desc in cursor.description] if cursor.description else []
+            return pd.DataFrame(cursor.fetchall(), columns=columns)
     
     def execute_non_query(self, query: str, params: tuple = None):
         """执行非查询语句（INSERT, UPDATE, DELETE等）"""

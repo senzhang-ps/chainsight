@@ -31,6 +31,49 @@ from .memory_store import (_ensure_memory_store_imported, _enable_memory_mode,
 from .db_helpers import _flush_batch_to_db
 
 
+_M1_ORDER_DATE_COLS = {
+    'simulation_date',
+    'order_date',
+    'delivery_date',
+    'ship_date',
+    'available_date',
+    'date',
+    'created_date',
+    'sim_date',
+}
+
+
+def _load_m1_previous_orders_from_db(db, run_id: str, last_batch_end: str) -> pd.DataFrame:
+    """从DB orderlog回退恢复Module1历史订单，并保留原始列名。"""
+    fallback_sql = (
+        "SELECT * FROM module1_output_orderlog "
+        "WHERE run_id = %s AND sim_date <= %s"
+    )
+    previous_orders = db.execute_query_df(fallback_sql, (run_id, last_batch_end))
+    if previous_orders.empty:
+        return previous_orders
+
+    if 'quantity' not in previous_orders.columns:
+        raise RuntimeError(
+            "从DB orderlog恢复历史订单失败：查询结果缺少 quantity 列，"
+            f"实际列={list(previous_orders.columns)}"
+        )
+
+    for col in _M1_ORDER_DATE_COLS & set(previous_orders.columns):
+        previous_orders[col] = pd.to_datetime(previous_orders[col], errors='coerce')
+
+    previous_orders['quantity'] = pd.to_numeric(previous_orders['quantity'], errors='coerce')
+    bad_quantity = (
+        previous_orders['quantity'].isna()
+        | previous_orders['quantity'].isin([float('inf'), float('-inf')])
+    )
+    if bad_quantity.any():
+        bad_count = int(bad_quantity.sum())
+        raise RuntimeError(f"从DB orderlog恢复历史订单失败：quantity 存在 {bad_count} 条空值或非法值")
+
+    return previous_orders
+
+
 def run_integrated_simulation_from_dict(
     config_data: dict,
     config_name: str,
@@ -206,21 +249,13 @@ def run_integrated_simulation_from_dict(
             if db is not None:
                 try:
                     _prev_date = checkpoint['last_batch_end']  # 上一批次结束日（e.g. "2025-12-15"）
-                    _fallback_sql = (
-                        "SELECT * FROM module1_output_orderlog "
-                        "WHERE run_id = %s AND sim_date <= %s"
+                    _fallback_orders = _load_m1_previous_orders_from_db(
+                        db=db,
+                        run_id=run_id_override,
+                        last_batch_end=_prev_date,
                     )
-                    _fallback_rows = db.execute_query(_fallback_sql, (run_id_override, _prev_date))
-                    if _fallback_rows:
-                        m1_previous_orders = pd.DataFrame(_fallback_rows)
-                        # 规范化日期列
-                        from pgsql_db.checkpoint import deserialize_m1_previous_orders as _deserialize
-                        _DATE_COLS = {'simulation_date', 'order_date', 'delivery_date',
-                                      'ship_date', 'available_date', 'date', 'created_date'}
-                        for _col in _DATE_COLS & set(m1_previous_orders.columns):
-                            m1_previous_orders[_col] = pd.to_datetime(
-                                m1_previous_orders[_col], errors='coerce'
-                            )
+                    if not _fallback_orders.empty:
+                        m1_previous_orders = _fallback_orders
                         logger.info(f"  ✅ 从DB orderlog 回退恢复历史订单: {len(m1_previous_orders)} 条")
                     else:
                         logger.warning(f"  ⚠️ DB orderlog 中未找到 run_id={run_id_override} 的历史订单")

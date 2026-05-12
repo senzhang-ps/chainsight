@@ -1,0 +1,396 @@
+<mxfile host="Electron" agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) draw.io/29.3.0 Chrome/140.0.7339.249 Electron/38.7.2 Safari/537.36" version="29.3.0" pages="3">
+  <diagram id="m1-upgrade-main" name="M1 重构主链路">
+    <mxGraphModel dx="2120" dy="920" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1980" pageHeight="1050" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="p1_title" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;fontSize=22;fontStyle=1" value="&lt;b&gt;M1 重构后总流程：weekly CoV 生成周订单总量，再按 OrderCalendar 分配下单日&lt;/b&gt;" vertex="1">
+          <mxGeometry height="40" width="1420" x="40" y="20" as="geometry" />
+        </mxCell>
+        <mxCell id="p1_legend" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=12;align=left;spacing=8" value="蓝色：函数处理节点&lt;br&gt;绿色：输入 / 配置 / 状态读取&lt;br&gt;橙色：中间或最终数据对象&lt;br&gt;红色：下游消费 / 兼容边界" vertex="1">
+          <mxGeometry height="110" width="330" x="1470" as="geometry" />
+        </mxCell>
+        <mxCell id="p1_lane_cfg" parent="1" style="swimlane;html=1;startSize=30;horizontal=1;rounded=0;fillColor=#eef7ee;strokeColor=#82b366;fontStyle=1" value="&lt;b&gt;配置校验与 forecast 视图准备&lt;/b&gt;" vertex="1">
+          <mxGeometry height="230" width="1860" x="40" y="110" as="geometry" />
+        </mxCell>
+        <mxCell id="p1_cfg" parent="p1_lane_cfg" style="shape=cylinder3d;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12" value="&lt;b&gt;M1 配置输入&lt;/b&gt;&lt;br&gt;DemandForecast / ForecastError(COV) / OrderCalendar&lt;br&gt;AOConfig / DPSConfig / SupplyChoiceConfig" vertex="1">
+          <mxGeometry height="105" width="290" x="20" y="65" as="geometry" />
+        </mxCell>
+        <mxCell id="p1_entry" parent="p1_lane_cfg" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;fontStyle=1" value="&lt;b&gt;run_daily_order_generation()&lt;/b&gt;&lt;br&gt;入口签名保持不变" vertex="1">
+          <mxGeometry height="80" width="235" x="360" y="77.5" as="geometry" />
+        </mxCell>
+        <mxCell id="p1_validate" parent="p1_lane_cfg" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12" value="&lt;b&gt;_validate_config()&lt;/b&gt;&lt;br&gt;必填表检查 / 日期转换&lt;br&gt;负需求裁零 / 标识符标准化" vertex="1">
+          <mxGeometry height="105" width="270" x="675" y="65" as="geometry" />
+        </mxCell>
+        <mxCell id="p1_prepare" parent="p1_lane_cfg" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12" value="&lt;b&gt;_prepare_forecasts()&lt;/b&gt;&lt;br&gt;weekly_for_orders：DPS 后保留周级 forecast&lt;br&gt;daily_for_consumption：订单层兼容消耗基线&lt;br&gt;daily_for_supply：DPS + SupplyChoice 后供 SDL 使用" vertex="1">
+          <mxGeometry height="135" width="335" x="1010" y="50" as="geometry" />
+        </mxCell>
+        <mxCell id="p1_views" parent="p1_lane_cfg" style="shape=cylinder3d;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12" value="&lt;b&gt;三类 forecast 视图&lt;/b&gt;&lt;br&gt;weekly_for_orders&lt;br&gt;daily_for_consumption&lt;br&gt;daily_for_supply" vertex="1">
+          <mxGeometry height="105" width="220" x="1460" y="65" as="geometry" />
+        </mxCell>
+        <mxCell id="p1_lane_order" parent="1" style="swimlane;html=1;startSize=30;horizontal=1;rounded=0;fillColor=#f7fbff;strokeColor=#6c8ebf;fontStyle=1" value="&lt;b&gt;订单生成：总量与结构分别抽样，归一后按本周下单日分配&lt;/b&gt;" vertex="1">
+          <mxGeometry height="320" width="1860" x="30" y="380" as="geometry" />
+        </mxCell>
+        <mxCell id="p1_order_dates" parent="p1_lane_order" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12" value="&lt;b&gt;Step 1（嵌入 split_weekly_orders_to_daily）&lt;/b&gt;&lt;br&gt;&lt;b&gt;_normalized_calendar_dates() + _build_week_start_map()&lt;/b&gt;&lt;br&gt;基于 OrderCalendar 判断本周有几天下单日&lt;br&gt;valid_order_dates = [d for d in calendar if week_start≤d&lt;week_end]" vertex="1">
+          <mxGeometry height="110" width="250" x="50" y="65" as="geometry" />
+        </mxCell>
+        <mxCell id="p1_weekly_qty" parent="p1_lane_order" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=left;verticalAlign=top;spacing=6" value="&lt;b&gt;Step 2 generate_weekly_orders()（5 步内部时序，详见 page 2）&lt;/b&gt;&lt;br&gt;1. _build_weekly_ml_demand: 按 ml/week 聚合&lt;br&gt;2. _split_weekly_demand_by_ao_means: 用 AOConfig 拆 AO/normal 均值&lt;br&gt;3. _generate_weekly_total_orders: total CoV 抽周总量&lt;br&gt;4. _generate_weekly_component_orders: AO/normal CoV 抽临时数量&lt;br&gt;5. _reconcile_weekly_component_orders_to_total: 归一回总量" vertex="1">
+          <mxGeometry height="120" width="280" x="360" y="60" as="geometry" />
+        </mxCell>
+        <mxCell id="p1_split_type" parent="p1_lane_order" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12" value="&lt;b&gt;Step 3（generate_weekly_orders 内部）&lt;/b&gt;&lt;br&gt;&lt;b&gt;_reconcile_weekly_component_orders_to_total()&lt;/b&gt;&lt;br&gt;将 _generate_weekly_component_orders() 的临时 AO/normal&lt;br&gt;归一回 _generate_weekly_total_orders() 的周总量" vertex="1">
+          <mxGeometry height="105" width="260" x="705" y="65" as="geometry" />
+        </mxCell>
+        <mxCell id="p1_allocate" parent="p1_lane_order" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12" value="&lt;b&gt;Step 4（split_weekly_orders_to_daily 内部）&lt;/b&gt;&lt;br&gt;&lt;b&gt;_split_integer_quantity_by_days()&lt;/b&gt;&lt;br&gt;按本周有效下单日整数拆分&lt;br&gt;base = qty // len(valid_order_dates)&lt;br&gt;余数按 order_date 升序补齐" vertex="1">
+          <mxGeometry height="140" width="300" x="1020" y="45" as="geometry" />
+        </mxCell>
+        <mxCell id="p1_allocated" parent="p1_lane_order" style="shape=cylinder3d;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12" value="&lt;b&gt;allocated_orders_internal&lt;/b&gt;&lt;br&gt;week / order_type / order_date&lt;br&gt;quantity / advance_days" vertex="1">
+          <mxGeometry height="105" width="190" x="1450" y="62.5" as="geometry" />
+        </mxCell>
+        <mxCell id="p1_filter" parent="p1_lane_order" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12" value="&lt;b&gt;Step 5a&lt;/b&gt;&lt;br&gt;&lt;b&gt;split_weekly_orders_to_daily()&lt;/b&gt;&lt;br&gt;每日仿真只取 split_idx = valid_order_dates.index(simulation_date)&lt;br&gt;split_qty = split_quantities[split_idx]" vertex="1">
+          <mxGeometry height="80" width="250" x="1010" y="225" as="geometry" />
+        </mxCell>
+        <mxCell id="p1_assign" parent="p1_lane_order" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12" value="&lt;b&gt;Step 5b（split_weekly_orders_to_daily 内部）&lt;/b&gt;&lt;br&gt;&lt;b&gt;demand_date = simulation_date + advance_days&lt;/b&gt;&lt;br&gt;normal: advance_days=0 → demand_date = order_date&lt;br&gt;AO: advance_days&gt;0 → demand_date = order_date + advance_days" vertex="1">
+          <mxGeometry height="95" width="300" x="1310" y="215" as="geometry" />
+        </mxCell>
+        <mxCell id="p1_today" parent="p1_lane_order" style="shape=cylinder3d;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12" value="&lt;b&gt;Step 5c&lt;/b&gt;&lt;br&gt;&lt;b&gt;today_orders_df&lt;/b&gt;&lt;br&gt;OrderLog.date = require_date&lt;br&gt;simulation_date = order_date" vertex="1">
+          <mxGeometry height="85" width="190" x="1640" y="220" as="geometry" />
+        </mxCell>
+        <mxCell id="p1_lane_output" parent="1" style="swimlane;html=1;startSize=30;horizontal=1;rounded=0;fillColor=#fff9ef;strokeColor=#d6b656;fontStyle=1" value="&lt;b&gt;历史合并、发货、供需日志、输出兼容&lt;/b&gt;" vertex="1">
+          <mxGeometry height="280" width="1860" x="40" y="740" as="geometry" />
+        </mxCell>
+        <mxCell id="p1_history" parent="p1_lane_output" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=12" value="&lt;b&gt;历史订单来源&lt;/b&gt;&lt;br&gt;DB: previous_orders_df&lt;br&gt;文件: load_previous_orders()" vertex="1">
+          <mxGeometry height="95" width="235" x="20" y="80" as="geometry" />
+        </mxCell>
+        <mxCell id="p1_merge" parent="p1_lane_output" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12" value="&lt;b&gt;_merge_with_history()&lt;/b&gt;&lt;br&gt;合并历史订单与 today_orders_df&lt;br&gt;保留未来 require_date 订单" vertex="1">
+          <mxGeometry height="105" width="285" x="350" y="75" as="geometry" />
+        </mxCell>
+        <mxCell id="p1_all" parent="p1_lane_output" style="shape=cylinder3d;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12" value="&lt;b&gt;all_orders_df&lt;/b&gt;&lt;br&gt;累计日级订单池&lt;br&gt;写入 OrderLog" vertex="1">
+          <mxGeometry height="90" width="210" x="690" y="82.5" as="geometry" />
+        </mxCell>
+        <mxCell id="p1_ship" parent="p1_lane_output" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12" value="&lt;b&gt;_generate_shipments()&lt;/b&gt;&lt;br&gt;筛选 OrderLog.date == simulation_date&lt;br&gt;使用 Orchestrator 可用库存" vertex="1">
+          <mxGeometry height="105" width="285" x="980" y="50" as="geometry" />
+        </mxCell>
+        <mxCell id="p1_sdl" parent="p1_lane_output" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12" value="&lt;b&gt;_apply_orders_consumption()&lt;/b&gt;&lt;br&gt;daily_for_supply + today_orders_df&lt;br&gt;生成 SupplyDemandLog 未来窗口" vertex="1">
+          <mxGeometry height="90" width="285" x="980" y="170" as="geometry" />
+        </mxCell>
+        <mxCell id="p1_output" parent="p1_lane_output" style="shape=cylinder3d;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12" value="&lt;b&gt;生产输出 schema 不变&lt;/b&gt;&lt;br&gt;OrderLog / ShipmentLog / CutLog&lt;br&gt;SupplyDemandLog / Summary" vertex="1">
+          <mxGeometry height="105" width="245" x="1340" y="82.5" as="geometry" />
+        </mxCell>
+        <mxCell id="p1_downstream" parent="p1_lane_output" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=12" value="&lt;b&gt;下游透明&lt;/b&gt;&lt;br&gt;M3 / M5 / Summary / DB writer&lt;br&gt;不需要理解 week 或周级中间表" vertex="1">
+          <mxGeometry height="105" width="190" x="1630" y="82.5" as="geometry" />
+        </mxCell>
+        <mxCell id="p1_e1" edge="1" parent="1" source="p1_cfg" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#82b366;orthogonalLoop=1;jettySize=auto" target="p1_entry" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p1_e2" edge="1" parent="1" source="p1_entry" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#6c8ebf;orthogonalLoop=1;jettySize=auto" target="p1_validate" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p1_e3" edge="1" parent="1" source="p1_validate" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#6c8ebf;orthogonalLoop=1;jettySize=auto" target="p1_prepare" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p1_e4" edge="1" parent="1" source="p1_prepare" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#d6b656;orthogonalLoop=1;jettySize=auto" target="p1_views" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p1_e5" edge="1" parent="1" source="p1_cfg" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#82b366;orthogonalLoop=1;jettySize=auto" target="p1_order_dates" value="OrderCalendar">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p1_e6" edge="1" parent="1" source="p1_order_dates" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#6c8ebf;orthogonalLoop=1;jettySize=auto" target="p1_weekly_qty" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p1_e7" edge="1" parent="1" source="p1_weekly_qty" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#6c8ebf;orthogonalLoop=1;jettySize=auto" target="p1_split_type" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p1_e8" edge="1" parent="1" source="p1_split_type" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#6c8ebf;orthogonalLoop=1;jettySize=auto" target="p1_allocate" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p1_e9" edge="1" parent="1" source="p1_allocate" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#d6b656;orthogonalLoop=1;jettySize=auto" target="p1_allocated" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p1_e10" edge="1" parent="1" source="p1_allocated" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#d6b656;orthogonalLoop=1;jettySize=auto" target="p1_filter" value="日级下单计划">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1545" y="575" />
+              <mxPoint x="1145" y="575" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="p1_e11" edge="1" parent="1" source="p1_filter" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#6c8ebf;orthogonalLoop=1;jettySize=auto" target="p1_assign" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p1_e12" edge="1" parent="1" source="p1_assign" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#d6b656;orthogonalLoop=1;jettySize=auto" target="p1_today" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p1_e13" edge="1" parent="1" source="p1_today" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#d6b656;orthogonalLoop=1;jettySize=auto" target="p1_merge" value="today_orders_df">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1735" y="715" />
+              <mxPoint x="560" y="715" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="p1_e14" edge="1" parent="1" source="p1_history" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#666666;orthogonalLoop=1;jettySize=auto" target="p1_merge" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p1_e15" edge="1" parent="1" source="p1_merge" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#d6b656;orthogonalLoop=1;jettySize=auto" target="p1_all" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p1_e16" edge="1" parent="1" source="p1_all" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#6c8ebf;orthogonalLoop=1;jettySize=auto" target="p1_ship" value="到期订单">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p1_e17" edge="1" parent="1" source="p1_today" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#d6b656;dashed=1;orthogonalLoop=1;jettySize=auto;entryX=1;entryY=0.25;entryDx=0;entryDy=0;" target="p1_sdl" value="当日新增订单">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1770" y="790" />
+              <mxPoint x="1320" y="790" />
+              <mxPoint x="1320" y="933" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="p1_e19" edge="1" parent="1" source="p1_ship" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#d6b656;orthogonalLoop=1;jettySize=auto" target="p1_output" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p1_e20" edge="1" parent="1" source="p1_sdl" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#d6b656;orthogonalLoop=1;jettySize=auto" target="p1_output" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p1_e21" edge="1" parent="1" source="p1_output" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#b85450;orthogonalLoop=1;jettySize=auto" target="p1_downstream" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p1_e22" edge="1" parent="1" source="p1_views" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#d6b656;dashed=1;orthogonalLoop=1;jettySize=auto" target="p1_weekly_qty" value="weekly_for_orders">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1610" y="350" />
+              <mxPoint x="540" y="350" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+  <diagram id="m1-weekly-order-generation" name="周级订单生成 5 步时序">
+    <mxGraphModel dx="1500" dy="1100" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1200" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="p2_title" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;fontSize=20;fontStyle=1" value="&lt;b&gt;generate_weekly_orders() 5 步内部时序：聚合 → AO 均值拆分 → total 抽样 → component 抽样 → 归一&lt;/b&gt;" vertex="1">
+          <mxGeometry height="40" width="1500" x="40" y="20" as="geometry" />
+        </mxCell>
+
+        <!-- Inputs -->
+        <mxCell id="p2_forecast" parent="1" style="shape=cylinder3d;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12" value="&lt;b&gt;DemandForecast&lt;/b&gt;&lt;br&gt;material / location / week&lt;br&gt;weekly demand mean" vertex="1">
+          <mxGeometry height="100" width="220" x="40" y="100" as="geometry" />
+        </mxCell>
+        <mxCell id="p2_ao_config" parent="1" style="shape=cylinder3d;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12" value="&lt;b&gt;AOConfig&lt;/b&gt;&lt;br&gt;ao_percent / advance_days&lt;br&gt;按 material/location/order_type" vertex="1">
+          <mxGeometry height="100" width="220" x="40" y="370" as="geometry" />
+        </mxCell>
+        <mxCell id="p2_error" parent="1" style="shape=cylinder3d;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12" value="&lt;b&gt;ForecastError(CoV)&lt;/b&gt;&lt;br&gt;total/weekly CoV → Step 3&lt;br&gt;AO/normal CoV → Step 4" vertex="1">
+          <mxGeometry height="110" width="220" x="40" y="640" as="geometry" />
+        </mxCell>
+
+        <!-- Step 1 -->
+        <mxCell id="p2_s1" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;align=left;verticalAlign=top;spacing=6" value="&lt;b&gt;Step 1  _build_weekly_ml_demand()&lt;/b&gt;&lt;br&gt;按 material / location / week 聚合周需求&lt;br&gt;稳定排序保证随机可复现" vertex="1">
+          <mxGeometry height="100" width="320" x="340" y="100" as="geometry" />
+        </mxCell>
+        <mxCell id="p2_d1" parent="1" style="shape=cylinder3d;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12" value="&lt;b&gt;weekly_demand&lt;/b&gt;&lt;br&gt;聚合后的 ml/week 周需求" vertex="1">
+          <mxGeometry height="80" width="220" x="740" y="110" as="geometry" />
+        </mxCell>
+
+        <!-- Step 2 (AO mean split) -->
+        <mxCell id="p2_s2" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;align=left;verticalAlign=top;spacing=6" value="&lt;b&gt;Step 2  _split_weekly_demand_by_ao_means()&lt;/b&gt;&lt;br&gt;AO 均值 = weekly_demand × ao_percent&lt;br&gt;normal 均值 = weekly_demand × (1 − Σ ao_percent)&lt;br&gt;裁剪为非负整数；按 demand_type 拆为两行" vertex="1">
+          <mxGeometry height="120" width="370" x="1010" y="100" as="geometry" />
+        </mxCell>
+        <mxCell id="p2_d2" parent="1" style="shape=cylinder3d;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12" value="&lt;b&gt;weekly_order_means&lt;/b&gt;&lt;br&gt;ml/week × demand_type&lt;br&gt;AO baseline / normal baseline" vertex="1">
+          <mxGeometry height="100" width="220" x="1080" y="280" as="geometry" />
+        </mxCell>
+
+        <!-- Step 3 (total sampling) -->
+        <mxCell id="p2_s3" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;align=left;verticalAlign=top;spacing=6" value="&lt;b&gt;Step 3  _generate_weekly_total_orders()&lt;/b&gt;&lt;br&gt;基于 weekly_demand × total/weekly CoV&lt;br&gt;按截断正态分布抽样整周订单总量&lt;br&gt;quantity 裁剪为非负整数" vertex="1">
+          <mxGeometry height="120" width="320" x="340" y="450" as="geometry" />
+        </mxCell>
+        <mxCell id="p2_d3" parent="1" style="shape=cylinder3d;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12" value="&lt;b&gt;weekly_total_orders&lt;/b&gt;&lt;br&gt;ml/week 周总量&lt;br&gt;来自 total CoV 抽样" vertex="1">
+          <mxGeometry height="100" width="220" x="740" y="460" as="geometry" />
+        </mxCell>
+
+        <!-- Step 4 (component sampling) -->
+        <mxCell id="p2_s4" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;align=left;verticalAlign=top;spacing=6" value="&lt;b&gt;Step 4  _generate_weekly_component_orders()&lt;/b&gt;&lt;br&gt;基于 weekly_order_means × AO/normal CoV&lt;br&gt;每个 demand_type 独立按截断正态抽样&lt;br&gt;得到临时 AO / normal 周级数量（未归一）" vertex="1">
+          <mxGeometry height="120" width="370" x="1010" y="450" as="geometry" />
+        </mxCell>
+        <mxCell id="p2_d4" parent="1" style="shape=cylinder3d;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12" value="&lt;b&gt;provisional_orders&lt;/b&gt;&lt;br&gt;ml/week × demand_type&lt;br&gt;临时 AO / normal 数量（未归一）" vertex="1">
+          <mxGeometry height="100" width="240" x="1075" y="630" as="geometry" />
+        </mxCell>
+
+        <!-- Step 5 (reconcile) -->
+        <mxCell id="p2_s5" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;align=left;verticalAlign=top;spacing=6" value="&lt;b&gt;Step 5  _reconcile_weekly_component_orders_to_total()&lt;/b&gt;&lt;br&gt;输入：provisional_orders + weekly_total_orders&lt;br&gt;按 ml/week 内 AO/normal 比例缩放到 weekly_total&lt;br&gt;余数按稳定顺序补齐为整数&lt;br&gt;归一后 sum(AO + normal) = weekly_total_orders" vertex="1">
+          <mxGeometry height="140" width="430" x="500" y="800" as="geometry" />
+        </mxCell>
+        <mxCell id="p2_out" parent="1" style="shape=cylinder3d;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12" value="&lt;b&gt;weekly_orders_internal&lt;/b&gt;&lt;br&gt;week / material / location&lt;br&gt;demand_type: AO / normal&lt;br&gt;reconciled quantity / advance_days" vertex="1">
+          <mxGeometry height="120" width="280" x="1080" y="810" as="geometry" />
+        </mxCell>
+        <mxCell id="p2_invariant" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=12;align=left;spacing=6" value="&lt;b&gt;周级守恒（拆日基线）&lt;/b&gt;&lt;br&gt;sum(AO + normal quantity) ≡ weekly_total_orders&lt;br&gt;归一后的周级数量 = split_weekly_orders_to_daily 的守恒基线&lt;br&gt;后续按下单日整数拆分仍保留此守恒" vertex="1">
+          <mxGeometry height="120" width="430" x="60" y="810" as="geometry" />
+        </mxCell>
+
+        <!-- Edges: inputs to steps -->
+        <mxCell id="p2_e1" edge="1" parent="1" source="p2_forecast" target="p2_s1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#82b366;orthogonalLoop=1;jettySize=auto" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p2_e2" edge="1" parent="1" source="p2_s1" target="p2_d1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#d6b656;orthogonalLoop=1;jettySize=auto" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p2_e3" edge="1" parent="1" source="p2_d1" target="p2_s2" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#6c8ebf;orthogonalLoop=1;jettySize=auto" value="weekly_demand">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p2_e4" edge="1" parent="1" source="p2_ao_config" target="p2_s2" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#82b366;orthogonalLoop=1;jettySize=auto" value="ao_percent">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="280" y="420" />
+              <mxPoint x="990" y="420" />
+              <mxPoint x="990" y="220" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="p2_e5" edge="1" parent="1" source="p2_s2" target="p2_d2" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#d6b656;orthogonalLoop=1;jettySize=auto" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="p2_e6" edge="1" parent="1" source="p2_d1" target="p2_s3" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#6c8ebf;orthogonalLoop=1;jettySize=auto" value="weekly_demand">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="850" y="350" />
+              <mxPoint x="500" y="350" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="p2_e7" edge="1" parent="1" source="p2_error" target="p2_s3" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#82b366;orthogonalLoop=1;jettySize=auto" value="total CoV">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p2_e8" edge="1" parent="1" source="p2_s3" target="p2_d3" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#d6b656;orthogonalLoop=1;jettySize=auto" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="p2_e9" edge="1" parent="1" source="p2_d2" target="p2_s4" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#6c8ebf;orthogonalLoop=1;jettySize=auto" value="weekly_order_means">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p2_e10" edge="1" parent="1" source="p2_error" target="p2_s4" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#82b366;dashed=1;orthogonalLoop=1;jettySize=auto" value="AO/normal CoV">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="280" y="780" />
+              <mxPoint x="980" y="780" />
+              <mxPoint x="980" y="510" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="p2_e11" edge="1" parent="1" source="p2_s4" target="p2_d4" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#d6b656;orthogonalLoop=1;jettySize=auto" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="p2_e12" edge="1" parent="1" source="p2_d4" target="p2_s5" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#6c8ebf;orthogonalLoop=1;jettySize=auto" value="provisional_orders">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p2_e13" edge="1" parent="1" source="p2_d3" target="p2_s5" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#6c8ebf;orthogonalLoop=1;jettySize=auto" value="weekly_total_orders（守恒目标）">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="850" y="700" />
+              <mxPoint x="600" y="700" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="p2_e14" edge="1" parent="1" source="p2_s5" target="p2_out" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#d6b656;orthogonalLoop=1;jettySize=auto" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p2_e15" edge="1" parent="1" source="p2_out" target="p2_invariant" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#b85450;dashed=1;orthogonalLoop=1;jettySize=auto" value="invariant check">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1080" y="970" />
+              <mxPoint x="490" y="970" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+  <diagram id="m1-order-date-allocation" name="下单日分配与需求日">
+    <mxGraphModel dx="1268" dy="611" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="950" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="p3_title" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;fontSize=22;fontStyle=1" value="&lt;b&gt;split_weekly_orders_to_daily()：本周拆分 + 当日筛选 + assign 需求日（一函数完成）&lt;/b&gt;" vertex="1">
+          <mxGeometry height="40" width="900" x="40" y="20" as="geometry" />
+        </mxCell>
+        <mxCell id="p3_weekly" parent="1" style="shape=cylinder3d;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12" value="&lt;b&gt;weekly_orders_internal&lt;/b&gt;&lt;br&gt;week / demand_type / quantity&lt;br&gt;advance_days" vertex="1">
+          <mxGeometry height="110" width="250" x="60" y="105" as="geometry" />
+        </mxCell>
+        <mxCell id="p3_dates" parent="1" style="shape=cylinder3d;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12" value="&lt;b&gt;order_dates&lt;/b&gt;&lt;br&gt;本周 OrderCalendar 有效下单日&lt;br&gt;例如 Mon / Wed / Fri" vertex="1">
+          <mxGeometry height="110" width="250" x="60" y="285" as="geometry" />
+        </mxCell>
+        <mxCell id="p3_allocate" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12" value="&lt;b&gt;split_weekly_orders_to_daily() 内：&lt;/b&gt;&lt;br&gt;&lt;b&gt;_split_integer_quantity_by_days()&lt;/b&gt;&lt;br&gt;按 valid_order_dates 平均分配&lt;br&gt;base = qty // len(valid_order_dates)&lt;br&gt;余数按 order_date 升序补齐" vertex="1">
+          <mxGeometry height="145" width="350" x="390" y="140" as="geometry" />
+        </mxCell>
+        <mxCell id="p3_allocated" parent="1" style="shape=cylinder3d;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12" value="&lt;b&gt;allocated_orders_internal&lt;/b&gt;&lt;br&gt;order_date / demand_type / quantity&lt;br&gt;advance_days" vertex="1">
+          <mxGeometry height="115" width="260" x="810" y="155" as="geometry" />
+        </mxCell>
+        <mxCell id="p3_filter" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12" value="&lt;b&gt;split_weekly_orders_to_daily() 内：&lt;/b&gt;&lt;br&gt;&lt;b&gt;split_idx = valid_order_dates.index(simulation_date)&lt;/b&gt;&lt;br&gt;每日只取 order_date == simulation_date 的份额&lt;br&gt;注意：此处筛选键是 order_date，不是 demand_date" vertex="1">
+          <mxGeometry height="105" width="290" x="1170" y="160" as="geometry" />
+        </mxCell>
+        <mxCell id="p3_assign" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12" value="&lt;b&gt;split_weekly_orders_to_daily() 内：&lt;/b&gt;&lt;br&gt;&lt;b&gt;demand_date = simulation_date + advance_days&lt;/b&gt;&lt;br&gt;normal: advance_days=0 → demand_date = order_date&lt;br&gt;AO: advance_days&gt;0 → demand_date = order_date + advance_days&lt;br&gt;OrderCalendar 不决定 demand_date" vertex="1">
+          <mxGeometry height="135" width="330" x="1150" y="310" as="geometry" />
+        </mxCell>
+        <mxCell id="p3_orderlog" parent="1" style="shape=cylinder3d;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12" value="&lt;b&gt;today_orders_df / OrderLog 行&lt;/b&gt;&lt;br&gt;date = demand_date（即 require_date）&lt;br&gt;simulation_date = order_date&lt;br&gt;material / location / demand_type / quantity / advance_days" vertex="1">
+          <mxGeometry height="120" width="330" x="1150" y="490" as="geometry" />
+        </mxCell>
+        <mxCell id="p3_note" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=12" value="&lt;b&gt;关键语义（与 refactor 代码一致）&lt;/b&gt;&lt;br&gt;order_date：下单日，来自 OrderCalendar&lt;br&gt;demand_date（require_date）：需求/到期日，写入 OrderLog.date&lt;br&gt;simulation_date：当天仿真日 = 当天生成订单的 order_date&lt;br&gt;变量在代码中为 demand_date；OrderLog 列名为 date" vertex="1">
+          <mxGeometry height="140" width="650" x="390" y="490" as="geometry" />
+        </mxCell>
+        <mxCell id="p3_merge" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12" value="&lt;b&gt;_merge_with_history()&lt;/b&gt;&lt;br&gt;AO 若 require_date 在未来，会留在累计订单池&lt;br&gt;到 require_date 当天再发货" vertex="1">
+          <mxGeometry height="115" width="330" x="390" y="705" as="geometry" />
+        </mxCell>
+        <mxCell id="p3_ship" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12" value="&lt;b&gt;_generate_shipments()&lt;/b&gt;&lt;br&gt;按 OrderLog.date == simulation_date&lt;br&gt;处理到期订单" vertex="1">
+          <mxGeometry height="95" width="270" x="820" y="715" as="geometry" />
+        </mxCell>
+        <mxCell id="p3_output" parent="1" style="shape=cylinder3d;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12" value="&lt;b&gt;输出 schema 不变&lt;/b&gt;&lt;br&gt;OrderLog.date 仍是下游需求 / 到期日&lt;br&gt;不默认写出 order_date / source_week" vertex="1">
+          <mxGeometry height="110" width="330" x="1140" y="707.5" as="geometry" />
+        </mxCell>
+        <mxCell id="p3_e1" edge="1" parent="1" source="p3_weekly" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#d6b656;orthogonalLoop=1;jettySize=auto" target="p3_allocate" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p3_e2" edge="1" parent="1" source="p3_dates" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#82b366;orthogonalLoop=1;jettySize=auto" target="p3_allocate" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p3_e3" edge="1" parent="1" source="p3_allocate" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#d6b656;orthogonalLoop=1;jettySize=auto" target="p3_allocated" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p3_e4" edge="1" parent="1" source="p3_allocated" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#6c8ebf;orthogonalLoop=1;jettySize=auto" target="p3_filter" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p3_e5" edge="1" parent="1" source="p3_filter" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#6c8ebf;orthogonalLoop=1;jettySize=auto" target="p3_assign" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p3_e6" edge="1" parent="1" source="p3_assign" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#d6b656;orthogonalLoop=1;jettySize=auto" target="p3_orderlog" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p3_e7" edge="1" parent="1" source="p3_orderlog" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#b85450;orthogonalLoop=1;jettySize=auto" target="p3_note" value="">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1120" y="550" />
+              <mxPoint x="1120" y="400" />
+              <mxPoint x="760" y="400" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="p3_e8" edge="1" parent="1" source="p3_orderlog" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#d6b656;orthogonalLoop=1;jettySize=auto" target="p3_merge" value="">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1305" y="660" />
+              <mxPoint x="555" y="660" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="p3_e9" edge="1" parent="1" source="p3_merge" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#6c8ebf;orthogonalLoop=1;jettySize=auto" target="p3_ship" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p3_e10" edge="1" parent="1" source="p3_ship" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#d6b656;orthogonalLoop=1;jettySize=auto" target="p3_output" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

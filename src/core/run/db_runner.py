@@ -15,6 +15,7 @@ import pandas as pd
 from pgsql_db import table_mapping
 from .db_config import _load_config_from_database
 from .local_writer import _write_results_to_local_dev_format
+from .utils import resolve_excel_path
 
 
 def _normalize_for_compare(df: pd.DataFrame) -> pd.DataFrame:
@@ -34,22 +35,20 @@ def _normalize_for_compare(df: pd.DataFrame) -> pd.DataFrame:
     return norm
 
 
-def _find_local_config_file(config_name: str) -> Path | None:
-    """按配置名查找本地 Excel 配置文件。"""
-    config_basename = Path(config_name).stem
-    project_root = Path(__file__).parent.parent.parent.parent
-    search_dirs = [project_root / "config", project_root / "test_files", project_root]
+def _find_local_config_file(config_arg: str) -> Path | None:
+    """按用户输入的 ``--config`` 参数定位本地 Excel 配置文件。
 
-    for d in search_dirs:
-        candidate = d / f"{config_basename}.xlsx"
-        if candidate.exists():
-            return candidate
-    return None
+    支持名字、相对路径、绝对路径，详见 ``resolve_excel_path``。
+    """
+    return resolve_excel_path(config_arg)
 
 
-def _build_expected_local_config(config_name: str) -> dict:
-    """构建本地期望配置（Excel + CSV 覆盖空 sheet，与文件模式语义一致）。"""
-    config_file = _find_local_config_file(config_name)
+def _build_expected_local_config(config_arg: str) -> dict:
+    """构建本地期望配置（Excel + CSV 覆盖空 sheet，与文件模式语义一致）。
+
+    ``config_arg`` 是用户原始输入（名字 / 相对路径 / 绝对路径）。
+    """
+    config_file = _find_local_config_file(config_arg)
     if config_file is None:
         return {}
 
@@ -230,17 +229,17 @@ def _run_with_database(ns: argparse.Namespace) -> int:
         logger.info("🔄 步骤0.5: 检查同名配置并按差异同步数据库")
         logger.info("=" * 60)
 
-        # 构建本地期望配置（Excel + CSV覆盖）
-        expected_config = _build_expected_local_config(config_name)
+        # 构建本地期望配置（Excel + CSV覆盖）—— 用原始 --config 输入（支持任意路径/子目录）
+        expected_config = _build_expected_local_config(_raw_config)
         if not expected_config:
-            logger.info(f"  ℹ️ 未找到本地配置文件 {Path(config_name).stem}.xlsx，直接使用数据库配置")
+            logger.info(f"  ℹ️ 未找到本地配置文件 {config_name}.xlsx（输入：{_raw_config}），直接使用数据库配置")
         else:
             exists, _ = initializer.check_config_data_exists(config_name)
             if not exists:
                 logger.info("  ℹ️ 数据库中不存在同名配置，执行首次导入")
-                config_file = initializer.find_config_file(config_name)
+                config_file = _find_local_config_file(_raw_config) or initializer.find_config_file(config_name)
                 if not config_file:
-                    logger.error(f"[ERROR] 未找到本地配置文件: {Path(config_name).stem}.xlsx")
+                    logger.error(f"[ERROR] 未找到本地配置文件: {config_name}.xlsx（输入：{_raw_config}）")
                     return 1
                 success, import_results = initializer.import_config_from_excel(config_name, config_file)
                 if not success:

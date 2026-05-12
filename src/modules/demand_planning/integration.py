@@ -111,10 +111,8 @@ def run_daily_order_generation(
             'all_orders_for_next_day': all_orders_df  # 保留累积订单供下一天使用
         }
 
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        return _empty_result()
+    except Exception:
+        raise
 
 
 def _empty_result() -> dict:

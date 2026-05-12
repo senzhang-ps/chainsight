@@ -46,6 +46,7 @@ from .output_dir import (
     _list_existing_runs,
 )
 from .db_runner import _run_with_database
+from .utils import resolve_excel_path
 
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:
@@ -165,11 +166,10 @@ def main(argv: list[str] | None = None) -> int:
         return _run_with_database(ns)
     
     # ==================== 本地文件模式 ====================
-    cfg_path = Path(ns.config).expanduser().resolve()
-    if not cfg_path.exists():
-        raise FileNotFoundError(f"Configuration file not found: {cfg_path}")
-    if cfg_path.suffix.lower() not in {".xlsx", ".xlsm", ".xls"}:
-        raise ValueError("Configuration file must be an Excel file (.xlsx/.xlsm/.xls)")
+    # 支持名字 / 相对路径 / 绝对路径，含或不含 .xlsx 后缀
+    cfg_path = resolve_excel_path(ns.config)
+    if cfg_path is None or not cfg_path.exists():
+        raise FileNotFoundError(f"Configuration file not found: {ns.config}")
 
     # 尽早加载配置以便在出现结构/格式问题时快速失败
     #（该调用会返回可供运行函数使用的对象，或用于校验配置文件。）

@@ -494,6 +494,12 @@ class DatabaseConnection:
             
             # 列类型升级：BIGINT → DOUBLE PRECISION（防止浮点数截断）
             INT_TYPES = {'BIGINT', 'INTEGER', 'SMALLINT', 'INT', 'INT4', 'INT8', 'INT2'}
+            DATE_TIME_TYPES = {
+                'DATE',
+                'TIMESTAMP',
+                'TIMESTAMP WITHOUT TIME ZONE',
+                'TIMESTAMP WITH TIME ZONE',
+            }
             for col_name in (df_cols & existing_cols):  # 仅检查已存在的公共列
                 df_dtype = df_col_types.get(col_name)
                 if df_dtype is None:
@@ -510,6 +516,17 @@ class DatabaseConnection:
                             sql.Identifier(col_name),
                             sql.Identifier(col_name)
                         ))
+                    existing_col_info[col_name] = 'DOUBLE PRECISION'
+                elif expected_pg_type == 'TEXT' and existing_pg_type in DATE_TIME_TYPES:
+                    with self.get_cursor() as cursor:
+                        cursor.execute(sql.SQL("""
+                            ALTER TABLE {} ALTER COLUMN {} TYPE TEXT USING {}::TEXT
+                        """).format(
+                            sql.Identifier(table_name),
+                            sql.Identifier(col_name),
+                            sql.Identifier(col_name)
+                        ))
+                    existing_col_info[col_name] = 'TEXT'
             
             # 检查DataFrame的列是否都在现有表中（允许现有表有额外列）
             missing_cols = df_cols - existing_cols
@@ -583,7 +600,9 @@ class DatabaseConnection:
             ]
             # 只有明确的日期字段才使用 DATE 类型，避免误判
             if any(name == col_name_lower or col_name_lower.endswith('_' + name) for name in date_specific_names):
-                return "DATE"
+                if "datetime" in dtype_str or "date" in dtype_str:
+                    return "DATE"
+                return "TEXT"
                  
             # 4. 数量/度量类 -> 使用 DOUBLE PRECISION (防止 int/float 混淆)
             # 注意：排除以 _date 结尾的列，避免误匹配日期列
@@ -858,6 +877,14 @@ class DatabaseConnection:
         with self.get_cursor(commit=False) as cursor:
             cursor.execute(query, params)
             return cursor.fetchall()
+
+    def execute_query_df(self, query: str, params: tuple = None) -> pd.DataFrame:
+        """Execute a query and return a DataFrame preserving column names."""
+        with self.get_cursor(commit=False) as cursor:
+            cursor.execute(query, params)
+            columns = [desc[0] for desc in cursor.description]
+            data = cursor.fetchall()
+            return pd.DataFrame(data, columns=columns)
     
     def execute_non_query(self, query: str, params: tuple = None):
         """执行非查询语句（INSERT, UPDATE, DELETE等）"""

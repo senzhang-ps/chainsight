@@ -31,6 +31,52 @@ from .memory_store import (_ensure_memory_store_imported, _enable_memory_mode,
 from .db_helpers import _flush_batch_to_db
 
 
+_M1_PREVIOUS_ORDER_COLUMNS = [
+    'date',
+    'material',
+    'location',
+    'demand_type',
+    'quantity',
+    'simulation_date',
+    'advance_days',
+]
+
+
+def _load_m1_previous_orders_from_orderlog(
+    db,
+    run_id: str,
+    previous_batch_end: str,
+) -> pd.DataFrame:
+    """Restore Module1 cumulative orders from DB with the original column names."""
+    query = (
+        "SELECT * FROM module1_output_orderlog "
+        "WHERE run_id = %s AND sim_date <= %s "
+        "ORDER BY sim_date, date"
+    )
+
+    if hasattr(db, 'execute_query_df'):
+        orders = db.execute_query_df(query, (run_id, previous_batch_end))
+    else:
+        rows = db.execute_query(query, (run_id, previous_batch_end))
+        orders = pd.DataFrame(rows)
+
+    if orders is None or orders.empty:
+        return pd.DataFrame(columns=_M1_PREVIOUS_ORDER_COLUMNS)
+
+    if not set(_M1_PREVIOUS_ORDER_COLUMNS).issubset(orders.columns):
+        missing = sorted(set(_M1_PREVIOUS_ORDER_COLUMNS) - set(orders.columns))
+        raise ValueError(
+            "module1_output_orderlog restore lost required columns: "
+            f"{missing}. Use execute_query_df/read_table so column names are preserved."
+        )
+
+    restored = orders[_M1_PREVIOUS_ORDER_COLUMNS].copy()
+    for col in ('date', 'simulation_date'):
+        if col in restored.columns:
+            restored[col] = pd.to_datetime(restored[col], errors='coerce')
+    return restored
+
+
 def run_integrated_simulation_from_dict(
     config_data: dict,
     config_name: str,
@@ -206,21 +252,12 @@ def run_integrated_simulation_from_dict(
             if db is not None:
                 try:
                     _prev_date = checkpoint['last_batch_end']  # 上一批次结束日（e.g. "2025-12-15"）
-                    _fallback_sql = (
-                        "SELECT * FROM module1_output_orderlog "
-                        "WHERE run_id = %s AND sim_date <= %s"
+                    m1_previous_orders = _load_m1_previous_orders_from_orderlog(
+                        db,
+                        run_id=run_id_override,
+                        previous_batch_end=_prev_date,
                     )
-                    _fallback_rows = db.execute_query(_fallback_sql, (run_id_override, _prev_date))
-                    if _fallback_rows:
-                        m1_previous_orders = pd.DataFrame(_fallback_rows)
-                        # 规范化日期列
-                        from pgsql_db.checkpoint import deserialize_m1_previous_orders as _deserialize
-                        _DATE_COLS = {'simulation_date', 'order_date', 'delivery_date',
-                                      'ship_date', 'available_date', 'date', 'created_date'}
-                        for _col in _DATE_COLS & set(m1_previous_orders.columns):
-                            m1_previous_orders[_col] = pd.to_datetime(
-                                m1_previous_orders[_col], errors='coerce'
-                            )
+                    if not m1_previous_orders.empty:
                         logger.info(f"  ✅ 从DB orderlog 回退恢复历史订单: {len(m1_previous_orders)} 条")
                     else:
                         logger.warning(f"  ⚠️ DB orderlog 中未找到 run_id={run_id_override} 的历史订单")

@@ -8,6 +8,7 @@
 """
 
 import os
+import sys
 import time
 from typing import Any, Optional
 
@@ -25,6 +26,9 @@ from .io_utils import (
     load_previous_orders,
     save_module1_output_with_supply_demand,
 )
+
+_ORDER_DEBUG_SOURCE_COL = '_quantity_debug_source'
+_ORDER_DEBUG_SOURCE_ROW_COL = '_quantity_debug_source_row'
 
 
 def run_daily_order_generation(
@@ -248,14 +252,18 @@ def _merge_with_history(
     # 🦆 如果提供了内存中的历史订单数据（DB模式），则直接使用，跳过文件读取
     if previous_orders_df is not None and not previous_orders_df.empty:
         previous_orders = previous_orders_df.copy()
+        previous_source = 'previous_orders_df'
     else:
         previous_orders = load_previous_orders(output_dir, simulation_date, max_advance)
+        previous_source = 'history_orderlog_files'
 
     previous_orders = _filter_future_orders(previous_orders, simulation_date)
     previous_orders = _deduplicate_orders(previous_orders)
+    previous_orders = _tag_order_debug_source(previous_orders, previous_source)
 
     if today_orders_df is not None and not today_orders_df.empty:
-        orders_df = pd.concat([previous_orders, today_orders_df], ignore_index=True)
+        today_orders = _tag_order_debug_source(today_orders_df, 'today_orders_df')
+        orders_df = pd.concat([previous_orders, today_orders], ignore_index=True)
     else:
         orders_df = previous_orders.copy()
 
@@ -297,12 +305,82 @@ def _deduplicate_orders(orders: pd.DataFrame) -> pd.DataFrame:
 def _normalize_orders(orders_df: pd.DataFrame) -> pd.DataFrame:
     """规范化订单。"""
     if orders_df.empty:
-        return orders_df
+        return _drop_order_debug_columns(orders_df)
     if 'quantity' in orders_df.columns:
-        orders_df['quantity'] = orders_df['quantity'].astype(int)
+        quantity = pd.to_numeric(orders_df['quantity'], errors='coerce')
+        invalid_quantity_mask = (
+            quantity.isna() | quantity.isin([np.inf, -np.inf])
+        )
+        if invalid_quantity_mask.any():
+            _raise_invalid_quantity_error(
+                orders_df, invalid_quantity_mask, quantity
+            )
+        orders_df['quantity'] = quantity.astype(int)
     if 'simulation_date' not in orders_df.columns:
         orders_df['simulation_date'] = orders_df['date']
-    return normalize_identifiers(orders_df)
+    return normalize_identifiers(_drop_order_debug_columns(orders_df))
+
+
+def _tag_order_debug_source(
+    orders_df: pd.DataFrame,
+    source: str
+) -> pd.DataFrame:
+    """Attach temporary source metadata used only for diagnostics."""
+    if orders_df is None:
+        return pd.DataFrame()
+
+    tagged = orders_df.copy()
+    if tagged.empty:
+        return tagged
+
+    tagged[_ORDER_DEBUG_SOURCE_COL] = source
+    tagged[_ORDER_DEBUG_SOURCE_ROW_COL] = tagged.index
+    return tagged
+
+
+def _drop_order_debug_columns(orders_df: pd.DataFrame) -> pd.DataFrame:
+    """Remove temporary diagnostic metadata before returning order data."""
+    return orders_df.drop(
+        columns=[_ORDER_DEBUG_SOURCE_COL, _ORDER_DEBUG_SOURCE_ROW_COL],
+        errors='ignore',
+    )
+
+
+def _raise_invalid_quantity_error(
+    orders_df: pd.DataFrame,
+    invalid_quantity_mask: pd.Series,
+    numeric_quantity: pd.Series
+) -> None:
+    bad_rows = orders_df.loc[invalid_quantity_mask].copy()
+    bad_rows.insert(0, 'row_index', bad_rows.index)
+    bad_rows['_quantity_after_to_numeric'] = numeric_quantity.loc[
+        invalid_quantity_mask
+    ].values
+
+    preferred_cols = [
+        'row_index',
+        _ORDER_DEBUG_SOURCE_COL,
+        _ORDER_DEBUG_SOURCE_ROW_COL,
+        'date',
+        'material',
+        'location',
+        'demand_type',
+        'quantity',
+        '_quantity_after_to_numeric',
+        'simulation_date',
+        'advance_days',
+    ]
+    display_cols = [c for c in preferred_cols if c in bad_rows.columns]
+    diagnostic_rows = bad_rows[display_cols].to_string(index=False)
+
+    message = (
+        "Module1 order normalization failed: quantity contains non-finite "
+        "or non-numeric values before integer conversion at "
+        "src/modules/demand_planning/integration.py::_normalize_orders.\n"
+        f"Bad rows:\n{diagnostic_rows}"
+    )
+    print(message, file=sys.stderr)
+    raise ValueError(message)
 
 
 def _generate_shipments(

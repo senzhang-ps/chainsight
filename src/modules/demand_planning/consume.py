@@ -11,7 +11,7 @@
 import pickle
 import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -23,6 +23,7 @@ from .constants import (
     DEFAULT_USE_OPTIMIZED_CONSUME,
     append_error_log,
 )
+from ...utils.numeric_safe import safe_int_series
 
 
 # 消耗窗口偏移量
@@ -263,7 +264,6 @@ def _build_parallel_tasks(
         任务列表。
     """
     tasks: List[Tuple[pd.DataFrame, pd.DataFrame, np.ndarray, str, str]] = []
-    bad_pickle_info: List[Dict[str, Any]] = []
 
     for (mat, loc), grp in orders.groupby(['material', 'location']):
         ml_mask = (
@@ -279,15 +279,12 @@ def _build_parallel_tasks(
         sample = (grp[order_cols], ml_forecast, offsets, mat, loc)
         try:
             pickle.dumps(sample)
-            tasks.append(sample)
         except Exception as e:
-            bad_pickle_info.append({
-                'ml_key': (mat, loc),
-                'error': str(e)
-            })
-
-    if bad_pickle_info:
-        pass
+            # 不能静默丢弃该 (material, location) 的消耗任务——否则结果会少算且无人知晓。
+            raise RuntimeError(
+                f"并行消耗任务无法序列化 (material={mat!r}, location={loc!r})：{e}"
+            ) from e
+        tasks.append(sample)
 
     return tasks
 
@@ -310,7 +307,6 @@ def _execute_parallel_consume(
         补丁DataFrame列表。
     """
     patches: List[pd.DataFrame] = []
-    parallel_failures = 0
 
     try:
         with ProcessPoolExecutor(max_workers=max_workers) as ex:
@@ -318,19 +314,15 @@ def _execute_parallel_consume(
             for f in as_completed(futures):
                 try:
                     res = f.result()
-                    if res is not None and not res.empty:
-                        patches.append(res)
-                except Exception:
-                    parallel_failures += 1
-                    msg = f'[{order_type}并行] 子任务异常'
-                    append_error_log(msg)
-    except Exception:
-        parallel_failures += 1
-        msg = f'[{order_type}并行] 执行器失败'
-        append_error_log(msg)
-
-    if parallel_failures > 0:
-        pass
+                except Exception as e:
+                    # 子任务失败意味着这部分消耗没算——不能吞掉，否则结果静默偏差。
+                    append_error_log(f'[{order_type}并行] 子任务异常: {e}')
+                    raise
+                if res is not None and not res.empty:
+                    patches.append(res)
+    except Exception as e:
+        append_error_log(f'[{order_type}并行] 执行器失败: {e}')
+        raise
 
     return patches
 
@@ -357,8 +349,9 @@ def _apply_patches(
     cf['new_quantity'] = pd.to_numeric(cf['new_quantity'], errors='coerce')
     cf['quantity'] = np.where(
         cf['new_quantity'].notna(),
-        np.maximum(0, cf['new_quantity'].fillna(0)).astype(int),
-        pd.to_numeric(cf['quantity'], errors='coerce').fillna(0).astype(int)
+        safe_int_series(np.maximum(0, cf['new_quantity'].fillna(0)),
+                        context='module1._apply_patches.new_quantity'),
+        safe_int_series(cf['quantity'], context='module1._apply_patches.quantity'),
     )
     return cf[['material', 'location', 'date', 'quantity']]
 

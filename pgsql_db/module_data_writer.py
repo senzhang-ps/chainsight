@@ -14,6 +14,7 @@ from datetime import datetime
 from psycopg import errors, sql
 from .db_connection import DatabaseConnection
 from .table_schemas import MODULE6_OUTPUT_SCHEMAS, get_columns
+from src.utils.numeric_safe import safe_int_series
 
 _summary_logger = logging.getLogger("SupplyChainSimulation")
 
@@ -384,7 +385,7 @@ class ModuleDataWriter:
                         "rows": len(df)
                     }
                 except Exception as e:
-                    results[table_name] = -1
+                    raise
         
         return results
     
@@ -436,7 +437,7 @@ class ModuleDataWriter:
                 )
                 results[excel_file.name] = file_results
             except Exception as e:
-                results[excel_file.name] = {"error": str(e)}
+                raise
         
         # 查找所有CSV文件并按日期排序
         csv_files = sorted(output_path.glob("*.csv"))
@@ -496,7 +497,7 @@ class ModuleDataWriter:
                         "rows": len(df)
                     }
             except Exception as e:
-                results[csv_file.name] = {"error": str(e)}
+                raise
         
         return results
     
@@ -591,7 +592,7 @@ class ModuleDataWriter:
                     }
                 
             except Exception as e:
-                results[sheet_name] = -1
+                raise
         
         return results
     
@@ -727,7 +728,7 @@ class ModuleDataWriter:
                                 df['run_id'] = run_id
                         dfs.append(df)
                     except Exception as e:
-                        pass
+                        raise
                 
                 if dfs:
                     combined_df = pd.concat(dfs, ignore_index=True)
@@ -875,14 +876,15 @@ class ModuleDataWriter:
         return filtered[sim_dates == day_sim_date].copy()
 
     def _zero_fill_quantity_for_db(self, df: pd.DataFrame, table_name: str) -> pd.DataFrame:
-        """Normalize nullable order quantities at the DB write boundary."""
+        """Normalize abnormal order quantities to 0 at the DB write boundary."""
         if df.empty or table_name != 'module1_output_orderlog' or 'quantity' not in df.columns:
             return df
 
         cleaned = df.copy()
-        quantity = pd.to_numeric(cleaned['quantity'], errors='coerce')
-        quantity = quantity.mask(quantity.isin([float('inf'), float('-inf')]), 0)
-        cleaned['quantity'] = quantity.fillna(0)
+        cleaned['quantity'] = safe_int_series(
+            cleaned['quantity'],
+            context=f'db.{table_name}.quantity',
+        )
         return cleaned
 
     def prepare_batch_dataframes(
@@ -1151,7 +1153,7 @@ class ModuleDataWriter:
                             "rows": 0
                         }
                     except Exception as e:
-                        results[table_name] = -1
+                        raise
                     continue
 
                 combined_df = pd.concat(dfs, ignore_index=True)
@@ -1177,7 +1179,7 @@ class ModuleDataWriter:
                         "rows": len(combined_df)
                     }
                 except Exception as e:
-                    results[table_name] = -1
+                    raise
         
         # 统计
         total_tables = sum(1 for v in results.values() if v > 0)
@@ -1257,10 +1259,10 @@ class ModuleDataWriter:
                 run_id, end_date_dt, if_exists
             )
         except Exception as e:
-            results['summary_output_ordershipmentcutsummary'] = -1
             _summary_logger.exception(
                 f"[ERROR] Summary 子表生成失败 summary_output_ordershipmentcutsummary: {e}"
             )
+            raise
 
         # 2. 生成 changeover 汇总报告
         try:
@@ -1268,10 +1270,10 @@ class ModuleDataWriter:
                 run_id, end_date_dt, if_exists
             )
         except Exception as e:
-            results['summary_output_fullchangeoverlog'] = -1
             _summary_logger.exception(
                 f"[ERROR] Summary 子表生成失败 summary_output_fullchangeoverlog: {e}"
             )
+            raise
 
         # 3. 生成 capacity_exceed 汇总报告
         try:
@@ -1279,10 +1281,10 @@ class ModuleDataWriter:
                 run_id, end_date_dt, if_exists
             )
         except Exception as e:
-            results['summary_output_fullcapacityexceed'] = -1
             _summary_logger.exception(
                 f"[ERROR] Summary 子表生成失败 summary_output_fullcapacityexceed: {e}"
             )
+            raise
 
         # 4. 生成 production_plan 汇总报告
         try:
@@ -1290,10 +1292,10 @@ class ModuleDataWriter:
                 run_id, end_date_dt, if_exists
             )
         except Exception as e:
-            results['summary_output_fullproductionplan'] = -1
             _summary_logger.exception(
                 f"[ERROR] Summary 子表生成失败 summary_output_fullproductionplan: {e}"
             )
+            raise
 
         # 5. 生成 deployment_plan 汇总报告
         try:
@@ -1301,10 +1303,10 @@ class ModuleDataWriter:
                 run_id, end_date_dt, if_exists
             )
         except Exception as e:
-            results['summary_output_fulldeploymentplan'] = -1
             _summary_logger.exception(
                 f"[ERROR] Summary 子表生成失败 summary_output_fulldeploymentplan: {e}"
             )
+            raise
 
         # 6. 生成 delivery_plan 汇总报告
         try:
@@ -1312,10 +1314,10 @@ class ModuleDataWriter:
                 run_id, end_date_dt, if_exists
             )
         except Exception as e:
-            results['summary_output_fulldeliveryplan'] = -1
             _summary_logger.exception(
                 f"[ERROR] Summary 子表生成失败 summary_output_fulldeliveryplan: {e}"
             )
+            raise
 
         # 7. 生成 truck_usage 汇总报告
         try:
@@ -1323,10 +1325,10 @@ class ModuleDataWriter:
                 run_id, end_date_dt, if_exists
             )
         except Exception as e:
-            results['summary_output_fulltruckusage'] = -1
             _summary_logger.exception(
                 f"[ERROR] Summary 子表生成失败 summary_output_fulltruckusage: {e}"
             )
+            raise
         
         elapsed = time.time() - start_time
         total_tables = sum(1 for v in results.values() if isinstance(v, int) and v >= 0)
@@ -1448,7 +1450,10 @@ class ModuleDataWriter:
         
         for col in ['order_qty', 'shipment_qty', 'cut_qty']:
             if col in summary.columns:
-                summary[col] = summary[col].fillna(0).astype(int)
+                summary[col] = safe_int_series(
+                    summary[col].fillna(0),
+                    context=f'db.reconciliation_summary.{col}',
+                )
             else:
                 summary[col] = 0
         
@@ -1794,7 +1799,7 @@ def write_run_data_to_db(
     # 测试连接
     conn_result = db.test_connection()
     if not conn_result["success"]:
-        return False
+        raise RuntimeError(f"数据库连接失败: {conn_result.get('message')}")
     
     # 创建写入器并执行
     writer = ModuleDataWriter(db)
@@ -1809,7 +1814,7 @@ def write_run_data_to_db(
         
         return True
     except Exception as e:
-        return False
+        raise
     finally:
         db.close()
 

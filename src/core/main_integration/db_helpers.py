@@ -324,18 +324,20 @@ def _atomic_copy_batch(conn, cur, prepared_tables: dict, db) -> None:
         for i, row in enumerate(records):
             new_row = []
             for j, val in enumerate(row):
-                if pd.isna(val) if not isinstance(val, str) else False:
-                    new_row.append(None)
-                elif j in int_col_indices:
+                if j in int_col_indices:
                     try:
-                        new_row.append(int(float(val)))
-                    except (ValueError, TypeError):
-                        new_row.append(None)
+                        float_val = float(val)
+                        new_row.append(int(float_val) if np.isfinite(float_val) else 0)
+                    except (ValueError, TypeError, OverflowError):
+                        new_row.append(0)
                 elif j in float_col_indices:
                     try:
-                        new_row.append(float(val))
-                    except (ValueError, TypeError):
-                        new_row.append(None)
+                        float_val = float(val)
+                        new_row.append(float_val if np.isfinite(float_val) else 0.0)
+                    except (ValueError, TypeError, OverflowError):
+                        new_row.append(0.0)
+                elif pd.isna(val) if not isinstance(val, str) else False:
+                    new_row.append(None)
                 elif j in text_col_indices:
                     # 布尔值转为 "True"/"False" 字符串，与 Dev/Src xlsx 输出格式保持一致
                     # （避免 PG bool 转 text 时产生 "t"/"f"）
@@ -512,7 +514,7 @@ def _safe_view(orch, method_name: str, date_arg: str) -> pd.DataFrame:
         return result
     except Exception as e:
         logger.warning(f"  [警告] {method_name}({date_arg}) 调用失败: {e}")
-        return pd.DataFrame()
+        raise
 
 
 def _table_exists_in_txn(cur, table_name: str) -> bool:

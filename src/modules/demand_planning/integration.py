@@ -7,6 +7,7 @@
 - generate_supply_demand_log_for_integration: 生成供需日志
 """
 
+import logging
 import os
 import time
 from typing import Any, Optional
@@ -14,9 +15,12 @@ from typing import Any, Optional
 import numpy as np
 import pandas as pd
 
+logger = logging.getLogger("SupplyChainSimulation")
+
 from .constants import DEFAULT_MAX_ADVANCE_DAYS
 from ...utils.defaults import M1_FUTURE_CUTOFF_DAYS
 from ...utils.normalization import normalize_identifiers
+from ...utils.numeric_safe import safe_int_series
 from .dps import apply_dps, apply_supply_choice
 from .forecast import expand_forecast_to_days_integer_split
 from .order import generate_daily_orders
@@ -246,16 +250,24 @@ def _merge_with_history(
     # 🦆 如果提供了内存中的历史订单数据（DB模式），则直接使用，跳过文件读取
     if previous_orders_df is not None and not previous_orders_df.empty:
         previous_orders = previous_orders_df.copy()
+        prev_source = 'previous_orders_df'
     else:
         previous_orders = load_previous_orders(output_dir, simulation_date, max_advance)
+        prev_source = 'history_orderlog_files'
 
     previous_orders = _filter_future_orders(previous_orders, simulation_date)
     previous_orders = _deduplicate_orders(previous_orders)
 
     if today_orders_df is not None and not today_orders_df.empty:
-        orders_df = pd.concat([previous_orders, today_orders_df], ignore_index=True)
+        frames = []
+        if not previous_orders.empty:
+            frames.append(previous_orders.assign(_quantity_debug_source=prev_source))
+        frames.append(today_orders_df.assign(_quantity_debug_source='today_orders_df'))
+        orders_df = pd.concat(frames, ignore_index=True)
     else:
         orders_df = previous_orders.copy()
+        if not orders_df.empty:
+            orders_df['_quantity_debug_source'] = prev_source
 
     return _normalize_orders(orders_df)
 
@@ -292,12 +304,44 @@ def _deduplicate_orders(orders: pd.DataFrame) -> pd.DataFrame:
     return orders
 
 
+def _sanitize_order_quantity(orders_df: pd.DataFrame) -> pd.Series:
+    """把订单 quantity 列转为 int；异常值报带来源定位的错误。
+
+    正常 Module1 计算路径不吞掉坏数据；异常值入库的 0 填充只在 DB 写入边界处理。
+    """
+    qty_numeric = pd.Series(
+        pd.to_numeric(orders_df['quantity'], errors='coerce'),
+        index=orders_df.index,
+    )
+    bad_mask = qty_numeric.isna() | ~np.isfinite(qty_numeric.to_numpy(dtype='float64'))
+    if bad_mask.any():
+        bad_count = int(bad_mask.sum())
+        bad_rows = orders_df.loc[bad_mask]
+        if '_quantity_debug_source' in bad_rows.columns:
+            source_counts = bad_rows['_quantity_debug_source'].value_counts().to_dict()
+        else:
+            source_counts = {'unknown': bad_count}
+        preview_cols = [
+            c for c in ['date', 'material', 'location', 'demand_type',
+                        'simulation_date', 'advance_days', 'quantity',
+                        '_quantity_debug_source']
+            if c in bad_rows.columns
+        ]
+        logger.warning(
+            "Module1 订单 quantity 含 %d 个异常值（NaN/inf/不可转换），已替换为 0；"
+            "来源分布=%s；异常订单行示例:\n%s",
+            bad_count, source_counts, bad_rows[preview_cols].head(20).to_string(),
+        )
+    return safe_int_series(orders_df['quantity'], context='module1._normalize_orders.quantity')
+
+
 def _normalize_orders(orders_df: pd.DataFrame) -> pd.DataFrame:
     """规范化订单。"""
     if orders_df.empty:
-        return orders_df
+        return orders_df.drop(columns=['_quantity_debug_source'], errors='ignore')
     if 'quantity' in orders_df.columns:
-        orders_df['quantity'] = orders_df['quantity'].astype(int)
+        orders_df['quantity'] = _sanitize_order_quantity(orders_df)
+    orders_df = orders_df.drop(columns=['_quantity_debug_source'], errors='ignore')
     if 'simulation_date' not in orders_df.columns:
         orders_df['simulation_date'] = orders_df['date']
     return normalize_identifiers(orders_df)
@@ -389,7 +433,10 @@ def _apply_orders_consumption(
         )
         _apply_fast_consumption(normal_orders, quantities, idx_map, offsets)
 
-    consumed['quantity'] = quantities.astype(int)
+    consumed['quantity'] = safe_int_series(
+        pd.Series(quantities, index=consumed.index),
+        context='module1._apply_orders_consumption.quantity',
+    )
 
     return normalize_identifiers(consumed)
 

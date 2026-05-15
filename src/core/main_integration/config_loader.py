@@ -3,14 +3,20 @@ config_loader.py
 
 配置加载与标准化模块。
 """
+from __future__ import annotations
 
 import logging
 import os
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pandas as pd
 
 from ...utils.normalization import normalize_identifiers
+
+if TYPE_CHECKING:
+    # 仅类型检查使用，运行期不导入，避免 main_integration ↔ run 循环依赖。
+    from ..run.config_dir import ConfigDir
 
 # 复用 src/utils/logger_config.py::DualLogger 创建的同名 logger，
 # 这样消息既能进控制台又能进 simulation_log_*.txt。
@@ -18,84 +24,6 @@ logger = logging.getLogger("SupplyChainSimulation")
 
 
 _EXCEL_SUFFIXES = {".xlsx", ".xlsm", ".xls"}
-
-
-def discover_csv_override_files(excel_path: str) -> tuple[dict, list[str]]:
-    """解析某个 Excel 配置文件允许使用的 CSV 覆盖文件。
-
-    支持两种来源（合并；显式子目录优先）：
-
-    1. 显式专属目录：
-       - ``<excel_stem>_csv/``
-       - ``<excel_stem>.csv_overrides/``
-    2. 同目录 ``*.csv``（不再要求目录中只有一个 Excel 文件）。
-
-    覆盖语义由调用方决定（当前 ``load_configuration`` 仅在 Excel 内对应 sheet
-    为空时才使用 CSV，所以多 Excel 共享同名 CSV 不会引发误覆盖）。
-
-    Returns:
-        tuple[dict, list[str]]:
-            - ``{sheet_name: csv_path}``
-            - 解析过程中的说明/提示信息
-    """
-    messages: list[str] = []
-    csv_files: dict[str, Path] = {}
-
-    config_file = Path(excel_path).resolve()
-    config_dir = config_file.parent
-    if not config_dir.is_dir():
-        return csv_files, messages
-
-    explicit_dirs = [
-        config_dir / f"{config_file.stem}_csv",
-        config_dir / f"{config_file.stem}.csv_overrides",
-    ]
-
-    for override_dir in explicit_dirs:
-        if not override_dir.is_dir():
-            continue
-        for csv_path in sorted(override_dir.glob("*.csv")):
-            sheet_name = csv_path.stem
-            if sheet_name in csv_files:
-                messages.append(
-                    f"检测到重复 CSV 覆盖文件名 {sheet_name}.csv；已优先使用 {csv_files[sheet_name].parent.name}"
-                )
-                continue
-            csv_files[sheet_name] = csv_path
-
-    # 同目录 *.csv：作为补充来源，不覆盖显式子目录中的同名 CSV
-    for csv_path in sorted(config_dir.glob("*.csv")):
-        sheet_name = csv_path.stem
-        if sheet_name not in csv_files:
-            csv_files[sheet_name] = csv_path
-
-    return csv_files, messages
-
-
-def load_csv_overrides(excel_path: str, messages: list[str] | None = None) -> dict:
-    """读取 Excel 配置文件对应的 CSV 覆盖数据。"""
-    csv_overrides = {}
-    try:
-        csv_files, discovered_messages = discover_csv_override_files(excel_path)
-        if messages is not None:
-            messages.extend(discovered_messages)
-
-        for sheet_name, csv_path in csv_files.items():
-            try:
-                csv_overrides[sheet_name] = pd.read_csv(csv_path)
-            except Exception as e:
-                error_message = f"CSV 文件读取失败: {csv_path.name} - {e}"
-                if messages is not None:
-                    messages.append(error_message)
-                else:
-                    logger.warning(f"  ⚠️ {error_message}")
-    except Exception as e:
-        error_message = f"CSV 覆盖扫描失败: {e}"
-        if messages is not None:
-            messages.append(error_message)
-        else:
-            logger.warning(f"  ⚠️ {error_message}")
-    return csv_overrides
 
 
 def load_configuration_from_dict(config_data: dict, config_name: str = "DB_Config") -> dict:
@@ -300,54 +228,86 @@ def load_configuration_from_dict(config_data: dict, config_name: str = "DB_Confi
     return config_dict
 
 
-def load_configuration(config_path: str) -> dict:
-    """加载与标准化配置数据
+def load_configuration(config) -> dict:
+    """加载与标准化配置数据。
 
     目的：
-    - 从 Excel 读取所有工作表，补齐缺失的必要表，统一标准化标识符字段，并对 M4 换产配置执行重复性检查与去重映射。
+    - 从 ``config/`` 目录读取唯一 Excel 与同级 CSV，补齐缺失的必要表，统一标准化
+      标识符字段，并对 M4 换产配置执行重复性检查与去重映射。
 
     Args:
-        config_path: 配置文件路径（Excel）。
+        config: ``ConfigDir`` 实例（首选）；或 Excel 路径字符串 / ``Path``（向后兼容）。
+                传字符串/Path 时内部走 ``ConfigDir.from_excel_path``（CSV 唯一性仍校验）。
 
     Returns:
         dict: 标准化后的配置数据字典。
 
-    输入数据：
-        - Excel 工作簿；可能存在缺失表或非标准类型的标识符列。
-
-    输出/副作用：
-        - 打印加载与标准化日志；对 M4 的配置进行去重与键映射以向后兼容。
+    核心原则：
+        - **sheet 名权威**：以 ``xl.sheet_names`` 为唯一权威；循环前 ``tuple(...)``
+          锁定快照，再用该快照逐项调用 ``cfg_dir.csv_for_sheet`` 做大小写不敏感匹配。
+          不引入额外的规范 sheet 清单。
+        - **CSV 无条件优先**：只要 ``config/`` 目录下存在同名 CSV（大小写不敏感），
+          直接用 CSV、跳过 Excel sheet，与 sheet 是否为空无关。
+        - **路径独立性**：CSV 来源仅限传入的 ``config/`` 目录一层，不递归、不回退到
+          其他目录、不调用旧的 ``discover_csv_override_files``。
 
     逻辑：
-        - 加载→补齐必要表→标准化标识符→检验并去重 Changeover 配置→映射关键表→返回字典。
+        归一化为 ConfigDir → 加载（CSV 优先）→ 补齐必要表 → 标准化标识符
+        → 检验并去重 Changeover 配置 → 映射关键表 → 完整性校验 → 返回字典。
     """
-    logger.info(f"📋 加载配置文件: {config_path}")
+    # ---- 归一化为 ConfigDir（鸭子类型，避免顶层 import 形成循环依赖） ----
+    if hasattr(config, "excel_path") and hasattr(config, "csv_map"):
+        cfg_dir = config  # 已经是 ConfigDir
+    else:
+        from ..run.config_dir import ConfigDir  # 惰性 import
+        cfg_dir = ConfigDir.from_excel_path(config)
 
+    excel_path = str(cfg_dir.excel_path)
+    logger.info(
+        f"📋 加载配置目录: {cfg_dir.dir_path}（Excel: {cfg_dir.excel_path.name}, "
+        f"CSV: {len(cfg_dir.csv_map)} 个）"
+    )
+
+    xl: pd.ExcelFile | None = None
     try:
-        xl = pd.ExcelFile(config_path)
-        config_dict = {}
+        xl = pd.ExcelFile(excel_path)
 
-        # 加载所有配置表
-        for sheet_name in xl.sheet_names:
-            config_dict[sheet_name] = xl.parse(sheet_name)
-            logger.info(f"  ✅ [Excel] {sheet_name} ({len(config_dict[sheet_name])} 行)")
+        # ---- 先把 Excel 的 sheet 名锁定成元组快照，作为匹配唯一权威 ----
+        sheet_names: tuple[str, ...] = tuple(xl.sheet_names)
+        logger.info(f"  📑 Excel sheet 列表（{len(sheet_names)} 个）: {sheet_names}")
 
-        # CSV 覆盖：仅当 Excel 中对应 sheet 为空时，才使用同名 CSV 数据
-        csv_messages: list[str] = []
-        csv_overrides = load_csv_overrides(config_path, csv_messages)
-        for msg in csv_messages:
-            logger.info(f"  ℹ️ {msg}")
+        config_dict: dict = {}
         applied_csv_count = 0
-        for sheet_name, csv_df in csv_overrides.items():
-            existing = config_dict.get(sheet_name)
-            if existing is None or (isinstance(existing, pd.DataFrame) and existing.empty):
-                config_dict[sheet_name] = csv_df
+
+        # ---- 逐 sheet：CSV 无条件优先 ----
+        for sheet_name in sheet_names:
+            csv_path = cfg_dir.csv_for_sheet(sheet_name)  # 内部按 .lower() 查 csv_map
+            if csv_path is not None:
+                config_dict[sheet_name] = pd.read_csv(csv_path)
                 applied_csv_count += 1
-                logger.info(f"  ✅ [CSV] {sheet_name} ({len(csv_df)} 行) — Excel 中该 sheet 为空，使用 CSV 数据")
+                logger.info(
+                    f"  ✅ [CSV优先] {sheet_name} <- {csv_path.name} "
+                    f"({len(config_dict[sheet_name])} 行)"
+                )
+            else:
+                config_dict[sheet_name] = xl.parse(sheet_name)
+                logger.info(f"  ✅ [Excel] {sheet_name} ({len(config_dict[sheet_name])} 行)")
+
+        # ---- 仅有 CSV、Excel 无对应 sheet 的扩展数据源 ----
+        loaded_lower = {s.lower() for s in sheet_names}
+        for stem_lower, csv_path in cfg_dir.csv_map.items():
+            if stem_lower not in loaded_lower:
+                # 用 CSV 文件名（保留原大小写）作为 sheet 名
+                config_dict[csv_path.stem] = pd.read_csv(csv_path)
+                logger.info(
+                    f"  ✅ [CSV扩展] {csv_path.stem} <- {csv_path.name} "
+                    f"({len(config_dict[csv_path.stem])} 行)"
+                )
 
         logger.info(
             f"📊 配置加载汇总: 共 {len(config_dict)} 个配置表 "
-            f"(Excel: {len(xl.sheet_names)}, CSV 覆盖空 sheet: {applied_csv_count})"
+            f"(Excel sheet: {len(sheet_names)}, CSV 优先覆盖: {applied_csv_count}, "
+            f"CSV 总数: {len(cfg_dir.csv_map)})"
         )
 
         # 确保必要的配置表存在
@@ -477,8 +437,53 @@ def load_configuration(config_path: str) -> dict:
         else:
             logger.info("✅ 无需映射 Module4 配置表")
 
+        # ---- 完整性校验（出口处统一）----
+        _validate_config_dict(config_dict)
+
         return config_dict
-        
     except Exception as e:
-        logger.error(f"❌ 配置文件加载失败: {e}")
+        logger.error(f"❌ 配置加载失败: {e}")
         raise
+    finally:
+        # 显式关闭，避免 Windows 上 ExcelFile 句柄滞留导致同目录文件无法删除/移动。
+        if xl is not None:
+            try:
+                xl.close()
+            except Exception:  # noqa: BLE001 — 关闭失败不该掩盖主异常
+                pass
+
+
+# ---------- 完整性校验 ----------
+# 业务必需 sheet 名称（大小写不敏感匹配）。与 load_configuration 内 required_sheets 一致。
+_REQUIRED_SHEETS: set[str] = {
+    "M1_InitialInventory",
+    "Global_SpaceCapacity",
+    "Global_Network",
+    "Global_LeadTime",
+    "Global_DemandPriority",
+}
+
+
+def _validate_config_dict(
+    config_dict: dict,
+    required: set[str] | None = None,
+) -> None:
+    """校验 ``config_dict`` 中必需 sheet 是否全部加载、各 sheet 是否非空。
+
+    当前实现：必需 sheet 缺失走 warning（与现有 ``load_configuration`` "补空表 + warning"
+    语义一致，避免破坏现有可跑配置）；空 DataFrame 走 info 提示。若团队后续决定改成
+    硬失败（缺失即 raise），把 ``logger.warning`` 替换为 ``raise ValueError`` 即可。
+    """
+    if required is None:
+        required = _REQUIRED_SHEETS
+    loaded_lower = {k.lower() for k in config_dict}
+    missing = sorted(s for s in required if s.lower() not in loaded_lower)
+    if missing:
+        logger.warning(
+            f"[ConfigValidation] config_dict 缺少必需 sheet：{missing}（已由上游补空表）"
+        )
+    for name, df in config_dict.items():
+        if isinstance(df, pd.DataFrame) and df.empty:
+            logger.info(
+                f"[ConfigValidation] sheet '{name}' 加载后为空 DataFrame，请确认数据源是否有效"
+            )

@@ -63,8 +63,52 @@ class ExcelImporter:
 
     @staticmethod
     def _scan_csv_overrides(excel_path: str) -> Dict[str, pd.DataFrame]:
-        """数据库导入模式禁用 CSV 覆盖，保持与 Dev 文件模式一致。"""
+        """[已废弃] 数据库导入已改用 ``load_excel_file_with_csv_priority``。"""
         return {}
+
+    @staticmethod
+    def load_excel_file_with_csv_priority(excel_path: str) -> Dict[str, pd.DataFrame]:
+        """读取 Excel 配置，并让同目录同名 CSV 无条件优先。
+
+        规则与文件模式 ``load_configuration`` 的原始数据读取阶段保持一致：
+        - 以 Excel 的 sheet 名作为匹配权威；
+        - 同目录存在同名 CSV（大小写不敏感，含 ``.CSV``）时直接使用 CSV；
+        - CSV 没有对应 Excel sheet 时作为扩展表导入；
+        - CSV 来源仅限 Excel 同目录一层，由 ``ConfigDir`` 校验大小写不敏感唯一性。
+        """
+        from src.core.run.config_dir import ConfigDir
+
+        cfg_dir = ConfigDir.from_excel_path(excel_path)
+        xl = None
+        try:
+            try:
+                xl = pd.ExcelFile(str(cfg_dir.excel_path))
+            except ValueError:
+                ExcelImporter._patch_openpyxl_font_family()
+                xl = pd.ExcelFile(str(cfg_dir.excel_path))
+
+            sheet_names: tuple[str, ...] = tuple(xl.sheet_names)
+            sheet_data: Dict[str, pd.DataFrame] = {}
+
+            for sheet_name in sheet_names:
+                csv_path = cfg_dir.csv_for_sheet(sheet_name)
+                if csv_path is not None:
+                    sheet_data[sheet_name] = pd.read_csv(csv_path)
+                else:
+                    sheet_data[sheet_name] = xl.parse(sheet_name)
+
+            loaded_lower = {s.lower() for s in sheet_names}
+            for stem_lower, csv_path in cfg_dir.csv_map.items():
+                if stem_lower not in loaded_lower:
+                    sheet_data[csv_path.stem] = pd.read_csv(csv_path)
+
+            return sheet_data
+        finally:
+            if xl is not None:
+                try:
+                    xl.close()
+                except Exception:
+                    pass
 
     def import_excel_file(
         self,
@@ -101,22 +145,14 @@ class ExcelImporter:
         config_type = self._derive_config_type(config_name)
 
         
-        # 读取所有sheet
-        try:
-            xl = pd.ExcelFile(excel_path)
-        except ValueError:
-            # openpyxl 对某些Excel样式不兼容（如字体family值超出上限14），
-            # 临时放宽校验后重试
-            self._patch_openpyxl_font_family()
-            xl = pd.ExcelFile(excel_path)
+        # 读取所有配置表：同目录同名 CSV 无条件优先于 Excel sheet。
+        sheet_data = self.load_excel_file_with_csv_priority(excel_path)
         results = {}
         
         start_time = time.time()
         
-        for sheet_name in xl.sheet_names:
+        for sheet_name, df in sheet_data.items():
             try:
-                df = xl.parse(sheet_name)
-                
                 # 构建表名: 使用统一配置表名（同结构同表），通过 config_name 字段区分不同配置
                 table_name = table_mapping.get_config_table_name(sheet_name)
                 
@@ -145,41 +181,6 @@ class ExcelImporter:
                 
             except Exception as e:
                 results[sheet_name] = -1
-
-        # 扫描并导入 CSV 覆盖文件
-        csv_overrides = self._scan_csv_overrides(excel_path)
-        if csv_overrides:
-            pass
-        for csv_sheet_name, csv_df in csv_overrides.items():
-            try:
-                csv_table_name = table_mapping.get_config_table_name(csv_sheet_name)
-                is_override = csv_sheet_name in results
-
-                if csv_df.empty and len(csv_df.columns) > 0:
-                    if is_override:
-                        pass
-                    else:
-                        pass
-                    self.db.create_table_from_df(csv_df, csv_table_name, if_exists, config_name=config_name, config_type=config_type)
-                    results[csv_sheet_name] = 0
-                elif not csv_df.empty:
-                    self.db.create_table_from_df(csv_df, csv_table_name, if_exists, config_name=config_name, config_type=config_type)
-                    results[csv_sheet_name] = len(csv_df)
-                    self.imported_tables[csv_table_name] = {
-                        "source_file": str(Path(excel_path).parent / f"{csv_sheet_name}.csv"),
-                        "sheet_name": csv_sheet_name,
-                        "row_count": len(csv_df),
-                        "column_count": len(csv_df.columns),
-                        "config_name": config_name
-                    }
-                    if is_override:
-                        pass
-                    else:
-                        pass
-            except Exception as e:
-                results[csv_sheet_name] = -1
-        if csv_overrides:
-            pass
 
         elapsed = time.time() - start_time
         total_rows = sum(r for r in results.values() if r > 0)

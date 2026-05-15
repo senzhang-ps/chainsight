@@ -14,6 +14,9 @@ from typing import Optional
 
 from ..main_integration import check_resume_capability
 
+# 仓库根（绑定到代码物理位置，不依赖 CWD）
+_PROJECT_ROOT = Path(__file__).resolve().parents[3]
+
 
 def _list_existing_runs(
     root_dir: Path, start_date: str, end_date: str
@@ -99,7 +102,7 @@ def _prompt_user_run_selection(run_infos: list[dict]) -> Path:
 
 
 def _ensure_output_dir(
-    config_path: Path,
+    config_source,
     resume_mode: bool = False,
     resume_from: Optional[str] = None,
     start_date: Optional[str] = None,
@@ -110,26 +113,28 @@ def _ensure_output_dir(
     """创建或选择本次运行使用的输出目录。
 
     目录结构：
-      `outputs/<config_stem>/run_YYYYMMDD_HHMMSS/`
+      - 新 ``ConfigDir`` 路径：``outputs/<project>/<scenario>/run_YYYYMMDD_HHMMSS/``
+      - 旧 ``Path`` 路径：``outputs/<config_stem>/run_YYYYMMDD_HHMMSS/`` （单层兼容）
 
     Args:
-        config_path: 配置文件路径。
+        config_source: ``ConfigDir``（首选）或旧式 Excel ``Path``。
         resume_mode: 是否启用历史目录续跑能力。
         resume_from: 指定要续跑的运行目录名称。
         start_date: 仿真开始日期，用于续跑校验。
         end_date: 仿真结束日期，用于续跑校验。
         interactive: 是否在存在多个候选目录时启用交互选择。
-        run_suffix: 运行目录后缀参数，当前保留兼容接口。
+        run_suffix: 运行目录后缀参数；非空时会作为 ``run_<ts>_<suffix>`` 拼到
+            目录名上（如 file 模式传 ``"test"`` → ``run_<ts>_test``）。
 
     Returns:
         可作为 `output_base_dir` 使用的最终叶子目录路径。
     """
-    cfg_stem = config_path.stem
-    project_root = Path.cwd()
-    
-    # 集中式输出目录结构
-    root_dir = project_root / "outputs" / cfg_stem
-    # 始终确保顶层目录存在，以便其名称与配置文件名保持一致
+    output_subpath = _output_subpath_from_config_source(config_source)
+    project_root = _PROJECT_ROOT
+
+    # 二级输出根：outputs/<project>/<scenario>/
+    root_dir = project_root / "outputs" / output_subpath
+    # 始终确保顶层目录存在，以便续跑状态与 run_* 子目录位于同一配置维度下
     root_dir.mkdir(parents=True, exist_ok=True)
 
     # 如果指定了具体运行目录，则校验后返回
@@ -167,10 +172,48 @@ def _ensure_output_dir(
 
     # 在顶层目录下创建唯一的运行文件夹以避免冲突
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    run_dir = root_dir / f"run_{ts}"
+    suffix = run_suffix.strip()
+    if suffix and not suffix.startswith("_"):
+        suffix = f"_{suffix}"
+    run_dir = root_dir / f"run_{ts}{suffix}"
     run_dir.mkdir(parents=True, exist_ok=False)
 
     return run_dir
+
+
+def _output_subpath_from_config_source(config_source) -> Path:
+    """从 ``ConfigDir`` 或旧式 Excel 路径推导输出二级子路径。
+
+    返回值始终为 ``Path``：
+      - ``ConfigDir``：返回 ``Path(<project>) / <scenario>``（二级）。
+      - 旧式 Excel ``Path``：返回单段 ``Path(<excel_stem>)``，保持
+        ``outputs/<excel_stem>/run_*/`` 旧行为以兼容遗留调用方。
+    """
+    if hasattr(config_source, "output_subpath"):
+        sub = config_source.output_subpath
+        if sub:
+            return Path(sub)
+    if hasattr(config_source, "excel_path"):
+        return Path(Path(config_source.excel_path).stem)
+    return Path(Path(config_source).stem)
+
+
+def _write_run_id_file(
+    log_dir: Path, run_id: str, filename: str, logger
+) -> None:
+    """把本次运行的 run_id 落盘到 ``log_dir/<filename>``。
+
+    DB 模式 → ``db_run_id.txt``（内容: ``db_<config>_<ts>``，与 DB 中实际使用的
+    ``effective_run_id`` 一致）。本地模式 → ``run_id.txt``（内容: run 目录
+    basename，与 ``outputs/<...>/<basename>/`` 对得上）。
+
+    无尾换行、UTF-8 无 BOM —— 便于 ``cat <file>`` 直接拿来当字符串使用；续跑
+    命中同一目录时覆盖写也是幂等的。失败仅 ``logger.warning``，不抛异常。
+    """
+    try:
+        (log_dir / filename).write_text(run_id, encoding="utf-8")
+    except OSError as e:
+        logger.warning(f"[WARN] 写入 {filename} 失败（不影响仿真）: {e}")
 
 
 def get_or_init_simulation_start(

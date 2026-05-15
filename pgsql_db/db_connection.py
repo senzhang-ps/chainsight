@@ -151,7 +151,7 @@ class DatabaseConnection:
                 exists = cursor.fetchone() is not None
             return exists
         except Exception as e:
-            return False
+            raise
         finally:
             if temp_conn and not temp_conn.closed:
                 temp_conn.close()
@@ -185,7 +185,7 @@ class DatabaseConnection:
                 )
             return True
         except Exception as e:
-            return False
+            raise
         finally:
             if temp_conn and not temp_conn.closed:
                 temp_conn.close()
@@ -233,7 +233,7 @@ class DatabaseConnection:
                 result["success"] = True
                 result["message"] = "连接成功"
         except Exception as e:
-            result["message"] = f"连接失败: {str(e)}"
+            raise
         finally:
             result["connection_time_ms"] = round((time.time() - start_time) * 1000, 2)
         
@@ -304,7 +304,7 @@ class DatabaseConnection:
                 )
                 return cursor.fetchone() is not None
         except Exception as e:
-            return False
+            raise
     
     def delete_config_data(self, table_name: str, config_name: str) -> int:
         """
@@ -334,7 +334,7 @@ class DatabaseConnection:
                     pass
                 return deleted_count
         except Exception as e:
-            return 0
+            raise
     
     def create_table_from_df(
         self,
@@ -563,7 +563,7 @@ class DatabaseConnection:
             
             return True
         except Exception as e:
-            return False
+            raise
     
     def _clean_name(self, name: str) -> str:
         """清理名称，使其符合PostgreSQL命名规范"""
@@ -716,23 +716,25 @@ class DatabaseConnection:
         for i, row in enumerate(records):
             new_row = []
             for j, val in enumerate(row):
-                if pd.isna(val) if not isinstance(val, str) else False:
-                    new_row.append(None)
-                elif j in int_col_indices:
+                if j in int_col_indices:
                     try:
-                        # 兼容处理：float -> int
-                        new_row.append(int(float(val)))
-                    except (ValueError, TypeError):
-                        new_row.append(None)
+                        float_val = float(val)
+                        new_row.append(int(float_val) if np.isfinite(float_val) else 0)
+                    except (ValueError, TypeError, OverflowError):
+                        new_row.append(0)
                 elif j in float_col_indices:
                     try:
                         float_val = float(val)
-                        if round_float_values:
+                        if not np.isfinite(float_val):
+                            new_row.append(0.0)
+                        elif round_float_values:
                             new_row.append(round(float_val, 15))
                         else:
                             new_row.append(float_val)
-                    except (ValueError, TypeError):
-                        new_row.append(None)
+                    except (ValueError, TypeError, OverflowError):
+                        new_row.append(0.0)
+                elif pd.isna(val) if not isinstance(val, str) else False:
+                    new_row.append(None)
                 elif j in text_col_indices:
                     # Convert booleans to "True"/"False" strings to match
                     # 与 Dev/Src 的 xlsx 输出格式保持一致（避免 PG 将 bool->text 转成 `t`/`f`）
@@ -851,7 +853,7 @@ class DatabaseConnection:
                             indexes_created.append(f"{clean_col}({index_type})")
                 except Exception as e:
                     # 索引创建失败不影响主流程
-                    pass
+                    raise
         
         if indexes_created:
             pass

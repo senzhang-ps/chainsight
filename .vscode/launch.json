@@ -1,53 +1,22 @@
 {
     "version": "0.2.0",
     "configurations": [
-        
         {
-            "name": "Run BC_S5 Simulation (2025-10-06)",
+            "name": "Python: run.py in work env",
             "type": "python",
             "request": "launch",
+            "python": "C:\\Users\\lenovo\\miniforge3\\envs\\work\\python.exe",
             "program": "${workspaceFolder}/run.py",
-            "python": "${workspaceFolder}/.venv/Scripts/python.exe",
-            "cwd": "${workspaceFolder}",
-            "env": {
-                "PYTHONPATH": "${workspaceFolder}"
-            },
-            "subProcess": true,
             "console": "integratedTerminal",
             "args": [
-                "--config", "test_files/BC_S5.xlsx",
-                "--start-date", "2025-10-06",
-                "--end-date", "2025-10-10"
+                "--config", ".\\config\\OC_Paste_S1_20251224.xlsx",
+                "--local",
+                "--start-date", "2025-12-15",
+                "--end-date", "2026-02-28"
             ],
-            "justMyCode": false
-        },
-        {
-            "name": "Python: Debug Current File",
-            "type": "python",
-            "request": "launch",
-            "program": "${file}",
-            "python": "${workspaceFolder}/.venv/Scripts/python.exe",
-            "console": "integratedTerminal",
-            "justMyCode": false
-        },
-        {
-            "name": "Resume BC_S5 Simulation",
-            "type": "python",
-            "request": "launch",
-            "program": "${workspaceFolder}/run.py",
-            "python": "${workspaceFolder}/.venv/Scripts/python.exe",
-            "cwd": "${workspaceFolder}",
-            "env": {
-                "PYTHONPATH": "${workspaceFolder}"
-            },
-            "subProcess": true,
-            "console": "integratedTerminal",
-            "args": [
-                "--config", "test_files/BC_S5.xlsx",
-                "--end-date", "2025-10-10",
-                "--resume"
-            ],
-            "justMyCode": false
+            "justMyCode": true,
+            "env": {},
+            "cwd": "${workspaceFolder}"
         }
     ]
 }

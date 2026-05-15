@@ -119,7 +119,7 @@ def generate_shipment_with_inventory_check(
     返回:
         (shipment_df, cut_df)元组。
     """
-    if orders_df.empty:
+    if orders_df.empty or (hasattr(orchestrator, 'shipment_valid') and orchestrator.shipment_valid == 0):
         return pd.DataFrame(), pd.DataFrame()
 
     # 当日到期订单

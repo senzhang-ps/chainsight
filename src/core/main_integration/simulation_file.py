@@ -273,6 +273,7 @@ def run_integrated_simulation(
                     output_dir=str(module_outputs['module1']),
                     orchestrator=orchestrator
                 )
+
                 m1_shipments = m1_result.get('shipment_df', pd.DataFrame())
 
                 # 🔄 立即处理M1 shipment，扣减库存

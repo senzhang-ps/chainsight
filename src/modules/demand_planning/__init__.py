@@ -57,6 +57,9 @@ from .integration import (
     run_daily_order_generation,
     generate_supply_demand_log_for_integration,
 )
+
+from .integration_refactor import run_daily_order_generation as run_daily_order_generation_refactor
+
 from .io_utils import (
     load_previous_orders,
     save_module1_output_with_supply_demand,

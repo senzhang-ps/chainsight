@@ -9,6 +9,7 @@ import os
 import argparse
 import io
 import logging
+from pathlib import Path
 
 # Windows UTF-8 编码设置 - 解决emoji和中文输出问题
 if sys.platform == 'win32':
@@ -37,9 +38,14 @@ def main():
     """
     # 配置文件路径（可以通过命令行参数或环境变量指定）
     parser = argparse.ArgumentParser(description="运行供应链集成仿真")
-    parser.add_argument("--config", "-c",
-                       default="./config/integration_config.json",
-                       help="配置文件路径 (默认: ./config/integration_config.json)")
+    cfg_group = parser.add_mutually_exclusive_group()
+    cfg_group.add_argument("--config-dir",
+                           default=None,
+                           help=("场景 config/ 目录绝对路径，或 <project>/<scenario> 短格式；"
+                                 "短格式按 workspace_root 展开"))
+    cfg_group.add_argument("--config", "-c",
+                           default=None,
+                           help="配置文件路径或含唯一 Excel 的目录路径；与 --config-dir 平级支持")
     parser.add_argument("--start-date", "-s",
                        default="2024-01-01",
                        help="仿真开始日期 (默认: 2024-01-01)")
@@ -58,16 +64,34 @@ def main():
 
     args = parser.parse_args()
 
-    # 检查配置文件是否存在
-    if not os.path.exists(args.config):
-        logger.error(f"❌ 配置文件不存在: {args.config}")
-        logger.error("请提供有效的配置文件路径，或使用测试脚本生成配置")
-        sys.exit(1)
+    if args.config_dir:
+        try:
+            from ..run.config_dir import ConfigDir
+            from ..run.utils import expand_config_dir_arg
+
+            cfg = ConfigDir.from_path(expand_config_dir_arg(args.config_dir))
+            args.config = str(cfg.excel_path)
+            if args.output is None:
+                args.output = str(Path("outputs") / cfg.output_subpath)
+                logger.info(f"💫 使用默认输出目录: {args.output}")
+        except (ValueError, FileNotFoundError) as e:
+            print(f"[ConfigError] {e}", file=sys.stderr)
+            sys.exit(2)
+    else:
+        # 过渡期旧路径：保持原默认值与存在性检查。
+        if args.config is None:
+            args.config = "./config/integration_config.json"
+
+        # 检查配置文件是否存在
+        if not os.path.exists(args.config):
+            logger.error(f"❌ 配置文件不存在: {args.config}")
+            logger.error("请提供有效的配置文件路径，或使用测试脚本生成配置")
+            sys.exit(1)
 
     # 如果没有指定输出目录，根据配置文件名生成
     if args.output is None:
         config_name = os.path.splitext(os.path.basename(args.config))[0]
-        args.output = f"./{config_name}_output"
+        args.output = str(Path("outputs") / config_name)
         logger.info(f"💫 使用默认输出目录: {args.output}")
 
     # 处理断点续跑检查选项

@@ -99,19 +99,23 @@ Script-only optional dependencies (for example DOCX generation or alternate Exce
 
 ### File mode
 
-In file mode, `--config` is an Excel path:
+In file mode, prefer `--config-dir` and pass a `workspace/<project>/<scenario>/config/` directory. The directory must contain exactly one Excel file; CSV files in the same directory are matched to sheet names case-insensitively and take priority over Excel sheets.
 
 ```powershell
-python run.py --config config/BC_S5.xlsx --start-date 2025-10-06 --end-date 2025-10-10
-python run.py --config config/OC_Paste_S1_20251224.xlsx --end-date 2025-12-16 --force-restart --non-interactive
-python run.py --config config/BC_S5.xlsx --end-date 2025-10-15 --resume
+python run.py --config-dir D:/PG/chainsight/workspace/SDC/baseline/config --start-date 2025-10-06 --end-date 2025-10-10
+python run.py --config-dir SDC/baseline --end-date 2025-12-16 --force-restart --non-interactive
+python run.py --config-dir SDC/baseline --end-date 2025-10-15 --resume
 ```
+
+The short form `<project>/<scenario>` expands to `<workspace_root>/<project>/<scenario>/config`. `workspace_root` is resolved in this order: `CHAINSIGHT_WORKSPACE` environment variable > project-root `.env` with `CHAINSIGHT_WORKSPACE=...` > `config/defaults.yaml::workspace_root` > project-root `workspace/`. The old `--config` Excel path remains available during the transition, but new file-mode calls should move to `--config-dir`.
 
 ### Database mode
 
-In database mode, `--config` is a config name and you must add `--use-db`:
+In database mode, `--config` can be a config name, an Excel file path, or a config directory containing exactly one Excel file. Add `--use-db`. For a directory input, ChainSight uses the only Excel file in that directory and derives `config_name` from the Excel filename:
 
 ```powershell
+python run.py --config D:/PG/chainsight/config/sdc --start-date 2026-06-29 --end-date 2026-07-01 --use-db --non-interactive
+python run.py --config D:/PG/chainsight/config/sdc/sdc.xlsx --start-date 2026-06-29 --end-date 2026-07-01 --use-db --non-interactive
 python run.py --config BC_S5 --start-date 2025-10-06 --end-date 2025-10-06 --use-db
 python run.py --config OC_Paste_S1_20251224 --start-date 2025-12-15 --end-date 2025-12-16 --use-db
 ```
@@ -134,7 +138,8 @@ The CLI contract is defined by `src/core/run/run_main.py`:
 
 | Argument | Meaning |
 |---|---|
-| `--config` | Excel path in file mode; config name in DB mode |
+| `--config-dir` | Scenario `config/` directory in file mode, either absolute path or `<project>/<scenario>` short form |
+| `--config` | Deprecated Excel path in file mode; config name, Excel path, or single-Excel directory path in DB mode |
 | `--start-date` | Required for the first run, format `YYYY-MM-DD` |
 | `--end-date` | Required, format `YYYY-MM-DD` |
 | `--resume` | Resume automatically |
@@ -159,6 +164,8 @@ chainsight/
 │   └── *.xlsx
 ├── docs/
 ├── outputs/
+├── workspace/
+│   └── <project>/<scenario>/config/
 ├── pgsql_db/
 └── src/
     ├── core/

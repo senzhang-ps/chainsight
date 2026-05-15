@@ -20,7 +20,7 @@ import os
 from typing import Dict, List, Optional
 from pathlib import Path
 from .validation_manager import ValidationManager
-from ..core.main_integration.config_loader import load_csv_overrides
+from ..core.main_integration.config_loader import load_configuration
 
 class ConfigValidator:
     """配置验证器
@@ -781,17 +781,12 @@ def run_pre_simulation_validation(config_path: str, output_dir: str) -> tuple:
     # 创建验证管理器
     validation_manager = ValidationManager(output_dir)
     
-    # 加载配置
+    # 加载配置（走 ConfigDir + load_configuration，CSV 无条件优先）
     try:
-        # 使用更高效的方式读取所有工作表，且只读取数据值以加速
-        config_dict = pd.read_excel(config_path, sheet_name=None, engine='openpyxl', engine_kwargs={'data_only': True})
-        # 扫描并应用 CSV 覆盖
-        csv_messages: list[str] = []
-        csv_overrides = load_csv_overrides(config_path, csv_messages)
-        for message in csv_messages:
-            validation_manager.add_info("ConfigLoader", "CSVOverride", message)
-        for sheet_name, df in csv_overrides.items():
-            config_dict[sheet_name] = df
+        # 惰性导入 ConfigDir，避免 core.run -> main_integration -> config_validator 循环依赖
+        from ..core.run.config_dir import ConfigDir
+        cfg_dir = ConfigDir.from_excel_path(config_path)
+        config_dict = load_configuration(cfg_dir)
     except Exception as e:
         validation_manager.add_error("ConfigLoader", "LoadError", f"Failed to load config file: {str(e)}")
         report_path = validation_manager.write_report()

@@ -15,6 +15,7 @@ import pandas as pd
 from pgsql_db import table_mapping
 from .db_config import _load_config_from_database
 from .local_writer import _write_results_to_local_dev_format
+from .utils import resolve_excel_path, _PROJECT_ROOT
 
 
 def _normalize_for_compare(df: pd.DataFrame) -> pd.DataFrame:
@@ -34,37 +35,47 @@ def _normalize_for_compare(df: pd.DataFrame) -> pd.DataFrame:
     return norm
 
 
-def _find_local_config_file(config_name: str) -> Path | None:
-    """按配置名查找本地 Excel 配置文件。"""
-    config_basename = Path(config_name).stem
-    project_root = Path(__file__).parent.parent.parent.parent
-    search_dirs = [project_root / "config", project_root / "test_files", project_root]
+def _find_local_config_file(config_arg: str) -> Path | None:
+    """按用户输入的 ``--config`` 参数定位本地 Excel 配置文件。
 
-    for d in search_dirs:
-        candidate = d / f"{config_basename}.xlsx"
-        if candidate.exists():
-            return candidate
-    return None
+    支持名字、Excel 路径、以及包含唯一 Excel 的目录路径。
+    """
+    raw = Path(config_arg).expanduser()
+    if raw.is_dir():
+        from .config_dir import ConfigDir
+
+        return ConfigDir.from_path(raw.resolve()).excel_path
+    return resolve_excel_path(config_arg)
 
 
-def _build_expected_local_config(config_name: str) -> dict:
-    """构建本地期望配置（仅 Excel，保持与 Dev 一致）。"""
-    config_file = _find_local_config_file(config_name)
+def _resolve_db_config_input(config_arg: str) -> tuple[str, Path | None]:
+    """解析数据库模式 ``--config`` 输入。
+
+    返回 ``(config_name, local_config_file)``：
+    - 目录路径：使用目录内唯一 Excel，config_name 取 Excel stem。
+    - Excel 路径或可解析名字：使用解析出的 Excel，config_name 取 Excel stem。
+    - 纯数据库配置名：保留原 stem，local_config_file 为 None。
+    """
+    local_config_file = _find_local_config_file(config_arg)
+    if local_config_file is not None:
+        return local_config_file.stem, local_config_file
+    return Path(config_arg).stem, None
+
+
+def _build_expected_local_config(config_arg: str) -> dict:
+    """构建本地期望配置（Excel + 同目录 CSV 无条件优先）。
+
+    ``config_arg`` 是用户原始输入（名字 / 相对路径 / 绝对路径）。
+    """
+    config_file = _find_local_config_file(config_arg)
     if config_file is None:
         return {}
 
-    try:
-        xl = pd.ExcelFile(str(config_file))
-    except ValueError:
-        # 与 ExcelImporter 保持一致：兼容 openpyxl 对部分字体 family 的严格校验
-        from pgsql_db.excel_importer import ExcelImporter
-        ExcelImporter._patch_openpyxl_font_family()
-        xl = pd.ExcelFile(str(config_file))
+    from pgsql_db.excel_importer import ExcelImporter
+    sheet_data = ExcelImporter.load_excel_file_with_csv_priority(str(config_file))
 
     expected = {}
-
-    for sheet_name in xl.sheet_names:
-        df = xl.parse(sheet_name)
+    for sheet_name, df in sheet_data.items():
         table_name = table_mapping.get_config_table_name(sheet_name)
         db_key = table_name[4:] if table_name.startswith("cfg_") else table_name
         expected[db_key] = df
@@ -134,10 +145,17 @@ def _build_db_log_dir(
     config_name: str,
     timestamp: str,
     project_root: Path | None = None,
+    output_subpath: Path | None = None,
 ) -> Path:
-    """返回数据库模式日志目录路径（位于项目 outputs 根目录下）。"""
-    root = project_root if project_root is not None else Path.cwd()
-    return root / "outputs" / f"db_{config_name}_{timestamp}"
+    """返回数据库模式日志目录路径（位于项目 outputs 根目录下）。
+
+    路径形态：``<root>/outputs/<output_subpath>/db_run_<timestamp>``。
+    ``output_subpath`` 缺省时回退到 ``Path(config_name) / config_name``，
+    确保纯 DB 名（无本地 Excel）仍能落到二级结构下。
+    """
+    root = project_root if project_root is not None else _PROJECT_ROOT
+    sub = output_subpath if output_subpath is not None else Path(config_name) / config_name
+    return root / "outputs" / sub / f"db_run_{timestamp}"
 
 
 def _run_with_database(ns: argparse.Namespace) -> int:
@@ -153,9 +171,30 @@ def _run_with_database(ns: argparse.Namespace) -> int:
     import shutil
     
     # 规范化配置名称：去掉路径前缀和 .xlsx 后缀，确保纯名称如 BC_S5
-    # 用户可能传入 "config/BC_S5"、"config/BC_S5.xlsx" 或 "BC_S5"
+    # 用户可能传入 "config/BC_S5"、"config/BC_S5.xlsx" 或 "BC_S5"；
+    # 也支持新入口 --config-dir <绝对路径或短格式>。
+    _raw_config_dir = getattr(ns, "config_dir", None)
     _raw_config = ns.config
-    config_name = Path(_raw_config).stem  # 去掉目录和后缀
+    cfg = None  # ConfigDir 实例，若可构造则用于派生 output_subpath
+    try:
+        if _raw_config_dir:
+            from .config_dir import ConfigDir
+            from .utils import expand_config_dir_arg
+            cfg = ConfigDir.from_path(expand_config_dir_arg(_raw_config_dir))
+            local_config_file = cfg.excel_path
+            config_name = cfg.excel_path.stem
+            _raw_config = str(cfg.excel_path)  # 供下游同名配置比对函数使用
+        else:
+            config_name, local_config_file = _resolve_db_config_input(_raw_config)
+            if local_config_file is not None:
+                from .config_dir import ConfigDir
+                cfg = ConfigDir.from_excel_path(local_config_file)
+    except (ValueError, FileNotFoundError) as e:
+        print(f"[ConfigError] {e}", file=sys.stderr)
+        return 2
+
+    # 输出二级子路径（DB 模式与文件模式共用此规则）
+    _output_subpath = cfg.output_subpath if cfg is not None else Path(config_name) / config_name
     start_date = ns.start_date
     end_date = ns.end_date
     
@@ -184,7 +223,7 @@ def _run_with_database(ns: argparse.Namespace) -> int:
     # 执行初始化（检测数据库、创建数据库、检测配置表、导入配置）
     init_result = initializer.initialize(
         config_name=config_name,
-        auto_import_config=True,
+        auto_import_config=(local_config_file is None),
         verbose=True
     )
     
@@ -195,9 +234,14 @@ def _run_with_database(ns: argparse.Namespace) -> int:
     db = initializer.db
     
     # 创建本地日志目录（默认仅保存日志文件）
-    project_root = Path.cwd()
+    # 新路径形态：outputs/<project>/<scenario>/db_run_<ts>/
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    log_dir = _build_db_log_dir(config_name=config_name, timestamp=ts)
+    log_dir = _build_db_log_dir(
+        config_name=config_name,
+        timestamp=ts,
+        project_root=_PROJECT_ROOT,
+        output_subpath=_output_subpath,
+    )
     log_dir.mkdir(parents=True, exist_ok=True)
     
     # 设置日志系统
@@ -220,17 +264,17 @@ def _run_with_database(ns: argparse.Namespace) -> int:
         logger.info("🔄 步骤0.5: 检查同名配置并按差异同步数据库")
         logger.info("=" * 60)
 
-        # 构建本地期望配置（Excel + CSV覆盖）
-        expected_config = _build_expected_local_config(config_name)
+        # 构建本地期望配置（Excel + CSV覆盖）—— 用原始 --config 输入（支持任意路径/子目录）
+        expected_config = _build_expected_local_config(_raw_config)
         if not expected_config:
-            logger.info(f"  ℹ️ 未找到本地配置文件 {Path(config_name).stem}.xlsx，直接使用数据库配置")
+            logger.info(f"  ℹ️ 未找到本地配置文件 {config_name}.xlsx（输入：{_raw_config}），直接使用数据库配置")
         else:
             exists, _ = initializer.check_config_data_exists(config_name)
             if not exists:
                 logger.info("  ℹ️ 数据库中不存在同名配置，执行首次导入")
-                config_file = initializer.find_config_file(config_name)
+                config_file = local_config_file or initializer.find_config_file(config_name)
                 if not config_file:
-                    logger.error(f"[ERROR] 未找到本地配置文件: {Path(config_name).stem}.xlsx")
+                    logger.error(f"[ERROR] 未找到本地配置文件: {config_name}.xlsx（输入：{_raw_config}）")
                     return 1
                 success, import_results = initializer.import_config_from_excel(config_name, config_file)
                 if not success:
@@ -322,7 +366,11 @@ def _run_with_database(ns: argparse.Namespace) -> int:
                     logger.info(f"[NEW] 未检测到未完成运行，全新开始 run_id={effective_run_id}")
             except Exception as _ce:
                 logger.warning(f"[WARN] 断点续跑检测异常（将全新开始）: {_ce}")
-        
+
+        # 落盘 effective_run_id：续跑场景下这里已经是复用的既有 run_id，与 DB 对齐
+        from .output_dir import _write_run_id_file
+        _write_run_id_file(log_dir, effective_run_id, "db_run_id.txt", logger)
+
         try:
             result = run_integrated_simulation_from_dict(
                 config_data=config_data,
@@ -378,7 +426,9 @@ def _run_with_database(ns: argparse.Namespace) -> int:
                 logger.info("\n" + "=" * 60)
                 logger.info("[DIR] 输出本地文件（Dev格式）")
                 logger.info("=" * 60)
-                local_output_dir = project_root / "outputs" / config_name / f"run_{ts}"
+                # 与 log_dir 共用同一 <project>/<scenario>/db_run_<ts> 目录，
+                # 让 DB 模式所有产物（日志 + Dev 格式导出）聚合在一处。
+                local_output_dir = log_dir
                 local_output_dir.mkdir(parents=True, exist_ok=True)
                 
                 orch_output_dir = str(Path(output_dir) / "orchestrator") if output_dir else None
@@ -417,13 +467,22 @@ def _run_with_database(ns: argparse.Namespace) -> int:
         # 必须使用与模块数据相同的 run_id 进行过滤，否则查不到数据
         logger.info(f"[DATA] 从数据库生成 Summary 汇总报告（run_id={run_id}）...")
         summary_success = False
+        summary_results = {}
         try:
-            writer.generate_summary_reports_from_db(
+            summary_results = writer.generate_summary_reports_from_db(
                 run_id=run_id,
                 start_date=start_date,
                 end_date=end_date,
                 if_exists='replace'
             )
+            failed_summary_tables = [
+                name for name, rows in summary_results.items()
+                if isinstance(rows, int) and rows < 0
+            ]
+            if failed_summary_tables:
+                raise RuntimeError(
+                    "Summary 表生成失败: " + ", ".join(failed_summary_tables)
+                )
             summary_success = True
         except Exception as summary_err:
             logger.error(f"[ERROR] Summary 汇总报告生成失败: {summary_err}")
@@ -435,12 +494,38 @@ def _run_with_database(ns: argparse.Namespace) -> int:
         # 但此时 Summary 表尚未生成，导致状态不一致
         if db is not None:
             from pgsql_db.checkpoint import update_checkpoint_status
+            def _update_checkpoint_status_with_retry(status: str, error_message: str | None = None) -> None:
+                last_err = None
+                for attempt in range(3):
+                    try:
+                        update_checkpoint_status(db, run_id, status, error_message=error_message)
+                        return
+                    except Exception as cp_err:
+                        last_err = cp_err
+                        try:
+                            db.close()
+                        except Exception:
+                            pass
+                        if attempt < 2:
+                            wait_seconds = 5 * (2 ** attempt)
+                            logger.warning(
+                                f"[WARN] 更新 checkpoint 状态失败，{wait_seconds}s 后重试 "
+                                f"({attempt + 1}/3, run_id={run_id}): {cp_err}"
+                            )
+                            time.sleep(wait_seconds)
+                raise last_err
+
             if summary_success:
-                update_checkpoint_status(db, run_id, 'completed')
+                _update_checkpoint_status_with_retry('completed')
                 logger.info(f"[OK] 运行状态已更新为 completed（所有 Summary 已生成，run_id={run_id}）")
             else:
-                update_checkpoint_status(db, run_id, 'failed', error_message='Summary 汇总报告生成失败')
+                _update_checkpoint_status_with_retry(
+                    'failed',
+                    error_message='Summary 汇总报告生成失败'
+                )
                 logger.warning(f"[WARN] 运行状态已更新为 failed（Summary 生成失败，run_id={run_id}）")
+                _run_completed = True
+                return 1
         
         db_write_time = time.time() - db_write_start
         logger.info(f"[TIME]  数据库写入耗时: {db_write_time:.2f}秒")

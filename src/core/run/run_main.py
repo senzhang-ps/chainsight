@@ -42,10 +42,18 @@ from ..main_integration import (
 from ...utils.logger_config import setup_logging
 from .output_dir import (
     _ensure_output_dir,
+    _write_run_id_file,
     get_or_init_simulation_start,
     _list_existing_runs,
 )
 from .db_runner import _run_with_database
+from .utils import (
+    resolve_excel_path,
+    resolve_workspace_root_with_source,
+    expand_config_dir_arg,
+    _PROJECT_ROOT,
+)
+from .config_dir import ConfigDir
 
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:
@@ -59,10 +67,25 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
             "Supports automatic resume from interruption points with directory selection."
         ),
     )
-    parser.add_argument(
+    # --config 与 --config-dir 互斥；二选一必填，两者均为一等公民、可长期使用。
+    cfg_group = parser.add_mutually_exclusive_group(required=True)
+    cfg_group.add_argument(
+        "--config-dir",
+        metavar="ABS_PATH_OR_SHORT",
+        help=(
+            "场景 config/ 目录的【绝对路径】（例如 "
+            "D:/PG/chainsight/workspace/SDC/baseline/config）；"
+            "或短格式 <project>/<scenario>（仅当配置了 workspace_root 时可用，"
+            "在 workspace_root 下展开为 <root>/<project>/<scenario>/config）"
+        ),
+    )
+    cfg_group.add_argument(
         "--config",
-        required=True,
-        help="Path to the configuration .xlsx file",
+        metavar="NAME_OR_PATH",
+        help=(
+            "Excel 文件名 / Excel 路径 / 含唯一 Excel 的目录路径，内部统一走 ConfigDir 链路，"
+            "与 --config-dir 行为等价；旧脚本可继续使用"
+        ),
     )
     parser.add_argument(
         "--start-date",
@@ -165,25 +188,57 @@ def main(argv: list[str] | None = None) -> int:
         return _run_with_database(ns)
     
     # ==================== 本地文件模式 ====================
-    cfg_path = Path(ns.config).expanduser().resolve()
-    if not cfg_path.exists():
-        raise FileNotFoundError(f"Configuration file not found: {cfg_path}")
-    if cfg_path.suffix.lower() not in {".xlsx", ".xlsm", ".xls"}:
-        raise ValueError("Configuration file must be an Excel file (.xlsx/.xlsm/.xls)")
+    # 解析配置来源：优先 --config-dir（绝对路径或短格式），过渡期接受旧 --config。
+    try:
+        if ns.config_dir:
+            cfg = ConfigDir.from_path(expand_config_dir_arg(ns.config_dir))
+        else:
+            # --config 与 --config-dir 平级支持：两条 CLI 路径均为一等公民，无废弃提示。
+            # 旧脚本继续传 --config <name|path|dir> 时直接走 ConfigDir 链路，结果与
+            # --config-dir 等价（输出二级路径、CSV 同名优先等约束完全一致）。
+            raw_config = Path(ns.config).expanduser()
+            if raw_config.is_dir():
+                cfg = ConfigDir.from_path(raw_config.resolve())
+            else:
+                excel_path = resolve_excel_path(ns.config)
+                if excel_path is None or not excel_path.exists():
+                    raise FileNotFoundError(f"配置文件未找到：{ns.config}")
+                cfg = ConfigDir.from_excel_path(excel_path)
+    except (ValueError, FileNotFoundError) as e:
+        print(f"[ConfigError] {e}", file=sys.stderr)
+        return 2
+
+    cfg_path = cfg.excel_path  # 下游 run_integrated_simulation 仍接收 Excel 路径字符串
+    output_source = cfg  # 始终用 ConfigDir，确保输出路径统一为 outputs/<project>/<scenario>/
+
+    # 打印 workspace_root 来源与值，便于跨环境排查（仅在使用 --config-dir 时有意义）
+    if ns.config_dir:
+        try:
+            wsr_source, wsr = resolve_workspace_root_with_source()
+        except Exception:  # noqa: BLE001
+            wsr_source = "unresolved"
+            wsr = "(unresolved)"
+        print(f"[Config] workspace_root = {wsr} ({wsr_source})", file=sys.stderr)
+        print(f"[Config] config_dir     = {cfg.dir_path}", file=sys.stderr)
+        print(f"[Config] project        = {cfg.project}", file=sys.stderr)
+        print(f"[Config] scenario       = {cfg.scenario}", file=sys.stderr)
 
     # 尽早加载配置以便在出现结构/格式问题时快速失败
     #（该调用会返回可供运行函数使用的对象，或用于校验配置文件。）
-    _ = load_configuration(str(cfg_path))  # noqa: F841
+    _ = load_configuration(cfg)  # noqa: F841
 
-    # 为 --list-runs 提前获取根目录与日期参数
-    cfg_stem = cfg_path.stem
-    project_root = Path.cwd()
-    root_dir = project_root / "outputs" / cfg_stem
+    # 为 --list-runs 提前获取根目录与日期参数。
+    # 输出目录命名：使用 ConfigDir.output_subpath = "<project>/<scenario>" 二级目录；
+    # 旧 --config 路径或属性缺失时兜底为单层 cfg_path.stem。
+    try:
+        output_subpath = output_source.output_subpath
+    except Exception:  # noqa: BLE001
+        output_subpath = Path(Path(output_source).stem)
+    root_dir = _PROJECT_ROOT / "outputs" / output_subpath
     root_dir.mkdir(parents=True, exist_ok=True)
-    
-    start_arg = ns["start_date"] if isinstance(ns, dict) else ns.start_date
-    simulation_start = get_or_init_simulation_start(root_dir, start_arg)
-    end_date = str(ns["end_date"]) if isinstance(ns, dict) else ns.end_date
+
+    simulation_start = get_or_init_simulation_start(root_dir, ns.start_date)
+    end_date = str(ns.end_date)
 
     # 处理 --list-runs 命令
     if ns.list_runs:
@@ -208,17 +263,21 @@ def main(argv: list[str] | None = None) -> int:
     # 确定输出目录与续跑模式
     enable_resume = (ns.resume or ns.resume_from) and not ns.force_restart
     output_base_dir = _ensure_output_dir(
-        cfg_path, 
+        output_source,
         resume_mode=enable_resume,
         resume_from=ns.resume_from,
         start_date=simulation_start,
         end_date=end_date,
-        interactive=not ns.non_interactive
+        interactive=not ns.non_interactive,
+        run_suffix=ns.run_suffix,
     )
 
     # [NEW] 设置日志系统 - 同时输出到terminal和文件
     logger, redirector = setup_logging(str(output_base_dir), log_level="INFO", redirect_print=True)
-    
+
+    # 落盘本地模式 run_id（即 run 目录 basename），与 outputs/<...>/<basename>/ 对齐
+    _write_run_id_file(output_base_dir, output_base_dir.name, "run_id.txt", logger)
+
     import time
     program_start_time = time.time()
     program_start_datetime = datetime.now()

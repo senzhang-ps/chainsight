@@ -13,6 +13,7 @@ from typing import Any, Optional, Tuple
 import pandas as pd
 
 from ...utils.normalization import normalize_identifiers
+from ...utils.numeric_safe import safe_int_series
 from .dps import apply_dps, apply_supply_choice
 
 
@@ -51,9 +52,14 @@ def expand_forecast_to_days_integer_split(
         (demand_weekly['week'] - 1) * 7, unit='D'
     )
 
-    # 计算每日基础数量和余数
-    demand_weekly['base_qty'] = (demand_weekly['quantity'] // 7).astype(int)
-    demand_weekly['remainder'] = (demand_weekly['quantity'] % 7).astype(int)
+    # 计算每日基础数量和余数（NaN/inf quantity 视为 0）
+    demand_weekly['quantity'] = demand_weekly['quantity'].fillna(0)
+    demand_weekly['base_qty'] = safe_int_series(
+        demand_weekly['quantity'] // 7, context='module1.expand_forecast.base_qty'
+    )
+    demand_weekly['remainder'] = safe_int_series(
+        demand_weekly['quantity'] % 7, context='module1.expand_forecast.remainder'
+    )
 
     # 向量化生成7天数据
     t0 = time.perf_counter()
@@ -62,7 +68,10 @@ def expand_forecast_to_days_integer_split(
         day_df = demand_weekly.copy()
         day_df['date'] = day_df['week_start'] + pd.Timedelta(days=day_offset)
         # 前remainder天多分配1个单位
-        extra = (day_offset < day_df['remainder']).astype(int)
+        extra = safe_int_series(
+            day_offset < day_df['remainder'],
+            context='module1.expand_forecast.extra',
+        )
         day_df['quantity'] = day_df['base_qty'] + extra
         days.append(
             day_df[['date', 'material', 'location', 'week', 'quantity']]
@@ -77,7 +86,9 @@ def expand_forecast_to_days_integer_split(
 
     result_df['demand_type'] = 'normal'
     result_df['original_quantity'] = result_df['quantity']
-    result_df['quantity'] = result_df['quantity'].astype(int)
+    result_df['quantity'] = safe_int_series(
+        result_df['quantity'], context='module1.expand_forecast.quantity'
+    )
 
     elapsed = time.perf_counter() - t0
 

@@ -17,6 +17,7 @@ import pandas as pd
 from scipy.stats import truncnorm
 
 from ...utils.normalization import normalize_identifiers
+from ...utils.numeric_safe import safe_int_series
 from .consume import consume_orders
 
 
@@ -201,12 +202,15 @@ def _generate_ao_orders(
 
     # 向量化生成数量
     ao_abs_std = ao_e['ao_daily_avg'] * ao_e['error_std_percent'].fillna(0)
-    ao_qty = np.maximum(
-        0, np.round(np.random.normal(ao_e['ao_daily_avg'], ao_abs_std))
-    ).astype(int)
-    ao_dates = sim_date + pd.to_timedelta(
-        ao_e['advance_days'].astype(int), unit='D'
+    ao_qty = safe_int_series(
+        pd.Series(np.maximum(0, np.round(np.random.normal(ao_e['ao_daily_avg'], ao_abs_std))),
+                  index=ao_e.index),
+        context='module1._generate_ao_orders.quantity',
     )
+    ao_advance_days = safe_int_series(
+        ao_e['advance_days'], context='module1._generate_ao_orders.advance_days'
+    )
+    ao_dates = sim_date + pd.to_timedelta(ao_advance_days, unit='D')
 
     return pd.DataFrame({
         'date': ao_dates,
@@ -215,7 +219,7 @@ def _generate_ao_orders(
         'demand_type': 'AO',
         'quantity': ao_qty,
         'simulation_date': sim_date,
-        'advance_days': ao_e['advance_days'].astype(int)
+        'advance_days': ao_advance_days
     })
 
 
@@ -283,9 +287,11 @@ def _generate_normal_orders(
 
     # 向量化生成数量
     n_abs_std = n_e['normal_daily_avg'] * n_e['error_std_percent'].fillna(0)
-    normal_qty = np.maximum(
-        0, np.round(np.random.normal(n_e['normal_daily_avg'], n_abs_std))
-    ).astype(int)
+    normal_qty = safe_int_series(
+        pd.Series(np.maximum(0, np.round(np.random.normal(n_e['normal_daily_avg'], n_abs_std))),
+                  index=n_e.index),
+        context='module1._generate_normal_orders.quantity',
+    )
 
     return pd.DataFrame({
         'date': pd.Series([sim_date] * len(n_e)),
@@ -314,7 +320,9 @@ def _aggregate_orders(orders_df: pd.DataFrame) -> pd.DataFrame:
     orders_df = orders_df.groupby(
         group_cols, as_index=False
     )['quantity'].sum()
-    orders_df['quantity'] = orders_df['quantity'].astype(int)
+    orders_df['quantity'] = safe_int_series(
+        orders_df['quantity'], context='module1._aggregate_orders.quantity'
+    )
     return normalize_identifiers(orders_df)
 
 

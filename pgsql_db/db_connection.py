@@ -54,7 +54,7 @@ class DatabaseConnection:
     
     def connect(self) -> psycopg.Connection:
         """建立数据库连接（autocommit=True 模式）
-        
+
          使用 autocommit=True 确保 conn.transaction() 始终创建真正的
         BEGIN...COMMIT 事务块。在 autocommit=False（psycopg3 默认值）下，
         任何先前的 SQL 语句（包括 SELECT）都会隐式开启事务，导致后续的
@@ -62,23 +62,35 @@ class DatabaseConnection:
         只发出 RELEASE SAVEPOINT 而非 COMMIT，数据不会持久化到磁盘。
         进程被 KeyboardInterrupt 终止后，PostgreSQL 回滚整个未提交的外层事务，
         所有已写入的数据全部丢失。
-        
+
         使用 autocommit=True 后：
         - conn.transaction() 始终发出 BEGIN...COMMIT（数据真正持久化）
         - 每次 flush 的数据在事务退出时即刻可见且不可丢失
         - 无需在 conn.transaction() 前手动 conn.commit() 清理隐式事务
         """
-        if self._connection is None or self._connection.closed:
-            self._connection = psycopg.connect(
-                host=self.host,
-                port=self.port,
-                dbname=self.database,
-                user=self.user,
-                password=self.password,
-                client_encoding='UTF8',
-                autocommit=True,
-            )
-        return self._connection
+        if self._connection is not None and not self._connection.closed:
+            return self._connection
+        # 重试退避：Summary 等长查询结束后 PostgreSQL 可能短暂繁忙
+        last_err = None
+        for attempt in range(3):
+            try:
+                self._connection = psycopg.connect(
+                    host=self.host,
+                    port=self.port,
+                    dbname=self.database,
+                    user=self.user,
+                    password=self.password,
+                    client_encoding='UTF8',
+                    autocommit=True,
+                    connect_timeout=30,
+                )
+                return self._connection
+            except (psycopg.OperationalError, psycopg.errors.ConnectionTimeout) as e:
+                last_err = e
+                self._connection = None
+                if attempt < 2:
+                    time.sleep(5 * (2 ** attempt))  # 5s, 10s
+        raise last_err
     
     def close(self):
         """关闭数据库连接"""
@@ -139,7 +151,7 @@ class DatabaseConnection:
                 exists = cursor.fetchone() is not None
             return exists
         except Exception as e:
-            return False
+            raise
         finally:
             if temp_conn and not temp_conn.closed:
                 temp_conn.close()
@@ -173,7 +185,7 @@ class DatabaseConnection:
                 )
             return True
         except Exception as e:
-            return False
+            raise
         finally:
             if temp_conn and not temp_conn.closed:
                 temp_conn.close()
@@ -221,7 +233,7 @@ class DatabaseConnection:
                 result["success"] = True
                 result["message"] = "连接成功"
         except Exception as e:
-            result["message"] = f"连接失败: {str(e)}"
+            raise
         finally:
             result["connection_time_ms"] = round((time.time() - start_time) * 1000, 2)
         
@@ -292,7 +304,7 @@ class DatabaseConnection:
                 )
                 return cursor.fetchone() is not None
         except Exception as e:
-            return False
+            raise
     
     def delete_config_data(self, table_name: str, config_name: str) -> int:
         """
@@ -322,7 +334,7 @@ class DatabaseConnection:
                     pass
                 return deleted_count
         except Exception as e:
-            return 0
+            raise
     
     def create_table_from_df(
         self,
@@ -471,6 +483,10 @@ class DatabaseConnection:
                 self._clean_name(str(col)): df[col].dtype
                 for col in df.columns
             }
+            # cleaned name -> 原始列名映射，用于按 cleaned name 取回原列数据
+            df_clean_to_orig = {
+                self._clean_name(str(col)): col for col in df.columns
+            }
             
             # 如果现有表缺少db_write_time列，自动添加
             if 'db_write_time' not in existing_cols and 'db_write_time' in df_cols:
@@ -482,6 +498,9 @@ class DatabaseConnection:
             
             # 列类型升级：BIGINT → DOUBLE PRECISION（防止浮点数截断）
             INT_TYPES = {'BIGINT', 'INTEGER', 'SMALLINT', 'INT', 'INT4', 'INT8', 'INT2'}
+            DATE_LIKE_TYPES = {
+                'DATE', 'TIMESTAMP', 'TIMESTAMP WITHOUT TIME ZONE', 'TIMESTAMP WITH TIME ZONE',
+            }
             for col_name in (df_cols & existing_cols):  # 仅检查已存在的公共列
                 df_dtype = df_col_types.get(col_name)
                 if df_dtype is None:
@@ -498,6 +517,29 @@ class DatabaseConnection:
                             sql.Identifier(col_name),
                             sql.Identifier(col_name)
                         ))
+                # DataFrame 期望 TEXT、DB 现有列是 DATE/TIMESTAMP：数据驱动判断
+                # - 全部值都能解析为日期 → 保持 DATE/TIMESTAMP，让真日期字符串如 "2026-04-01" 直接 COPY
+                # - 含非日期值（如 "ALL" 通配符）→ ALTER 到 TEXT
+                elif expected_pg_type == 'TEXT' and existing_pg_type in DATE_LIKE_TYPES:
+                    orig_col = df_clean_to_orig.get(col_name)
+                    needs_demote = True
+                    if orig_col is not None:
+                        non_null = df[orig_col].dropna()
+                        if non_null.empty:
+                            needs_demote = False
+                        else:
+                            parsed = pd.to_datetime(non_null.astype(str), errors='coerce')
+                            if not parsed.isna().any():
+                                needs_demote = False
+                    if needs_demote:
+                        with self.get_cursor() as cursor:
+                            cursor.execute(sql.SQL("""
+                                ALTER TABLE {} ALTER COLUMN {} TYPE TEXT USING {}::TEXT
+                            """).format(
+                                sql.Identifier(table_name),
+                                sql.Identifier(col_name),
+                                sql.Identifier(col_name)
+                            ))
             
             # 检查DataFrame的列是否都在现有表中（允许现有表有额外列）
             missing_cols = df_cols - existing_cols
@@ -521,7 +563,7 @@ class DatabaseConnection:
             
             return True
         except Exception as e:
-            return False
+            raise
     
     def _clean_name(self, name: str) -> str:
         """清理名称，使其符合PostgreSQL命名规范"""
@@ -564,7 +606,7 @@ class DatabaseConnection:
             # 注意：某些包含 "date" 的列可能存储 "ALL" 等特殊值，需要使用 TEXT
             # `file_date` 和 `sim_date` 作为标识符使用 `TEXT` 类型（格式：YYYYMMDD）
             date_specific_names = [
-                'start_date', 'end_date', 'order_date', 'delivery_date', 
+                'start_date', 'end_date', 'order_date', 'delivery_date',
                 'ship_date', 'arrival_date', 'due_date', 'created_date',
                 'updated_date', 'forecast_date', 'plan_date', 'production_plan_date'
             ]
@@ -642,7 +684,13 @@ class DatabaseConnection:
         int_col_indices = set()
         float_col_indices = set()
         text_col_indices = set()
-        
+        datetime_col_indices = set()
+
+        _TIMESTAMP_TYPES = {
+            'TIMESTAMP', 'TIMESTAMP WITHOUT TIME ZONE', 'TIMESTAMP WITH TIME ZONE',
+            'DATE',
+        }
+
         for col_name, col_type in col_types.items():
             if col_name in col_name_to_idx:
                 idx = col_name_to_idx[col_name]
@@ -653,32 +701,40 @@ class DatabaseConnection:
                     float_col_indices.add(idx)
                 elif ct_upper in ('TEXT', 'VARCHAR', 'CHARACTER VARYING', 'CHAR', 'CHARACTER'):
                     text_col_indices.add(idx)
-        
+                elif ct_upper in _TIMESTAMP_TYPES:
+                    datetime_col_indices.add(idx)
+
         # 准备插入数据
         records = df.values.tolist()
-        
+
+        # Excel 序列日期 epoch（1899-12-30）
+        from datetime import timedelta as _timedelta
+        _EXCEL_EPOCH = datetime(1899, 12, 30)
+
         # 处理NaN值和数据类型转换
         import numpy as np
         for i, row in enumerate(records):
             new_row = []
             for j, val in enumerate(row):
-                if pd.isna(val) if not isinstance(val, str) else False:
-                    new_row.append(None)
-                elif j in int_col_indices:
+                if j in int_col_indices:
                     try:
-                        # 兼容处理：float -> int
-                        new_row.append(int(float(val)))
-                    except (ValueError, TypeError):
-                        new_row.append(None)
+                        float_val = float(val)
+                        new_row.append(int(float_val) if np.isfinite(float_val) else 0)
+                    except (ValueError, TypeError, OverflowError):
+                        new_row.append(0)
                 elif j in float_col_indices:
                     try:
                         float_val = float(val)
-                        if round_float_values:
+                        if not np.isfinite(float_val):
+                            new_row.append(0.0)
+                        elif round_float_values:
                             new_row.append(round(float_val, 15))
                         else:
                             new_row.append(float_val)
-                    except (ValueError, TypeError):
-                        new_row.append(None)
+                    except (ValueError, TypeError, OverflowError):
+                        new_row.append(0.0)
+                elif pd.isna(val) if not isinstance(val, str) else False:
+                    new_row.append(None)
                 elif j in text_col_indices:
                     # Convert booleans to "True"/"False" strings to match
                     # 与 Dev/Src 的 xlsx 输出格式保持一致（避免 PG 将 bool->text 转成 `t`/`f`）
@@ -686,6 +742,15 @@ class DatabaseConnection:
                         new_row.append(str(val))
                     else:
                         new_row.append(str(val) if val is not None else None)
+                elif j in datetime_col_indices:
+                    # Excel 将日期存为整数序列号时，转换为 datetime；已是 datetime 则直接使用
+                    if isinstance(val, (int, float, np.integer, np.floating)):
+                        try:
+                            new_row.append(_EXCEL_EPOCH + _timedelta(days=float(val)))
+                        except (ValueError, OverflowError):
+                            new_row.append(None)
+                    else:
+                        new_row.append(val)
                 else:
                     new_row.append(val)
             records[i] = tuple(new_row)
@@ -788,15 +853,33 @@ class DatabaseConnection:
                             indexes_created.append(f"{clean_col}({index_type})")
                 except Exception as e:
                     # 索引创建失败不影响主流程
-                    pass
+                    raise
         
         if indexes_created:
             pass
     
-    def read_table(self, table_name: str) -> pd.DataFrame:
-        """读取表数据到DataFrame"""
+    def read_table(self, table_name: str, filters: Optional[Dict[str, Any]] = None) -> pd.DataFrame:
+        """读取表数据到DataFrame，可选按列等值过滤。"""
+        query = sql.SQL("SELECT * FROM {}").format(sql.Identifier(table_name))
+        params = None
+        if filters:
+            conditions = []
+            params_list = []
+            for column, value in filters.items():
+                identifier = sql.Identifier(self._clean_name(str(column)))
+                if value is None:
+                    conditions.append(sql.SQL("{} IS NULL").format(identifier))
+                else:
+                    conditions.append(sql.SQL("{} = %s").format(identifier))
+                    params_list.append(value)
+            query = sql.SQL("SELECT * FROM {} WHERE {}").format(
+                sql.Identifier(table_name),
+                sql.SQL(" AND ").join(conditions),
+            )
+            params = tuple(params_list)
+
         with self.get_cursor(commit=False) as cursor:
-            cursor.execute(sql.SQL("SELECT * FROM {}").format(sql.Identifier(table_name)))
+            cursor.execute(query, params)
             columns = [desc[0] for desc in cursor.description]
             data = cursor.fetchall()
             return pd.DataFrame(data, columns=columns)
@@ -806,6 +889,13 @@ class DatabaseConnection:
         with self.get_cursor(commit=False) as cursor:
             cursor.execute(query, params)
             return cursor.fetchall()
+
+    def execute_query_df(self, query: str, params: tuple = None) -> pd.DataFrame:
+        """执行查询并以带列名的DataFrame返回结果。"""
+        with self.get_cursor(commit=False) as cursor:
+            cursor.execute(query, params)
+            columns = [desc[0] for desc in cursor.description] if cursor.description else []
+            return pd.DataFrame(cursor.fetchall(), columns=columns)
     
     def execute_non_query(self, query: str, params: tuple = None):
         """执行非查询语句（INSERT, UPDATE, DELETE等）"""

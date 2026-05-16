@@ -11,6 +11,8 @@ import duckdb
 import numpy as np
 import pandas as pd
 
+from ...utils.numeric_safe import safe_int_series
+
 
 def consume_orders_duckdb(
     orders_df: pd.DataFrame,
@@ -189,7 +191,10 @@ def consume_orders_vectorized(
         t2 = time.perf_counter()
         _consume_orders_fast(normal_orders, quantities, idx_map, offsets)
     
-    result['quantity'] = quantities.astype(int)
+    result['quantity'] = safe_int_series(
+        pd.Series(quantities, index=result.index),
+        context='module1.consume_orders_duckdb.quantity',
+    )
     result = result.drop(columns=['_idx'])
     
     return result

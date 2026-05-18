@@ -228,6 +228,61 @@ def load_configuration_from_dict(config_data: dict, config_name: str = "DB_Confi
     return config_dict
 
 
+def _align_csv_dtypes_to_excel(
+    csv_df: pd.DataFrame,
+    xl: pd.ExcelFile,
+    sheet_name: str,
+) -> list[str]:
+    """以 Excel sheet 的列 dtype 为权威，把 CSV 同名列向其对齐（in-place）。
+
+    背景：纯文本 CSV 读出 ``date``/时间戳列默认是 ``str``；同源 Excel 因 cell
+    格式落成 ``datetime64``。两条路径若不对齐，下游 ``df['date'] == Timestamp``
+    会因 dtype 不匹配静默返回空集合（曾在 Module5 batch_optimizer 安全库存过滤
+    复现）。此函数仅做"以 Excel 为基准"的向上兼容性转换，覆盖 datetime / 数值
+    两大类；不动 Excel 中本来就是 object/str 的列。
+
+    返回：实际被对齐的列名列表（用于日志，便于排查）。
+    失败兜底：任一列 cast 异常仅 ``logger.warning``，不抛——避免单列脏数据
+    拖垮整个加载流程。
+    """
+    aligned: list[str] = []
+    try:
+        # 只读 1 行作为 dtype 探针，开销可忽略
+        sample = xl.parse(sheet_name, nrows=1)
+    except Exception as e:  # noqa: BLE001
+        logger.warning(
+            f"[CSV-DtypeAlign] 读取 Excel sheet '{sheet_name}' 探针失败，"
+            f"跳过 dtype 对齐：{e}"
+        )
+        return aligned
+
+    for col in sample.columns:
+        if col not in csv_df.columns:
+            continue
+        target_dtype = sample[col].dtype
+        # 已经一致就跳过
+        if csv_df[col].dtype == target_dtype:
+            continue
+        try:
+            if pd.api.types.is_datetime64_any_dtype(target_dtype):
+                csv_df[col] = pd.to_datetime(csv_df[col], errors="coerce")
+                aligned.append(f"{col}→datetime64")
+            elif pd.api.types.is_integer_dtype(target_dtype):
+                # CSV 整数列可能因含 NaN 被 pandas 读成 float；按 Excel 期望整数对齐
+                csv_df[col] = pd.to_numeric(csv_df[col], errors="coerce").astype(target_dtype)
+                aligned.append(f"{col}→{target_dtype}")
+            elif pd.api.types.is_float_dtype(target_dtype):
+                csv_df[col] = pd.to_numeric(csv_df[col], errors="coerce").astype(target_dtype)
+                aligned.append(f"{col}→{target_dtype}")
+            # 其它 dtype（object/bool/string 等）保持 CSV 原状，避免误判
+        except Exception as e:  # noqa: BLE001
+            logger.warning(
+                f"[CSV-DtypeAlign] sheet '{sheet_name}' 列 '{col}' "
+                f"对齐到 {target_dtype} 失败（保留 CSV 原 dtype）：{e}"
+            )
+    return aligned
+
+
 def load_configuration(config) -> dict:
     """加载与标准化配置数据。
 
@@ -279,15 +334,25 @@ def load_configuration(config) -> dict:
         config_dict: dict = {}
         applied_csv_count = 0
 
-        # ---- 逐 sheet：CSV 无条件优先 ----
+        # ---- 逐 sheet：CSV 无条件优先；CSV 后用 Excel 同 sheet 的 dtype 对齐 ----
+        # 之所以要对齐：CSV 是纯文本，pandas 读出来 date 列会落成 ``str``，
+        # 而 Excel 同列因 cell 格式会落成 ``datetime64``。下游若直接做
+        # ``df['date'] == Timestamp`` 比较，CSV 路径会因 dtype 不匹配而静默
+        # 返回空集合（曾导致 Module5 batch_optimizer 安全库存过滤失效）。
+        # 修复策略：以 Excel sheet 头部 dtypes 为权威，CSV 同名列若需要则 cast。
+        # ``float_precision="round_trip"``：用慢但完整精度的 float 解析器，避免
+        # 默认 C 解析器在末位舍入导致 CSV 与 Excel 浮点列 1e-13 量级漂移。
         for sheet_name in sheet_names:
             csv_path = cfg_dir.csv_for_sheet(sheet_name)  # 内部按 .lower() 查 csv_map
             if csv_path is not None:
-                config_dict[sheet_name] = pd.read_csv(csv_path)
+                csv_df = pd.read_csv(csv_path, float_precision="round_trip")
+                aligned_cols = _align_csv_dtypes_to_excel(csv_df, xl, sheet_name)
+                config_dict[sheet_name] = csv_df
                 applied_csv_count += 1
+                align_note = f"，对齐列: {aligned_cols}" if aligned_cols else ""
                 logger.info(
                     f"  ✅ [CSV优先] {sheet_name} <- {csv_path.name} "
-                    f"({len(config_dict[sheet_name])} 行)"
+                    f"({len(csv_df)} 行){align_note}"
                 )
             else:
                 config_dict[sheet_name] = xl.parse(sheet_name)
@@ -298,7 +363,9 @@ def load_configuration(config) -> dict:
         for stem_lower, csv_path in cfg_dir.csv_map.items():
             if stem_lower not in loaded_lower:
                 # 用 CSV 文件名（保留原大小写）作为 sheet 名
-                config_dict[csv_path.stem] = pd.read_csv(csv_path)
+                config_dict[csv_path.stem] = pd.read_csv(
+                    csv_path, float_precision="round_trip"
+                )
                 logger.info(
                     f"  ✅ [CSV扩展] {csv_path.stem} <- {csv_path.name} "
                     f"({len(config_dict[csv_path.stem])} 行)"

@@ -201,13 +201,23 @@ def _to_abs(value: str) -> Path:
 def expand_config_dir_arg(arg: str) -> Path:
     """把 ``--config-dir`` 的值展开为 ``config/`` 目录的绝对路径。
 
-    - 绝对路径：原样返回（``Path.resolve()`` 规范化）。**这是首要支持的输入形式。**
-    - 短格式 ``<project>/<scenario>``：展开为
-      ``<workspace_root>/<project>/<scenario>/config``，仅当 ``workspace_root`` 可解析
-      时可用。任意其他形式（如 ``a/b/c`` 三层）抛 ``ValueError``。
+    解析规则：
 
-    本函数只做路径展开，不做目录存在性 / Excel 唯一性 / CSV 唯一性校验——这些都由
-    ``ConfigDir.from_path`` 在拿到展开后的路径时执行。
+    - **绝对路径**：原样返回（``Path.resolve()`` 规范化）。**首要输入形式。**
+    - **相对路径**：依次尝试 ``<workspace_root>/<arg>`` 与 ``<CWD>/<arg>``，
+      取首个 ``is_dir()`` 命中的；都不存在则落到 ``<workspace_root>/<arg>``，
+      让下游 ``ConfigDir.from_path`` 报准确的"目录不存在"错误。
+    - 解析结果若末段不是 ``config``，自动追加 ``/config``——同时兼容：
+
+      * 旧 2 段短格式 ``<project>/<scenario>``
+        → ``<workspace_root>/<project>/<scenario>/config``
+      * 新 3 段 ``<project>/scenarios/<scenario>``
+        → ``<workspace_root>/<project>/scenarios/<scenario>/config``
+      * 新 4 段 ``<project>/scenarios/<scenario>/config``（已含 ``config/``）
+        → 原样使用
+
+    本函数只做路径展开，不做目录存在性 / Excel 唯一性 / CSV 唯一性校验——
+    这些都由 ``ConfigDir.from_path`` 在拿到展开后的路径时执行。
     """
     if not arg:
         raise ValueError("--config-dir 不能为空")
@@ -216,14 +226,10 @@ def expand_config_dir_arg(arg: str) -> Path:
     if p.is_absolute():
         return p.resolve()
 
-    # 短格式：必须正好两段
-    # 用 PurePath.parts，兼容正反斜杠混用
-    parts = p.parts
-    if len(parts) != 2:
-        raise ValueError(
-            f"--config-dir 须为绝对路径，或形如 <project>/<scenario> 的短格式；"
-            f"实际收到：{arg}"
-        )
-
     workspace_root = resolve_workspace_root()
-    return (workspace_root / parts[0] / parts[1] / "config").resolve()
+    # workspace_root 优先、CWD 兜底
+    candidates = [workspace_root / p, Path.cwd() / p]
+    base = next((c for c in candidates if c.is_dir()), candidates[0])
+    if base.name != "config":
+        base = base / "config"
+    return base.resolve()

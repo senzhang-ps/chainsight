@@ -71,12 +71,16 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     cfg_group = parser.add_mutually_exclusive_group(required=True)
     cfg_group.add_argument(
         "--config-dir",
-        metavar="ABS_PATH_OR_SHORT",
+        metavar="ABS_PATH_OR_REL",
         help=(
             "场景 config/ 目录的【绝对路径】（例如 "
             "D:/PG/chainsight/workspace/SDC/baseline/config）；"
-            "或短格式 <project>/<scenario>（仅当配置了 workspace_root 时可用，"
-            "在 workspace_root 下展开为 <root>/<project>/<scenario>/config）"
+            "或相对路径（先按 workspace_root 解析、再按 CWD 兜底），支持三种写法："
+            "<project>/<scenario>（旧 4 级布局短格式）、"
+            "<project>/scenarios/<scenario>、"
+            "<project>/scenarios/<scenario>/config（生产 5 级布局，"
+            "scenarios/ 中间层会被自动识别）。"
+            "末段不是 config 时自动追加 /config"
         ),
     )
     cfg_group.add_argument(

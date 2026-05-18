@@ -100,15 +100,29 @@ class ConfigDir:
     def scenario(self) -> str:
         """场景名 = ``config/`` 的父目录名（即 scenario 目录）。
 
-        磁盘拓扑：``<input_root>/<project>/<scenario>/config/***.xlsx``。
+        支持两种磁盘拓扑，scenario 派生规则一致：
+
+        - 4 级（旧）：``<input_root>/<project>/<scenario>/config/***.xlsx``
+        - 5 级（生产）：``<input_root>/<project>/scenarios/<scenario>/config/***.xlsx``
+
         scenario 由目录名决定，与 Excel 文件名无关。
         """
         return self.dir_path.parent.name
 
     @property
     def project(self) -> str:
-        """项目名 = ``config/`` 的祖父目录名（即 project 目录）。"""
-        return self.dir_path.parent.parent.name
+        """项目名：自动识别 ``scenarios/`` 中间层。
+
+        - 4 级（旧）：``<input_root>/<project>/<scenario>/config/`` →
+          ``project = dir_path.parent.parent.name``
+        - 5 级（生产）：``<input_root>/<project>/scenarios/<scenario>/config/`` →
+          当 ``config/`` 的祖父目录名恰好为字面 ``scenarios`` 时，上溯一层取
+          ``dir_path.parent.parent.parent.name``，跳过 ``scenarios/`` 这层。
+        """
+        grandparent = self.dir_path.parent.parent
+        if grandparent.name == "scenarios":
+            return grandparent.parent.name
+        return grandparent.name
 
     @property
     def output_subpath(self) -> Path:

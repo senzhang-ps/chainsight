@@ -132,5 +132,93 @@ class LoadConfigurationCsvPriorityTests(unittest.TestCase):
             self.assertIn(f"Sheet_{i}", result)
 
 
+class CsvDtypeAlignmentTests(unittest.TestCase):
+    """CSV 加载后用 Excel 同 sheet 的 dtype 对齐——回归 Module5 batch_optimizer
+    安全库存过滤失效 bug。
+
+    bug 现场（2026-05-18）：BC_S5 仿真在 ``deployment_planning/batch_optimizer.py``
+    用 ``safety_stock['date'] == horizon_end`` 过滤当日安全库存。CSV 优先机制
+    引入后 date 列变 ``str``，与 Timestamp 比较恒为 False → 过滤后空集合 →
+    后续推送/分配决策与 Excel 直读 baseline 漂移。
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self.tmp = Path(self._tmp.name).resolve()
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def _write_xlsx(self, sheets: dict[str, pd.DataFrame]) -> Path:
+        path = self.tmp / "config.xlsx"
+        with pd.ExcelWriter(path, engine="openpyxl") as xw:
+            for name, df in sheets.items():
+                df.to_excel(xw, sheet_name=name, index=False)
+        return path
+
+    def test_csv_date_column_aligned_to_datetime64(self):
+        # Excel 里 date 列是日期类型（pandas 读 Excel 后为 datetime64）
+        dates = pd.to_datetime(["2025-10-05", "2025-10-06", "2025-10-07"])
+        excel_sheets = _empty_required_sheets() | {
+            "M3_SafetyStock": pd.DataFrame({
+                "material": [1, 2, 3],
+                "date": dates,
+                "safety_stock_qty": [100.0, 200.0, 300.0],
+            }),
+        }
+        self._write_xlsx(excel_sheets)
+        # CSV 同名：date 列是字符串（CSV 本质纯文本）
+        (self.tmp / "M3_SafetyStock.csv").write_text(
+            "material,date,safety_stock_qty\n"
+            "1,2025-10-05,100.0\n"
+            "2,2025-10-06,200.0\n"
+            "3,2025-10-07,300.0\n",
+            encoding="utf-8",
+        )
+
+        cfg = ConfigDir.from_path(self.tmp)
+        result = load_configuration(cfg)
+
+        ss = result["M3_SafetyStock"]
+        # 关键断言：CSV-loaded date 列被对齐到 datetime64
+        self.assertTrue(
+            pd.api.types.is_datetime64_any_dtype(ss["date"]),
+            f"date 列未被对齐为 datetime64：实际 dtype={ss['date'].dtype}",
+        )
+        # 与 Timestamp 比较应返回非空（bug 现场会返回空）
+        horizon = pd.Timestamp("2025-10-06")
+        filtered = ss[ss["date"] == horizon]
+        self.assertEqual(len(filtered), 1,
+                         "date == Timestamp 过滤命中失败——dtype 未对齐")
+
+    def test_csv_float_precision_roundtrip(self):
+        # 浮点列必须无损 round-trip：默认 read_csv C 解析器会末位舍入，
+        # ``float_precision='round_trip'`` 走慢但完整精度的 Python 解析器。
+        excel_sheets = _empty_required_sheets() | {
+            "Sheet_X": pd.DataFrame({
+                "v": [184.31632653061226, 724.7045454545454, 1.2345678901234567],
+            }),
+        }
+        self._write_xlsx(excel_sheets)
+        # 写 CSV 时用 repr 保完整精度
+        with open(self.tmp / "Sheet_X.csv", "w", encoding="utf-8") as f:
+            f.write("v\n")
+            f.write("184.31632653061226\n")
+            f.write("724.7045454545454\n")
+            f.write("1.2345678901234567\n")
+
+        cfg = ConfigDir.from_path(self.tmp)
+        result = load_configuration(cfg)
+
+        # 必须与 Excel 同值（bug 现场默认 read_csv 会损失末位精度）
+        excel_vals = excel_sheets["Sheet_X"]["v"].tolist()
+        csv_vals = result["Sheet_X"]["v"].tolist()
+        for ev, cv in zip(excel_vals, csv_vals):
+            self.assertEqual(
+                ev, cv,
+                f"浮点 round-trip 损失：Excel={ev!r} CSV={cv!r}",
+            )
+
+
 if __name__ == "__main__":
     unittest.main()

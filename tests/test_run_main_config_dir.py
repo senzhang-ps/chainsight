@@ -104,12 +104,34 @@ class WorkspaceRootResolutionTests(unittest.TestCase):
                 (ws / "SDC" / "baseline" / "config").resolve(),
             )
 
-    def test_expand_rejects_invalid_short_form(self):
+    def test_expand_accepts_explicit_config_suffix(self):
+        # 新语义：相对路径末段已是 ``config``，原样作为 config 目录使用，
+        # 不再因"超过 2 段"被拒（覆盖 <project>/<scenario>/config 这种写法）。
+        ws = self.root / "workspace"
         with patch.object(run_utils, "_PROJECT_ROOT", self.root), patch.dict(
-            os.environ, {}, clear=True
+            os.environ, {"CHAINSIGHT_WORKSPACE": str(ws)}, clear=True
         ):
-            with self.assertRaises(ValueError):
-                run_utils.expand_config_dir_arg("SDC/baseline/config")
+            self.assertEqual(
+                run_utils.expand_config_dir_arg("SDC/baseline/config"),
+                (ws / "SDC" / "baseline" / "config").resolve(),
+            )
+
+    def test_expand_accepts_scenarios_5_level_relative_path(self):
+        # 新语义：生产 5 级布局相对路径 <project>/scenarios/<scenario>/config
+        # 与 <project>/scenarios/<scenario>（无 config 后缀）都接受。
+        ws = self.root / "workspace"
+        with patch.object(run_utils, "_PROJECT_ROOT", self.root), patch.dict(
+            os.environ, {"CHAINSIGHT_WORKSPACE": str(ws)}, clear=True
+        ):
+            expected = (ws / "proj" / "scenarios" / "scen" / "config").resolve()
+            self.assertEqual(
+                run_utils.expand_config_dir_arg("proj/scenarios/scen/config"),
+                expected,
+            )
+            self.assertEqual(
+                run_utils.expand_config_dir_arg("proj/scenarios/scen"),
+                expected,
+            )
 
 
 class RunMainConfigDirIntegrationTests(unittest.TestCase):

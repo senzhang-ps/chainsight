@@ -261,5 +261,97 @@ class ConfigDirDerivedPropertiesTests(unittest.TestCase):
         self.assertEqual(cfg.output_subpath, Path("SDC") / "baseline")
 
 
+class ConfigDirScenariosLayoutTests(unittest.TestCase):
+    """5 级生产布局：``<root>/<project>/scenarios/<scenario>/config/`` 自动跳过 scenarios/。"""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        root = Path(self._tmp.name).resolve()
+        self.project_name = "sdc-space-rccp-simulation-202605"
+        self.scenario_name = "baseline-current-params-should-be-rccp-otd"
+        self.cfg_dir = root / self.project_name / "scenarios" / self.scenario_name / "config"
+        self.cfg_dir.mkdir(parents=True)
+        _write_xlsx(self.cfg_dir / f"{self.scenario_name}.xlsx")
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def test_skips_literal_scenarios_layer(self):
+        cfg = ConfigDir.from_path(self.cfg_dir)
+        # scenario 仍是 config 父目录名（与 4 级一致）
+        self.assertEqual(cfg.scenario, self.scenario_name)
+        # project 跳过字面 "scenarios"，取再上一层
+        self.assertEqual(cfg.project, self.project_name)
+        # 输出仍是 2 段，不含 "scenarios"
+        self.assertEqual(
+            cfg.output_subpath,
+            Path(self.project_name) / self.scenario_name,
+        )
+        self.assertNotIn("scenarios", cfg.output_subpath.parts)
+
+
+class ExpandConfigDirArgTests(unittest.TestCase):
+    """``expand_config_dir_arg`` 的绝对路径 / 相对路径 / 自动追加 config/ 行为。"""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self.tmp = Path(self._tmp.name).resolve()
+        # 让 workspace_root 指向 tmp，避免污染默认 workspace。
+        self._old_env = os.environ.get("CHAINSIGHT_WORKSPACE")
+        os.environ["CHAINSIGHT_WORKSPACE"] = str(self.tmp)
+
+    def tearDown(self) -> None:
+        if self._old_env is None:
+            os.environ.pop("CHAINSIGHT_WORKSPACE", None)
+        else:
+            os.environ["CHAINSIGHT_WORKSPACE"] = self._old_env
+        self._tmp.cleanup()
+
+    def test_absolute_path_returned_as_is(self):
+        from src.core.run.utils import expand_config_dir_arg
+
+        abs_path = self.tmp / "X" / "Y" / "config"
+        abs_path.mkdir(parents=True)
+        got = expand_config_dir_arg(str(abs_path))
+        self.assertEqual(got, abs_path.resolve())
+
+    def test_two_segment_short_form_appends_config(self):
+        # 老 2 段短格式：<project>/<scenario> → workspace_root/<project>/<scenario>/config
+        from src.core.run.utils import expand_config_dir_arg
+
+        (self.tmp / "SDC" / "baseline" / "config").mkdir(parents=True)
+        got = expand_config_dir_arg("SDC/baseline")
+        self.assertEqual(got, (self.tmp / "SDC" / "baseline" / "config").resolve())
+
+    def test_scenarios_3_segment_appends_config(self):
+        # 新 3 段：<project>/scenarios/<scenario> → 末段非 config，追加 /config
+        from src.core.run.utils import expand_config_dir_arg
+
+        target = self.tmp / "proj-a" / "scenarios" / "scen-x" / "config"
+        target.mkdir(parents=True)
+        got = expand_config_dir_arg("proj-a/scenarios/scen-x")
+        self.assertEqual(got, target.resolve())
+
+    def test_scenarios_4_segment_uses_as_is(self):
+        # 新 4 段：<project>/scenarios/<scenario>/config → 已含 config，不追加
+        from src.core.run.utils import expand_config_dir_arg
+
+        target = self.tmp / "proj-a" / "scenarios" / "scen-x" / "config"
+        target.mkdir(parents=True)
+        got = expand_config_dir_arg("proj-a/scenarios/scen-x/config")
+        self.assertEqual(got, target.resolve())
+
+    def test_missing_relative_path_falls_back_to_workspace_root(self):
+        # 既不在 workspace_root 下也不在 CWD 下时，落到 workspace_root 版本，
+        # 让 ConfigDir.from_path 报准确的"目录不存在"。
+        from src.core.run.utils import expand_config_dir_arg
+
+        got = expand_config_dir_arg("ghost/scenarios/none")
+        self.assertEqual(
+            got,
+            (self.tmp / "ghost" / "scenarios" / "none" / "config").resolve(),
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -41,8 +41,12 @@ def main():
     cfg_group = parser.add_mutually_exclusive_group()
     cfg_group.add_argument("--config-dir",
                            default=None,
-                           help=("场景 config/ 目录绝对路径，或 <project>/<scenario> 短格式；"
-                                 "短格式按 workspace_root 展开"))
+                           help=("场景 config/ 目录绝对路径；"
+                                 "或相对路径（先 workspace_root 解析、CWD 兜底），支持："
+                                 "<project>/<scenario>（旧 4 级）、"
+                                 "<project>/scenarios/<scenario>[/config]"
+                                 "（生产 5 级，scenarios/ 自动识别）；"
+                                 "末段非 config 自动追加"))
     cfg_group.add_argument("--config", "-c",
                            default=None,
                            help="配置文件路径或含唯一 Excel 的目录路径；与 --config-dir 平级支持")

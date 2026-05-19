@@ -153,7 +153,8 @@ def save_module1_output_with_supply_demand(
     shipment_df: pd.DataFrame,
     supply_demand_df: pd.DataFrame,
     output_file: str,
-    cut_df: Optional[pd.DataFrame] = None
+    cut_df: pd.DataFrame,
+    summary_df: pd.DataFrame
 ) -> None:
     """将Module1输出写入Excel文件。
 
@@ -165,7 +166,7 @@ def save_module1_output_with_supply_demand(
         cut_df: 缺货DataFrame。
     """
     try:
-        with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
+        with pd.ExcelWriter(output_file, engine='xlsxwriter') as writer:
             orders_out = _ensure_cols(
                 orders_df,
                 ['date', 'material', 'location', 'demand_type',
@@ -198,8 +199,10 @@ def save_module1_output_with_supply_demand(
                 writer, sheet_name='SupplyDemandLog', index=False
             )
 
-            summary = _build_summary(orders_df, shipment_df, cut_out, supply_demand_df)
-            summary.to_excel(writer, sheet_name='Summary', index=False)
+            # summary = _build_summary(orders_df, shipment_df, cut_out, supply_demand_df)
+            normalize_identifiers(summary).to_excel(
+                writer, sheet_name='Summary', index=False
+            )
 
     except Exception as e:
         pass

@@ -8,9 +8,11 @@ from .orchestrator_main import (
     Orchestrator,
     create_orchestrator,
 )
+from .new_orchestrator import Orchestrator as Orch
 
 __all__ = [
     'Orchestrator',
     'create_orchestrator',
     'DeploymentUID',
+    'Orch'
 ]

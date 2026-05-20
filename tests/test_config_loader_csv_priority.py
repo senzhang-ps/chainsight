@@ -8,9 +8,13 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
-from src.core.main_integration.config_loader import load_configuration
+from src.core.main_integration.config_loader import (
+    _validate_config_dict,
+    load_configuration,
+)
 from src.core.run.config_dir import ConfigDir
 
 
@@ -218,6 +222,31 @@ class CsvDtypeAlignmentTests(unittest.TestCase):
                 ev, cv,
                 f"浮点 round-trip 损失：Excel={ev!r} CSV={cv!r}",
             )
+
+
+class ConfigQuantityValidationTests(unittest.TestCase):
+    def test_quantity_column_empty_and_abnormal_values_are_warned(self):
+        config_dict = {
+            "M1_DemandForecast": pd.DataFrame({
+                "material": ["A", "B", "C", "D", "E", "F", "G"],
+                "location": ["L"] * 7,
+                "quantity": [10, None, "", "bad", np.inf, -np.inf, "NaN"],
+            }),
+            "M3_SafetyStock": pd.DataFrame({
+                "safety_stock_qty": [1, None, "bad"],
+            }),
+        }
+
+        with self.assertLogs("SupplyChainSimulation", level="WARNING") as logs:
+            _validate_config_dict(config_dict, required=set())
+
+        output = "\n".join(logs.output)
+        self.assertIn("[ConfigValidation][quantity]", output)
+        self.assertIn("sheet='M1_DemandForecast'", output)
+        self.assertIn("empty=2", output)
+        self.assertIn("non_numeric=2", output)
+        self.assertIn("infinite=2", output)
+        self.assertNotIn("M3_SafetyStock", output)
 
 
 if __name__ == "__main__":

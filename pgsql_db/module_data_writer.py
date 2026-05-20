@@ -1249,10 +1249,13 @@ class ModuleDataWriter:
             pass
         
         results = {}
-        
+
         # 转换日期为datetime用于过滤
         end_date_dt = pd.to_datetime(end_date) if end_date else None
-        
+
+        # 为 summary 聚合的高频过滤/分组列建立复合索引（幂等，IF NOT EXISTS）
+        self._ensure_summary_source_indexes()
+
         # 1. 生成 order_shipment_cut 汇总报告
         try:
             results['summary_output_ordershipmentcutsummary'] = self._generate_order_shipment_cut_summary(
@@ -1337,185 +1340,581 @@ class ModuleDataWriter:
         
         return results
     
+    def _get_table_columns(self, table_name: str) -> set:
+        """返回表的列名集合；表不存在时返回空集合。"""
+        try:
+            with self.db.get_cursor(commit=False) as cursor:
+                cursor.execute(
+                    """
+                    SELECT column_name FROM information_schema.columns
+                    WHERE table_name = %s
+                    """,
+                    (table_name,),
+                )
+                return {row[0] for row in cursor.fetchall()}
+        except Exception:
+            return set()
+
+    # summary 聚合 / 过滤的高频列组合，用于建立复合 BTREE 索引。
+    # 前导列 run_id 服务 WHERE 等值过滤，其余列服务 GROUP BY / ORDER BY，
+    # 让 PG 走 index scan 并省去额外排序。
+    def _get_table_column_types(self, table_name: str) -> Dict[str, str]:
+        """Return lower-case information_schema data types by column name."""
+        try:
+            with self.db.get_cursor(commit=False) as cursor:
+                cursor.execute(
+                    """
+                    SELECT column_name, data_type
+                    FROM information_schema.columns
+                    WHERE table_name = %s
+                    """,
+                    (table_name,),
+                )
+                return {row[0]: str(row[1]).lower() for row in cursor.fetchall()}
+        except Exception:
+            return {}
+
+    def _ensure_table_columns(self, table_name: str, column_defs: Dict[str, str]) -> bool:
+        """Create a table if needed and add missing columns, without dropping data."""
+        existed = self.db.table_exists(table_name)
+        cols_sql = sql.SQL(", ").join(
+            sql.SQL("{} {}").format(sql.Identifier(col), sql.SQL(pg_type))
+            for col, pg_type in column_defs.items()
+        )
+        with self.db.get_cursor() as cursor:
+            cursor.execute(
+                sql.SQL("CREATE TABLE IF NOT EXISTS {} ({})").format(
+                    sql.Identifier(table_name),
+                    cols_sql,
+                )
+            )
+
+        existing_cols = self._get_table_columns(table_name)
+        for col, pg_type in column_defs.items():
+            if col in existing_cols:
+                continue
+            with self.db.get_cursor() as cursor:
+                cursor.execute(
+                    sql.SQL("ALTER TABLE {} ADD COLUMN {} {}").format(
+                        sql.Identifier(table_name),
+                        sql.Identifier(col),
+                        sql.SQL(pg_type),
+                    )
+                )
+
+        # 类型对齐：仅处理"声明 BIGINT 但既有列是浮点/numeric"的安全收窄。
+        # 旧版本曾把 qty 列建成 DOUBLE PRECISION；此处用 TRUNC 向零截断改回 BIGINT，
+        # 与 safe_int_series 截断语义一致，且对已是整数值的历史行无损。
+        # 其余类型差异一律不动，避免误伤 TEXT/TIMESTAMP 等列。
+        _FLOATY = {"double precision", "real", "numeric"}
+        existing_types = self._get_table_column_types(table_name)
+        for col, pg_type in column_defs.items():
+            if pg_type.strip().upper() != "BIGINT":
+                continue
+            if existing_types.get(col) in _FLOATY:
+                try:
+                    with self.db.get_cursor() as cursor:
+                        cursor.execute(
+                            sql.SQL(
+                                "ALTER TABLE {tbl} ALTER COLUMN {col} TYPE BIGINT "
+                                "USING TRUNC({col})::bigint"
+                            ).format(
+                                tbl=sql.Identifier(table_name),
+                                col=sql.Identifier(col),
+                            )
+                        )
+                except Exception as e:
+                    _summary_logger.warning(
+                        "[SCHEMA] 列类型对齐跳过 %s.%s: %s", table_name, col, e
+                    )
+        return existed
+
+    def _prepare_summary_target(
+        self,
+        table_name: str,
+        column_defs: Dict[str, str],
+        if_exists: str,
+        run_id: Optional[str],
+    ) -> None:
+        """Ensure target schema and apply summary replace/fail semantics per run."""
+        existed = self._ensure_table_columns(table_name, column_defs)
+        if if_exists == "fail" and existed:
+            raise ValueError(f"Table {table_name} already exists")
+        if if_exists != "replace" or not existed:
+            return
+
+        cols = self._get_table_columns(table_name)
+        with self.db.get_cursor() as cursor:
+            if run_id and "run_id" in cols:
+                cursor.execute(
+                    sql.SQL("DELETE FROM {} WHERE run_id = %s").format(
+                        sql.Identifier(table_name)
+                    ),
+                    (run_id,),
+                )
+            elif not run_id:
+                cursor.execute(
+                    sql.SQL("TRUNCATE TABLE {}").format(sql.Identifier(table_name))
+                )
+
+    def _timestamp_expr(self, column: str, col_type: Optional[str]) -> Any:
+        """Build a timestamp expression that avoids casting arbitrary text."""
+        ident = sql.Identifier(column)
+        if col_type in {"date", "timestamp without time zone", "timestamp with time zone"}:
+            return sql.SQL("{}::timestamp").format(ident)
+
+        return sql.SQL(
+            """
+            CASE
+                WHEN NULLIF({col}::text, '') IS NULL THEN NULL::timestamp
+                WHEN {col}::text ~ '^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'
+                    THEN ({col}::text)::timestamp
+                ELSE NULL::timestamp
+            END
+            """
+        ).format(col=ident)
+
+    def _date_filter_condition(
+        self,
+        column: str,
+        col_type: Optional[str],
+        keep_invalid_text: bool = True,
+    ) -> Any:
+        """Build a date <= end_date predicate that tolerates TEXT date columns."""
+        ident = sql.Identifier(column)
+        if col_type in {"date", "timestamp without time zone", "timestamp with time zone"}:
+            return sql.SQL("({col} IS NULL OR {col} <= %s)").format(col=ident)
+
+        invalid_result = sql.SQL("TRUE") if keep_invalid_text else sql.SQL("FALSE")
+        return sql.SQL(
+            """
+            (
+                {col} IS NULL
+                OR NULLIF({col}::text, '') IS NULL
+                OR CASE
+                    WHEN {col}::text ~ '^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'
+                        THEN ({col}::text)::timestamp <= %s
+                    ELSE {invalid_result}
+                END
+            )
+            """
+        ).format(col=ident, invalid_result=invalid_result)
+
+    _SUMMARY_SOURCE_INDEX_SPECS = [
+        ("module1_output_orderlog", ["run_id", "date", "material", "location"]),
+        ("module1_output_shipmentlog", ["run_id", "date", "material", "location"]),
+        ("module1_output_cutlog", ["run_id", "date", "material", "location"]),
+        ("module4_output_changeoverlog", ["run_id", "changeover_end_date"]),
+        ("module4_output_capacityexceed", ["run_id", "date"]),
+        ("module4_output_productionplan", ["run_id", "available_date"]),
+        ("module5_output_deploymentplan", ["run_id", "date"]),
+        ("module6_output_deliveryplan", ["run_id", "actual_ship_date"]),
+        ("module6_output_truckusagelog", ["run_id", "date"]),
+    ]
+
+    def _ensure_summary_source_indexes(self) -> int:
+        """为 summary 聚合的源表建立复合索引（幂等）。
+
+        - CREATE INDEX IF NOT EXISTS：已存在则跳过，无副作用。
+        - 仅对存在的表、且复合列全部存在时建立；缺列时退化为已存在列的前缀。
+        - 单个索引建立失败不影响其余（大表首次建索引耗时，但仅一次性成本）。
+
+        返回成功执行 CREATE 的索引数量（已存在的也计入，因为 IF NOT EXISTS 不报错）。
+        """
+        created = 0
+        for table_name, cols in self._SUMMARY_SOURCE_INDEX_SPECS:
+            existing = self._get_table_columns(table_name)
+            if not existing:
+                continue
+            idx_cols = [c for c in cols if c in existing]
+            # 至少需要 run_id + 1 个分组/过滤列才有意义
+            if len(idx_cols) < 2:
+                continue
+            index_name = f"idx_{table_name}_summary"
+            col_idents = sql.SQL(", ").join(sql.Identifier(c) for c in idx_cols)
+            query = sql.SQL(
+                "CREATE INDEX IF NOT EXISTS {idx} ON {tbl} ({cols})"
+            ).format(
+                idx=sql.Identifier(index_name),
+                tbl=sql.Identifier(table_name),
+                cols=col_idents,
+            )
+            try:
+                with self.db.get_cursor() as cursor:
+                    cursor.execute(query)
+                created += 1
+            except Exception as e:
+                _summary_logger.warning(
+                    "[INDEX] 复合索引建立跳过 %s(%s): %s",
+                    table_name, ", ".join(idx_cols), e,
+                )
+        return created
+
+    def _sample_config_sim_date(self, run_id: str, candidate_tables: list) -> str:
+        """从候选表的 config_name 列采样一行，提取 8 位日期 → 'YYYY-MM-DD'。"""
+        import re
+        for tbl in candidate_tables:
+            cols = self._get_table_columns(tbl)
+            if 'config_name' not in cols:
+                continue
+            try:
+                where = sql.SQL("WHERE run_id = %s") if (run_id and 'run_id' in cols) else sql.SQL("")
+                params = (run_id,) if (run_id and 'run_id' in cols) else None
+                query = sql.SQL(
+                    "SELECT config_name FROM {tbl} {where} LIMIT 1"
+                ).format(tbl=sql.Identifier(tbl), where=where)
+                with self.db.get_cursor(commit=False) as cursor:
+                    cursor.execute(query, params)
+                    row = cursor.fetchone()
+            except (errors.UndefinedTable, errors.UndefinedColumn):
+                continue
+            if not row or row[0] is None:
+                continue
+            m = re.search(r'(\d{8})', str(row[0]))
+            if m:
+                return pd.to_datetime(m.group(1), format='%Y%m%d').strftime('%Y-%m-%d')
+        return None
+
+    def _build_log_agg_cte(
+        self,
+        table_name: str,
+        qty_alias: str,
+        dedup: bool,
+        run_id: Optional[str],
+        sim_date_constant: Optional[str],
+        params: List[Any],
+    ) -> Any:
+        """Build a source aggregation CTE that returns no rows if the source is absent."""
+        cols = self._get_table_columns(table_name)
+        col_types = self._get_table_column_types(table_name)
+        required = {"date", "material", "location", "quantity"}
+        if not cols or not required.issubset(cols):
+            return sql.SQL(
+                """
+                SELECT
+                    NULL::timestamp AS date,
+                    NULL::text AS material,
+                    NULL::text AS location,
+                    NULL::timestamp AS simulation_date,
+                    0::double precision AS {qty_alias}
+                WHERE FALSE
+                """
+            ).format(qty_alias=sql.Identifier(qty_alias))
+
+        date_expr = self._timestamp_expr("date", col_types.get("date"))
+        if sim_date_constant is not None:
+            sim_expr = sql.SQL("%s::timestamp")
+            params.append(sim_date_constant)
+        elif "simulation_date" in cols:
+            sim_expr = self._timestamp_expr(
+                "simulation_date", col_types.get("simulation_date")
+            )
+        elif "sim_date" in cols:
+            sim_expr = self._timestamp_expr("sim_date", col_types.get("sim_date"))
+        else:
+            sim_expr = sql.SQL("NULL::timestamp")
+
+        select_items = [
+            sql.SQL("{} AS date").format(date_expr),
+            sql.SQL("material::text AS material"),
+            sql.SQL("location::text AS location"),
+            sql.SQL("{} AS simulation_date").format(sim_expr),
+            sql.SQL("quantity::double precision AS quantity"),
+        ]
+        if dedup and "demand_type" in cols:
+            select_items.append(sql.SQL("demand_type::text AS demand_type"))
+
+        where_sql = sql.SQL("")
+        if run_id and "run_id" in cols:
+            where_sql = sql.SQL("WHERE run_id = %s")
+            params.append(run_id)
+
+        base_select = sql.SQL(
+            """
+            SELECT {select_items}
+            FROM {table}
+            {where}
+            """
+        ).format(
+            select_items=sql.SQL(", ").join(select_items),
+            table=sql.Identifier(table_name),
+            where=where_sql,
+        )
+        if dedup:
+            base_select = sql.SQL("SELECT DISTINCT * FROM ({base}) dedup_src").format(
+                base=base_select
+            )
+
+        return sql.SQL(
+            """
+            SELECT
+                date,
+                material,
+                location,
+                simulation_date,
+                SUM(quantity) AS {qty_alias}
+            FROM ({base}) src
+            GROUP BY date, material, location, simulation_date
+            """
+        ).format(
+            qty_alias=sql.Identifier(qty_alias),
+            base=base_select,
+        )
+
+    def _stream_filter_to_summary(
+        self,
+        source_table: str,
+        target_table: str,
+        run_id: Optional[str],
+        end_date_dt: Optional[pd.Timestamp],
+        date_filter_cols: List[str],
+        sort_cols: Optional[List[str]] = None,
+        stable_tiebreaker: bool = False,
+        if_exists: str = 'replace',
+        chunksize: int = 100_000,
+    ) -> int:
+        """SQL 侧 WHERE + ORDER BY 下推，服务端游标按 chunksize 流式写入 summary 表。
+
+        - date_filter_cols 每列生成 ``(col IS NULL OR col <= end_date)``，AND 串联，
+          仅对源表实际存在的列下推（与旧实现的 ``if col in df.columns`` 防御性一致）。
+        - sort_cols 仅取源表实际存在的列；stable_tiebreaker=True 时追加 ``ctid`` 末位
+          tiebreaker，等价旧实现的 ``kind='mergesort'`` 稳定排序。
+        - 服务端游标 + ``ORDER BY`` 在 PG 端全局排序后分发，每 chunk 已是全表顺序。
+        - 首批写入用调用方 if_exists，其余批次强制 'append'。
+        - 表不存在 / 无符合行 → 返回 0。
+        """
+        if self.db.table_exists(target_table):
+            if if_exists == "fail":
+                raise ValueError(f"Table {target_table} already exists")
+            if if_exists == "replace":
+                target_cols = self._get_table_columns(target_table)
+                with self.db.get_cursor() as cursor:
+                    if run_id and "run_id" in target_cols:
+                        cursor.execute(
+                            sql.SQL("DELETE FROM {} WHERE run_id = %s").format(
+                                sql.Identifier(target_table)
+                            ),
+                            (run_id,),
+                        )
+                    elif not run_id:
+                        cursor.execute(
+                            sql.SQL("TRUNCATE TABLE {}").format(
+                                sql.Identifier(target_table)
+                            )
+                        )
+
+        cols = self._get_table_columns(source_table)
+        if not cols:
+            return 0
+        col_types = self._get_table_column_types(source_table)
+
+        where_parts = []
+        params: list = []
+        if run_id and 'run_id' in cols:
+            where_parts.append(sql.SQL("run_id = %s"))
+            params.append(run_id)
+        if end_date_dt is not None:
+            for col in date_filter_cols or []:
+                if col in cols:
+                    where_parts.append(
+                        self._date_filter_condition(col, col_types.get(col))
+                    )
+                    params.append(end_date_dt)
+        where_sql = sql.SQL("")
+        if where_parts:
+            where_sql = sql.SQL("WHERE ") + sql.SQL(" AND ").join(where_parts)
+
+        order_sql = sql.SQL("")
+        order_terms: list = []
+        if sort_cols:
+            order_terms = [sql.Identifier(c) for c in sort_cols if c in cols]
+        if stable_tiebreaker:
+            order_terms.append(sql.SQL("ctid"))
+        if order_terms:
+            order_sql = sql.SQL("ORDER BY ") + sql.SQL(", ").join(order_terms)
+
+        query = sql.SQL("SELECT * FROM {tbl} {where} {order}").format(
+            tbl=sql.Identifier(source_table),
+            where=where_sql,
+            order=order_sql,
+        )
+
+        total = 0
+        is_first = True
+        try:
+            for chunk_df in self.db.iter_query_chunks(
+                query, tuple(params) if params else None, chunksize=chunksize
+            ):
+                if chunk_df.empty:
+                    continue
+                # 与旧实现一致：若源表缺 run_id 列，则按 run_id 补一列
+                if run_id and 'run_id' not in chunk_df.columns:
+                    chunk_df['run_id'] = run_id
+                chunk_if_exists = if_exists if is_first else 'append'
+                self.db.create_table_from_df(
+                    chunk_df,
+                    target_table,
+                    if_exists=chunk_if_exists,
+                    config_name=self.config_name,
+                )
+                total += len(chunk_df)
+                is_first = False
+        except (errors.UndefinedTable, errors.UndefinedColumn):
+            return 0
+
+        if total > 0:
+            self.written_tables[target_table] = {"module": "summary", "rows": total}
+        return total
+
     def _generate_order_shipment_cut_summary(
         self,
         run_id: str,
         end_date_dt: pd.Timestamp,
         if_exists: str
     ) -> int:
-        """生成订单/发货/缺货汇总报告"""
+        """生成订单/发货/缺货汇总报告（SQL 侧 dedup + 聚合，避免全表加载）。"""
         table_name = "summary_output_ordershipmentcutsummary"
-        
-        try:
-            orders_df = self._read_table_for_run("module1_output_orderlog", run_id)
-        except errors.UndefinedTable:
-            orders_df = pd.DataFrame()
-        
-        try:
-            shipments_df = self._read_table_for_run("module1_output_shipmentlog", run_id)
-        except errors.UndefinedTable:
-            shipments_df = pd.DataFrame()
-        
-        try:
-            cuts_df = self._read_table_for_run("module1_output_cutlog", run_id)
-        except errors.UndefinedTable:
-            cuts_df = pd.DataFrame()
-        
-        if run_id:
-            if not orders_df.empty and 'run_id' in orders_df.columns:
-                orders_df = orders_df[orders_df['run_id'] == run_id].reset_index(drop=True)
-            if not shipments_df.empty and 'run_id' in shipments_df.columns:
-                shipments_df = shipments_df[shipments_df['run_id'] == run_id].reset_index(drop=True)
-            if not cuts_df.empty and 'run_id' in cuts_df.columns:
-                cuts_df = cuts_df[cuts_df['run_id'] == run_id].reset_index(drop=True)
-        
-        # Dev 从文件路径提取 simulation_date（取路径中第一个8位数字日期，
-        # 实际来自 config_name 如 OC_Paste_S1_20251224 → '2025-12-24'）。
-        # DB 需要复制此行为：从 config_name 列提取日期，统一覆盖 simulation_date。
-        import re
-        config_sim_date = None
-        for df_ref in [orders_df, shipments_df, cuts_df]:
-            if not df_ref.empty and 'config_name' in df_ref.columns:
-                sample_config = str(df_ref['config_name'].iloc[0])
-                m = re.search(r'(\d{8})', sample_config)
-                if m:
-                    config_sim_date = pd.to_datetime(m.group(1), format='%Y%m%d').strftime('%Y-%m-%d')
-                break
-        
-        for df_ref in [orders_df, shipments_df, cuts_df]:
-            if not df_ref.empty:
-                if config_sim_date:
-                    # 与 Dev 一致：所有行使用从 config_name 提取的同一 simulation_date
-                    df_ref['simulation_date'] = config_sim_date
-                elif 'simulation_date' not in df_ref.columns and 'sim_date' in df_ref.columns:
-                    df_ref['simulation_date'] = df_ref['sim_date']
-                # 统一 simulation_date 类型为 datetime，避免三张 DF 来源不同
-                # （DB 列类型 TEXT vs TIMESTAMP）导致 merge 时 dtype 不一致而失败
-                if 'simulation_date' in df_ref.columns:
-                    df_ref['simulation_date'] = pd.to_datetime(
-                        df_ref['simulation_date'], errors='coerce'
-                    )
-        
-        # 去重（与 Dev 一致：按 date, material, location, quantity, simulation_date [+ demand_type]）
-        if not orders_df.empty:
-            dedup_cols = ['date', 'material', 'location', 'quantity', 'simulation_date']
-            if 'demand_type' in orders_df.columns:
-                dedup_cols.append('demand_type')
-            existing_cols = [c for c in dedup_cols if c in orders_df.columns]
-            if existing_cols:
-                orders_df = orders_df.drop_duplicates(subset=existing_cols, keep='first')
-        
-        group_cols = ['date', 'material', 'location', 'simulation_date']
-        merge_cols = ['date', 'material', 'location', 'simulation_date']
-        
-        order_agg = pd.DataFrame(columns=merge_cols + ['order_qty'])
-        if not orders_df.empty:
-            orders_df['date'] = pd.to_datetime(orders_df['date'], errors='coerce')
-            existing_group = [c for c in group_cols if c in orders_df.columns]
-            order_agg = orders_df.groupby(existing_group, dropna=False).agg(
-                {'quantity': 'sum'}
-            ).reset_index()
-            order_agg.rename(columns={'quantity': 'order_qty'}, inplace=True)
-        
-        shipment_agg = pd.DataFrame(columns=merge_cols + ['shipment_qty'])
-        if not shipments_df.empty:
-            shipments_df['date'] = pd.to_datetime(shipments_df['date'], errors='coerce')
-            existing_group = [c for c in group_cols if c in shipments_df.columns]
-            shipment_agg = shipments_df.groupby(existing_group, dropna=False).agg(
-                {'quantity': 'sum'}
-            ).reset_index()
-            shipment_agg.rename(columns={'quantity': 'shipment_qty'}, inplace=True)
-        
-        cut_agg = pd.DataFrame(columns=merge_cols + ['cut_qty'])
-        if not cuts_df.empty:
-            cuts_df['date'] = pd.to_datetime(cuts_df['date'], errors='coerce')
-            existing_group = [c for c in group_cols if c in cuts_df.columns]
-            cut_agg = cuts_df.groupby(existing_group, dropna=False).agg(
-                {'quantity': 'sum'}
-            ).reset_index()
-            cut_agg.rename(columns={'quantity': 'cut_qty'}, inplace=True)
-        
-        existing_merge = [c for c in merge_cols if c in order_agg.columns or c in shipment_agg.columns or c in cut_agg.columns]
-        if not existing_merge:
-            existing_merge = merge_cols
-        
-        summary = order_agg
-        if not shipment_agg.empty:
-            summary = summary.merge(shipment_agg, on=existing_merge, how='outer')
-        if not cut_agg.empty:
-            summary = summary.merge(cut_agg, on=existing_merge, how='outer')
-        
-        if summary.empty:
-            return 0
-        
-        for col in ['order_qty', 'shipment_qty', 'cut_qty']:
-            if col in summary.columns:
-                summary[col] = safe_int_series(
-                    summary[col].fillna(0),
-                    context=f'db.reconciliation_summary.{col}',
-                )
-            else:
-                summary[col] = 0
-        
-        # Dev 保留 CutLog 原始 cut_qty（不覆盖），仅做一致性校验
-        # 不再用 clip(lower=0) 覆盖
-        
-        if end_date_dt is not None and 'date' in summary.columns:
-            summary = summary[summary['date'] <= end_date_dt]
-        
-        summary = summary.sort_values(
-            [c for c in ['simulation_date', 'date', 'material', 'location'] if c in summary.columns]
+        orders_tbl = "module1_output_orderlog"
+        shipments_tbl = "module1_output_shipmentlog"
+        cuts_tbl = "module1_output_cutlog"
+
+        column_defs = {
+            "simulation_date": "TIMESTAMP",
+            "date": "TIMESTAMP",
+            "material": "TEXT",
+            "location": "TEXT",
+            "order_qty": "BIGINT",
+            "shipment_qty": "BIGINT",
+            "cut_qty": "BIGINT",
+            "run_id": "TEXT",
+            "config_name": "TEXT",
+            "db_write_time": "TIMESTAMP",
+        }
+        self._prepare_summary_target(table_name, column_defs, if_exists, run_id)
+
+        config_sim_date = self._sample_config_sim_date(
+            run_id, [orders_tbl, shipments_tbl, cuts_tbl]
         )
-        
-        cols = ['simulation_date', 'date', 'material', 'location', 'order_qty', 'shipment_qty', 'cut_qty']
-        cols = [c for c in cols if c in summary.columns]
-        summary = summary[cols]
-        
-        if run_id:
-            summary['run_id'] = run_id
-        
-        self.db.create_table_from_df(summary, table_name, if_exists, config_name=self.config_name)
-        self.written_tables[table_name] = {"module": "summary", "rows": len(summary)}
-        
-        return len(summary)
-    
+        params: List[Any] = []
+        order_agg_sql = self._build_log_agg_cte(
+            orders_tbl, "order_qty", True, run_id, config_sim_date, params
+        )
+        shipment_agg_sql = self._build_log_agg_cte(
+            shipments_tbl, "shipment_qty", False, run_id, config_sim_date, params
+        )
+        cut_agg_sql = self._build_log_agg_cte(
+            cuts_tbl, "cut_qty", False, run_id, config_sim_date, params
+        )
+
+        end_filter_sql = sql.SQL("")
+        if end_date_dt is not None:
+            end_filter_sql = sql.SQL("WHERE k.date <= %s")
+            params.append(end_date_dt)
+
+        params.extend([run_id, self.config_name])
+        query = sql.SQL(
+            """
+            WITH
+            order_agg AS ({order_agg}),
+            shipment_agg AS ({shipment_agg}),
+            cut_agg AS ({cut_agg}),
+            keys AS (
+                SELECT date, material, location, simulation_date FROM order_agg
+                UNION
+                SELECT date, material, location, simulation_date FROM shipment_agg
+                UNION
+                SELECT date, material, location, simulation_date FROM cut_agg
+            ),
+            summary_rows AS (
+                -- qty 向零截断为整型，对齐本地 safe_int / int() 语义；
+                -- cut_qty keeps CutLog semantics and is not derived from order-shipment.
+                -- cut_agg also participates in keys so cut-only rows are preserved.
+                SELECT
+                    k.simulation_date,
+                    k.date,
+                    k.material,
+                    k.location,
+                    TRUNC(COALESCE(o.order_qty, 0))::bigint AS order_qty,
+                    TRUNC(COALESCE(s.shipment_qty, 0))::bigint AS shipment_qty,
+                    TRUNC(COALESCE(c.cut_qty, 0))::bigint AS cut_qty
+                FROM keys k
+                LEFT JOIN order_agg o
+                    ON k.date IS NOT DISTINCT FROM o.date
+                    AND k.material IS NOT DISTINCT FROM o.material
+                    AND k.location IS NOT DISTINCT FROM o.location
+                    AND k.simulation_date IS NOT DISTINCT FROM o.simulation_date
+                LEFT JOIN shipment_agg s
+                    ON k.date IS NOT DISTINCT FROM s.date
+                    AND k.material IS NOT DISTINCT FROM s.material
+                    AND k.location IS NOT DISTINCT FROM s.location
+                    AND k.simulation_date IS NOT DISTINCT FROM s.simulation_date
+                LEFT JOIN cut_agg c
+                    ON k.date IS NOT DISTINCT FROM c.date
+                    AND k.material IS NOT DISTINCT FROM c.material
+                    AND k.location IS NOT DISTINCT FROM c.location
+                    AND k.simulation_date IS NOT DISTINCT FROM c.simulation_date
+                {end_filter}
+            )
+            INSERT INTO {target} (
+                simulation_date,
+                date,
+                material,
+                location,
+                order_qty,
+                shipment_qty,
+                cut_qty,
+                run_id,
+                config_name,
+                db_write_time
+            )
+            SELECT
+                simulation_date,
+                date,
+                material,
+                location,
+                order_qty,
+                shipment_qty,
+                cut_qty,
+                %s AS run_id,
+                %s AS config_name,
+                NOW() AS db_write_time
+            FROM summary_rows
+            ORDER BY simulation_date, date, material, location
+            """
+        ).format(
+            order_agg=order_agg_sql,
+            shipment_agg=shipment_agg_sql,
+            cut_agg=cut_agg_sql,
+            end_filter=end_filter_sql,
+            target=sql.Identifier(table_name),
+        )
+
+        try:
+            with self.db.get_cursor() as cursor:
+                cursor.execute(query, tuple(params))
+                rows = max(cursor.rowcount or 0, 0)
+        except (errors.UndefinedTable, errors.UndefinedColumn):
+            return 0
+
+        if rows > 0:
+            self.written_tables[table_name] = {"module": "summary", "rows": rows}
+        return rows
+
     def _generate_changeover_summary(
         self,
         run_id: str,
         end_date_dt: pd.Timestamp,
         if_exists: str
     ) -> int:
-        """生成换产汇总报告"""
-        table_name = "summary_output_fullchangeoverlog"
-        
-        try:
-            df = self._read_table_for_run("module4_output_changeoverlog", run_id)
-        except errors.UndefinedTable:
-            return 0
-        
-        if df.empty:
-            return 0
-        
-        # 按run_id过滤
-        if run_id and 'run_id' in df.columns:
-            df = df[df['run_id'] == run_id].reset_index(drop=True)
-        
-        # 按日期过滤（与 Dev 版本一致：只在 changeover_end_date 上过滤，不在 date 上过滤）
-        # Dev 数据中 changeover_end_date 不存在，所以过滤是 no-op，保留全部行
-        # DB 数据中 date 列值可能 > end_date，但不应在 date 上过滤
-        if end_date_dt is not None:
-            for col in ['changeover_start_date', 'changeover_end_date', 'date']:
-                if col in df.columns:
-                    df[col] = pd.to_datetime(df[col], errors='coerce')
-            
-            if 'changeover_end_date' in df.columns:
-                df = df[(df['changeover_end_date'].isna()) | (df['changeover_end_date'] <= end_date_dt)]
-        
-        if df.empty:
-            return 0
-
-        sort_cols = [
-            c for c in [
+        """生成换产汇总报告（流式 SQL pushdown）"""
+        return self._stream_filter_to_summary(
+            source_table="module4_output_changeoverlog",
+            target_table="summary_output_fullchangeoverlog",
+            run_id=run_id,
+            end_date_dt=end_date_dt,
+            # 与 Dev 一致：只在 changeover_end_date 上过滤
+            date_filter_cols=['changeover_end_date'],
+            sort_cols=[
                 'date', 'material', 'sending', 'receiving',
                 'planned_delivery_date', 'demand_element',
                 'demand_qty', 'planned_qty', 'deployed_qty_invcon',
@@ -1523,23 +1922,10 @@ class ModuleDataWriter:
                 'deploy_from_open_deployment_inbound',
                 'deploy_from_future_production', 'deployed_qty',
                 'leadtime', 'orig_location', 'is_cross_node', 'quota',
-            ] if c in df.columns
-        ]
-        if sort_cols:
-            df = df.sort_values(
-                by=sort_cols,
-                kind='mergesort',
-            ).reset_index(drop=True)
-        
-        # 添加run_id
-        if run_id and 'run_id' not in df.columns:
-            df['run_id'] = run_id
-        
-        # 写入数据库
-        self.db.create_table_from_df(df, table_name, if_exists, config_name=self.config_name)
-        self.written_tables[table_name] = {"module": "summary", "rows": len(df)}
-        
-        return len(df)
+            ],
+            stable_tiebreaker=True,  # 等价旧实现的 kind='mergesort'
+            if_exists=if_exists,
+        )
     
     def _generate_capacity_exceed_summary(
         self,
@@ -1547,38 +1933,15 @@ class ModuleDataWriter:
         end_date_dt: pd.Timestamp,
         if_exists: str
     ) -> int:
-        """生成产能超限汇总报告"""
-        table_name = "summary_output_fullcapacityexceed"
-        
-        try:
-            df = self._read_table_for_run("module4_output_capacityexceed", run_id)
-        except errors.UndefinedTable:
-            return 0
-        
-        if df.empty:
-            return 0
-        
-        # 按run_id过滤
-        if run_id and 'run_id' in df.columns:
-            df = df[df['run_id'] == run_id]
-        
-        # 按日期过滤
-        if end_date_dt is not None and 'date' in df.columns:
-            df['date'] = pd.to_datetime(df['date'], errors='coerce')
-            df = df[(df['date'].isna()) | (df['date'] <= end_date_dt)]
-        
-        if df.empty:
-            return 0
-        
-        # 添加run_id
-        if run_id and 'run_id' not in df.columns:
-            df['run_id'] = run_id
-        
-        # 写入数据库
-        self.db.create_table_from_df(df, table_name, if_exists, config_name=self.config_name)
-        self.written_tables[table_name] = {"module": "summary", "rows": len(df)}
-        
-        return len(df)
+        """生成产能超限汇总报告（流式 SQL pushdown）"""
+        return self._stream_filter_to_summary(
+            source_table="module4_output_capacityexceed",
+            target_table="summary_output_fullcapacityexceed",
+            run_id=run_id,
+            end_date_dt=end_date_dt,
+            date_filter_cols=['date'],
+            if_exists=if_exists,
+        )
     
     def _generate_production_plan_summary(
         self,
@@ -1586,37 +1949,15 @@ class ModuleDataWriter:
         end_date_dt: pd.Timestamp,
         if_exists: str
     ) -> int:
-        """生成生产计划汇总报告"""
-        table_name = "summary_output_fullproductionplan"
-        
-        try:
-            df = self._read_table_for_run("module4_output_productionplan", run_id)
-        except errors.UndefinedTable:
-            return 0
-        
-        if df.empty:
-            return 0
-        
-        # 按run_id过滤
-        if run_id and 'run_id' in df.columns:
-            df = df[df['run_id'] == run_id].reset_index(drop=True)
-        
-        if end_date_dt is not None and 'available_date' in df.columns:
-            df['available_date'] = pd.to_datetime(df['available_date'], errors='coerce')
-            df = df[(df['available_date'].isna()) | (df['available_date'] <= end_date_dt)]
-        
-        if df.empty:
-            return 0
-        
-        # 添加run_id
-        if run_id and 'run_id' not in df.columns:
-            df['run_id'] = run_id
-        
-        # 写入数据库
-        self.db.create_table_from_df(df, table_name, if_exists, config_name=self.config_name)
-        self.written_tables[table_name] = {"module": "summary", "rows": len(df)}
-        
-        return len(df)
+        """生成生产计划汇总报告（流式 SQL pushdown）"""
+        return self._stream_filter_to_summary(
+            source_table="module4_output_productionplan",
+            target_table="summary_output_fullproductionplan",
+            run_id=run_id,
+            end_date_dt=end_date_dt,
+            date_filter_cols=['available_date'],
+            if_exists=if_exists,
+        )
     
     def _generate_deployment_plan_summary(
         self,
@@ -1624,49 +1965,16 @@ class ModuleDataWriter:
         end_date_dt: pd.Timestamp,
         if_exists: str
     ) -> int:
-        """生成部署计划汇总报告"""
-        table_name = "summary_output_fulldeploymentplan"
-        
-        try:
-            df = self._read_table_for_run("module5_output_deploymentplan", run_id)
-        except errors.UndefinedTable:
-            return 0
-        
-        if df.empty:
-            return 0
-        
-        # 按run_id过滤
-        if run_id and 'run_id' in df.columns:
-            df = df[df['run_id'] == run_id].reset_index(drop=True)
-        
-        # 按日期过滤（与 Dev 版本 _generate_deployment_report 保持一致）
-        # Dev 版本过滤列: ['deployment_date', 'arrival_date', 'ship_date', 'date']
-        # 只有 'date' 列存在于实际数据中，且值在仿真范围内，所以过滤是 no-op
-        if end_date_dt is not None:
-            date_cols = ['deployment_date', 'arrival_date', 'ship_date', 'date']
-            for col in date_cols:
-                if col in df.columns:
-                    df[col] = pd.to_datetime(df[col], errors='coerce')
-            
-            # 创建过滤mask（使用 df.index 确保对齐）
-            mask = pd.Series([True] * len(df), index=df.index)
-            for col in date_cols:
-                if col in df.columns:
-                    mask = mask & ((df[col].isna()) | (df[col] <= end_date_dt))
-            df = df[mask]
-        
-        if df.empty:
-            return 0
-        
-        # 添加run_id
-        if run_id and 'run_id' not in df.columns:
-            df['run_id'] = run_id
-        
-        # 写入数据库
-        self.db.create_table_from_df(df, table_name, if_exists, config_name=self.config_name)
-        self.written_tables[table_name] = {"module": "summary", "rows": len(df)}
-        
-        return len(df)
+        """生成部署计划汇总报告（流式 SQL pushdown）"""
+        return self._stream_filter_to_summary(
+            source_table="module5_output_deploymentplan",
+            target_table="summary_output_fulldeploymentplan",
+            run_id=run_id,
+            end_date_dt=end_date_dt,
+            # 与 Dev 版本 _generate_deployment_report 保持一致
+            date_filter_cols=['deployment_date', 'arrival_date', 'ship_date', 'date'],
+            if_exists=if_exists,
+        )
     
     def _generate_delivery_plan_summary(
         self,
@@ -1674,49 +1982,19 @@ class ModuleDataWriter:
         end_date_dt: pd.Timestamp,
         if_exists: str
     ) -> int:
-        """生成交付计划汇总报告"""
-        table_name = "summary_output_fulldeliveryplan"
-        
-        try:
-            df = self._read_table_for_run("module6_output_deliveryplan", run_id)
-        except errors.UndefinedTable:
-            return 0
-        
-        if df.empty:
-            return 0
-        
-        # 按run_id过滤
-        if run_id and 'run_id' in df.columns:
-            df = df[df['run_id'] == run_id].reset_index(drop=True)
-        
-        # 按日期过滤（与 Dev 版本 _generate_delivery_report 保持一致）
-        # Dev 版本过滤列: ['planned_deploy_date', 'actual_ship_date']
-        # DB 表列名是 planned_deployment_date（不匹配 planned_deploy_date），所以只在 actual_ship_date 上实际过滤
-        if end_date_dt is not None:
-            date_cols = ['planned_deploy_date', 'actual_ship_date', 'date']
-            for col in date_cols:
-                if col in df.columns:
-                    df[col] = pd.to_datetime(df[col], errors='coerce')
-            
-            # 创建过滤mask（使用 df.index 确保对齐）
-            mask = pd.Series([True] * len(df), index=df.index)
-            for col in ['planned_deploy_date', 'actual_ship_date']:
-                if col in df.columns:
-                    mask = mask & ((df[col].isna()) | (df[col] <= end_date_dt))
-            df = df[mask]
-        
-        if df.empty:
-            return 0
-        
-        # 添加run_id
-        if run_id and 'run_id' not in df.columns:
-            df['run_id'] = run_id
-        
-        # 写入数据库
-        self.db.create_table_from_df(df, table_name, if_exists, config_name=self.config_name)
-        self.written_tables[table_name] = {"module": "summary", "rows": len(df)}
-        
-        return len(df)
+        """生成交付计划汇总报告（流式 SQL pushdown）"""
+        # 与 Dev 版本 _generate_delivery_report 保持一致：仅在
+        # planned_deploy_date / actual_ship_date 上过滤（DB 表列名是
+        # planned_deployment_date，与 planned_deploy_date 不匹配，过滤实际仅在
+        # actual_ship_date 生效——保留两列以兼容历史 schema）
+        return self._stream_filter_to_summary(
+            source_table="module6_output_deliveryplan",
+            target_table="summary_output_fulldeliveryplan",
+            run_id=run_id,
+            end_date_dt=end_date_dt,
+            date_filter_cols=['planned_deploy_date', 'actual_ship_date'],
+            if_exists=if_exists,
+        )
     
     def _generate_truck_usage_summary(
         self,
@@ -1724,38 +2002,15 @@ class ModuleDataWriter:
         end_date_dt: pd.Timestamp,
         if_exists: str
     ) -> int:
-        """生成卡车使用汇总报告"""
-        table_name = "summary_output_fulltruckusage"
-        
-        try:
-            df = self._read_table_for_run("module6_output_truckusagelog", run_id)
-        except errors.UndefinedTable:
-            return 0
-        
-        if df.empty:
-            return 0
-        
-        # 按run_id过滤
-        if run_id and 'run_id' in df.columns:
-            df = df[df['run_id'] == run_id]
-        
-        # 按日期过滤
-        if end_date_dt is not None and 'date' in df.columns:
-            df['date'] = pd.to_datetime(df['date'], errors='coerce')
-            df = df[(df['date'].isna()) | (df['date'] <= end_date_dt)]
-        
-        if df.empty:
-            return 0
-        
-        # 添加run_id
-        if run_id and 'run_id' not in df.columns:
-            df['run_id'] = run_id
-        
-        # 写入数据库
-        self.db.create_table_from_df(df, table_name, if_exists, config_name=self.config_name)
-        self.written_tables[table_name] = {"module": "summary", "rows": len(df)}
-        
-        return len(df)
+        """生成卡车使用汇总报告（流式 SQL pushdown）"""
+        return self._stream_filter_to_summary(
+            source_table="module6_output_truckusagelog",
+            target_table="summary_output_fulltruckusage",
+            run_id=run_id,
+            end_date_dt=end_date_dt,
+            date_filter_cols=['date'],
+            if_exists=if_exists,
+        )
 
 
 def write_run_data_to_db(

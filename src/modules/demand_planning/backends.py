@@ -173,7 +173,33 @@ class _PandasBackend:
         )
         demand_forecast["week_start"] = pd.to_datetime(demand_forecast["week_start"].astype(object))
 
+        # 生成simulation_date，再根据simulation_date移动窗口统计flag_count
         week_starts = demand_forecast["week_start"].sort_values().drop_duplicates().reset_index(drop=True)
+        max_date, min_date = demand_forecast['week_start'].max(),demand_forecast['week_start'].min()
+        # 1. 生成所有 week_start（每周一）
+        all_week_starts = pd.date_range(start=min_date, end=max_date, freq='7D')
+
+        # 2. 对每个 week_start，生成7天的 simulation_date
+        date_records = []
+        for ws in all_week_starts:
+            sim_dates = pd.date_range(start=ws, periods=7, freq='D')
+            for sd in sim_dates:
+                date_records.append({'week_start': ws, 'simulation_date': sd})
+
+        # 3. 构造 date_df
+        date_df = pd.DataFrame(date_records)
+
+        demand_forecast = pd.merge(demand_forecast,date_df,how='left',on='week_start')
+        demand_forecast = pd.merge(demand_forecast, order_calendar, how='left', left_on='simulation_date', right_on='date')
+        demand_forecast['order_day_flag'] = demand_forecast['order_day_flag'].fillna(1)
+        demand_forecast.sort_values(by=['material','location','simulation_date'],inplace=True, ascending=True)
+        # demand_forecast['flag_count'] = (
+        #     demand_forecast.groupby(['material', 'location'])['order_day_flag']
+        #     .apply(lambda x: x[::-1].rolling(window=7, min_periods=1).sum()[::-1])
+        #     .values  # .values 避免索引对齐问题
+        # )
+        demand_forecast['month'] = ((demand_forecast['week']-1)//4)+1
+
 
         bins = week_starts.tolist() + [week_starts.iloc[-1] + pd.Timedelta(days=7)]
         order_calendar["week_start"] = pd.cut(
@@ -184,7 +210,7 @@ class _PandasBackend:
         flag_summary["week_start"] = pd.to_datetime(flag_summary["week_start"])
 
         demand_forecast = demand_forecast.merge(flag_summary, on="week_start", how="left")
-        demand_forecast.dropna(inplace=True)
+        # demand_forecast.dropna(inplace=True)
 
         demand_forecast_split_by_dps = pd.merge(
             demand_forecast, dps_config, on=["material", "location"], how="left",
@@ -193,6 +219,7 @@ class _PandasBackend:
         demand_forecast_split_by_dps["quantity_percentage"] = (
             demand_forecast_split_by_dps["quantity"] * demand_forecast_split_by_dps["dps_percent"]
         )
+        # demand_forecast_split_by_dps.drop('')
 
         demand_forecast_total = demand_forecast_split_by_dps.copy()
         demand_forecast_total["quantity_total"] = demand_forecast_total["quantity_percentage"]
@@ -209,15 +236,16 @@ class _PandasBackend:
         else:
             demand_forecast_total_sc = demand_forecast_total.copy()
 
-        order_calendar["week_start"] = pd.to_datetime(order_calendar["week_start"].astype(object))
+        # order_calendar["week_start"] = pd.to_datetime(order_calendar["week_start"].astype(object))
 
         return demand_forecast_total, demand_forecast_total_sc, order_calendar
 
-    def distribute_to_daily(self, demand_forecast_total, order_calendar):
-        detail = pd.merge(
-            demand_forecast_total[["week", "location", "material", "quantity_total", "week_start", "flag_count"]],
-            order_calendar, on="week_start", how="left",
-        )
+    def distribute_to_daily(self, demand_forecast_total):
+        # detail = pd.merge(
+        #     demand_forecast_total[["week", "location", "material", "quantity_total", "week_start", "flag_count"]],
+        #     order_calendar, on="week_start", how="left",
+        # )
+        detail = demand_forecast_total.copy()
         detail["base_qty"] = np.where(
             (detail["order_day_flag"] == 1) & (detail["flag_count"] > 0),
             (detail["quantity_total"] // detail["flag_count"]).astype(int),
@@ -226,7 +254,8 @@ class _PandasBackend:
         detail["remainder"] = (detail["quantity_total"] % detail["flag_count"]).astype(int)
         day_offset = (detail["date"] - detail["week_start"]).dt.days
         detail["base_qty"] += (day_offset < detail["remainder"]).astype(int)
-        detail.drop("quantity_total", axis=1, inplace=True)
+        drop_cols = [c for c in ["quantity_total", "quantity"] if c in detail.columns]
+        detail.drop(drop_cols, axis=1, inplace=True)
         detail = detail.rename(columns={"base_qty": "quantity"})
         return detail
 
@@ -239,24 +268,41 @@ class _PandasBackend:
         df = pd.merge(df, self.forecast_error, on=["material", "location", "order_type"], how="left")
         df["error_std_percent"] = df["error_std_percent"].fillna(0)
         df["abs_std"] = df["split_quantity"] * df["error_std_percent"]
-        df["cov_quantity"] = np.maximum(
+        df["cov_quantity_raw"] = np.maximum(
             0, np.round(np.random.normal(df["split_quantity"], df["abs_std"]))
         ).astype(int)
+        df['cov_quantity_raw'] = df['cov_quantity_raw'].replace(0,1)
+        
+
+        df['rescue_rate'] = (
+            df.groupby(['material', 'location', 'month'])
+            .apply(lambda g: g['quantity_total'].sum()/2 / g['cov_quantity_raw'].sum())
+            .reindex(df.set_index(['material', 'location', 'month']).index)
+            .values
+        )
+
+        df['cov_quantity'] = df['rescue_rate'] * df['cov_quantity_raw']
+        # df.to_csv('sub_orders.csv',index=False)
         return df
 
     def split_ao_by_advance_days(self, df_with_error, order_calendar):
-        target_date = (
-            order_calendar[order_calendar["date"] == self._o.simulation_date]["week_start"]
-            .dt.strftime("%Y-%m-%d").item()
-        )
-        df_filtered = df_with_error[df_with_error["week_start"] == target_date]
-
+        # target_date = (
+        #     order_calendar[order_calendar["date"] == self._o.simulation_date]["week_start"]
+        #     .dt.strftime("%Y-%m-%d").item()
+        # )
+        # df_filtered = df_with_error[df_with_error["week_start"] == target_date]
+        df_filtered = df_with_error.copy()
         result = pd.merge(df_filtered, self.ao_config, on=["material", "location", "order_type"], how="left")
         result["advance_days"] = result["advance_days"].fillna(0)
         result["percent"] = result["percent"].fillna(result["ao_percent"])
         result["cov_quantity_ao_detail"] = (
             result["cov_quantity"] * result["percent"] / result["ao_percent"]
         )
+        result['cov_quantity_ao_detail'] = result['cov_quantity_ao_detail'].fillna(0)
+        result['date']+=pd.to_timedelta(result["advance_days"], unit="D")
+        result['daily_quantity'] = result["cov_quantity_ao_detail"] / result["flag_count"]
+        result.drop('quantity', axis=1, inplace=True)
+        result=result.rename(columns={"daily_quantity": "quantity", "order_type": "demand_type"})
         return result
 
     def build_order_df(self, ao_detail):
@@ -272,34 +318,38 @@ class _PandasBackend:
             .reset_index()
             .rename(columns={"daily_quantity": "quantity", "order_type": "demand_type"})
         )
-        order_df["simulation_date"] = self._o.simulation_date
+        # order_df["simulation_date"] = self._o.simulation_date
         return order_df
 
-    def merge_with_history(self, today_orders_df):
-        max_advance = self._get_max_advance_days()
+    def merge_with_history(self, order_df):
+        sim_date = self._o.simulation_date
 
-        if self._o.previous_orders_df is not None and not self._o.previous_orders_df.empty:
-            previous_orders = self._o.previous_orders_df.copy()
+        # 今日订单: simulation_date == today
+        if order_df is not None and not order_df.empty and "simulation_date" in order_df.columns:
+            today_orders = order_df[order_df["simulation_date"] == sim_date].copy()
         else:
-            previous_orders = load_previous_orders(self._o.output_dir, self._o.simulation_date, max_advance)
+            today_orders = order_df.copy() if order_df is not None else pd.DataFrame()
 
-        previous_orders = self._filter_future_orders(previous_orders)
-        previous_orders = self._deduplicate_orders(previous_orders)
+        # 所有有效订单: simulation_date <= today AND date >= today
+        all_orders = order_df.copy() if order_df is not None else pd.DataFrame()
+        if not all_orders.empty:
+            if "date" in all_orders.columns:
+                all_orders["date"] = pd.to_datetime(all_orders["date"])
+            if "simulation_date" in all_orders.columns:
+                all_orders = all_orders[
+                    (all_orders["simulation_date"] <= sim_date)
+                    & (all_orders["date"] >= sim_date)
+                ]
+            all_orders = self._deduplicate_orders(all_orders)
+            all_orders = self._normalize_orders(all_orders)
 
-        if today_orders_df is not None and not today_orders_df.empty:
-            orders_df = pd.concat([previous_orders, today_orders_df], ignore_index=True)
-        else:
-            orders_df = previous_orders.copy()
-        return self._normalize_orders(orders_df)
+        return all_orders, today_orders
 
     def apply_orders_consumption(self, forecast_df, orders_df):
         if forecast_df is None or forecast_df.empty:
             return pd.DataFrame(columns=["material", "location", "date", "quantity"])
 
-        base = forecast_df.groupby(
-            ["material", "location", "date"], as_index=False
-        )["quantity"].sum()
-        consumed = base.copy()
+        consumed = forecast_df.copy()
 
         if orders_df is None or orders_df.empty:
             return consumed
@@ -307,14 +357,25 @@ class _PandasBackend:
         from ...utils.normalization import normalize_identifiers
         consumed = normalize_identifiers(consumed)
         orders_df = normalize_identifiers(orders_df.copy())
+        consumed["date"] = pd.to_datetime(consumed["date"])
+        orders_df["date"] = pd.to_datetime(orders_df["date"])
         offsets = [0, -1, -2, 1, 2, 3]
 
         idx_map = {}
         for idx, row in enumerate(consumed.itertuples()):
-            key = (row.material, row.location, row.date)
-            idx_map[key] = idx
+            row_date = pd.to_datetime(row.date)
+            if pd.isna(row_date):
+                continue
+            key = (row.material, row.location, row_date.date())
+            idx_map.setdefault(key, []).append(idx)
 
-        quantities = consumed["quantity"].values.copy().astype(float)
+        quantity_data = consumed.loc[:, "quantity"]
+        if isinstance(quantity_data, pd.DataFrame):
+            quantity_data = quantity_data.iloc[:, -1]
+            consumed = consumed.loc[:, ~consumed.columns.duplicated(keep="last")]
+        quantities = pd.to_numeric(
+            quantity_data, errors="coerce"
+        ).fillna(0).values.copy().astype(float)
 
         ao_orders = orders_df[orders_df["demand_type"] == "AO"].copy()
         if not ao_orders.empty:
@@ -338,15 +399,19 @@ class _PandasBackend:
         if consumed_forecast.empty or "date" not in consumed_forecast.columns:
             return pd.DataFrame(columns=empty_cols)
 
-        future_cutoff = self._o.simulation_date + pd.Timedelta(days=M1_FUTURE_CUTOFF_DAYS)
+        sim_date = pd.Timestamp(self._o.simulation_date).normalize()
+        future_cutoff = sim_date + pd.Timedelta(days=M1_FUTURE_CUTOFF_DAYS)
         future_demand = consumed_forecast[
-            (pd.to_datetime(consumed_forecast["date"]) > self._o.simulation_date)
+            (pd.to_datetime(consumed_forecast["date"]) > sim_date)
             & (pd.to_datetime(consumed_forecast["date"]) <= future_cutoff)
         ].copy()
 
         if future_demand.empty:
             return pd.DataFrame(columns=empty_cols)
 
+        future_demand = future_demand.groupby(
+            ["date", "material", "location"], as_index=False
+        )["quantity"].sum()
         future_demand["demand_element"] = "forecast"
         from ...utils.normalization import normalize_identifiers
         return normalize_identifiers(future_demand[empty_cols].copy())
@@ -424,9 +489,10 @@ class _PandasBackend:
             return None
         import os
         from .io_utils import save_module1_output_with_supply_demand
+        date_str = pd.Timestamp(self._o.simulation_date).strftime("%Y%m%d")
         output_file = os.path.join(
             self._o.output_dir,
-            f"module1_output_{self._o.simulation_date.strftime('%Y%m%d')}.xlsx",
+            f"module1_output_{date_str}.xlsx",
         )
         save_module1_output_with_supply_demand(
             orders_df, shipment_df, supply_demand_df, output_file, cut_df, summary_df
@@ -583,17 +649,50 @@ class _PolarsBackend:
             )
         )
 
-        # 直接从 date 计算 week_start（消除 bin_to_ws DataFrame 创建 + join）
+        # 生成simulation_date，再根据simulation_date移动窗口统计flag_count
+        from datetime import timedelta
+
         ws_list = demand_forecast.select("week_start").unique().sort("week_start")["week_start"].to_list()
         if not ws_list:
             return pl.DataFrame(), pl.DataFrame(), order_calendar
 
-        min_ws = ws_list[0]
+        max_ws, min_ws = ws_list[-1], ws_list[0]
+
+        # 1. 生成所有 week_start（每周一）
+        week_starts = ws_list
+
+        # 2. 对每个 week_start，生成7天的 simulation_date
+        date_records = []
+        for ws in week_starts:
+            for offset in range(7):
+                date_records.append({"week_start": ws, "simulation_date": ws + timedelta(days=offset)})
+
+        # 3. 构造 date_df
+        date_df = pl.DataFrame(date_records)
+
+        demand_forecast = demand_forecast.join(date_df, on="week_start", how="left")
+        demand_forecast = demand_forecast.join(
+            order_calendar.select(
+                pl.col("date").cast(pl.Date),
+                pl.col("date").cast(pl.Date).alias("_calendar_date"),
+                "order_day_flag",
+            ),
+            left_on="simulation_date", right_on="date", how="left",
+        ).with_columns(
+            pl.col("_calendar_date").alias("date"),
+        ).drop("_calendar_date")
+        demand_forecast = demand_forecast.with_columns(
+            pl.col("order_day_flag").fill_null(1),
+        )
+        demand_forecast = demand_forecast.sort(["material", "location", "simulation_date"])
+        demand_forecast = demand_forecast.with_columns(
+            ((pl.col("week") - 1) // 4 + 1).alias("month"),
+        )
+
         n_weeks = len(ws_list)
 
-        order_calendar = order_calendar.with_columns(
-            pl.col("date").cast(pl.Date).alias("date"),
-        )
+        # flag_summary: 按 week_start 统计 order_day_flag
+        order_calendar = order_calendar.with_columns(pl.col("date").cast(pl.Date))
         _days = (pl.col("date") - min_ws).dt.total_days()
         _idx = _days // 7
         order_calendar = order_calendar.with_columns(
@@ -602,35 +701,31 @@ class _PolarsBackend:
             .otherwise(None)
             .alias("week_start"),
         )
-
-        # flag_summary
         flag_summary = (
             order_calendar
             .filter(pl.col("week_start").is_not_null())
             .group_by("week_start")
             .agg(pl.col("order_day_flag").sum().alias("flag_count"))
         )
+        demand_forecast = demand_forecast.join(flag_summary, on="week_start", how="left")
 
-        # 合并: flag join + filter + DPS join + 计算（减少中间 DataFrame）
-        df_split = (
-            demand_forecast
-            .join(flag_summary, on="week_start", how="left")
-            .filter(pl.col("flag_count").is_not_null())
-            .join(dps_config, on=["material", "location"], how="left")
-            .with_columns([
-                pl.col("dps_percent").fill_null(1),
-                (pl.col("quantity") * pl.col("dps_percent")).alias("quantity_percentage"),
-            ])
+        demand_forecast_split_by_dps = demand_forecast.join(
+            dps_config, on=["material", "location"], how="left",
+        )
+        demand_forecast_split_by_dps = demand_forecast_split_by_dps.with_columns(
+            pl.col("dps_percent").fill_null(1),
+        )
+        demand_forecast_split_by_dps = demand_forecast_split_by_dps.with_columns(
+            (pl.col("quantity") * pl.col("dps_percent")).alias("quantity_percentage"),
         )
 
-        # 基础版本
-        demand_forecast_total = df_split.with_columns(
+        demand_forecast_total = demand_forecast_split_by_dps.with_columns(
             pl.col("quantity_percentage").alias("quantity_total"),
         )
 
         # Supply choice 版本
         if not dps_sc_config.is_empty():
-            demand_forecast_total_sc = df_split.join(
+            demand_forecast_total_sc = demand_forecast_split_by_dps.join(
                 dps_sc_config, on=["week", "material", "quantity"], how="left",
             ).with_columns(
                 (pl.col("quantity_percentage") + pl.col("adjust_quantity").fill_null(0)).alias("quantity_total"),
@@ -640,12 +735,8 @@ class _PolarsBackend:
 
         return demand_forecast_total, demand_forecast_total_sc, order_calendar
 
-    def distribute_to_daily(self, demand_forecast_total, order_calendar):
-        cols = ["week", "location", "material", "quantity_total", "week_start", "flag_count"]
-        available = [c for c in cols if c in demand_forecast_total.columns]
-        detail = demand_forecast_total.select(available).join(
-            order_calendar, on="week_start", how="left",
-        )
+    def distribute_to_daily(self, demand_forecast_total):
+        detail = demand_forecast_total.clone()
         detail = detail.with_columns([
             pl.when((pl.col("order_day_flag") == 1) & (pl.col("flag_count") > 0))
             .then((pl.col("quantity_total") // pl.col("flag_count")).cast(pl.Int64))
@@ -656,7 +747,9 @@ class _PolarsBackend:
         day_offset = (pl.col("date") - pl.col("week_start")).dt.total_days()
         detail = detail.with_columns(
             (pl.col("base_qty") + (day_offset < pl.col("remainder")).cast(pl.Int64)).alias("base_qty"),
-        ).drop("quantity_total").rename({"base_qty": "quantity"})
+        )
+        drop_cols = [c for c in ["quantity_total", "quantity"] if c in detail.columns]
+        detail = detail.drop(drop_cols).rename({"base_qty": "quantity"})
 
         return detail
 
@@ -683,43 +776,42 @@ class _PolarsBackend:
         abs_std = df["abs_std"].to_numpy().astype(float)
         raw = np.random.normal(np.nan_to_num(split_qty), np.nan_to_num(abs_std))
         cov = np.maximum(0, np.round(np.nan_to_num(raw))).astype(int)
-        df = df.with_columns(pl.Series("cov_quantity", cov))
+        cov = np.where(cov == 0, 1, cov)
+        df = df.with_columns(pl.Series("cov_quantity_raw", cov))
 
+        df = df.with_columns(
+            (pl.col("quantity_total").sum() / 2 / pl.col("cov_quantity_raw").sum())
+            .over(["material", "location", "month"])
+            .alias("rescue_rate"),
+        )
+        df = df.with_columns(
+            (pl.col("rescue_rate") * pl.col("cov_quantity_raw")).alias("cov_quantity"),
+        )
         return df
 
     def split_ao_by_advance_days(self, df_with_error, order_calendar):
-        sim_date = self._o.simulation_date
-        if isinstance(sim_date, pd.Timestamp):
-            sim_date_val = sim_date.normalize().to_pydatetime().date()
-        else:
-            sim_date_val = sim_date
-
-        target_ws = (
-            order_calendar
-            .filter(pl.col("date") == pl.lit(sim_date_val))
-            .select("week_start")
-            .item()
-        )
-        # target_date 为 week_start 的字符串
-        if hasattr(target_ws, "strftime"):
-            target_str = target_ws.strftime("%Y-%m-%d")
-        else:
-            target_str = str(target_ws)
-
-        df_filtered = df_with_error.filter(
-            pl.col("week_start").cast(pl.Utf8) == pl.lit(target_str),
-        )
+        df_filtered = df_with_error.clone()
 
         result = df_filtered.join(self.ao_config, on=["material", "location", "order_type"], how="left")
-        result = result.with_columns([
+        result = result.with_columns(
             pl.col("advance_days").fill_null(0),
-        ])
+        )
         result = result.with_columns(
             pl.col("percent").fill_null(pl.col("ao_percent")),
         )
         result = result.with_columns(
             (pl.col("cov_quantity") * pl.col("percent") / pl.col("ao_percent")).alias("cov_quantity_ao_detail"),
         )
+        result = result.with_columns(
+            pl.col("cov_quantity_ao_detail").fill_null(0),
+        )
+        result = result.with_columns(
+            (pl.col("date") + pl.duration(days=pl.col("advance_days").cast(pl.Int64))).alias("date"),
+        )
+        result = result.with_columns(
+            (pl.col("cov_quantity_ao_detail") / pl.col("flag_count")).alias("daily_quantity"),
+        )
+        result = result.drop("quantity").rename({"daily_quantity": "quantity", "order_type": "demand_type"})
         return result
 
     def build_order_df(self, ao_detail):
@@ -739,39 +831,34 @@ class _PolarsBackend:
             .agg(pl.col("daily_quantity").sum())
             .rename({"daily_quantity": "quantity", "order_type": "demand_type"})
         )
-        order_df = order_df.with_columns(
-            pl.lit(sim_date).alias("simulation_date"),
-        )
         return order_df
 
-    def merge_with_history(self, today_orders_df):
-        max_advance = self._get_max_advance_days()
-
-        # 加载历史订单
-        prev_df = self._o.previous_orders_df
-        if prev_df is not None and not (isinstance(prev_df, (pd.DataFrame, pl.DataFrame)) and len(prev_df) == 0):
-            previous_orders = self._to_pl(prev_df) if isinstance(prev_df, pd.DataFrame) else prev_df.clone()
+    def merge_with_history(self, order_df):
+        sim_date = self._o.simulation_date
+        if isinstance(sim_date, pd.Timestamp):
+            sim_date_py = sim_date.normalize().to_pydatetime().date()
         else:
-            pd_prev = load_previous_orders(self._o.output_dir, self._o.simulation_date, max_advance)
-            previous_orders = self._to_pl(pd_prev)
+            sim_date_py = pd.Timestamp(sim_date).normalize().to_pydatetime().date()
 
-        previous_orders = self._filter_future_orders(previous_orders)
-        previous_orders = self._deduplicate_orders(previous_orders)
+        # 今日订单: simulation_date == today
+        if order_df is not None and not order_df.is_empty() and "simulation_date" in order_df.columns:
+            today_orders = order_df.filter(pl.col("simulation_date") == pl.lit(sim_date_py))
+        else:
+            today_orders = order_df.clone() if order_df is not None else pl.DataFrame()
 
-        # 无历史 → 直接返回今日订单
-        if previous_orders.is_empty():
-            if today_orders_df is None or len(today_orders_df) == 0:
-                return pl.DataFrame()
-            return self._normalize_orders(today_orders_df)
+        # 所有有效订单: simulation_date <= today AND date >= today
+        if order_df is None or order_df.is_empty():
+            all_orders = pl.DataFrame()
+        else:
+            all_orders = order_df.with_columns(pl.col("date").cast(pl.Date))
+            all_orders = all_orders.filter(
+                (pl.col("simulation_date") <= pl.lit(sim_date_py))
+                & (pl.col("date") >= pl.lit(sim_date_py))
+            )
+            all_orders = self._deduplicate_orders(all_orders)
+            all_orders = self._normalize_orders(all_orders)
 
-        # 无今日订单 → 直接返回历史
-        if today_orders_df is None or len(today_orders_df) == 0:
-            return self._normalize_orders(previous_orders)
-
-        # 两者都有数据：统一 schema 后 concat
-        # 统一到 date=Date, 标识符列=Utf8, 数值列=Float64（后续 validate_data 再转 Int64）
-        orders_df = self._unify_and_concat(previous_orders, today_orders_df)
-        return self._normalize_orders(orders_df)
+        return all_orders, today_orders
 
     @staticmethod
     def _unify_and_concat(left: pl.DataFrame, right: pl.DataFrame) -> pl.DataFrame:
@@ -801,16 +888,15 @@ class _PolarsBackend:
             return pl.DataFrame(schema={"material": pl.Utf8, "location": pl.Utf8, "date": pl.Date, "quantity": pl.Int64})
 
         # 聚合 forecast
-        consumed = forecast_df.group_by(["material", "location", "date"]).agg(
-            pl.col("quantity").sum(),
-        ).with_columns([
+        consumed = forecast_df.with_columns([
             pl.col("material").cast(pl.Utf8),
             pl.col("location").cast(pl.Utf8),
             pl.col("date").cast(pl.Date),
+            pl.col("quantity").fill_nan(0).fill_null(0),
         ])
 
         if orders_df is None or orders_df.is_empty():
-            return consumed
+            return _normalize_identifiers_polars(consumed)
 
         # 直接在 polars 上构建索引，不转 pandas
         idx_map = {}
@@ -819,8 +905,11 @@ class _PolarsBackend:
             consumed["location"].to_list(),
             consumed["date"].to_list(),
         )):
-            idx_map[(mat, loc, dt)] = idx
+            if dt is None:
+                continue
+            idx_map.setdefault((mat, loc, dt), []).append(idx)
 
+        orders_df = orders_df.with_columns(pl.col("date").cast(pl.Date))
         quantities = consumed["quantity"].to_numpy().astype(float).copy()
         offsets = [0, -1, -2, 1, 2, 3]
 
@@ -855,6 +944,8 @@ class _PolarsBackend:
             mat = row["material"]
             loc = row["location"]
             order_date = row["date"]
+            if order_date is None:
+                continue
             if hasattr(order_date, "date"):
                 order_date = order_date.date()
 
@@ -864,11 +955,15 @@ class _PolarsBackend:
                 target_date = order_date + timedelta(days=offset)
                 key = (mat, loc, target_date)
                 if key in idx_map:
-                    idx = idx_map[key]
-                    avail = int(quantities[idx])
-                    take = min(avail, remaining)
-                    quantities[idx] = avail - take
-                    remaining -= take
+                    for idx in idx_map[key]:
+                        if remaining <= 0:
+                            break
+                        avail = int(quantities[idx])
+                        if avail <= 0:
+                            continue
+                        take = min(avail, remaining)
+                        quantities[idx] = avail - take
+                        remaining -= take
 
     def generate_supply_demand_log(self, demand_forecast, consumed_forecast):
         empty_cols = ["date", "material", "location", "quantity", "demand_element"]
@@ -895,6 +990,9 @@ class _PolarsBackend:
         if future_demand.is_empty():
             return pl.DataFrame(schema={c: pl.Utf8 for c in empty_cols})
 
+        future_demand = future_demand.group_by(
+            ["date", "material", "location"],
+        ).agg(pl.col("quantity").sum())
         future_demand = future_demand.with_columns(
             pl.lit("forecast").alias("demand_element"),
         )
@@ -1103,7 +1201,7 @@ class _PolarsBackend:
         inv_pd = inv_pd[["material", "location", "qty_avail"]]
         return self._to_pl(inv_pd)
 
-    def save_output(self, orders_df, shipment_df, cut_df, supply_demand_df):
+    def save_output(self, orders_df, shipment_df, cut_df, supply_demand_df, summary_df):
         """Polars 原生 Excel 输出，datetime 和 quantity 格式化。"""
         import os
         import xlsxwriter
@@ -1112,9 +1210,10 @@ class _PolarsBackend:
         if self._o.skip_file_output:
             return None
 
+        date_str = pd.Timestamp(self._o.simulation_date).strftime("%Y%m%d")
         output_file = os.path.join(
             self._o.output_dir,
-            f"module1_output_{self._o.simulation_date.strftime('%Y%m%d')}.xlsx",
+            f"module1_output_{date_str}.xlsx",
         )
 
         try:
@@ -1123,6 +1222,7 @@ class _PolarsBackend:
                 "ShipmentLog": (shipment_df, ["date", "material", "location", "quantity", "demand_type", "order_id"]),
                 "CutLog": (cut_df, ["date", "material", "location", "quantity"]),
                 "SupplyDemandLog": (supply_demand_df, ["date", "material", "location", "quantity", "demand_element"]),
+                "Summary": (summary_df, ["Total_Orders","Total_Shipments","Total_Cuts","Total_SupplyDemand","Date"])
             }
 
             with xlsxwriter.Workbook(output_file) as wb:

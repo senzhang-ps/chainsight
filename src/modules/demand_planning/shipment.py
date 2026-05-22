@@ -133,7 +133,7 @@ def generate_shipment_with_inventory_check(
 
     # 当日到期订单
     today_orders = orders_df[
-        pd.to_datetime(orders_df['date']) == simulation_date.normalize()
+        pd.to_datetime(orders_df['date']) == simulation_date
     ].copy()
     if today_orders.empty:
         return pd.DataFrame(), pd.DataFrame()

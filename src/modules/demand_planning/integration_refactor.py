@@ -41,6 +41,7 @@ class ModuleOne(Module):
         self.output_dir = output_dir
         self.skip_file_output = skip_file_output
         self.previous_orders_df = previous_orders_df
+        self.order_df = None
 
         # 选择 backend
         if engine == 'polars':
@@ -80,41 +81,49 @@ class ModuleOne(Module):
     # 步骤方法（委托到 backend，TimedMeta 自动计时）
     # ------------------------------------------------------------------
 
+    # 1
     def prepare_ao_summary(self):
         return self._backend.prepare_ao_summary()
 
+    # 2
     def apply_dps_and_supply_choice(self):
         return self._backend.apply_dps_and_supply_choice()
 
-    def distribute_to_daily(self, demand_forecast_total, order_calendar):
-        return self._backend.distribute_to_daily(demand_forecast_total, order_calendar)
+    # 3
+    def distribute_to_daily(self, demand_forecast_total):
+        return self._backend.distribute_to_daily(demand_forecast_total)
 
+    # 4
     def split_by_ao_and_apply_error(self, demand_forecast_total, ao_config_summary):
         return self._backend.split_by_ao_and_apply_error(demand_forecast_total, ao_config_summary)
 
+    # 5
     def split_ao_by_advance_days(self, df_with_error, order_calendar):
         return self._backend.split_ao_by_advance_days(df_with_error, order_calendar)
 
+    # 6
     def build_order_df(self, ao_detail):
         return self._backend.build_order_df(ao_detail)
 
     def merge_with_history(self, today_orders_df):
         return self._backend.merge_with_history(today_orders_df)
 
-    def apply_orders_consumption(self, forecast_df, orders_df):
-        return self._backend.apply_orders_consumption(forecast_df, orders_df)
+    def apply_orders_consumption(self, orders_df):
+        consumed = self._backend.apply_orders_consumption(self.daily_detail_sc, orders_df)
+        self.daily_detail_sc = consumed
+        return consumed
 
-    def generate_supply_demand_log(self, demand_forecast, consumed_forecast):
-        return self._backend.generate_supply_demand_log(demand_forecast, consumed_forecast)
+    def generate_supply_demand_log(self, consumed_forecast):
+        return self._backend.generate_supply_demand_log(self.daily_detail_sc, consumed_forecast)
 
     def build_summary(self, orders_df, shipment_df, cut_df, supply_demand_df):
         return self._backend.build_summary(orders_df, shipment_df, cut_df, supply_demand_df)
 
-    def generate_shipments(self, orders_df, daily_detail):
-        return self._backend.generate_shipments(orders_df, daily_detail)
+    def generate_shipments(self, orders_df):
+        return self._backend.generate_shipments(orders_df, self.daily_detail)
 
-    def save_output(self, orders_df, shipment_df, cut_df, supply_demand_df):
-        return self._backend.save_output(orders_df, shipment_df, cut_df, supply_demand_df)
+    def save_output(self, orders_df, shipment_df, cut_df, supply_demand_df, summary_df):
+        return self._backend.save_output(orders_df, shipment_df, cut_df, supply_demand_df, summary_df)
 
     def get_order_day_flag(self, order_cal):
         return self._backend.get_order_day_flag(order_cal)
@@ -123,27 +132,33 @@ class ModuleOne(Module):
     # 主流程
     # ------------------------------------------------------------------
 
+    def prepare(self):
+        # 1) AO 汇总
+        ao_config, ao_config_summary = self.prepare_ao_summary()
+
+        # 2) DPS 拆分 + 周预测准备
+        demand_total, demand_total_sc, order_cal = self.apply_dps_and_supply_choice()
+
+        # 3) 日度拆分
+        daily_detail = self.distribute_to_daily(demand_total)
+        daily_detail_sc = self.distribute_to_daily(demand_total_sc)
+
+        # 4) AO 拆分 + 误差应用
+        df_with_error = self.split_by_ao_and_apply_error(demand_total, ao_config_summary)
+
+        # 5) advance_days 拆分 + 构建订单
+        order_df = self.split_ao_by_advance_days(df_with_error, order_cal)
+        self.order_df = order_df
+        self.daily_detail = daily_detail
+        self.daily_detail_sc = daily_detail_sc
+        self.order_cal = order_cal
+
     def run(self):
         try:
-            # 1) AO 汇总
-            ao_config, ao_config_summary = self.prepare_ao_summary()
+            order_cal = self.order_cal
 
-            # 2) DPS 拆分 + 周预测准备
-            demand_total, demand_total_sc, order_cal = self.apply_dps_and_supply_choice()
-
-            # 3) 日度拆分
-            daily_detail = self.distribute_to_daily(demand_total, order_cal)
-            daily_detail_sc = self.distribute_to_daily(demand_total_sc, order_cal)
-
-            # 4) AO 拆分 + 误差应用
-            df_with_error = self.split_by_ao_and_apply_error(demand_total, ao_config_summary)
-
-            # 5) advance_days 拆分 + 构建订单
-            ao_detail = self.split_ao_by_advance_days(df_with_error, order_cal)
-            order_df = self.build_order_df(ao_detail)
-
-            # 6) 合并历史订单
-            all_orders = self.merge_with_history(order_df)
+            # 6) 合并历史订单（backend 内部按 simulation_date 筛选）
+            all_orders, today_orders = self.merge_with_history(self.order_df)
             all_orders = self.validate_data(
                 all_orders, name='orders',
                 numeric_columns=['quantity', 'advance_days'],
@@ -153,7 +168,7 @@ class ModuleOne(Module):
             self.legacy_orchestrator.shipment_valid = int(self.get_order_day_flag(order_cal))
 
             # 7) 生成发货
-            shipment_df, cut_df = self.generate_shipments(all_orders, daily_detail)
+            shipment_df, cut_df = self.generate_shipments(all_orders)
             shipment_df = self.validate_data(
                 shipment_df, name='shipment',
                 numeric_columns=['quantity'],
@@ -161,8 +176,8 @@ class ModuleOne(Module):
             )
 
             # 8) 供需日志
-            consumed = self.apply_orders_consumption(daily_detail_sc, order_df)
-            supply_demand_df = self.generate_supply_demand_log(daily_detail_sc, consumed)
+            consumed = self.apply_orders_consumption(today_orders)
+            supply_demand_df = self.generate_supply_demand_log(consumed)
             supply_demand_df = self.validate_data(
                 supply_demand_df, name='supply_demand',
                 numeric_columns=['quantity'],
@@ -186,7 +201,7 @@ class ModuleOne(Module):
                 'output_file': output_file,
                 'all_orders_for_next_day': self._to_pandas(all_orders),
             }
-        except Exception:
+        except Exception as e:
             import traceback
             traceback.print_exc()
             self._empty_result()
@@ -243,19 +258,25 @@ class ModuleOne(Module):
             mat = r.material
             loc = r.location
             order_date = pd.to_datetime(r.date)
+            if pd.isna(order_date):
+                continue
             remaining = int(r.quantity)
 
             for offset in offsets:
                 if remaining <= 0:
                     break
                 target_date = order_date + pd.Timedelta(days=offset)
-                key = (mat, loc, target_date)
+                key = (mat, loc, target_date.date())
                 if key in idx_map:
-                    idx = idx_map[key]
-                    avail = int(quantities[idx])
-                    take = min(avail, remaining)
-                    quantities[idx] = avail - take
-                    remaining -= take
+                    for idx in idx_map[key]:
+                        if remaining <= 0:
+                            break
+                        avail = int(quantities[idx])
+                        if avail <= 0:
+                            continue
+                        take = min(avail, remaining)
+                        quantities[idx] = avail - take
+                        remaining -= take
 
 
 # ------------------------------------------------------------------
@@ -283,6 +304,8 @@ def run_daily_order_generation(
         previous_orders_df=previous_orders_df,
         engine=engine,**kwargs
     )
+    if m1.order_df is None:
+        m1.prepare()
     m1.run()
     return m1.output()
 
@@ -298,10 +321,11 @@ def generate_supply_demand_log_for_integration(
     if consumed_forecast.empty or 'date' not in consumed_forecast.columns:
         return pd.DataFrame(columns=empty_cols)
 
-    future_cutoff = simulation_date + pd.Timedelta(days=M1_FUTURE_CUTOFF_DAYS)
+    sim_date = pd.Timestamp(simulation_date).normalize()
+    future_cutoff = sim_date + pd.Timedelta(days=M1_FUTURE_CUTOFF_DAYS)
 
     future_demand = consumed_forecast[
-        (pd.to_datetime(consumed_forecast['date']) > simulation_date)
+        (pd.to_datetime(consumed_forecast['date']) > sim_date)
         & (pd.to_datetime(consumed_forecast['date']) <= future_cutoff)
     ].copy()
 

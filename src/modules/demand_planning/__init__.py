@@ -59,6 +59,7 @@ from .integration import (
 )
 
 from .integration_refactor import run_daily_order_generation as run_daily_order_generation_refactor
+from .integration_refactor import ModuleOne
 
 from .io_utils import (
     load_previous_orders,

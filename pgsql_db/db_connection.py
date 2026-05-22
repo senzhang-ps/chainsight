@@ -896,6 +896,28 @@ class DatabaseConnection:
             cursor.execute(query, params)
             columns = [desc[0] for desc in cursor.description] if cursor.description else []
             return pd.DataFrame(cursor.fetchall(), columns=columns)
+
+    def iter_query_chunks(self, query, params=None, chunksize: int = 100_000):
+        """服务端游标流式产出 DataFrame chunk，避免大结果集一次性加载到内存。
+
+        autocommit=True 下，server-side cursor 必须包在 conn.transaction()
+        里（DECLARE CURSOR 需要显式事务），由本方法自行管理。
+        """
+        import secrets
+        conn = self.connect()
+        cur_name = f"sc_{secrets.token_hex(4)}"
+        with conn.transaction():
+            with conn.cursor(name=cur_name) as cur:
+                cur.execute(query, params)
+                columns = (
+                    [desc[0] for desc in cur.description]
+                    if cur.description else []
+                )
+                while True:
+                    rows = cur.fetchmany(chunksize)
+                    if not rows:
+                        break
+                    yield pd.DataFrame(rows, columns=columns)
     
     def execute_non_query(self, query: str, params: tuple = None):
         """执行非查询语句（INSERT, UPDATE, DELETE等）"""

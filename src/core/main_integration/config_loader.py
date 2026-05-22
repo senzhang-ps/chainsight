@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import numpy as np
 import pandas as pd
 
 from ...utils.normalization import normalize_identifiers
@@ -225,6 +226,7 @@ def load_configuration_from_dict(config_data: dict, config_name: str = "DB_Confi
     if mapped_count > 0:
         logger.info(f"✅ 已映射 {mapped_count} 个 Module4 配置表")
 
+    _validate_config_dict(config_dict)
     return config_dict
 
 
@@ -531,6 +533,69 @@ _REQUIRED_SHEETS: set[str] = {
 }
 
 
+def _sample_quantity_warning_values(
+    series: pd.Series,
+    mask: pd.Series,
+    limit: int = 5,
+) -> list[str]:
+    samples: list[str] = []
+    for idx, value in series[mask].head(limit).items():
+        samples.append(f"{idx}={value!r}")
+    return samples
+
+
+def _warn_bad_quantity_columns(config_dict: dict) -> None:
+    """Print warnings for empty or abnormal values in config columns named quantity."""
+    for sheet_name, df in config_dict.items():
+        if not isinstance(df, pd.DataFrame) or df.empty:
+            continue
+
+        quantity_cols = [
+            col for col in df.columns
+            if str(col).strip().lower() == "quantity"
+        ]
+        for col in quantity_cols:
+            series = df[col]
+            null_mask = series.isna()
+            blank_mask = series.map(
+                lambda value: isinstance(value, str) and value.strip() == ""
+            )
+            empty_mask = null_mask | blank_mask
+
+            try:
+                numeric = pd.to_numeric(series, errors="coerce")
+                numeric_values = numeric.to_numpy(dtype="float64", na_value=np.nan)
+                finite_mask = pd.Series(
+                    np.isfinite(numeric_values),
+                    index=series.index,
+                )
+                numeric_na_mask = numeric.isna()
+            except Exception:
+                finite_mask = pd.Series(False, index=series.index)
+                numeric_na_mask = pd.Series(True, index=series.index)
+
+            non_numeric_mask = (~empty_mask) & numeric_na_mask
+            infinite_mask = (~numeric_na_mask) & (~finite_mask)
+
+            empty_count = int(empty_mask.sum())
+            non_numeric_count = int(non_numeric_mask.sum())
+            infinite_count = int(infinite_mask.sum())
+            if empty_count == 0 and non_numeric_count == 0 and infinite_count == 0:
+                continue
+
+            bad_mask = empty_mask | non_numeric_mask | infinite_mask
+            logger.warning(
+                "[ConfigValidation][quantity] sheet='%s' column='%s' has "
+                "empty=%d, non_numeric=%d, infinite=%d. samples=%s",
+                sheet_name,
+                col,
+                empty_count,
+                non_numeric_count,
+                infinite_count,
+                _sample_quantity_warning_values(series, bad_mask),
+            )
+
+
 def _validate_config_dict(
     config_dict: dict,
     required: set[str] | None = None,
@@ -541,6 +606,7 @@ def _validate_config_dict(
     语义一致，避免破坏现有可跑配置）；空 DataFrame 走 info 提示。若团队后续决定改成
     硬失败（缺失即 raise），把 ``logger.warning`` 替换为 ``raise ValueError`` 即可。
     """
+    _warn_bad_quantity_columns(config_dict)
     if required is None:
         required = _REQUIRED_SHEETS
     loaded_lower = {k.lower() for k in config_dict}

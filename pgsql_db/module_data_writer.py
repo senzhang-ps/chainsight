@@ -1,6 +1,6 @@
 """
 模块数据写入器
-将各Module的输入/输出数据写入PostgreSQL数据库
+将各模块的输入/输出数据写入 PostgreSQL 数据库
 """
 
 import logging
@@ -35,14 +35,14 @@ class ModuleDataWriter:
         self.written_tables: Dict[str, Dict] = {}
 
     def _read_table_for_run(self, table_name: str, run_id: str | None = None) -> pd.DataFrame:
-        """Read only the current run when the table has run_id metadata."""
+        """当表包含 run_id 元数据时，只读取当前运行的数据。"""
         if not run_id:
             return self.db.read_table(table_name)
 
         try:
             return self.db.read_table(table_name, filters={"run_id": run_id})
         except errors.UndefinedColumn:
-            # Older tables may not have run_id. Fall back to the legacy behavior.
+            # 旧表可能没有 run_id 列，此时回退到历史读取逻辑。
             df = self.db.read_table(table_name)
             if "run_id" in df.columns:
                 return df[df["run_id"] == run_id].reset_index(drop=True)
@@ -69,25 +69,25 @@ class ModuleDataWriter:
 
         # 定义所有需要按 run_id 删除的输出表
         output_tables = [
-            # Module1输出表
+            # 模块1输出表
             'module1_output_orderlog',
             'module1_output_shipmentlog',
             'module1_output_cutlog',
             'module1_output_supplydemandlog',
             'module1_output_summary',
-            # Module3输出表
+            # 模块3输出表
             'module3_output_netdemand',
-            # Module4输出表
+            # 模块4输出表
             'module4_output_productionplan',
             'module4_output_capacityexceed',
             'module4_output_validation',
             'module4_output_changeoverlog',
-            # Module5输出表
+            # 模块5输出表
             'module5_output_deploymentplan',
             'module5_output_unfulfilledlog',
             'module5_output_stockonhandlog',
             'module5_output_validation',
-            # Module6输出表
+            # 模块6输出表
             'module6_output_deliveryplan',
             'module6_output_vehiclelog',
             'module6_output_truckusagelog',
@@ -146,25 +146,25 @@ class ModuleDataWriter:
 
     # 所有输出表的完整列表（类级别常量，供预建表和清理复用）
     ALL_OUTPUT_TABLES = [
-        # Module1输出表
+        # 模块1输出表
         'module1_output_orderlog',
         'module1_output_shipmentlog',
         'module1_output_cutlog',
         'module1_output_supplydemandlog',
         'module1_output_summary',
-        # Module3输出表
+        # 模块3输出表
         'module3_output_netdemand',
-        # Module4输出表
+        # 模块4输出表
         'module4_output_productionplan',
         'module4_output_capacityexceed',
         'module4_output_validation',
         'module4_output_changeoverlog',
-        # Module5输出表
+        # 模块5输出表
         'module5_output_deploymentplan',
         'module5_output_unfulfilledlog',
         'module5_output_stockonhandlog',
         'module5_output_validation',
-        # Module6输出表
+        # 模块6输出表
         'module6_output_deliveryplan',
         'module6_output_vehiclelog',
         'module6_output_truckusagelog',
@@ -197,8 +197,8 @@ class ModuleDataWriter:
     def ensure_output_tables_exist(self) -> int:
         """在仿真开始前预建所有输出表的空结构。
 
-        每张表至少包含公共列 run_id, sim_date, config_name, db_write_time，
-        后续 COPY 写入时若 DataFrame 带有更多列，会自动 ALTER TABLE ADD COLUMN。
+        每张表至少包含公共列 run_id、sim_date、config_name、db_write_time，
+        后续批量写入时若数据帧带有更多列，会自动补齐缺失字段。
 
         返回：
             int: 新创建的表数量
@@ -233,9 +233,9 @@ class ModuleDataWriter:
         run_id: str | None,
         sim_date: str,
     ) -> Dict[str, tuple[pd.DataFrame, List[str]]]:
-        """预处理单个仿真日的 Orchestrator CSV 数据，供数据库 COPY 使用。
+        """预处理单个仿真日的编排器 CSV 数据，供数据库批量写入使用。
 
-        这样可以让 Orchestrator 的当日状态写入与模块批量写入在同一事务内提交，
+        这样可以让编排器的当日状态写入与模块批量写入在同一事务内提交，
         保证批次结果的一致性与可回滚性。
         """
         orch_path = Path(orchestrator_dir)
@@ -290,13 +290,13 @@ class ModuleDataWriter:
         if_exists: str = "replace"
     ) -> Dict[str, int]:
         """
-        【优化版】只写入Summary文件和Orchestrator数据
+        【优化版】只写入汇总文件和编排器数据
         
         这个方法专门用于仿真结束后的批量写入，避免每天重复写入模块输出。
-        Summary文件已包含所有模块的完整汇总数据。
+        汇总文件已包含所有模块的完整汇总数据。
         
         优化效果：
-        - 减少写入次数：从5天×6模块×多Sheet → 8个Summary文件 + 10个Orchestrator文件
+        - 减少写入次数：从5天×6模块×多工作表 → 8个汇总文件 + 10个编排器文件
         - 避免重复数据：不再写入每天的模块输出（summary已包含汇总）
         - 预计提升：写入时间从~54秒降至~15秒
         
@@ -321,13 +321,13 @@ class ModuleDataWriter:
         
         results = {}
         
-        # 1. 写入Summary数据（最重要）
+        # 1. 写入汇总数据（最重要）
         summary_dir = base_path / "summary"
         if summary_dir.exists():
             summary_results = self._write_summary_files_fast(str(summary_dir), run_id, if_exists)
             results.update(summary_results)
         
-        # 2. 写入Orchestrator状态数据
+        # 2. 写入编排器状态数据
         orch_dir = base_path / "orchestrator"
         if orch_dir.exists():
             orch_results = self.write_orchestrator_data(str(orch_dir), run_id=run_id, if_exists=if_exists)
@@ -346,7 +346,7 @@ class ModuleDataWriter:
         run_id: str = None,
         if_exists: str = "replace"
     ) -> Dict[str, int]:
-        """快速写入Summary文件"""
+        """快速写入汇总文件"""
         summary_path = Path(summary_dir)
         results = {}
         
@@ -372,11 +372,11 @@ class ModuleDataWriter:
                     else:
                         df = pd.read_csv(file_path)
                     
-                    # 添加run_id列
+                    # 添加 run_id 列
                     if run_id and not df.empty:
                         df['run_id'] = run_id
                     
-                    # 写入数据库（传入config_name）
+                    # 写入数据库（传入 config_name）
                     self.db.create_table_from_df(df, table_name, if_exists, config_name=self.config_name)
                     results[table_name] = len(df)
                     self.written_tables[table_name] = {
@@ -422,7 +422,7 @@ class ModuleDataWriter:
         # 第一次写入用 replace，后续用 append
         tables_written: Dict[str, bool] = {}
         
-        # 查找所有Excel文件并按日期排序
+        # 查找所有 Excel 文件并按日期排序
         excel_files = sorted(output_path.glob("*.xlsx"))
         
         for excel_file in excel_files:
@@ -439,7 +439,7 @@ class ModuleDataWriter:
             except Exception as e:
                 raise
         
-        # 查找所有CSV文件并按日期排序
+        # 查找所有 CSV 文件并按日期排序
         csv_files = sorted(output_path.glob("*.csv"))
         
         for csv_file in csv_files:
@@ -510,7 +510,7 @@ class ModuleDataWriter:
         if_exists: str = "append",
         tables_written: Dict[str, bool] = None
     ) -> Dict[str, int]:
-        """写入单个Excel文件的所有sheet
+        """写入单个 Excel 文件的所有工作表
         
         文件名中的日期（如 Module1Output_20251006.xlsx）会被提取为 file_date 列，
         sim_date 参数用于标识当前仿真日期。
@@ -532,7 +532,7 @@ class ModuleDataWriter:
         date_match = re.search(r'_(\d{8})(?:\.xlsx)?$', excel_path.stem)
         file_date = date_match.group(1) if date_match else None
         
-        # 使用简化的表名格式: {module_name}_output_{sheet_name}
+        # 使用简化的表名格式：{module_name}_output_{sheet_name}
         # 这样与内存模式的表名保持一致
         for sheet_name in xl.sheet_names:
             try:
@@ -541,12 +541,12 @@ class ModuleDataWriter:
                 # 构建表名（简化格式，与内存模式一致）
                 table_name = f"{module_name}_output_{self._clean_name(sheet_name)}"
                 
-                # 如果DataFrame为空，尝试使用预定义的列名（如果有的话）
+                # 如果数据帧为空，尝试使用预定义的列名（如果有的话）
                 if df.empty:
                     schema_columns = get_columns(module_name, sheet_name)
                     if schema_columns:  # 只有定义了列名时才使用
                         df = pd.DataFrame(columns=schema_columns)
-                    # 否则保持空DataFrame（与基线保持一致）
+                    # 否则保持空数据帧（与基线保持一致）
                 
                 # 添加日期列（从文件名提取）
                 if file_date:
@@ -563,7 +563,7 @@ class ModuleDataWriter:
                     else:
                         df['sim_date'] = actual_sim_date
                 
-                # 添加run_id列
+                # 添加 run_id 列
                 if run_id:
                     df['run_id'] = run_id
                 
@@ -576,7 +576,7 @@ class ModuleDataWriter:
                     else:
                         tables_written[table_name] = True
                 
-                # 写入数据库 (即使 df.empty 也会创建表结构，传入config_name)
+                # 写入数据库（即使 df.empty 也会创建表结构，并传入 config_name）
                 self.db.create_table_from_df(df, table_name, actual_if_exists, config_name=self.config_name)
                 results[sheet_name] = len(df)
                 
@@ -618,7 +618,7 @@ class ModuleDataWriter:
         if not base_path.exists():
             raise FileNotFoundError(f"运行输出目录不存在: {run_output_dir}")
         
-        # 自动生成run_id
+        # 自动生成 run_id
         if run_id is None:
             run_id = base_path.name
         
@@ -659,10 +659,10 @@ class ModuleDataWriter:
         if_exists: str = "append"
     ) -> Dict[str, int]:
         """
-        写入Orchestrator输出的CSV数据
+        写入编排器输出的 CSV 数据
         
         参数：
-            orchestrator_dir: Orchestrator输出目录
+            orchestrator_dir: 编排器输出目录
             run_id: 运行ID
             sim_date: 仿真日期（格式：YYYYMMDD）
             if_exists: 如果表存在的处理方式
@@ -676,7 +676,7 @@ class ModuleDataWriter:
         
         results = {}
         
-        # 定义Orchestrator输出文件类型
+        # 定义编排器输出文件类型
         file_patterns = [
             "unrestricted_inventory_*.csv",
             "open_deployment_*.csv",
@@ -858,10 +858,10 @@ class ModuleDataWriter:
         df: pd.DataFrame,
         day_sim_date: str | None,
     ) -> pd.DataFrame:
-        """仅保留当前仿真日新生成的 Module1 订单。
+        """仅保留当前仿真日新生成的模块1订单。
 
         集成模式下的 `orders_df` 为累计口径，后续日期会包含前序日期已生成的订单。
-        但数据库对账与本地 Excel 比对都按行级 `simulation_date` 视为“当日 `OrderLog`”，
+        但数据库对账与本地 Excel 比对都按行级 `simulation_date` 视为“当日订单日志”，
         因此在写库前必须先将累计结果切回当前仿真日口径，再补充 `sim_date`。
         """
         if df.empty or not day_sim_date or 'simulation_date' not in df.columns:
@@ -876,7 +876,7 @@ class ModuleDataWriter:
         return filtered[sim_dates == day_sim_date].copy()
 
     def _zero_fill_quantity_for_db(self, df: pd.DataFrame, table_name: str) -> pd.DataFrame:
-        """Normalize abnormal order quantities to 0 at the DB write boundary."""
+        """在数据库写入边界把异常订单数量归零。"""
         if df.empty or table_name != 'module1_output_orderlog' or 'quantity' not in df.columns:
             return df
 
@@ -893,7 +893,7 @@ class ModuleDataWriter:
         run_id: str = None,
     ) -> Dict[str, tuple]:
         """
-        预处理批次数据为可写入的 DataFrames（不涉及 DB 操作）。
+        预处理批次数据为可写入的数据帧（不涉及数据库操作）。
 
         用于 _flush_batch_to_db 在事务外预处理数据，
         然后在事务内通过 _atomic_copy_batch 写入。
@@ -1011,7 +1011,7 @@ class ModuleDataWriter:
         """
         从内存中的模块结果字典直接写入数据库
         
-        这个方法用于数据库模式，绕过文件系统直接将DataFrame写入数据库。
+        这个方法用于数据库模式，绕过文件系统直接将数据帧写入数据库。
         
         参数：
             all_results: 模块运行结果字典，结构为:
@@ -1032,22 +1032,22 @@ class ModuleDataWriter:
         """
         results = {}
         
-        # [DEL] 在写入前按 run_id 删除当前运行的旧数据（不影响其他 run_id 数据）
+        # [删除] 在写入前按 run_id 删除当前运行的旧数据（不影响其他 run_id 数据）
         if truncate_first:
             self.truncate_output_tables(run_id=run_id)
         
         
-        # 定义模块输出的DataFrame到表名的映射
+        # 定义模块输出数据帧到表名的映射
         # 键名必须与模块返回的字典键名一致
         module_df_mapping = {
             'module1': {
-                # `orders_df` 是当天新增订单（`today_orders_df`），与比对脚本从 xlsx 过滤后的口径一致
+                # `orders_df` 是当天新增订单（`today_orders_df`），与比对脚本从 xlsx 过滤后的口径一致。
                 # `simulation_date` 与当天口径一致
                 'orders_df': 'module1_output_orderlog',
                 'shipment_df': 'module1_output_shipmentlog',
                 'cut_df': 'module1_output_cutlog',
                 'supply_demand_df': 'module1_output_supplydemandlog',
-                'summary_df': 'module1_output_summary',  # 添加Summary映射
+                'summary_df': 'module1_output_summary',  # 添加汇总映射
             },
             'module3': {
                 'net_demand_df': 'module3_output_netdemand',
@@ -1077,7 +1077,7 @@ class ModuleDataWriter:
         for module_name, df_mapping in module_df_mapping.items():
             module_results = all_results.get(module_name, [])
             
-            # [DEBUG] DEBUG: 打印每个模块的结果详情
+            # [调试] 打印每个模块的结果详情
             if module_results and len(module_results) > 0:
                 first_result = module_results[0]
                 if isinstance(first_result, dict):
@@ -1112,7 +1112,7 @@ class ModuleDataWriter:
                 
                 for df_key, table_name in df_mapping.items():
                     df = day_result.get(df_key)
-                    # [DEBUG] DEBUG: 打印每个 DataFrame 键的检查结果
+                    # [调试] 打印每个数据帧键的检查结果
                     if df is not None:
                         if isinstance(df, pd.DataFrame):
                             pass
@@ -1121,7 +1121,7 @@ class ModuleDataWriter:
                     else:
                         pass
                     if df is not None and isinstance(df, pd.DataFrame):
-                        # 为每一天的数据添加 sim_date（包括空 DataFrame）
+                        # 为每一天的数据添加 sim_date（包括空数据帧）
                         df = df.copy()  # 避免修改原始数据
                         if module_name == 'module1' and df_key == 'orders_df':
                             df = self._filter_module1_orders_for_day(df, day_sim_date)
@@ -1139,7 +1139,7 @@ class ModuleDataWriter:
             for table_name, dfs in table_data.items():
                 if not dfs:
                     # 即使没有数据，也创建空表结构
-                    # 创建带有 sim_date 和 run_id 列的空 DataFrame
+                    # 创建带有 sim_date 和 run_id 列的空数据帧
                     combined_df = pd.DataFrame()
                     combined_df['sim_date'] = pd.Series(dtype='string')
                     if run_id:
@@ -1162,14 +1162,14 @@ class ModuleDataWriter:
                 if 'sim_date' not in combined_df.columns:
                     combined_df['sim_date'] = pd.Series(dtype='string')
 
-                # 添加run_id列
+                # 添加 run_id 列
                 if run_id:
                     if combined_df.empty:
                         combined_df['run_id'] = pd.Series(dtype='string')
                     else:
                         combined_df['run_id'] = run_id
 
-                # 写入数据库 (即使 combined_df.empty 也会创建表结构，传入config_name)
+                # 写入数据库（即使 combined_df.empty 也会创建表结构，并传入 config_name）
                 combined_df = self._zero_fill_quantity_for_db(combined_df, table_name)
                 try:
                     self.db.create_table_from_df(combined_df, table_name, if_exists, config_name=self.config_name)
@@ -1219,11 +1219,11 @@ class ModuleDataWriter:
         if_exists: str = "replace"
     ) -> Dict[str, int]:
         """
-        从数据库中的模块输出表直接生成Summary汇总报告
+        从数据库中的模块输出表直接生成汇总报告
         
         当使用 --use-db 模式时，模块不会输出xlsx文件，因此无法使用
-        SummaryReportGenerator从文件生成汇总报告。此方法直接从已写入
-        数据库的模块输出表中聚合数据，生成7个Summary报告表：
+        文件汇总生成器从文件生成汇总报告。此方法直接从已写入
+        数据库的模块输出表中聚合数据，生成7个汇总报告表：
         
         1. summary_output_ordershipmentcutsummary - 订单/发货/缺货汇总
         2. summary_output_fullchangeoverlog - 换产日志
@@ -1250,13 +1250,13 @@ class ModuleDataWriter:
         
         results = {}
 
-        # 转换日期为datetime用于过滤
+        # 转换日期为 datetime，用于过滤
         end_date_dt = pd.to_datetime(end_date) if end_date else None
 
-        # 为 summary 聚合的高频过滤/分组列建立复合索引（幂等，IF NOT EXISTS）
+        # 为汇总聚合的高频过滤/分组列建立复合索引（幂等，IF NOT EXISTS）
         self._ensure_summary_source_indexes()
 
-        # 1. 生成 order_shipment_cut 汇总报告
+        # 1. 生成订单/发货/缺货汇总报告
         try:
             results['summary_output_ordershipmentcutsummary'] = self._generate_order_shipment_cut_summary(
                 run_id, end_date_dt, if_exists
@@ -1267,7 +1267,7 @@ class ModuleDataWriter:
             )
             raise
 
-        # 2. 生成 changeover 汇总报告
+        # 2. 生成换产汇总报告
         try:
             results['summary_output_fullchangeoverlog'] = self._generate_changeover_summary(
                 run_id, end_date_dt, if_exists
@@ -1278,7 +1278,7 @@ class ModuleDataWriter:
             )
             raise
 
-        # 3. 生成 capacity_exceed 汇总报告
+        # 3. 生成产能超限汇总报告
         try:
             results['summary_output_fullcapacityexceed'] = self._generate_capacity_exceed_summary(
                 run_id, end_date_dt, if_exists
@@ -1289,7 +1289,7 @@ class ModuleDataWriter:
             )
             raise
 
-        # 4. 生成 production_plan 汇总报告
+        # 4. 生成生产计划汇总报告
         try:
             results['summary_output_fullproductionplan'] = self._generate_production_plan_summary(
                 run_id, end_date_dt, if_exists
@@ -1300,7 +1300,7 @@ class ModuleDataWriter:
             )
             raise
 
-        # 5. 生成 deployment_plan 汇总报告
+        # 5. 生成部署计划汇总报告
         try:
             results['summary_output_fulldeploymentplan'] = self._generate_deployment_plan_summary(
                 run_id, end_date_dt, if_exists
@@ -1311,7 +1311,7 @@ class ModuleDataWriter:
             )
             raise
 
-        # 6. 生成 delivery_plan 汇总报告
+        # 6. 生成交付计划汇总报告
         try:
             results['summary_output_fulldeliveryplan'] = self._generate_delivery_plan_summary(
                 run_id, end_date_dt, if_exists
@@ -1322,7 +1322,7 @@ class ModuleDataWriter:
             )
             raise
 
-        # 7. 生成 truck_usage 汇总报告
+        # 7. 生成卡车使用汇总报告
         try:
             results['summary_output_fulltruckusage'] = self._generate_truck_usage_summary(
                 run_id, end_date_dt, if_exists
@@ -1355,11 +1355,28 @@ class ModuleDataWriter:
         except Exception:
             return set()
 
-    # summary 聚合 / 过滤的高频列组合，用于建立复合 BTREE 索引。
+    def _get_table_column_info(self, table_name: str) -> List[tuple[str, str]]:
+        """按表内字段顺序返回字段名和 PostgreSQL 类型。"""
+        try:
+            with self.db.get_cursor(commit=False) as cursor:
+                cursor.execute(
+                    """
+                    SELECT column_name, data_type
+                    FROM information_schema.columns
+                    WHERE table_name = %s
+                    ORDER BY ordinal_position
+                    """,
+                    (table_name,),
+                )
+                return [(row[0], str(row[1])) for row in cursor.fetchall()]
+        except Exception:
+            return []
+
+    # 汇总聚合 / 过滤的高频列组合，用于建立复合 BTREE 索引。
     # 前导列 run_id 服务 WHERE 等值过滤，其余列服务 GROUP BY / ORDER BY，
-    # 让 PG 走 index scan 并省去额外排序。
+    # 让 PostgreSQL 尽量走索引扫描并省去额外排序。
     def _get_table_column_types(self, table_name: str) -> Dict[str, str]:
-        """Return lower-case information_schema data types by column name."""
+        """返回每个字段在 information_schema 中登记的小写数据类型。"""
         try:
             with self.db.get_cursor(commit=False) as cursor:
                 cursor.execute(
@@ -1375,7 +1392,7 @@ class ModuleDataWriter:
             return {}
 
     def _ensure_table_columns(self, table_name: str, column_defs: Dict[str, str]) -> bool:
-        """Create a table if needed and add missing columns, without dropping data."""
+        """必要时创建表并补齐缺失字段，不删除既有数据。"""
         existed = self.db.table_exists(table_name)
         cols_sql = sql.SQL(", ").join(
             sql.SQL("{} {}").format(sql.Identifier(col), sql.SQL(pg_type))
@@ -1436,7 +1453,7 @@ class ModuleDataWriter:
         if_exists: str,
         run_id: Optional[str],
     ) -> None:
-        """Ensure target schema and apply summary replace/fail semantics per run."""
+        """确保目标表结构正确，并按当前运行应用汇总表的 replace/fail 语义。"""
         existed = self._ensure_table_columns(table_name, column_defs)
         if if_exists == "fail" and existed:
             raise ValueError(f"Table {table_name} already exists")
@@ -1458,7 +1475,7 @@ class ModuleDataWriter:
                 )
 
     def _timestamp_expr(self, column: str, col_type: Optional[str]) -> Any:
-        """Build a timestamp expression that avoids casting arbitrary text."""
+        """构造时间戳表达式，避免随意转换无法解析的文本。"""
         ident = sql.Identifier(column)
         if col_type in {"date", "timestamp without time zone", "timestamp with time zone"}:
             return sql.SQL("{}::timestamp").format(ident)
@@ -1480,7 +1497,7 @@ class ModuleDataWriter:
         col_type: Optional[str],
         keep_invalid_text: bool = True,
     ) -> Any:
-        """Build a date <= end_date predicate that tolerates TEXT date columns."""
+        """构造 date <= end_date 的过滤条件，并兼容文本类型日期列。"""
         ident = sql.Identifier(column)
         if col_type in {"date", "timestamp without time zone", "timestamp with time zone"}:
             return sql.SQL("({col} IS NULL OR {col} <= %s)").format(col=ident)
@@ -1499,6 +1516,393 @@ class ModuleDataWriter:
             )
             """
         ).format(col=ident, invalid_result=invalid_result)
+
+    @staticmethod
+    def _summary_passthrough_type(col_name: str, pg_type: str) -> str:
+        """返回透传 Summary 目标列类型，元数据列使用固定类型。"""
+        col_lower = col_name.lower()
+        if col_lower in {"run_id", "config_name"}:
+            return "TEXT"
+        if col_lower == "db_write_time":
+            return "TIMESTAMP"
+        return pg_type or "TEXT"
+
+    @staticmethod
+    def _is_text_pg_type(pg_type: str) -> bool:
+        return (pg_type or "").lower() in {
+            "text",
+            "character varying",
+            "character",
+            "varchar",
+            "char",
+        }
+
+    @staticmethod
+    def _is_date_pg_type(pg_type: str) -> bool:
+        return (pg_type or "").lower() in {
+            "date",
+            "timestamp without time zone",
+            "timestamp with time zone",
+            "timestamp",
+        }
+
+    @staticmethod
+    def _is_integer_pg_type(pg_type: str) -> bool:
+        return (pg_type or "").lower() in {
+            "smallint",
+            "integer",
+            "bigint",
+        }
+
+    @staticmethod
+    def _is_float_pg_type(pg_type: str) -> bool:
+        return (pg_type or "").lower() in {
+            "real",
+            "double precision",
+            "numeric",
+        }
+
+    def _build_passthrough_column_defs(
+        self,
+        source_column_info: List[tuple[str, str]],
+        run_id: Optional[str],
+    ) -> Dict[str, str]:
+        """基于源表字段构造透传 Summary 目标表字段定义。"""
+        column_defs: Dict[str, str] = {}
+        for col_name, pg_type in source_column_info:
+            column_defs[col_name] = self._summary_passthrough_type(col_name, pg_type)
+
+        if run_id and "run_id" not in column_defs:
+            column_defs["run_id"] = "TEXT"
+        if self.config_name and "config_name" not in column_defs:
+            column_defs["config_name"] = "TEXT"
+        if "db_write_time" not in column_defs:
+            column_defs["db_write_time"] = "TIMESTAMP"
+        return column_defs
+
+    def _ensure_passthrough_summary_target(
+        self,
+        target_table: str,
+        column_defs: Dict[str, str],
+    ) -> bool:
+        """准备 SQL-only 透传 Summary 目标表，只做安全建表、补列和宽化。"""
+        existed = self.db.table_exists(target_table)
+        cols_sql = sql.SQL(", ").join(
+            sql.SQL("{} {}").format(sql.Identifier(col), sql.SQL(pg_type))
+            for col, pg_type in column_defs.items()
+        )
+        with self.db.get_cursor() as cursor:
+            cursor.execute(
+                sql.SQL("CREATE TABLE IF NOT EXISTS {} ({})").format(
+                    sql.Identifier(target_table),
+                    cols_sql,
+                )
+            )
+
+        existing_cols = self._get_table_columns(target_table)
+        for col, pg_type in column_defs.items():
+            if col in existing_cols:
+                continue
+            with self.db.get_cursor() as cursor:
+                cursor.execute(
+                    sql.SQL("ALTER TABLE {} ADD COLUMN {} {}").format(
+                        sql.Identifier(target_table),
+                        sql.Identifier(col),
+                        sql.SQL(pg_type),
+                    )
+                )
+            existing_cols.add(col)
+
+        existing_types = self._get_table_column_types(target_table)
+        for col, desired_type in column_defs.items():
+            existing_type = existing_types.get(col)
+            if not existing_type:
+                continue
+            desired_lower = desired_type.lower()
+            try:
+                if self._is_text_pg_type(desired_lower) and not self._is_text_pg_type(existing_type):
+                    with self.db.get_cursor() as cursor:
+                        cursor.execute(
+                            sql.SQL(
+                                "ALTER TABLE {} ALTER COLUMN {} TYPE TEXT USING {}::TEXT"
+                            ).format(
+                                sql.Identifier(target_table),
+                                sql.Identifier(col),
+                                sql.Identifier(col),
+                            )
+                        )
+                elif self._is_float_pg_type(desired_lower) and self._is_integer_pg_type(existing_type):
+                    with self.db.get_cursor() as cursor:
+                        cursor.execute(
+                            sql.SQL(
+                                "ALTER TABLE {} ALTER COLUMN {} TYPE DOUBLE PRECISION "
+                                "USING {}::DOUBLE PRECISION"
+                            ).format(
+                                sql.Identifier(target_table),
+                                sql.Identifier(col),
+                                sql.Identifier(col),
+                            )
+                        )
+            except Exception as e:
+                _summary_logger.warning(
+                    "[SCHEMA] 透传 Summary 列类型对齐跳过 %s.%s: %s",
+                    target_table, col, e,
+                )
+        return existed
+
+    def _build_summary_where_clause(
+        self,
+        source_cols: set,
+        col_types: Dict[str, str],
+        run_id: Optional[str],
+        end_date_dt: Optional[pd.Timestamp],
+        date_filter_cols: Optional[List[str]],
+    ) -> tuple[Any, List[Any]]:
+        """构造 Summary 源表过滤条件，复用当前 run_id 与日期口径。"""
+        where_parts = []
+        params: List[Any] = []
+        if run_id and "run_id" in source_cols:
+            where_parts.append(sql.SQL("run_id = %s"))
+            params.append(run_id)
+        if end_date_dt is not None:
+            for col in date_filter_cols or []:
+                if col in source_cols:
+                    where_parts.append(
+                        self._date_filter_condition(col, col_types.get(col))
+                    )
+                    params.append(end_date_dt)
+
+        if not where_parts:
+            return sql.SQL(""), params
+        return sql.SQL("WHERE ") + sql.SQL(" AND ").join(where_parts), params
+
+    def _build_summary_order_clause(
+        self,
+        source_cols: set,
+        sort_cols: Optional[List[str]],
+        stable_tiebreaker: bool,
+    ) -> Any:
+        """构造 Summary 透传输出排序条件。"""
+        order_terms: List[Any] = []
+        if sort_cols:
+            order_terms = [sql.Identifier(c) for c in sort_cols if c in source_cols]
+        if stable_tiebreaker:
+            order_terms.append(sql.SQL("ctid"))
+        if not order_terms:
+            return sql.SQL("")
+        return sql.SQL("ORDER BY ") + sql.SQL(", ").join(order_terms)
+
+    def _summary_source_has_rows(
+        self,
+        source_table: str,
+        where_sql: Any,
+        where_params: List[Any],
+    ) -> bool:
+        """判断源表过滤后是否存在数据，避免无数据时创建空 Summary 表。"""
+        query = sql.SQL("SELECT 1 FROM {tbl} {where} LIMIT 1").format(
+            tbl=sql.Identifier(source_table),
+            where=where_sql,
+        )
+        with self.db.get_cursor(commit=False) as cursor:
+            cursor.execute(query, tuple(where_params) if where_params else None)
+            return cursor.fetchone() is not None
+
+    def _build_passthrough_select_items(
+        self,
+        source_columns: List[str],
+        output_columns: List[str],
+        run_id: Optional[str],
+        target_col_types: Optional[Dict[str, str]] = None,
+    ) -> tuple[List[Any], List[Any]]:
+        """构造 INSERT SELECT 的 SELECT 字段表达式，并返回占位符参数。"""
+        # 将源表字段列表转为集合，便于判断某个目标字段是否真实存在于源表。
+        source_col_set = set(source_columns)
+        # 目标表字段类型可能为空；为空时使用空字典，避免后续 get 访问失败。
+        target_col_types = target_col_types or {}
+        # select_items 保存 SELECT 后面的每个输出表达式，例如 col AS col、NOW() AS db_write_time。
+        select_items: List[Any] = []
+        # params 保存 select_items 中使用到的 %s 占位符参数，例如 config_name 或补写的 run_id。
+        params: List[Any] = []
+        # 按目标表字段顺序逐列生成 SELECT 表达式，保证 INSERT 字段与 SELECT 字段一一对应。
+        for col in output_columns:
+            # 读取目标字段当前类型；用于判断是否需要显式转成文本以兼容历史表结构。
+            target_type = target_col_types.get(col, "")
+            # config_name 是运行配置标签：无论源表是否有旧值，Summary 统一写当前 writer.config_name。
+            if col == "config_name" and self.config_name:
+                # 使用 %s::text 参数化写入，避免把配置名直接拼进 SQL。
+                select_items.append(sql.SQL("%s::text AS {}").format(sql.Identifier(col)))
+                # 记录与上方 %s 对应的真实参数值。
+                params.append(self.config_name)
+            # db_write_time 是本次 Summary 写入时间，由数据库当前时间生成。
+            elif col == "db_write_time":
+                # 如果历史目标表把 db_write_time 建成了文本列，则把 NOW() 显式转文本，避免插入类型冲突。
+                if self._is_text_pg_type(target_type):
+                    select_items.append(
+                        sql.SQL("NOW()::text AS {}").format(sql.Identifier(col))
+                    )
+                # 正常情况下 db_write_time 是时间戳列，直接写 NOW()。
+                else:
+                    select_items.append(sql.SQL("NOW() AS {}").format(sql.Identifier(col)))
+            # run_id 若源表不存在但调用方传入了 run_id，则在 SELECT 中补一列常量。
+            elif col == "run_id" and col not in source_col_set and run_id:
+                # 使用参数化常量补 run_id，保证目标 Summary 表仍可按 run_id 隔离。
+                select_items.append(sql.SQL("%s::text AS {}").format(sql.Identifier(col)))
+                # 记录与上方 %s 对应的当前运行标识。
+                params.append(run_id)
+            # 其他字段都是透传字段：默认从源表读取同名字段并写入目标表同名字段。
+            else:
+                # 默认源字段表达式就是源表同名字段。
+                source_expr = sql.Identifier(col)
+                # 如果目标字段是文本类型，则显式 source_col::text，兼容历史表被宽化为 TEXT 的场景。
+                if self._is_text_pg_type(target_type):
+                    source_expr = sql.SQL("{}::text").format(sql.Identifier(col))
+                # 生成形如 source_col AS target_col 的表达式，字段名用 sql.Identifier 安全转义。
+                select_items.append(
+                    sql.SQL("{} AS {}").format(source_expr, sql.Identifier(col))
+                )
+        # 返回 SELECT 表达式列表和对应的参数列表，由 _insert_select_to_summary 统一组装执行。
+        return select_items, params
+
+    def _insert_select_to_summary(
+        self,
+        source_table: str,
+        target_table: str,
+        run_id: Optional[str],
+        end_date_dt: Optional[pd.Timestamp],
+        date_filter_cols: List[str],
+        sort_cols: Optional[List[str]] = None,
+        stable_tiebreaker: bool = False,
+        if_exists: str = "replace",
+    ) -> int:
+        """用 INSERT SELECT 在数据库内生成透传型 Summary 表，避免 pandas 搬运。
+
+        参数：
+            source_table: 来源模块输出表名，例如 module6_output_truckusagelog。
+            target_table: 目标 Summary 表名，例如 summary_output_fulltruckusage。
+            run_id: 当前运行标识；源表有 run_id 列时用于过滤，目标表 replace 时用于隔离删除。
+            end_date_dt: Summary 截止日期；不为空时按 date_filter_cols 下推日期过滤。
+            date_filter_cols: 需要应用 end_date_dt 的候选日期列；只对源表实际存在的列生效。
+            sort_cols: 输出排序字段；只对源表实际存在的字段生效。
+            stable_tiebreaker: 是否追加 ctid 作为稳定排序补充键。
+            if_exists: 目标表存在时的处理方式，支持 replace / append / fail。
+
+        返回：
+            int: 实际插入目标 Summary 表的行数。
+        """
+        # 读取源表字段名和字段类型，后续建目标表、拼 SELECT 字段都依赖这份信息。
+        source_column_info = self._get_table_column_info(source_table)
+        # 源表不存在或没有字段时，没有可透传的数据，直接返回 0。
+        if not source_column_info:
+            return 0
+
+        # source_cols 是源表字段名集合，用于判断 run_id、日期列、排序列是否存在。
+        source_cols = {col for col, _ in source_column_info}
+        # col_types 是源表字段类型字典，用于构造兼容日期/文本日期的过滤条件。
+        col_types = {col: str(pg_type).lower() for col, pg_type in source_column_info}
+
+        # 检查目标 Summary 表是否已经存在，以决定 fail/replace 的处理方式。
+        target_exists = self.db.table_exists(target_table)
+        if target_exists:
+            # fail 模式下目标表已存在即报错，避免误覆盖既有结果。
+            if if_exists == "fail":
+                raise ValueError(f"Table {target_table} already exists")
+            # replace 模式不重建整表，优先按 run_id 删除当前运行旧数据。
+            if if_exists == "replace":
+                # 读取目标表字段，用于确认是否可以按 run_id 精准删除。
+                target_cols = self._get_table_columns(target_table)
+                # 删除旧数据属于写操作，使用默认提交游标。
+                with self.db.get_cursor() as cursor:
+                    # 有 run_id 且目标表存在 run_id 列时，只删除当前运行对应的 Summary 数据。
+                    if run_id and "run_id" in target_cols:
+                        cursor.execute(
+                            # 目标表名使用 sql.Identifier 安全拼接，run_id 使用参数绑定。
+                            sql.SQL("DELETE FROM {} WHERE run_id = %s").format(
+                                sql.Identifier(target_table)
+                            ),
+                            (run_id,),
+                        )
+                    # 没有 run_id 时无法做运行级隔离，只能按历史兼容逻辑清空目标表。
+                    elif not run_id:
+                        cursor.execute(
+                            # TRUNCATE 仅在缺少 run_id 的历史兼容场景使用。
+                            sql.SQL("TRUNCATE TABLE {}").format(
+                                sql.Identifier(target_table)
+                            )
+                        )
+
+        # 构造 WHERE 过滤片段和对应参数，包括 run_id 过滤与 end_date 日期过滤。
+        where_sql, where_params = self._build_summary_where_clause(
+            source_cols, col_types, run_id, end_date_dt, date_filter_cols
+        )
+        try:
+            # 先用 SELECT 1 判断过滤后是否有数据；无数据时不创建空 Summary 表。
+            if not self._summary_source_has_rows(source_table, where_sql, where_params):
+                return 0
+        # 源表或字段不存在时按无数据处理，不中断整个 Summary 生成流程。
+        except (errors.UndefinedTable, errors.UndefinedColumn):
+            return 0
+
+        # 基于源表字段构造目标 Summary 表字段定义，并补齐 run_id/config_name/db_write_time 元数据列。
+        column_defs = self._build_passthrough_column_defs(source_column_info, run_id)
+        # 确保目标表存在、字段齐全，并对历史表做必要的安全类型兼容。
+        self._ensure_passthrough_summary_target(target_table, column_defs)
+
+        # output_columns 是目标表写入字段顺序，必须与 SELECT 输出表达式顺序一致。
+        output_columns = list(column_defs.keys())
+        # source_columns 保留源表字段顺序，用于判断哪些目标字段来自源表、哪些字段需要补常量。
+        source_columns = [col for col, _ in source_column_info]
+        # 读取目标表当前字段类型；历史表可能已有不同类型，需要 SELECT 侧做兼容转换。
+        target_col_types = self._get_table_column_types(target_table)
+        # 构造 SELECT 输出表达式和 SELECT 侧常量参数，例如 config_name、补写 run_id。
+        select_items, select_params = self._build_passthrough_select_items(
+            source_columns, output_columns, run_id, target_col_types
+        )
+        # 构造 ORDER BY 片段；无排序字段时返回空 SQL 片段。
+        order_sql = self._build_summary_order_clause(
+            source_cols, sort_cols, stable_tiebreaker
+        )
+        # 后 6 张 summary_output_full... 表的核心写入 SQL：
+        # target      = 目标 Summary 表，例如 summary_output_fulltruckusage。
+        # target_cols = 目标表写入字段列表，顺序来自 output_columns。
+        # select_items= SELECT 输出表达式列表，顺序必须与 target_cols 完全一致。
+        # source      = 来源模块输出表，例如 module6_output_truckusagelog。
+        # where       = run_id 与 end_date 过滤条件；无过滤条件时为空片段。
+        # order       = 稳定排序条件；调用方未传排序字段时为空片段。
+        query = sql.SQL(
+            """
+            INSERT INTO {target} ({target_cols})
+            SELECT {select_items}
+            FROM {source}
+            {where}
+            {order}
+            """
+        ).format(
+            # target：目标 Summary 表名，用 sql.Identifier 防止表名拼接风险。
+            target=sql.Identifier(target_table),
+            # target_cols：INSERT INTO (...) 中的目标字段列表。
+            target_cols=sql.SQL(", ").join(sql.Identifier(c) for c in output_columns),
+            # select_items：SELECT 后面的字段表达式，包含源字段透传和元数据字段覆盖。
+            select_items=sql.SQL(", ").join(select_items),
+            # source：FROM 后面的来源模块输出表名。
+            source=sql.Identifier(source_table),
+            # where：WHERE 过滤片段，包含当前 run_id 和日期上限过滤。
+            where=where_sql,
+            # order：ORDER BY 排序片段，用于保持输出顺序稳定。
+            order=order_sql,
+        )
+
+        try:
+            # 执行 INSERT SELECT；参数顺序为 SELECT 常量参数在前，WHERE 条件参数在后。
+            with self.db.get_cursor() as cursor:
+                cursor.execute(query, tuple(select_params + where_params))
+                # rowcount 即本次插入到 Summary 目标表的行数；数据库返回 None 时按 0 处理。
+                rows = max(cursor.rowcount or 0, 0)
+        except (errors.UndefinedTable, errors.UndefinedColumn):
+            return 0
+
+        if rows > 0:
+            self.written_tables[target_table] = {"module": "summary", "rows": rows}
+        return rows
 
     _SUMMARY_SOURCE_INDEX_SPECS = [
         ("module1_output_orderlog", ["run_id", "date", "material", "location"]),
@@ -1584,7 +1988,7 @@ class ModuleDataWriter:
         sim_date_constant: Optional[str],
         params: List[Any],
     ) -> Any:
-        """Build a source aggregation CTE that returns no rows if the source is absent."""
+        """构造源表聚合公共表表达式；源表缺失时返回空结果。"""
         cols = self._get_table_columns(table_name)
         col_types = self._get_table_column_types(table_name)
         required = {"date", "material", "location", "quantity"}
@@ -1673,97 +2077,148 @@ class ModuleDataWriter:
         if_exists: str = 'replace',
         chunksize: int = 100_000,
     ) -> int:
-        """SQL 侧 WHERE + ORDER BY 下推，服务端游标按 chunksize 流式写入 summary 表。
+        """数据库侧下推过滤与排序，服务端游标按 chunksize 流式写入汇总表。
 
-        - date_filter_cols 每列生成 ``(col IS NULL OR col <= end_date)``，AND 串联，
+        - date_filter_cols 每列生成 ``(col IS NULL OR col <= end_date)``，并用 AND 串联，
           仅对源表实际存在的列下推（与旧实现的 ``if col in df.columns`` 防御性一致）。
         - sort_cols 仅取源表实际存在的列；stable_tiebreaker=True 时追加 ``ctid`` 末位
-          tiebreaker，等价旧实现的 ``kind='mergesort'`` 稳定排序。
-        - 服务端游标 + ``ORDER BY`` 在 PG 端全局排序后分发，每 chunk 已是全表顺序。
+          作为稳定排序的补充键，等价旧实现的 ``kind='mergesort'`` 稳定排序。
+        - 服务端游标 + ``ORDER BY`` 在 PostgreSQL 端全局排序后分发，每个分块已是全表顺序。
         - 首批写入用调用方 if_exists，其余批次强制 'append'。
         - 表不存在 / 无符合行 → 返回 0。
         """
+        # 如果目标 Summary 表已经存在，需要先根据 if_exists 策略处理旧数据。
         if self.db.table_exists(target_table):
+            # fail 模式表示目标表已存在时直接报错，不允许覆盖或追加。
             if if_exists == "fail":
                 raise ValueError(f"Table {target_table} already exists")
+            # replace 模式在这里不整表重建，而是优先清理当前 run_id 的旧数据。
             if if_exists == "replace":
+                # 读取目标表字段，用于判断是否能按 run_id 精准删除。
                 target_cols = self._get_table_columns(target_table)
+                # 删除或清空目标表属于写操作，因此使用默认提交游标。
                 with self.db.get_cursor() as cursor:
+                    # 如果调用方传入 run_id 且目标表有 run_id 列，只删除当前运行旧数据。
                     if run_id and "run_id" in target_cols:
                         cursor.execute(
+                            # 安全拼接目标表名，避免表名字符串直接进入 SQL。
                             sql.SQL("DELETE FROM {} WHERE run_id = %s").format(
                                 sql.Identifier(target_table)
                             ),
+                            # run_id 作为参数绑定，避免 SQL 注入和转义问题。
                             (run_id,),
                         )
+                    # 如果没有 run_id，无法做运行级隔离，只能回退为清空整张目标表。
                     elif not run_id:
                         cursor.execute(
+                            # TRUNCATE 只在没有 run_id 的历史兼容场景使用。
                             sql.SQL("TRUNCATE TABLE {}").format(
                                 sql.Identifier(target_table)
                             )
                         )
 
+        # 读取源表字段集合；源表不存在或无法读取时返回空集合。
         cols = self._get_table_columns(source_table)
+        # 如果源表不存在或没有字段，说明没有可生成的 Summary 数据，直接返回 0。
         if not cols:
             return 0
+        # 读取源表字段类型，用于构造日期过滤条件时区分时间类型和文本类型。
         col_types = self._get_table_column_types(source_table)
 
+        # where_parts 保存 WHERE 子句中的每个条件片段。
         where_parts = []
+        # params 保存 WHERE 条件中 %s 占位符对应的参数值。
         params: list = []
+        # 如果传入 run_id 且源表有 run_id 列，则只读取当前运行的数据。
         if run_id and 'run_id' in cols:
+            # 添加 run_id 等值过滤条件。
             where_parts.append(sql.SQL("run_id = %s"))
+            # 记录 run_id 参数，顺序必须与 where_parts 中的 %s 一致。
             params.append(run_id)
+        # 如果传入结束日期，则对调用方指定的日期字段逐个下推过滤。
         if end_date_dt is not None:
+            # date_filter_cols 可能为空；为空时用 [] 避免循环报错。
             for col in date_filter_cols or []:
+                # 只对源表真实存在的日期列加过滤，兼容不同版本表结构。
                 if col in cols:
+                    # 构造兼容 DATE/TIMESTAMP/TEXT 的日期过滤条件。
                     where_parts.append(
                         self._date_filter_condition(col, col_types.get(col))
                     )
+                    # 每个日期过滤条件都需要一个 end_date_dt 参数。
                     params.append(end_date_dt)
+        # 默认没有 WHERE 条件时使用空 SQL 片段。
         where_sql = sql.SQL("")
+        # 如果存在任意过滤条件，则用 AND 串联成完整 WHERE 子句。
         if where_parts:
             where_sql = sql.SQL("WHERE ") + sql.SQL(" AND ").join(where_parts)
 
+        # 默认没有 ORDER BY 条件时使用空 SQL 片段。
         order_sql = sql.SQL("")
+        # order_terms 保存 ORDER BY 后面的字段或表达式。
         order_terms: list = []
+        # 如果调用方指定排序字段，只保留源表实际存在的字段。
         if sort_cols:
             order_terms = [sql.Identifier(c) for c in sort_cols if c in cols]
+        # stable_tiebreaker=True 时追加 ctid，模拟 pandas mergesort 的稳定排序效果。
         if stable_tiebreaker:
             order_terms.append(sql.SQL("ctid"))
+        # 如果存在排序项，则拼出完整 ORDER BY 子句。
         if order_terms:
             order_sql = sql.SQL("ORDER BY ") + sql.SQL(", ").join(order_terms)
 
+        # 构造源表查询：读取源表全部字段，并下推 WHERE / ORDER BY 到 PostgreSQL。
         query = sql.SQL("SELECT * FROM {tbl} {where} {order}").format(
+            # tbl 是来源模块输出表名，用 sql.Identifier 安全转义。
             tbl=sql.Identifier(source_table),
+            # where 是前面构造的过滤片段；无过滤时为空。
             where=where_sql,
+            # order 是前面构造的排序片段；无排序时为空。
             order=order_sql,
         )
 
+        # total 统计最终写入目标 Summary 表的总行数。
         total = 0
+        # is_first 标记当前是否为第一批 chunk；第一批使用调用方 if_exists。
         is_first = True
         try:
+            # 使用服务端游标按 chunksize 分块读取，避免一次性把全量结果拉入内存。
             for chunk_df in self.db.iter_query_chunks(
+                # query 是已经拼好的 SELECT * FROM source WHERE ... ORDER BY ...。
                 query, tuple(params) if params else None, chunksize=chunksize
             ):
+                # 空分块没有可写入数据，直接跳过。
                 if chunk_df.empty:
                     continue
                 # 与旧实现一致：若源表缺 run_id 列，则按 run_id 补一列
+                # 这样目标 Summary 表仍然可以按当前运行进行隔离和清理。
                 if run_id and 'run_id' not in chunk_df.columns:
                     chunk_df['run_id'] = run_id
+                # 第一批使用调用方传入的 if_exists，后续批次统一 append，避免覆盖前面批次。
                 chunk_if_exists = if_exists if is_first else 'append'
+                # 复用 DataFrame 写库逻辑：自动建表、补列、写入 config_name / db_write_time。
                 self.db.create_table_from_df(
+                    # 当前分块数据。
                     chunk_df,
+                    # 目标 Summary 表名。
                     target_table,
+                    # 第一批 replace/append/fail，后续固定 append。
                     if_exists=chunk_if_exists,
+                    # 写入当前配置名，用于区分不同配置输出。
                     config_name=self.config_name,
                 )
+                # 累加本批写入行数。
                 total += len(chunk_df)
+                # 第一批写入完成后，后续批次都必须追加。
                 is_first = False
+        # 源表或字段在查询过程中不存在时，按无数据处理，不中断整体 Summary 生成。
         except (errors.UndefinedTable, errors.UndefinedColumn):
             return 0
 
+        # 如果成功写入了数据，记录到 written_tables，供上层日志汇总使用。
         if total > 0:
             self.written_tables[target_table] = {"module": "summary", "rows": total}
+        # 返回本 Summary 子表实际写入行数。
         return total
 
     def _generate_order_shipment_cut_summary(
@@ -1772,131 +2227,202 @@ class ModuleDataWriter:
         end_date_dt: pd.Timestamp,
         if_exists: str
     ) -> int:
-        """生成订单/发货/缺货汇总报告（SQL 侧 dedup + 聚合，避免全表加载）。"""
+        """生成订单/发货/缺货汇总报告（数据库侧去重 + 聚合，避免全表加载）。"""
+        # 汇总目标表 summary_output_ordershipmentcutsummary：用于保存订单、发货、缺货三类数量的日粒度汇总结果。
         table_name = "summary_output_ordershipmentcutsummary"
+
+        # 三张源表：分别来自模块1输出的订单日志、发货日志、缺货日志。
         orders_tbl = "module1_output_orderlog"
         shipments_tbl = "module1_output_shipmentlog"
         cuts_tbl = "module1_output_cutlog"
 
+        # 目标表结构定义：如果目标表不存在则按该结构创建；如果已存在则校验/对齐字段。
         column_defs = {
+            # 仿真批次日期：与本地汇总对齐，通常从 config_name 中提取。
             "simulation_date": "TIMESTAMP",
+            # 业务日期：订单/发货/缺货发生日期。
             "date": "TIMESTAMP",
+            # 物料编码。
             "material": "TEXT",
+            # 地点/节点编码。
             "location": "TEXT",
+            # 订单汇总数量，使用大整型对齐安全整数语义。
             "order_qty": "BIGINT",
+            # 发货汇总数量，使用大整型对齐安全整数语义。
             "shipment_qty": "BIGINT",
+            # 缺货汇总数量，必须来自缺货日志聚合值。
             "cut_qty": "BIGINT",
+            # 本次运行唯一标识，用于隔离不同运行的数据。
             "run_id": "TEXT",
+            # 配置名称标签，只用于输出标识，不作为本段查询的聚合维度。
             "config_name": "TEXT",
+            # 数据库写入时间。
             "db_write_time": "TIMESTAMP",
         }
+        # 准备目标表：replace 时只清理当前 run_id 的旧汇总，避免影响其他运行。
         self._prepare_summary_target(table_name, column_defs, if_exists, run_id)
 
+        # 从源表 config_name 中抽样提取 simulation_date，确保三张日志使用同一仿真日期口径。
         config_sim_date = self._sample_config_sim_date(
             run_id, [orders_tbl, shipments_tbl, cuts_tbl]
         )
+
+        # 查询参数列表：_build_log_agg_cte 和主查询会按顺序追加占位符参数。
         params: List[Any] = []
+
+        # 构造订单聚合公共表表达式：dedup=True，表示订单日志需要在数据库侧去重后再聚合。
         order_agg_sql = self._build_log_agg_cte(
             orders_tbl, "order_qty", True, run_id, config_sim_date, params
         )
+
+        # 构造发货聚合公共表表达式：发货日志不做订单式去重，只按键汇总数量。
         shipment_agg_sql = self._build_log_agg_cte(
             shipments_tbl, "shipment_qty", False, run_id, config_sim_date, params
         )
+
+        # 构造缺货聚合公共表表达式：缺货日志的数量聚合后作为最终 cut_qty 来源。
         cut_agg_sql = self._build_log_agg_cte(
             cuts_tbl, "cut_qty", False, run_id, config_sim_date, params
         )
 
+        # 结束日期过滤条件默认为空；只有传入 end_date_dt 时才限制输出日期。
         end_filter_sql = sql.SQL("")
         if end_date_dt is not None:
-            end_filter_sql = sql.SQL("WHERE k.date <= %s")
+            # 过滤合并集合的业务日期 date，保证三类日志统一按同一输出日期过滤。
+            end_filter_sql = sql.SQL("WHERE date <= %s")
             params.append(end_date_dt)
 
+        # 主插入查询最后两个参数：写入汇总行上的 run_id 与 config_name 标签。
         params.extend([run_id, self.config_name])
+
+        # 构造完整查询：所有聚合、连接、插入都在 PostgreSQL 内完成，避免应用侧持有大数据帧。
         query = sql.SQL(
             """
             WITH
+            -- 1) 在数据库内分别聚合三类源日志。
+            --    _build_log_agg_cte 负责按 run_id 过滤、归一化 simulation_date、
+            --    转换 quantity 类型，以及订单日志在需要时去重。
+            --    order_agg 输出列：业务日期/物料/地点/仿真日期/订单数量。
             order_agg AS ({order_agg}),
+            --    shipment_agg 输出列：业务日期/物料/地点/仿真日期/发货数量。
             shipment_agg AS ({shipment_agg}),
+            --    cut_agg 输出列：业务日期/物料/地点/仿真日期/缺货数量。
             cut_agg AS ({cut_agg}),
-            keys AS (
-                SELECT date, material, location, simulation_date FROM order_agg
-                UNION
-                SELECT date, material, location, simulation_date FROM shipment_agg
-                UNION
-                SELECT date, material, location, simulation_date FROM cut_agg
+            -- 2) 把三类聚合结果纵向合并为一张带三列数量的流，缺失的数量列填 0。
+            --    用 UNION ALL（不去重）保留每个聚合的原值，随后由 GROUP BY 求和。
+            --    每个键在 order_agg/shipment_agg/cut_agg 中各至多一行，因此
+            --    GROUP BY 后 SUM(order_qty) 即等于该键的订单聚合值（或 0），
+            --    与原先 COALESCE(单值,0) 完全等价；但避免了 IS NOT DISTINCT FROM
+            --    联接退化成 O(n^2) 嵌套循环的性能问题。
+            combined AS (
+                SELECT date, material, location, simulation_date,
+                       order_qty AS order_qty,
+                       0::double precision AS shipment_qty,
+                       0::double precision AS cut_qty
+                FROM order_agg
+                UNION ALL
+                SELECT date, material, location, simulation_date,
+                       0::double precision, shipment_qty, 0::double precision
+                FROM shipment_agg
+                UNION ALL
+                SELECT date, material, location, simulation_date,
+                       0::double precision, 0::double precision, cut_qty
+                FROM cut_agg
             ),
             summary_rows AS (
-                -- qty 向零截断为整型，对齐本地 safe_int / int() 语义；
-                -- cut_qty keeps CutLog semantics and is not derived from order-shipment.
-                -- cut_agg also participates in keys so cut-only rows are preserved.
+                -- 3) 按键 hash 聚合；GROUP BY 天然把 NULL 键归为同一组，
+                --    等价原先 keys UNION + IS NOT DISTINCT FROM 的空值安全语义。
+                --    数量列向零截断为大整型，对齐 safe_int / int 的本地语义。
+                --    业务口径：cut_qty 仍取缺货日志聚合值，不由 order-shipment 重算。
                 SELECT
-                    k.simulation_date,
-                    k.date,
-                    k.material,
-                    k.location,
-                    TRUNC(COALESCE(o.order_qty, 0))::bigint AS order_qty,
-                    TRUNC(COALESCE(s.shipment_qty, 0))::bigint AS shipment_qty,
-                    TRUNC(COALESCE(c.cut_qty, 0))::bigint AS cut_qty
-                FROM keys k
-                LEFT JOIN order_agg o
-                    ON k.date IS NOT DISTINCT FROM o.date
-                    AND k.material IS NOT DISTINCT FROM o.material
-                    AND k.location IS NOT DISTINCT FROM o.location
-                    AND k.simulation_date IS NOT DISTINCT FROM o.simulation_date
-                LEFT JOIN shipment_agg s
-                    ON k.date IS NOT DISTINCT FROM s.date
-                    AND k.material IS NOT DISTINCT FROM s.material
-                    AND k.location IS NOT DISTINCT FROM s.location
-                    AND k.simulation_date IS NOT DISTINCT FROM s.simulation_date
-                LEFT JOIN cut_agg c
-                    ON k.date IS NOT DISTINCT FROM c.date
-                    AND k.material IS NOT DISTINCT FROM c.material
-                    AND k.location IS NOT DISTINCT FROM c.location
-                    AND k.simulation_date IS NOT DISTINCT FROM c.simulation_date
+                    simulation_date,
+                    date,
+                    material,
+                    location,
+                    -- 订单数量：求和后小数向零截断，再转大整型。
+                    TRUNC(SUM(order_qty))::bigint AS order_qty,
+                    -- 发货数量：求和后小数向零截断，再转大整型。
+                    TRUNC(SUM(shipment_qty))::bigint AS shipment_qty,
+                    -- 缺货数量：缺货日志聚合值求和后截断为大整型。
+                    TRUNC(SUM(cut_qty))::bigint AS cut_qty
+                FROM combined
+                -- 动态日期过滤条件；无结束日期时这里为空查询片段。
                 {end_filter}
+                GROUP BY simulation_date, date, material, location
             )
+            -- 4) 聚合结果直接在 PostgreSQL 内写入目标表，避免应用侧物化大数据帧。
             INSERT INTO {target} (
+                -- 输出列：仿真日期。
                 simulation_date,
+                -- 输出列：业务日期。
                 date,
+                -- 输出列：物料。
                 material,
+                -- 输出列：地点。
                 location,
+                -- 输出列：订单数量。
                 order_qty,
+                -- 输出列：发货数量。
                 shipment_qty,
+                -- 输出列：缺货数量。
                 cut_qty,
+                -- 输出列：当前运行标识。
                 run_id,
+                -- 输出列：当前配置名称。
                 config_name,
+                -- 输出列：写入时间。
                 db_write_time
             )
             SELECT
+                -- 从 summary_rows 取仿真日期。
                 simulation_date,
+                -- 从 summary_rows 取业务日期。
                 date,
+                -- 从 summary_rows 取物料。
                 material,
+                -- 从 summary_rows 取地点。
                 location,
+                -- 从 summary_rows 取订单数量。
                 order_qty,
+                -- 从 summary_rows 取发货数量。
                 shipment_qty,
+                -- 从 summary_rows 取缺货数量。
                 cut_qty,
+                -- 写入本次运行标识；注意 run_id 是隔离维度，但不是连接键。
                 %s AS run_id,
+                -- 写入配置名称标签；仅用于标识输出来源。
                 %s AS config_name,
+                -- 使用数据库当前时间作为写入时间。
                 NOW() AS db_write_time
             FROM summary_rows
+            -- 稳定输出顺序，便于对比、排查和回归测试。
             ORDER BY simulation_date, date, material, location
             """
         ).format(
+            # 注入订单聚合公共表表达式。
             order_agg=order_agg_sql,
+            # 注入发货聚合公共表表达式。
             shipment_agg=shipment_agg_sql,
+            # 注入缺货聚合公共表表达式。
             cut_agg=cut_agg_sql,
+            # 注入结束日期动态过滤片段。
             end_filter=end_filter_sql,
+            # 注入目标表名，并通过 sql.Identifier 防止查询标识符拼接风险。
             target=sql.Identifier(table_name),
         )
 
         try:
+            # 执行整条查询：PostgreSQL 内完成聚合并直接插入。
             with self.db.get_cursor() as cursor:
                 cursor.execute(query, tuple(params))
+                # cursor.rowcount 表示插入影响行数；若数据库返回 None，则按 0 处理。
                 rows = max(cursor.rowcount or 0, 0)
         except (errors.UndefinedTable, errors.UndefinedColumn):
+            # 兼容源表或字段不存在的场景：该汇总子表返回 0 行，不中断整个流程。
             return 0
 
         if rows > 0:
+            # 记录本次汇总写入结果，供上层汇总日志使用。
             self.written_tables[table_name] = {"module": "summary", "rows": rows}
         return rows
 
@@ -1906,13 +2432,13 @@ class ModuleDataWriter:
         end_date_dt: pd.Timestamp,
         if_exists: str
     ) -> int:
-        """生成换产汇总报告（流式 SQL pushdown）"""
-        return self._stream_filter_to_summary(
+        """生成换产汇总报告（数据库内 INSERT SELECT 透传）"""
+        return self._insert_select_to_summary(
             source_table="module4_output_changeoverlog",
             target_table="summary_output_fullchangeoverlog",
             run_id=run_id,
             end_date_dt=end_date_dt,
-            # 与 Dev 一致：只在 changeover_end_date 上过滤
+            # 与本地版本一致：只在 changeover_end_date 上过滤
             date_filter_cols=['changeover_end_date'],
             sort_cols=[
                 'date', 'material', 'sending', 'receiving',
@@ -1933,8 +2459,8 @@ class ModuleDataWriter:
         end_date_dt: pd.Timestamp,
         if_exists: str
     ) -> int:
-        """生成产能超限汇总报告（流式 SQL pushdown）"""
-        return self._stream_filter_to_summary(
+        """生成产能超限汇总报告（数据库内 INSERT SELECT 透传）"""
+        return self._insert_select_to_summary(
             source_table="module4_output_capacityexceed",
             target_table="summary_output_fullcapacityexceed",
             run_id=run_id,
@@ -1949,8 +2475,8 @@ class ModuleDataWriter:
         end_date_dt: pd.Timestamp,
         if_exists: str
     ) -> int:
-        """生成生产计划汇总报告（流式 SQL pushdown）"""
-        return self._stream_filter_to_summary(
+        """生成生产计划汇总报告（数据库内 INSERT SELECT 透传）"""
+        return self._insert_select_to_summary(
             source_table="module4_output_productionplan",
             target_table="summary_output_fullproductionplan",
             run_id=run_id,
@@ -1965,13 +2491,13 @@ class ModuleDataWriter:
         end_date_dt: pd.Timestamp,
         if_exists: str
     ) -> int:
-        """生成部署计划汇总报告（流式 SQL pushdown）"""
-        return self._stream_filter_to_summary(
+        """生成部署计划汇总报告（数据库内 INSERT SELECT 透传）"""
+        return self._insert_select_to_summary(
             source_table="module5_output_deploymentplan",
             target_table="summary_output_fulldeploymentplan",
             run_id=run_id,
             end_date_dt=end_date_dt,
-            # 与 Dev 版本 _generate_deployment_report 保持一致
+            # 与本地版本 _generate_deployment_report 保持一致
             date_filter_cols=['deployment_date', 'arrival_date', 'ship_date', 'date'],
             if_exists=if_exists,
         )
@@ -1982,12 +2508,12 @@ class ModuleDataWriter:
         end_date_dt: pd.Timestamp,
         if_exists: str
     ) -> int:
-        """生成交付计划汇总报告（流式 SQL pushdown）"""
-        # 与 Dev 版本 _generate_delivery_report 保持一致：仅在
+        """生成交付计划汇总报告（数据库内 INSERT SELECT 透传）"""
+        # 与本地版本 _generate_delivery_report 保持一致：仅在
         # planned_deploy_date / actual_ship_date 上过滤（DB 表列名是
         # planned_deployment_date，与 planned_deploy_date 不匹配，过滤实际仅在
-        # actual_ship_date 生效——保留两列以兼容历史 schema）
-        return self._stream_filter_to_summary(
+        # actual_ship_date 生效——保留两列以兼容历史结构）
+        return self._insert_select_to_summary(
             source_table="module6_output_deliveryplan",
             target_table="summary_output_fulldeliveryplan",
             run_id=run_id,
@@ -2002,8 +2528,8 @@ class ModuleDataWriter:
         end_date_dt: pd.Timestamp,
         if_exists: str
     ) -> int:
-        """生成卡车使用汇总报告（流式 SQL pushdown）"""
-        return self._stream_filter_to_summary(
+        """生成卡车使用汇总报告（数据库内 INSERT SELECT 透传）"""
+        return self._insert_select_to_summary(
             source_table="module6_output_truckusagelog",
             target_table="summary_output_fulltruckusage",
             run_id=run_id,

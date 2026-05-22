@@ -6,7 +6,8 @@
 - 三表 outer join（缺失方补 0）
 - end_date 过滤（date <= end_date）
 - 空数据返回 0
-- 透传表（truck_usage）的 date 过滤（NULL 保留、超期剔除）
+- 透传型 full summary 表的 date 过滤（NULL 保留、超期剔除）
+- 透传型 full summary 表在 DB 内 INSERT SELECT，不再经 pandas chunk 搬运
 
 无可达 DB 时整体 skip，不阻塞 CI。所有写入使用唯一 run_id，结束后按 run_id 清理，
 不污染既有数据，也不动 module1..6 的真实业务行。
@@ -28,10 +29,20 @@ _SOURCE_TABLES = [
     "module1_output_orderlog",
     "module1_output_shipmentlog",
     "module1_output_cutlog",
+    "module4_output_changeoverlog",
+    "module4_output_capacityexceed",
+    "module4_output_productionplan",
+    "module5_output_deploymentplan",
+    "module6_output_deliveryplan",
     "module6_output_truckusagelog",
 ]
 _SUMMARY_TABLES = [
     "summary_output_ordershipmentcutsummary",
+    "summary_output_fullchangeoverlog",
+    "summary_output_fullcapacityexceed",
+    "summary_output_fullproductionplan",
+    "summary_output_fulldeploymentplan",
+    "summary_output_fulldeliveryplan",
     "summary_output_fulltruckusage",
 ]
 
@@ -235,6 +246,154 @@ class SummarySqlPushdownTests(unittest.TestCase):
         kept = set(out["truck_id"].tolist())
         self.assertEqual(kept, {"T1", "T3"})
         self.assertNotIn("T2", kept)
+
+    def test_full_summary_tables_use_insert_select_without_pandas_chunks(self):
+        """6 张 full summary 表应在 DB 内透传生成，不再通过 pandas chunk 写入。"""
+        run_id = self._new_run_id()
+        config_name = "TEST_FULL_SQL_ONLY"
+
+        cases = [
+            (
+                "module4_output_changeoverlog",
+                "summary_output_fullchangeoverlog",
+                "_generate_changeover_summary",
+                pd.DataFrame({
+                    "changeover_end_date": pd.to_datetime(["2025-10-01", "2025-12-31", None]),
+                    "record_id": ["change_ok", "change_late", "change_null"],
+                }),
+            ),
+            (
+                "module4_output_capacityexceed",
+                "summary_output_fullcapacityexceed",
+                "_generate_capacity_exceed_summary",
+                pd.DataFrame({
+                    "date": pd.to_datetime(["2025-10-01", "2025-12-31", None]),
+                    "record_id": ["capacity_ok", "capacity_late", "capacity_null"],
+                }),
+            ),
+            (
+                "module4_output_productionplan",
+                "summary_output_fullproductionplan",
+                "_generate_production_plan_summary",
+                pd.DataFrame({
+                    "available_date": pd.to_datetime(["2025-10-01", "2025-12-31", None]),
+                    "record_id": ["production_ok", "production_late", "production_null"],
+                }),
+            ),
+            (
+                "module5_output_deploymentplan",
+                "summary_output_fulldeploymentplan",
+                "_generate_deployment_plan_summary",
+                pd.DataFrame({
+                    "deployment_date": pd.to_datetime(["2025-10-01", "2025-12-31", None]),
+                    "record_id": ["deployment_ok", "deployment_late", "deployment_null"],
+                }),
+            ),
+            (
+                "module6_output_deliveryplan",
+                "summary_output_fulldeliveryplan",
+                "_generate_delivery_plan_summary",
+                pd.DataFrame({
+                    "actual_ship_date": pd.to_datetime(["2025-10-01", "2025-12-31", None]),
+                    "record_id": ["delivery_ok", "delivery_late", "delivery_null"],
+                }),
+            ),
+            (
+                "module6_output_truckusagelog",
+                "summary_output_fulltruckusage",
+                "_generate_truck_usage_summary",
+                pd.DataFrame({
+                    "date": pd.to_datetime(["2025-10-01", "2025-12-31", None]),
+                    "record_id": ["truck_ok", "truck_late", "truck_null"],
+                }),
+            ),
+        ]
+
+        for source_table, _, _, df in cases:
+            self._insert(source_table, df, run_id, config_name)
+
+        writer = ModuleDataWriter(db=self.db, config_name=config_name)
+        original_iter_query_chunks = self.db.iter_query_chunks
+        original_create_table_from_df = self.db.create_table_from_df
+
+        def _fail_iter_query_chunks(*args, **kwargs):
+            raise AssertionError("full summary should not read pandas chunks")
+
+        def _fail_create_table_from_df(*args, **kwargs):
+            raise AssertionError("full summary should not write pandas DataFrames")
+
+        self.db.iter_query_chunks = _fail_iter_query_chunks
+        self.db.create_table_from_df = _fail_create_table_from_df
+        try:
+            for _, target_table, method_name, _ in cases:
+                generate = getattr(writer, method_name)
+                n1 = generate(run_id, pd.to_datetime("2025-12-30"), if_exists="replace")
+                n2 = generate(run_id, pd.to_datetime("2025-12-30"), if_exists="replace")
+                self.assertEqual(n1, 2)
+                self.assertEqual(n2, 2)
+
+                out = self._read_summary(target_table, run_id)
+                self.assertEqual(len(out), 2)
+                kept = set(out["record_id"].tolist())
+                self.assertTrue(any(record.endswith("_ok") for record in kept))
+                self.assertTrue(any(record.endswith("_null") for record in kept))
+                self.assertFalse(any(record.endswith("_late") for record in kept))
+                self.assertEqual(set(out["config_name"].tolist()), {config_name})
+                self.assertFalse(out["db_write_time"].isna().any())
+        finally:
+            self.db.iter_query_chunks = original_iter_query_chunks
+            self.db.create_table_from_df = original_create_table_from_df
+
+    def test_passthrough_overrides_config_name_and_isolates_runs(self):
+        """SQL-only 透传：config_name 用当前 writer 覆盖源表旧值；replace 只删当前 run_id。"""
+        run_a = self._new_run_id()
+        run_b = self._new_run_id()
+        usage_a = pd.DataFrame({
+            "date": pd.to_datetime(["2025-10-01", "2025-10-02"]),
+            "truck_id": ["A1", "A2"],
+        })
+        usage_b = pd.DataFrame({
+            "date": pd.to_datetime(["2025-10-03"]),
+            "truck_id": ["B1"],
+        })
+        # 源表里写入"旧"的 config_name，summary 应改用 writer 的新 config_name
+        self._insert("module6_output_truckusagelog", usage_a, run_a, "SOURCE_OLD_CFG")
+        self._insert("module6_output_truckusagelog", usage_b, run_b, "SOURCE_OLD_CFG")
+
+        writer = ModuleDataWriter(db=self.db, config_name="WRITER_NEW_CFG")
+        n_a = writer._generate_truck_usage_summary(
+            run_a, pd.to_datetime("2025-12-30"), if_exists="replace"
+        )
+        n_b = writer._generate_truck_usage_summary(
+            run_b, pd.to_datetime("2025-12-30"), if_exists="replace"
+        )
+        self.assertEqual(n_a, 2)
+        self.assertEqual(n_b, 1)
+
+        out_a = self._read_summary("summary_output_fulltruckusage", run_a)
+        # config_name 覆盖为 writer 的值，而非源表的 SOURCE_OLD_CFG
+        self.assertEqual(set(out_a["config_name"]), {"WRITER_NEW_CFG"})
+        self.assertTrue(out_a["db_write_time"].notna().all())
+        self.assertEqual(set(out_a["run_id"]), {run_a})
+
+        # 重新生成 run_a（replace）：run_b 不被误删，run_a 不重复累加
+        writer._generate_truck_usage_summary(
+            run_a, pd.to_datetime("2025-12-30"), if_exists="replace"
+        )
+        out_b = self._read_summary("summary_output_fulltruckusage", run_b)
+        self.assertEqual(len(out_b), 1)
+        self.assertEqual(set(out_b["truck_id"]), {"B1"})
+        out_a2 = self._read_summary("summary_output_fulltruckusage", run_a)
+        self.assertEqual(len(out_a2), 2)
+
+    def test_passthrough_returns_zero_when_no_source_rows(self):
+        """源表无该 run_id 数据时返回 0，不写入垃圾行。"""
+        run_id = self._new_run_id()
+        writer = ModuleDataWriter(db=self.db, config_name="TEST_NO_ROWS")
+        n = writer._generate_capacity_exceed_summary(
+            run_id, pd.to_datetime("2025-12-30"), if_exists="replace"
+        )
+        self.assertEqual(n, 0)
 
 
 if __name__ == "__main__":

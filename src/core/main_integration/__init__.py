@@ -1,29 +1,15 @@
 """
-main_integration 包
+main_integration package.
 
-供应链集成仿真编排模块。
-
-导出当前 main_integration 包的公共 API。
+Exports the public integration APIs lazily so package initialization does not
+pull in simulation_file/simulation_db and create import cycles with orchestrator.
 """
 
 import sys
 from pathlib import Path
+from typing import Any
 
-# 将父级目录加入路径以支持导入
 sys.path.insert(0, str(Path(__file__).parent.parent))
-
-# 核心仿真函数
-from .simulation_file import run_integrated_simulation
-from .simulation_db import run_integrated_simulation_from_dict
-
-# 配置加载
-from .config_loader import load_configuration, load_configuration_from_dict
-
-# 断点续跑函数
-from .resume import check_resume_capability
-
-# CLI 入口
-from .cli import main
 
 __all__ = [
     "run_integrated_simulation",
@@ -33,3 +19,30 @@ __all__ = [
     "check_resume_capability",
     "main",
 ]
+
+
+def __getattr__(name: str) -> Any:
+    if name == "run_integrated_simulation":
+        from .simulation_file import run_integrated_simulation
+
+        return run_integrated_simulation
+    if name == "run_integrated_simulation_from_dict":
+        from .simulation_db import run_integrated_simulation_from_dict
+
+        return run_integrated_simulation_from_dict
+    if name in {"load_configuration", "load_configuration_from_dict"}:
+        from .config_loader import load_configuration, load_configuration_from_dict
+
+        return {
+            "load_configuration": load_configuration,
+            "load_configuration_from_dict": load_configuration_from_dict,
+        }[name]
+    if name == "check_resume_capability":
+        from .resume import check_resume_capability
+
+        return check_resume_capability
+    if name == "main":
+        from .cli import main
+
+        return main
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

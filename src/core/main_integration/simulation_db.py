@@ -16,7 +16,7 @@ from typing import Any, Dict, Optional
 logger = logging.getLogger("SupplyChainSimulation")
 
 from .. import orchestrator
-from ..orchestrator import create_orchestrator
+from ..orchestrator import create_orchestrator, Orch
 from ...utils.time_manager import initialize_time_manager
 from ...services.summary_report_generator import SummaryReportGenerator
 from ...modules import module1, module3, module4, module5, module6
@@ -165,6 +165,20 @@ def run_integrated_simulation_from_dict(
         start_date=start_date,
         output_dir=str(orchestrator_output_dir)
     )
+    # 初始化新Orchestrator类
+    orch_new = Orch(start_date = start_date, end_date = end_date, config_path = 'None', output_path = output_base_dir, config_dict=config_dict)
+    orch_new.load_datas('M1')
+
+    # 实例化M1
+    m1 = module1.ModuleOne(
+        simulation_date=str(start_date),
+        output_dir=orch_new.get_output('module1'),
+        orchestrator=orch,
+        orch=orch_new,
+        engine='polars',
+    )
+    m1.prepare()
+
     # 设置 open deployment 的清理天数，与文件模式保持一致（100天）
     orch.set_past_due_cleanup_grace_days(100)
     # ===== 断点续跑 / 全新运行 分支 =====
@@ -402,13 +416,10 @@ def run_integrated_simulation_from_dict(
             # ========== M1: 订单生成 ==========
             try:
                 logger.info("1️⃣ 运行 Module1 - 订单生成")
-                m1_result = module1.run_daily_order_generation(
-                    config_dict=config_dict,
-                    simulation_date=current_date,
-                    output_dir=str(module_outputs['module1']),
-                    orchestrator=orch,
-                    previous_orders_df=m1_previous_orders  # 🔧 修复：传递历史订单
-                )
+                
+                m1.simulation_date = current_date
+                m1.run()
+                m1_result = m1.output()
                 m1_shipments = m1_result.get('shipment_df', pd.DataFrame())
                 
                 if not m1_shipments.empty:

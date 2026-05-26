@@ -131,20 +131,21 @@ class _PandasBackend:
         )
         ao_config_summary = ao_config.groupby(
             ["material", "location"]
-        ).agg(ao_percent_sum=("ao_percent", "sum")).reset_index()
+        ).agg(ao_percent=("ao_percent", "sum")).reset_index()
 
         ao_config["order_type"] = "AO"
         ao_config.rename(columns={"ao_percent": "percent"}, inplace=True)
 
-        ao_config_summary["ao_type"] = "AO"
-        ao_config_summary["normal_percent"] = 1 - ao_config_summary["ao_percent_sum"].clip(0, 1)
-        ao_config_summary["normal_type"] = "normal"
+        ao_config_summary["order_type"] = "AO"
+
+        ao_config_summary_normal = ao_config_summary.copy()
+        ao_config_summary_normal["ao_percent"] = 1 - ao_config_summary_normal["ao_percent"].clip(0, 1)
+        ao_config_summary_normal = ao_config_summary_normal[ao_config_summary_normal['ao_percent']>0]
+        ao_config_summary_normal["order_type"] = "normal"
 
         ao_config_summary = pd.concat([
-            ao_config_summary[["material", "location", "ao_type", "ao_percent_sum"]].rename(
-                columns={"ao_type": "order_type", "ao_percent_sum": "ao_percent"}),
-            ao_config_summary[["material", "location", "normal_type", "normal_percent"]].rename(
-                columns={"normal_type": "order_type", "normal_percent": "ao_percent"})
+            ao_config_summary[["material", "location", "order_type", "ao_percent"]],
+            ao_config_summary_normal[["material", "location", "order_type", "ao_percent"]]
         ])
         self._ao_config = ao_config  # 缓存修改后的版本，供下游 split_ao_by_advance_days 使用
         return ao_config, ao_config_summary
@@ -261,8 +262,11 @@ class _PandasBackend:
 
     def split_by_ao_and_apply_error(self, demand_forecast_total, ao_config_summary):
         df = pd.merge(demand_forecast_total, ao_config_summary, on=["material", "location"], how="left")
+        # df = df.dropna(subset='order_type')
         df["order_type"] = df["order_type"].fillna("normal")
         df["ao_percent"] = df["ao_percent"].fillna(1)
+        df = df[df['quantity_total']>0]
+        
         df["split_quantity"] = df["ao_percent"] * df["quantity_total"]
 
         df = pd.merge(df, self.forecast_error, on=["material", "location", "order_type"], how="left")
@@ -591,7 +595,7 @@ class _PolarsBackend:
         ao_config_summary = (
             ao_config
             .group_by(["material", "location"])
-            .agg(ao_percent_sum=pl.col("ao_percent").sum())
+            .agg(ao_percent=pl.col("ao_percent").sum())
         )
 
         ao_config = ao_config.with_columns(
@@ -599,22 +603,21 @@ class _PolarsBackend:
         ).rename({"ao_percent": "percent"})
 
         ao_config_summary = ao_config_summary.with_columns(
-            pl.lit("AO").alias("ao_type"),
-            (1 - pl.col("ao_percent_sum").clip(0, 1)).alias("normal_percent"),
-            pl.lit("normal").alias("normal_type"),
+            pl.lit("AO").alias("order_type"),
         )
 
-        part_ao = ao_config_summary.select(
-            "material", "location",
-            pl.col("ao_type").alias("order_type"),
-            pl.col("ao_percent_sum").alias("ao_percent"),
+        ao_config_summary_normal = ao_config_summary.with_columns(
+            (1 - pl.col("ao_percent").clip(0, 1)).alias("ao_percent"),
+        ).filter(
+            pl.col("ao_percent") > 0,
+        ).with_columns(
+            pl.lit("normal").alias("order_type"),
         )
-        part_normal = ao_config_summary.select(
-            "material", "location",
-            pl.col("normal_type").alias("order_type"),
-            pl.col("normal_percent").alias("ao_percent"),
-        )
-        ao_config_summary = pl.concat([part_ao, part_normal], how="vertical")
+
+        ao_config_summary = pl.concat([
+            ao_config_summary.select("material", "location", "order_type", "ao_percent"),
+            ao_config_summary_normal.select("material", "location", "order_type", "ao_percent"),
+        ], how="vertical")
 
         self._ao_config = ao_config  # 缓存修改后的版本，供下游 split_ao_by_advance_days 使用
         return ao_config, ao_config_summary
@@ -759,6 +762,7 @@ class _PolarsBackend:
             pl.col("order_type").fill_null("normal"),
             pl.col("ao_percent").fill_null(1),
         ])
+        df = df.filter(pl.col("quantity_total") > 0)
         df = df.with_columns(
             (pl.col("ao_percent") * pl.col("quantity_total")).alias("split_quantity"),
         )

@@ -49,14 +49,14 @@ _M1_SCHEMA = {
 }
 
 class Orchestrator:
-    def __init__(self, start_date, end_date, config_path, output_path):
+    def __init__(self, start_date, end_date, config_path, output_path, config_dict=None):
         self.start_date = start_date if isinstance(start_date, date) else pd.Timestamp(start_date).date()
         self.end_date = end_date if isinstance(end_date, date) else pd.Timestamp(end_date).date()
         self.datas = None
         self.config_path = config_path
         self.output_path = output_path
         self.module_idx = [1, 3, 4, 5, 6]
-        self.all_config = load_configuration(self.config_path)
+        self.all_config = load_configuration(self.config_path) if config_dict is None else config_dict
         set_module_seeds(self.all_config)
         self.build_output_folder()
         self.all_results = {}

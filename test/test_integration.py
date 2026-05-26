@@ -75,6 +75,9 @@ def run_integrated_simulation(
     if 'Global_SpaceCapacity' in config_dict and not config_dict['Global_SpaceCapacity'].empty:
         orchestrator.set_space_capacity(config_dict['Global_SpaceCapacity'])
 
+    orch = Orch(start_date = start_date, end_date = end_date, config_path = 'None', output_path = output_base_dir, config_dict=config_dict)
+    orch.load_datas('M1')
+
     # 生成仿真日期范围
     sim_dates = pd.date_range(actual_start_date, end_date, freq='D')
     logger.info(f"📅 仿真日期范围: {len(sim_dates)} 天")
@@ -131,15 +134,15 @@ def run_integrated_simulation(
 
         logger.info("1️⃣ 运行 Module1 - 订单生成")
         try:
-            m1_result = module1.run_daily_order_generation_refactor(
-                config_dict=config_dict,
-                simulation_date=current_date,
-                output_dir=str(module_outputs['module1']),
-                orchestrator=orchestrator,engine='polars',verbose=True
-            )
-
+            m1_result = module1.run_daily_order_generation(
+                    config_dict=config_dict,
+                    simulation_date=current_date,
+                    output_dir=str(module_outputs['module1']),
+                    orchestrator=orchestrator
+                )
+                
             m1_shipments = m1_result.get('shipment_df', pd.DataFrame())
-
+            
             if not m1_shipments.empty:
                 logger.info("🚚 立即处理M1 shipment，扣减库存...")
                 m1_shipments_normalized = normalize_identifiers(m1_shipments)
@@ -233,7 +236,7 @@ def run_integrated_simulation_refactor(
         output_dir=orch.get_output('module1'),
         orchestrator=orchestrator,
         orch=orch,
-        engine='polars',
+        engine='pandas',
     )
     m1.prepare()
 

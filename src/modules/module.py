@@ -46,7 +46,7 @@ class TimedMeta(ABCMeta):
 
 
 class Module(ABC, metaclass=TimedMeta):
-    _timed_exclude = {'run', 'output'}
+    _timed_exclude = {'run', 'output', 'validate_data'}
 
     def __init__(self, simulation_date, orchestrator, module_config, verbose=False):
         self.simulation_date = simulation_date

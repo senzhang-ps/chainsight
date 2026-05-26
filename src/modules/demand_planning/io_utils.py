@@ -154,7 +154,7 @@ def save_module1_output_with_supply_demand(
     supply_demand_df: pd.DataFrame,
     output_file: str,
     cut_df: pd.DataFrame,
-    summary_df: pd.DataFrame
+    summary_df=None
 ) -> None:
     """将Module1输出写入Excel文件。
 
@@ -199,8 +199,10 @@ def save_module1_output_with_supply_demand(
                 writer, sheet_name='SupplyDemandLog', index=False
             )
 
-            # summary = _build_summary(orders_df, shipment_df, cut_out, supply_demand_df)
-            normalize_identifiers(summary).to_excel(
+            if summary_df is None:
+                summary_df = _build_summary(orders_df, shipment_df, cut_out, supply_demand_df)
+
+            normalize_identifiers(summary_df).to_excel(
                 writer, sheet_name='Summary', index=False
             )
 

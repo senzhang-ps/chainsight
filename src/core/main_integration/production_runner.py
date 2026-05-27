@@ -146,8 +146,10 @@ def run_daily_production_planning_integrated(
         cap_df = m4_config['M4_LineCapacity'].copy()
         cap_df['date'] = pd.to_datetime(cap_df['date'])
         
-        rate_map = mlcfg.set_index(['material', 'delegate_line'])['prd_rate']
-        rate_map.index.set_names(['material', 'line'], inplace=True)
+        rate_map = mlcfg.set_index(
+            ['material', 'location', 'delegate_line']
+        )['prd_rate']
+        rate_map.index.set_names(['material', 'location', 'line'], inplace=True)
         
         # 加载前一天产线状态用于跨天转产连续性
         if previous_line_states_override is not None:
@@ -221,11 +223,7 @@ def run_daily_production_planning_integrated(
                 base_output_file, simulation_date
             )
             logger.info(f"Module4 每日输出已生成: {daily_output_path}")
-        
-        # 返回完整的Module4结果（包含所有输出表）
-        # production_df 与 Dev 版本一致：只返回当日及未来可用的生产
-        # 🔧 修复：不对 production_df 应用 normalize_identifiers
-        # Dev 版本的 M4 输出 Excel 使用原始 location（如 386），不做 zfill(4)
+
         # normalize_identifiers 仅在传入 orchestrator 时由调用方应用
         production_df = pd.DataFrame()
         if not plan_log.empty and 'available_date' in plan_log.columns:

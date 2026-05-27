@@ -98,8 +98,6 @@ def run_daily_order_generation(
         # 8) 生成Summary（供数据库模式使用，与Excel保持一致：使用累计订单）
         summary_df = _build_summary_df(all_orders_df, shipment_df, cut_df, supply_demand_df)
 
-        # `orders_df`：累积订单（`all_orders_df`），与本地 Excel 输出保持一致
-        # 本地 _save_output 使用 all_orders_df 写入 `OrderLog` sheet，
         # 数据库模式也应写入累积订单，确保数据库与本地结果完全一致。
         return {
             'orders_df': all_orders_df,  # ✅ 累积订单，与本地 Excel `OrderLog` 一致

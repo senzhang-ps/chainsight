@@ -10,6 +10,8 @@ from typing import Any, Dict, Optional
 
 import pandas as pd
 
+from src.utils.date_safe import parse_mixed_datetime
+
 from .config_loader import load_module1_daily_outputs
 from .mrp_simulation import run_mrp_layered_simulation_daily
 from .utils import normalize_identifiers
@@ -106,8 +108,8 @@ def _load_static_configs(config_dict: Dict[str, pd.DataFrame], skip_normalize: b
     deploy_config_df = config_dict.get('M5_DeployConfig', pd.DataFrame())
 
     # 日期转换
-    safety_stock_df = _convert_dates(safety_stock_df, 'date')
-    network_df = _convert_dates(network_df, 'eff_from', 'eff_to')
+    safety_stock_df = _convert_dates(safety_stock_df, 'M3_SafetyStock', 'date')
+    network_df = _convert_dates(network_df, 'Global_Network', 'eff_from', 'eff_to')
 
     # 标识符规范化（来自main_integration的数据已被规范化，可跳过）
     if not skip_normalize:
@@ -125,13 +127,13 @@ def _load_static_configs(config_dict: Dict[str, pd.DataFrame], skip_normalize: b
     }
 
 
-def _convert_dates(df: pd.DataFrame, *cols) -> pd.DataFrame:
+def _convert_dates(df: pd.DataFrame, context_prefix: str, *cols) -> pd.DataFrame:
     """转换日期列。"""
     if df.empty:
         return df
     for col in cols:
         if col in df.columns:
-            df[col] = pd.to_datetime(df[col])
+            df[col] = parse_mixed_datetime(df[col], f"{context_prefix}.{col}")
     return df
 
 

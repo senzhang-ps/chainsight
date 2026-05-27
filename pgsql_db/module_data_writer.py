@@ -102,6 +102,7 @@ class ModuleDataWriter:
             'summary_output_fulldeploymentplan',
             'summary_output_fulldeliveryplan',
             'summary_output_fulltruckusage',
+            'summary_historical_inventory_record',
             # 编排器状态表
             'orchestrator_unrestricted_inventory',
             'orchestrator_open_deployment',
@@ -179,6 +180,7 @@ class ModuleDataWriter:
         'summary_output_fulldeploymentplan',
         'summary_output_fulldeliveryplan',
         'summary_output_fulltruckusage',
+        'summary_historical_inventory_record',
         # 编排器状态表
         'orchestrator_unrestricted_inventory',
         'orchestrator_open_deployment',
@@ -786,6 +788,7 @@ class ModuleDataWriter:
             'summary_output_fulldeploymentplan',
             'summary_output_fulldeliveryplan',
             'summary_output_fulltruckusage',
+            'summary_historical_inventory_record',
             # 编排器状态表
             'orchestrator_unrestricted_inventory',
             'orchestrator_open_deployment',
@@ -960,6 +963,16 @@ class ModuleDataWriter:
                 for df_key, table_name in df_mapping.items():
                     df = day_result.get(df_key)
                     if df is not None and isinstance(df, pd.DataFrame):
+                        if df_key == 'unfulfilled_log':
+                            try:
+                                _sl = int((df['sending'] == df['receiving']).sum()) \
+                                    if not df.empty and 'sending' in df.columns else 0
+                            except Exception:
+                                _sl = -1
+                            _summary_logger.info(
+                                f"[PROBE-A] batch_results day unfulfilled_log rows={len(df)} "
+                                f"(self_loop={_sl}) sim_date={day_sim_date}"
+                            )
                         df = df.copy()
                         if module_name == 'module1' and df_key == 'orders_df':
                             df = self._filter_module1_orders_for_day(df, day_sim_date)
@@ -976,6 +989,34 @@ class ModuleDataWriter:
                 if not dfs:
                     continue
                 combined_df = pd.concat(dfs, ignore_index=True)
+                if table_name == 'module5_output_unfulfilledlog':
+                    _summary_logger.info(
+                        f"[PROBE-A] concat module5_output_unfulfilledlog rows={len(combined_df)}"
+                    )
+                # 方案B：module4 两张表与本地文件输出（output_writer.write_output）套同一列 schema，
+                # 否则 DB 表会缺 changeover 三列、且 capacityexceed 串成
+                # production_plan_date/unmet_uncon_planned_qty（仅 DB 写入层对齐，不影响 module5 共享结果）。
+                if table_name in ('module4_output_productionplan', 'module4_output_capacityexceed'):
+                    from src.modules.production_planning.constants import (
+                        PLAN_COLUMNS,
+                        EXCEED_COLUMNS,
+                    )
+                    _schema = list(
+                        PLAN_COLUMNS
+                        if table_name == 'module4_output_productionplan'
+                        else EXCEED_COLUMNS
+                    )
+                    # 补齐 schema 业务列（缺则空），丢弃不在 schema 的多余业务列，
+                    # 但务必保留已存在的元数据列（尤其 sim_date，否则按 sim_date 过滤会查不到行）。
+                    for _col in _schema:
+                        if _col not in combined_df.columns:
+                            combined_df[_col] = pd.Series(dtype='object', index=combined_df.index)
+                    _meta_keep = [
+                        c for c in combined_df.columns
+                        if c not in _schema
+                        and c in ('sim_date', 'file_date', 'run_id', 'config_name', 'db_write_time')
+                    ]
+                    combined_df = combined_df[_schema + _meta_keep]
                 if 'sim_date' not in combined_df.columns:
                     combined_df['sim_date'] = pd.Series(dtype='string')
                 if run_id:
@@ -2045,8 +2086,35 @@ class ModuleDataWriter:
             where=where_sql,
         )
         if dedup:
-            base_select = sql.SQL("SELECT DISTINCT * FROM ({base}) dedup_src").format(
-                base=base_select
+            # 订单全局去重（跨 simulation_date）：每个唯一订单
+            # (date, material, location, quantity[, demand_type]) 仅保留“首次出现”，
+            # 即最早的 simulation_date。与本地 _generate_order_shipment_report.drop_seen_orders
+            # 的全局 seen-set 口径一致（本地按日期升序处理文件，首次=最早 sim_date）。
+            # 此前用 `DISTINCT *`（去重键含 simulation_date）会把同一订单在每个 sim_date 各留一份，
+            # 导致 OSC 行数偏多（DB 58908 vs 本地 56128）。
+            _partition_items = [
+                sql.SQL("date"),
+                sql.SQL("material"),
+                sql.SQL("location"),
+                sql.SQL("quantity"),
+            ]
+            if "demand_type" in cols:
+                _partition_items.append(sql.SQL("demand_type"))
+            base_select = sql.SQL(
+                """
+                SELECT date, material, location, simulation_date, quantity
+                FROM (
+                    SELECT raw.*, ROW_NUMBER() OVER (
+                        PARTITION BY {partition}
+                        ORDER BY simulation_date ASC NULLS LAST
+                    ) AS _osc_rn
+                    FROM ({base}) raw
+                ) ranked
+                WHERE _osc_rn = 1
+                """
+            ).format(
+                partition=sql.SQL(", ").join(_partition_items),
+                base=base_select,
             )
 
         return sql.SQL(

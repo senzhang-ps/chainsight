@@ -13,6 +13,7 @@ from psycopg import sql as psql
 import pandas as pd
 
 from ...utils.normalization import normalize_identifiers
+from ...utils.numeric_safe import coerce_db_float, coerce_db_int
 
 # 复用 src/utils/logger_config.py::DualLogger 创建的同名 logger，
 # 这样消息既能进控制台又能进 simulation_log_*.txt。
@@ -295,21 +296,42 @@ def _atomic_copy_batch(conn, cur, prepared_tables: dict, db) -> None:
         records = df.values.tolist()
         col_name_to_idx = {col: idx for idx, col in enumerate(clean_columns)}
 
-        # 列类型升级：BIGINT → DOUBLE PRECISION（防止浮点截断）
+        # 列类型升级：BIGINT → DOUBLE PRECISION（防止浮点截断）；
+        # 以及 TEXT → BOOLEAN/DOUBLE/BIGINT（修复历史上被误建为 TEXT 的 bool/数值列）。
         _INT_TYPES = {'BIGINT', 'INTEGER', 'SMALLINT', 'INT', 'INT4', 'INT8', 'INT2'}
+        _TEXT_TYPES = {'TEXT', 'VARCHAR', 'CHARACTER VARYING', 'CHAR', 'CHARACTER'}
+        _TEXT_UPGRADE_CAST = {
+            'BOOLEAN': '::BOOLEAN',
+            'DOUBLE PRECISION': '::DOUBLE PRECISION',
+            'BIGINT': '::DOUBLE PRECISION::BIGINT',  # 经 DOUBLE 中转，兼容 '2' 与 '2.0'
+        }
         for cn, ct in list(col_types.items()):
             if cn in col_name_to_idx:
                 col_idx = col_name_to_idx[cn]
                 if col_idx < len(df.columns):
                     df_dtype = df.iloc[:, col_idx].dtype
                     expected_pg = db._pandas_to_pg_type(df_dtype, col_name=cn)
-                    if expected_pg == 'DOUBLE PRECISION' and ct.upper() in _INT_TYPES:
+                    ctu = ct.upper()
+                    if expected_pg == 'DOUBLE PRECISION' and ctu in _INT_TYPES:
                         cur.execute(f'ALTER TABLE "{table_name}" ALTER COLUMN "{cn}" TYPE DOUBLE PRECISION USING "{cn}"::DOUBLE PRECISION')
                         col_types[cn] = 'DOUBLE PRECISION'
+                    elif ctu in _TEXT_TYPES and expected_pg in _TEXT_UPGRADE_CAST:
+                        # 共享事务内用 SAVEPOINT 保护：cast 失败仅回滚本列并保持 TEXT，不废整批
+                        cast = _TEXT_UPGRADE_CAST[expected_pg]
+                        try:
+                            cur.execute('SAVEPOINT sp_text_upg')
+                            cur.execute(f'ALTER TABLE "{table_name}" ALTER COLUMN "{cn}" TYPE {expected_pg} USING "{cn}"{cast}')
+                            cur.execute('RELEASE SAVEPOINT sp_text_upg')
+                            col_types[cn] = expected_pg
+                            logger.info(f'    [UPGRADE] {table_name}.{cn} TEXT→{expected_pg}')
+                        except Exception as exc:
+                            cur.execute('ROLLBACK TO SAVEPOINT sp_text_upg')
+                            logger.warning(f'    [UPGRADE-SKIP] {table_name}.{cn} 保持 TEXT（cast 失败: {exc}）')
 
         int_col_indices = set()
         float_col_indices = set()
         text_col_indices = set()
+        bool_col_indices = set()
         for cn, ct in col_types.items():
             if cn in col_name_to_idx:
                 idx = col_name_to_idx[cn]
@@ -320,22 +342,34 @@ def _atomic_copy_batch(conn, cur, prepared_tables: dict, db) -> None:
                     float_col_indices.add(idx)
                 elif ctu in ('TEXT', 'VARCHAR', 'CHARACTER VARYING', 'CHAR', 'CHARACTER'):
                     text_col_indices.add(idx)
+                elif ctu in ('BOOLEAN', 'BOOL'):
+                    bool_col_indices.add(idx)
 
         for i, row in enumerate(records):
             new_row = []
             for j, val in enumerate(row):
-                if j in int_col_indices:
-                    try:
-                        float_val = float(val)
-                        new_row.append(int(float_val) if np.isfinite(float_val) else 0)
-                    except (ValueError, TypeError, OverflowError):
-                        new_row.append(0)
+                if j in bool_col_indices:
+                    # BOOLEAN 列：兼容 np.bool_/Python bool、历史 'True'/'False' 文本、0/1 数值
+                    if isinstance(val, (bool, np.bool_)):
+                        new_row.append(bool(val))
+                    elif val is None:
+                        new_row.append(None)
+                    elif isinstance(val, str):
+                        s = val.strip().lower()
+                        new_row.append(
+                            True if s in ('true', 't', '1', 'yes', 'y')
+                            else False if s in ('false', 'f', '0', 'no', 'n')
+                            else None
+                        )
+                    else:
+                        try:
+                            new_row.append(None if pd.isna(val) else bool(val))
+                        except (TypeError, ValueError):
+                            new_row.append(None)
+                elif j in int_col_indices:
+                    new_row.append(coerce_db_int(val))
                 elif j in float_col_indices:
-                    try:
-                        float_val = float(val)
-                        new_row.append(float_val if np.isfinite(float_val) else 0.0)
-                    except (ValueError, TypeError, OverflowError):
-                        new_row.append(0.0)
+                    new_row.append(coerce_db_float(val))
                 elif pd.isna(val) if not isinstance(val, str) else False:
                     new_row.append(None)
                 elif j in text_col_indices:

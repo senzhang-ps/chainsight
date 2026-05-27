@@ -389,11 +389,9 @@ def _run_with_database(ns: argparse.Namespace) -> int:
             # 仿真异常时更新 checkpoint 状态为 failed
             logger.error(f"[ERROR] 仿真过程中发生异常: {sim_err}")
             try:
-                from pgsql_db.checkpoint import update_checkpoint_status, load_checkpoint
-                _cp = load_checkpoint(db, config_name)
-                if _cp:
-                    update_checkpoint_status(db, _cp['run_id'], 'failed', error_message=str(sim_err)[:500])
-                    logger.info(f"❌ 运行状态已更新为 failed (run_id={_cp['run_id']})")
+                from pgsql_db.checkpoint import update_checkpoint_status
+                update_checkpoint_status(db, effective_run_id, 'failed', error_message=str(sim_err)[:500])
+                logger.info(f"❌ 运行状态已更新为 failed (run_id={effective_run_id})")
             except Exception:
                 pass  # checkpoint 状态更新失败不影响异常传播
             raise
@@ -577,12 +575,21 @@ def _run_with_database(ns: argparse.Namespace) -> int:
         # 这样断点续跑时能区分“正在运行”与“被中断”，也方便运维排查
         if not _run_completed:
             try:
-                from pgsql_db.checkpoint import load_checkpoint, update_checkpoint_status
-                _cp = load_checkpoint(db, config_name)
-                if _cp and _cp.get('status') == 'running':
-                    update_checkpoint_status(db, _cp['run_id'], 'interrupted',
-                                             error_message='进程异常退出（kill / crash / KeyboardInterrupt）')
-                    logger.info(f"checkpoint 状态已更新为 interrupted（run_id={_cp['run_id']}）")
+                from pgsql_db.checkpoint import update_checkpoint_status
+                _target_run_id = locals().get('effective_run_id')
+                if _target_run_id:
+                    _status_rows = db.execute_query(
+                        "SELECT COALESCE(status, 'running') FROM sim_checkpoint WHERE run_id = %s",
+                        (_target_run_id,),
+                    )
+                    if _status_rows and _status_rows[0][0] == 'running':
+                        update_checkpoint_status(
+                            db,
+                            _target_run_id,
+                            'interrupted',
+                            error_message='进程异常退出（kill / crash / KeyboardInterrupt）',
+                        )
+                        logger.info(f"checkpoint 状态已更新为 interrupted（run_id={_target_run_id}）")
             except Exception:
                 pass  # 连接已关闭或 DB 不可用时静默忽略
         # 正常或异常退出时显式释放并发锁

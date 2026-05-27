@@ -15,6 +15,7 @@ from typing import Dict, Optional
 
 import pandas as pd
 
+from ...utils.date_safe import parse_mixed_datetime
 from ...utils.normalization import normalize_identifiers
 from .constants import (
     DATE_FIELDS_MAP,
@@ -592,7 +593,10 @@ def _process_date_fields(config: dict) -> None:
             continue
         for f in fields:
             if f in config[sheet].columns:
-                config[sheet][f] = pd.to_datetime(config[sheet][f])
+                config[sheet][f] = parse_mixed_datetime(
+                    config[sheet][f],
+                    f"Module5.{sheet}.{f}",
+                )
 
 
 def load_integrated_config(
@@ -648,8 +652,14 @@ def load_integrated_config(
     if orchestrator and current_date:
         _load_production_from_orchestrator(orchestrator, current_date, config)
     
-    # 3.2 合并module4_result中的未来生产计划（仅在DB模式下）
-    if module4_result is not None and 'production_df' in module4_result:
+    # 3.2 当日 production GR 为空时，才从 module4_result 补充生产计划（仅 DB 模式）。
+    # 与文件模式同一门控：文件模式仅在 config['ProductionPlan'] 为空时才读 Module4 文件
+    # （见 3.3）。此前本分支**无条件**合并“未来生产计划”，使 Module5 自环供给池
+    # future_production 比文件模式多出未来产量——实测 2025-10-16 A888 自环
+    # deploy_from_future_production：文件=0、DB=27088——导致 A888 自环 deployed_qty 与
+    # UnfulfilledLog 与文件/archive 基准系统性不一致。加上 `.empty` 门控后，当日有 GR 时
+    # 两种模式的 ProductionPlan 均仅含当日 GR、future_production 同为空，行为对齐基准。
+    if config['ProductionPlan'].empty and module4_result is not None and 'production_df' in module4_result:
         production_df = module4_result['production_df']
         if isinstance(production_df, pd.DataFrame) and not production_df.empty:
             future_prod = production_df.copy()

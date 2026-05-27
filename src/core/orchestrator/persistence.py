@@ -26,6 +26,12 @@ class OrchestratorPersistenceMixin:
         Args:
             date: 日期（YYYY-MM-DD）
         """
+        # 数据库模式（persist_to_disk=False）不落盘 orchestrator CSV：
+        # 入库改由 db_helpers.prepare_orchestrator_day_dataframes_from_orch
+        # 从相同的 orchestrator 视图（get_*_view / *_by_date 字典）构建 DataFrame，
+        # 与本方法写出的 CSV 同源等价，因此跳过写文件不影响入库数据。
+        if not getattr(self, 'persist_to_disk', True):
+            return
         date_str = (
             pd.to_datetime(date).strftime('%Y%m%d')
         )

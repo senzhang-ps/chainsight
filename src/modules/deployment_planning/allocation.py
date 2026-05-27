@@ -4,10 +4,24 @@
 
 提供库存分配、MOQ/RV应用、优先级分配等功能。
 """
+import logging
+import os
 from typing import Dict, List
 
 import numpy as np
 import pandas as pd
+
+# 自环（sending==receiving）未满足量诊断探针：默认关闭，零开销。
+# 设置环境变量 CHAINSIGHT_SELFLOOP_PROBE=1 后，会在每个自环节点记录三类供给池
+# (in_transit/open_deployment_inbound/future_production) 与分配前后缺口，
+# 用于定位 DB 模式与本地模式 UnfulfilledLog 行数差异源自哪个供给池。
+_SELFLOOP_PROBE_ENABLED = (
+    os.environ.get("CHAINSIGHT_SELFLOOP_PROBE", "").strip()
+    not in ("", "0", "false", "False", "no", "No")
+)
+_selfloop_probe_logger = logging.getLogger(
+    "SupplyChainSimulation.selfloop_probe"
+)
 
 
 def apply_moq_rv(
@@ -317,6 +331,11 @@ def allocate_pipeline_supply(
         pool_odi = int(open_deployment_inbound.get(node_key, 0) or 0)
         pool_future_production = int(future_production.get(node_key, 0) or 0)
 
+        # 探针：分配前缺口总量与待满足行数（自环行）
+        if _SELFLOOP_PROBE_ENABLED:
+            _gap_before = float(self_df['raw_gap'].sum())
+            _rows_gap_before = int((self_df['raw_gap'] > 0).sum())
+
         def _alloc_source(df_src, pool, col_name):
             """分配单一来源的供给。"""
             if pool <= 0 or df_src.empty:
@@ -353,6 +372,23 @@ def allocate_pipeline_supply(
         self_df, used_future = _alloc_source(
             self_df, pool_future_production - used_odi, 'alloc_future'
         )
+
+        # 探针：分配后剩余缺口 = 自环 UnfulfilledLog 行来源。
+        # 比对 DB 模式与本地模式同一 (sim_date, node) 的三池取值，
+        # 即可定位 511465 vs 513212 差异源自哪个供给池。
+        if _SELFLOOP_PROBE_ENABLED:
+            _gap_after = float(self_df['raw_gap'].sum())
+            _rows_gap_after = int((self_df['raw_gap'] > 0).sum())
+            _selfloop_probe_logger.info(
+                "[SELFLOOP-PROBE] node=%s loc=%s "
+                "pool_in_transit=%d pool_odi=%d pool_future_production=%d "
+                "gap_before=%.0f gap_after=%.0f "
+                "rows_gap_before=%d rows_unfulfilled_after=%d",
+                node_key, location,
+                pool_in_transit, pool_odi, pool_future_production,
+                _gap_before, _gap_after,
+                _rows_gap_before, _rows_gap_after,
+            )
 
         # 更新cover
         self_df['plan_order_cover'] = (

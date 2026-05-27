@@ -15,6 +15,7 @@ from ...utils.normalization import (
     normalize_receiving,
     normalize_sending,
 )
+from ...utils.numeric_safe import safe_int_series
 
 
 class OrchestratorProcessorsMixin:
@@ -126,8 +127,10 @@ class OrchestratorProcessorsMixin:
             tmp['location'] = tmp['location'].apply(
                 normalize_location
             )
-            tmp['quantity'] = (
-                tmp['quantity'].fillna(0).astype(int)
+            tmp['quantity'] = safe_int_series(
+                tmp['quantity'],
+                context="orchestrator.production_plan_backlog.quantity",
+                default=0,
             )
 
             # 新增：用于精确去重的维度
@@ -182,10 +185,10 @@ class OrchestratorProcessorsMixin:
                 ['material', 'location', 'available_date'],
                 as_index=False,
             ).agg({'quantity': 'sum'})
-            aggregated['quantity'] = (
-                aggregated['quantity']
-                .fillna(0)
-                .astype(int)
+            aggregated['quantity'] = safe_int_series(
+                aggregated['quantity'],
+                context="orchestrator.production_plan_backlog.aggregated_quantity",
+                default=0,
             )
 
             self.production_plan_backlog = (

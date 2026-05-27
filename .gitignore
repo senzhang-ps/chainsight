@@ -33,6 +33,7 @@ MANIFEST
 .pytest_cache/
 .coverage
 htmlcov/
+tests/
 
 # IDEs
 .vscode/
@@ -81,6 +82,9 @@ archive/ChainSight_Dev/**/run_*/
 # OpenCode (local agent context, not shared)
 .opencode/
 AGENTS.md
+
+# CodeGraph local index
+.codegraph/
 
 # Sisyphus plans
 .sisyphus/

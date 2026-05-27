@@ -42,16 +42,104 @@ _M1_ORDER_DATE_COLS = {
     'sim_date',
 }
 
+_M1_ORDER_DB_META_COLS = {
+    'run_id',
+    'sim_date',
+    'config_name',
+    'db_write_time',
+    'file_date',
+}
 
-def _load_m1_previous_orders_from_db(db, run_id: str, last_batch_end: str) -> pd.DataFrame:
-    """从DB orderlog回退恢复Module1历史订单，并保留原始列名。"""
-    fallback_sql = (
-        "SELECT * FROM module1_output_orderlog "
-        "WHERE run_id = %s AND sim_date <= %s"
+_CHECKPOINT_PAYLOAD_TABLES = (
+    'module1_output_orderlog',
+    'module1_output_shipmentlog',
+    'module1_output_cutlog',
+    'module1_output_supplydemandlog',
+    'module1_output_summary',
+    'module3_output_netdemand',
+    'module4_output_productionplan',
+    'module4_output_capacityexceed',
+    'module4_output_validation',
+    'module4_output_changeoverlog',
+    'module5_output_deploymentplan',
+    'module5_output_unfulfilledlog',
+    'module5_output_stockonhandlog',
+    'module5_output_validation',
+    'module6_output_deliveryplan',
+    'module6_output_vehiclelog',
+    'module6_output_truckusagelog',
+    'module6_output_unsatisfiedmdqlog',
+    'module6_output_validationlog',
+    'module6_output_bypassrulehitlog',
+    'orchestrator_unrestricted_inventory',
+    'orchestrator_open_deployment',
+    'orchestrator_planning_intransit',
+    'orchestrator_space_quota',
+    'orchestrator_delivery_gr',
+    'orchestrator_production_gr',
+    'orchestrator_production_plan_backlog',
+    'orchestrator_shipment_log',
+    'orchestrator_delivery_shipment_log',
+    'orchestrator_inventory_change_log',
+    'orchestrator_daily_logs',
+)
+
+
+def _checkpoint_has_committed_payload(db, run_id: str, last_batch_end: str) -> bool:
+    """Return True if any module/orchestrator rows were committed for this checkpoint."""
+    meta = db.execute_query_df(
+        """
+        SELECT table_name,
+               bool_or(column_name = 'run_id') AS has_run_id,
+               bool_or(column_name = 'sim_date') AS has_sim_date
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = ANY(%s)
+          AND column_name IN ('run_id', 'sim_date')
+        GROUP BY table_name
+        """,
+        (list(_CHECKPOINT_PAYLOAD_TABLES),),
     )
+    if meta.empty:
+        return False
+
+    for row in meta.itertuples(index=False):
+        if not bool(row.has_run_id) or not bool(row.has_sim_date):
+            continue
+        table_name = str(row.table_name)
+        rows = db.execute_query(
+            f'SELECT 1 FROM "{table_name}" '
+            "WHERE run_id = %s AND LEFT(sim_date::text, 10) <= %s LIMIT 1",
+            (run_id, last_batch_end),
+        )
+        if rows:
+            return True
+    return False
+
+
+def _load_m1_previous_orders_from_db(
+    db,
+    run_id: str,
+    last_batch_end: str,
+    config_name: str = None,
+) -> pd.DataFrame:
+    """Restore Module1 carry-over orders from DB using the correct OrderLog grain."""
+    is_day_grain_orderlog = (config_name or '').upper().startswith('OC')
+    if is_day_grain_orderlog:
+        fallback_sql = (
+            "SELECT * FROM module1_output_orderlog "
+            "WHERE run_id = %s AND LEFT(sim_date::text, 10) <= %s"
+        )
+    else:
+        fallback_sql = (
+            "SELECT * FROM module1_output_orderlog "
+            "WHERE run_id = %s AND LEFT(sim_date::text, 10) = %s"
+        )
     previous_orders = db.execute_query_df(fallback_sql, (run_id, last_batch_end))
     if previous_orders.empty:
         return previous_orders
+
+    previous_orders = previous_orders.drop(columns=_M1_ORDER_DB_META_COLS, errors='ignore')
 
     if 'quantity' not in previous_orders.columns:
         raise RuntimeError(
@@ -163,7 +251,10 @@ def run_integrated_simulation_from_dict(
     logger.info("🎯 初始化Orchestrator")
     orch = create_orchestrator(
         start_date=start_date,
-        output_dir=str(orchestrator_output_dir)
+        output_dir=str(orchestrator_output_dir),
+        # 数据库模式不落盘 orchestrator CSV（入库走内存视图，消除临时文件）；
+        # 仅当无 DB 连接的退化场景才保留文件落盘以兼容旧行为。
+        persist_to_disk=(db is None),
     )
     # 设置 open deployment 的清理天数，与文件模式保持一致（100天）
     orch.set_past_due_cleanup_grace_days(100)
@@ -178,10 +269,29 @@ def run_integrated_simulation_from_dict(
         ensure_checkpoint_table(db)
         ensure_m4_state_table(db)
 
+    checkpoint_has_payload = None
     if resume and db is not None:
         from pgsql_db.checkpoint import load_checkpoint, next_day, deserialize_orchestrator_state
         _rk = run_key or config_name
         checkpoint = load_checkpoint(db, _rk, start_date=start_date, end_date=end_date)
+        if checkpoint is not None:
+            try:
+                checkpoint_has_payload = _checkpoint_has_committed_payload(
+                    db,
+                    checkpoint['run_id'],
+                    checkpoint['last_batch_end'],
+                )
+            except Exception as _payload_err:
+                logger.warning(f"⚠️ 无法核验 checkpoint 已提交数据（按正常续跑处理）: {_payload_err}")
+                checkpoint_has_payload = None
+            if checkpoint_has_payload is False:
+                run_id_override = checkpoint['run_id']  # 复用既有 run_id 继续完成该次运行
+                logger.warning(
+                    f"⚠️ 幽灵 checkpoint：run_id={checkpoint['run_id']} "
+                    f"(last_batch_end={checkpoint['last_batch_end']}) 没有任何已提交模块/编排器数据。"
+                    f" 将在同一 run_id 下从 {start_date} 重新处理全部工作（不跳过天数、不丢数据）。"
+                )
+                checkpoint = None  # 退化为全新开始路径，run_id_override 保持复用既有 run_id
 
     # DbRuntimeState：内存跨天状态（替代 M4 产线状态、已分配产能及 M3→M4 数据传递中的临时文件中转）。
     runtime_state = DbRuntimeState()
@@ -253,12 +363,16 @@ def run_integrated_simulation_from_dict(
                         db=db,
                         run_id=run_id_override,
                         last_batch_end=_prev_date,
+                        config_name=config_name,
                     )
-                    if not _fallback_orders.empty:
+                    if not _fallback_orders.empty or checkpoint_has_payload is True:
                         m1_previous_orders = _fallback_orders
                         logger.info(f"  ✅ 从DB orderlog 回退恢复历史订单: {len(m1_previous_orders)} 条")
                     else:
-                        logger.warning(f"  ⚠️ DB orderlog 中未找到 run_id={run_id_override} 的历史订单")
+                        logger.warning(
+                            f"  ⚠️ DB orderlog 中未找到 run_id={run_id_override} "
+                            f"截至 {checkpoint.get('last_batch_end')} 的可恢复快照"
+                        )
                 except Exception as _e:
                     logger.warning(f"  ⚠️ 从DB orderlog 回退读取失败: {_e}")
             # 安全防护：续跑模式下若历史订单仍无法恢复，中止运行以避免静默错算
@@ -346,7 +460,11 @@ def run_integrated_simulation_from_dict(
             logger.info("🌅 每日开始状态更新")
             logger.info("💾 保存期初库存快照...")
             orch.save_beginning_inventory(current_date.strftime('%Y-%m-%d'))
-            runtime_state.cleanup_audit_df = orch.cleanup_past_due_open_deployments(current_date.strftime('%Y-%m-%d'), grace_days=getattr(orch, "cleanup_grace_days", 0), write_audit=True)
+            runtime_state.cleanup_audit_df = orch.cleanup_past_due_open_deployments(
+                current_date.strftime('%Y-%m-%d'),
+                grace_days=getattr(orch, "cleanup_grace_days", 0),
+                write_audit=getattr(orch, "persist_to_disk", True),
+            )
 
             logger.info("📦 处理当日delivery GR到达...")
             orch._process_delivery_arrivals(current_date.strftime('%Y-%m-%d'))
@@ -392,6 +510,7 @@ def run_integrated_simulation_from_dict(
             raise RuntimeError(f"每日GR入库处理失败，中止仿真以防止数据错误: {e}") from e
 
         # ==================== 模块运行序列 ====================
+        m1_result = None
         m1_shipments = pd.DataFrame()
         m4_production = pd.DataFrame()
         m4_result = None  # 由 M4 设置，通过内存传递给 M5
@@ -407,7 +526,8 @@ def run_integrated_simulation_from_dict(
                     simulation_date=current_date,
                     output_dir=str(module_outputs['module1']),
                     orchestrator=orch,
-                    previous_orders_df=m1_previous_orders  # 🔧 修复：传递历史订单
+                    previous_orders_df=m1_previous_orders,  # 🔧 修复：传递历史订单
+                    skip_file_output=True,  # DB 模式不写 M1 Excel；结果走 batch_results + m1_result（M3/M5 均用内存 module1_result）
                 )
                 m1_shipments = m1_result.get('shipment_df', pd.DataFrame())
                 
@@ -492,6 +612,7 @@ def run_integrated_simulation_from_dict(
                     current_date=current_date.strftime('%Y-%m-%d'),
                     output_path=str(module_outputs['module5'] / f"Module5Output_{current_date.strftime('%Y%m%d')}.xlsx"),
                     skip_file_output=True,
+                    module1_result=m1_result,
                     module4_result=m4_result,
                 )
                 
@@ -541,7 +662,8 @@ def run_integrated_simulation_from_dict(
                     current_date=current_date,
                     output_dir=str(module_outputs['module6']),
                     max_wait_days=M6_MAX_WAIT_DAYS,
-                    random_seed=config_dict.get('M6_RandomSeed', M6_RANDOM_SEED)
+                    random_seed=config_dict.get('M6_RandomSeed', M6_RANDOM_SEED),
+                    skip_file_output=True,  # DB 模式不写 M6 Excel；结果走 m6_result + orch.process_module6_delivery
                 )
                 
                 if m6_result and 'delivery_plan' in m6_result:
@@ -570,7 +692,9 @@ def run_integrated_simulation_from_dict(
                     config_dict=config_dict,
                     start_date=current_date.strftime('%Y-%m-%d'),
                     end_date=current_date.strftime('%Y-%m-%d'),
-                    output_dir=str(module_outputs['module3'])
+                    output_dir=str(module_outputs['module3']),
+                    module1_result=m1_result,
+                    skip_file_output=True,  # DB 模式不写 M3 Excel；结果走 batch_results + runtime_state.previous_m3_result
                 )
                 if m3_result is not None:
                     m3_result['simulation_date'] = current_date
@@ -672,23 +796,29 @@ def run_integrated_simulation_from_dict(
         runtime_str = f"{total_runtime_seconds:.2f}秒"
     
     # 生成汇总报告
-    try:
-        logger.info("📊 正在生成汇总报告...")
-        report_generator = SummaryReportGenerator(
-            output_base_dir=str(output_dir),
-            config_dict=config_dict
-        )
-        # start_date 和 end_date 在本函数中已是字符串格式
-        summary_reports = report_generator.generate_all_reports(
-            start_date=start_date,
-            end_date=end_date
-        )
-        logger.info(f"✅ 汇总报告生成完成，输出目录: {output_dir / 'summary'}")
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        logger.warning(f"⚠️ 汇总报告生成失败: {e}")
-        summary_reports = {}
+    # 数据库模式：跳过这里基于文件的仿真内 Summary（它会写 temp/summary 并读取
+    # orchestrator CSV）。DB 模式的 Summary 由 db_runner 的
+    # ModuleDataWriter.generate_summary_reports_from_db 从数据库重新生成并写入
+    # summary_output_* 表，与文件无关；保持 summary_reports={} 不影响返回结构。
+    summary_reports = {}
+    if db is None:
+        try:
+            logger.info("📊 正在生成汇总报告...")
+            report_generator = SummaryReportGenerator(
+                output_base_dir=str(output_dir),
+                config_dict=config_dict
+            )
+            # start_date 和 end_date 在本函数中已是字符串格式
+            summary_reports = report_generator.generate_all_reports(
+                start_date=start_date,
+                end_date=end_date
+            )
+            logger.info(f"✅ 汇总报告生成完成，输出目录: {output_dir / 'summary'}")
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            logger.warning(f"⚠️ 汇总报告生成失败: {e}")
+            summary_reports = {}
     
     # 最终统计
     try:

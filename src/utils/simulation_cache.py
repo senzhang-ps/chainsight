@@ -17,6 +17,8 @@ import time
 from typing import Dict, Optional, Set, Tuple
 import pandas as pd
 
+from .date_safe import parse_mixed_datetime
+
 
 class SimulationCache:
     """
@@ -95,8 +97,14 @@ class SimulationCache:
         
         # 过滤有效期内的数据（使用整个仿真期间）
         if 'eff_from' in network_df.columns and 'eff_to' in network_df.columns:
-            network_df['eff_from'] = pd.to_datetime(network_df['eff_from'])
-            network_df['eff_to'] = pd.to_datetime(network_df['eff_to'])
+            network_df['eff_from'] = parse_mixed_datetime(
+                network_df['eff_from'],
+                "Global_Network.eff_from",
+            )
+            network_df['eff_to'] = parse_mixed_datetime(
+                network_df['eff_to'],
+                "Global_Network.eff_to",
+            )
             self._active_network = network_df[
                 (network_df['eff_from'] <= self.sim_end) &
                 (network_df['eff_to'] >= self.sim_start)
@@ -190,7 +198,10 @@ class SimulationCache:
                 ss_df[col] = ss_df[col].astype(str).str.strip()
         
         if 'date' in ss_df.columns:
-            ss_df['date'] = pd.to_datetime(ss_df['date']).dt.strftime('%Y-%m-%d')
+            ss_df['date'] = parse_mixed_datetime(
+                ss_df['date'],
+                "M3_SafetyStock.date",
+            ).dt.strftime('%Y-%m-%d')
         
         qty_col = 'safety_stock' if 'safety_stock' in ss_df.columns else 'SafetyStock'
         if qty_col not in ss_df.columns:

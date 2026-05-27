@@ -95,18 +95,30 @@ def load_checkpoint(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
 ) -> Optional[dict]:
-    """按 run_key 查询最近一条可用于断点续跑的 checkpoint（status=running/failed/interrupted），返回 dict 或 None。
+    """按 run_key 查询可用于断点续跑的最早未完成 checkpoint，返回 dict 或 None。
 
     当调用方传入 start_date / end_date 时，仅匹配日期区间完全相同的 checkpoint，
     防止因日期区间变更后错误接续旧 run（会导致断点续跑从错误起点开始）。
     """
+    where = [
+        "run_key = %s",
+        "status IN ('running', 'failed', 'interrupted')",
+    ]
+    params = [run_key]
+    if start_date is not None:
+        where.append("start_date = %s")
+        params.append(str(start_date))
+    if end_date is not None:
+        where.append("end_date = %s")
+        params.append(str(end_date))
+
     rows = db.execute_query(
         "SELECT run_key, run_id, config_name, start_date::text, end_date::text, "
         "last_batch_end::text, orch_state_json::text, "
         "COALESCE(status, 'running'), error_message "
-        "FROM sim_checkpoint WHERE run_key = %s AND status IN ('running', 'failed', 'interrupted') "  # interrupted 也可用于断点续跑
-        "ORDER BY updated_at DESC LIMIT 1",
-        (run_key,),
+        f"FROM sim_checkpoint WHERE {' AND '.join(where)} "
+        "ORDER BY created_at ASC NULLS LAST, updated_at ASC NULLS LAST, run_id ASC LIMIT 1",
+        tuple(params),
     )
     if not rows:
         return None
@@ -122,11 +134,6 @@ def load_checkpoint(
         "status":          row[7],
         "error_message":   row[8],
     }
-    # 校验日期区间一致性
-    if start_date is not None and cp["start_date"] != str(start_date):
-        return None
-    if end_date is not None and cp["end_date"] != str(end_date):
-        return None
     return cp
 
 def update_checkpoint_status(db: "DatabaseConnection", run_id: str, status: str, error_message: str = None) -> None:

@@ -10,6 +10,7 @@ from pandas.errors import EmptyDataError, ParserError
 import logging
 
 from ...utils.normalization import normalize_identifiers
+from ...utils.numeric_safe import safe_int_scalar, safe_int_series
 
 logger = logging.getLogger("SupplyChainSimulation." + __name__)
 # 复用 src/utils/logger_config.py::DualLogger 创建的同�?logger�?
@@ -202,10 +203,11 @@ def restore_orchestrator_state(orchestrator, restore_date: str, output_base_dir:
                     if transit_uid is not None and str(transit_uid).strip() and str(transit_uid) != 'None':
                         uid_str = str(transit_uid)
                         # 安全地将 quantity 转为 int
-                        try:
-                            quantity = int(float(row.get('quantity', 0) or 0))
-                        except (ValueError, TypeError):
-                            quantity = 0
+                        quantity = safe_int_scalar(
+                            row.get('quantity', 0),
+                            context="resume.planning_intransit.quantity",
+                            default=0,
+                        )
                         
                         # 将日期字段转换为 datetime（Module6 需要 datetime 进行比较）
                         try:
@@ -249,10 +251,11 @@ def restore_orchestrator_state(orchestrator, restore_date: str, output_base_dir:
                     if uid is not None and str(uid).strip() and str(uid) != 'None':
                         uid_str = str(uid)
                         # 安全地将 deployed_qty 转为 int
-                        try:
-                            deployed_qty = int(float(row.get('deployed_qty', 0) or 0))
-                        except (ValueError, TypeError):
-                            deployed_qty = 0
+                        deployed_qty = safe_int_scalar(
+                            row.get('deployed_qty', 0),
+                            context="resume.open_deployment.deployed_qty",
+                            default=0,
+                        )
                         
                         orchestrator.open_deployment[uid_str] = {
                             'material': str(row.get('material', '')),
@@ -306,7 +309,11 @@ def restore_orchestrator_state(orchestrator, restore_date: str, output_base_dir:
                 backlog_df = normalize_identifiers(backlog_df)
                 # 将 quantity 转为 int
                 if 'quantity' in backlog_df.columns:
-                    backlog_df['quantity'] = pd.to_numeric(backlog_df['quantity'], errors='coerce').fillna(0).astype(int)
+                    backlog_df['quantity'] = safe_int_series(
+                        backlog_df['quantity'],
+                        context="resume.production_plan_backlog.quantity",
+                        default=0,
+                    )
                 # 将 available_date 转为 datetime 以匹配原有结构
                 if 'available_date' in backlog_df.columns:
                     backlog_df['available_date'] = pd.to_datetime(backlog_df['available_date']).dt.normalize()

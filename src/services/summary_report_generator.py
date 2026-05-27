@@ -14,6 +14,7 @@ from pathlib import Path
 import glob
 
 from src.utils.normalization import normalize_material, normalize_location
+from src.utils.deterministic_sort import stable_sort_for_output
 
 logger = logging.getLogger("SupplyChainSimulation." + __name__)
 
@@ -217,6 +218,41 @@ class SummaryReportGenerator:
                 return xl.parse(sheet_name, usecols=lambda col: col in wanted)
             return xl.parse(sheet_name)
 
+    def _collect_excel_sheet_columns(self, file_paths: List[str], sheet_name: str) -> List[str]:
+        """Collect a stable union of worksheet columns across daily files."""
+        columns: List[str] = []
+        seen = set()
+        try:
+            from openpyxl import load_workbook
+        except Exception as e:
+            logger.warning(f"Unable to import openpyxl for summary header scan: {e}")
+            return columns
+
+        for file_path in file_paths:
+            try:
+                workbook = load_workbook(file_path, read_only=True, data_only=True)
+                try:
+                    if sheet_name not in workbook.sheetnames:
+                        continue
+                    worksheet = workbook[sheet_name]
+                    header = next(
+                        worksheet.iter_rows(min_row=1, max_row=1, values_only=True),
+                        (),
+                    )
+                    for value in header:
+                        if value is None:
+                            continue
+                        column = str(value)
+                        if column not in seen:
+                            seen.add(column)
+                            columns.append(column)
+                finally:
+                    workbook.close()
+            except Exception as e:
+                logger.warning(f"Unable to scan columns in {file_path}: {e}")
+                return columns
+        return columns
+
     def _apply_end_date_filters(
         self,
         df: pd.DataFrame,
@@ -260,7 +296,7 @@ class SummaryReportGenerator:
         if sort_cols:
             actual_sort_cols = [col for col in sort_cols if col in df.columns]
             if actual_sort_cols:
-                df = df.sort_values(by=actual_sort_cols, kind='mergesort').reset_index(drop=True)
+                df = stable_sort_for_output(df, actual_sort_cols)
         return df
 
     def _append_summary_csv(self, df: pd.DataFrame, csv_path: Path, write_header: bool) -> None:
@@ -285,6 +321,7 @@ class SummaryReportGenerator:
         reorder_date_first: bool = False,
         sort_cols: Optional[List[str]] = None,
         input_rows: Optional[int] = None,
+        output_columns: Optional[List[str]] = None,
     ) -> str:
         xlsx_path, csv_path = self._summary_output_paths(stem)
         self._remove_stale_summary_file(xlsx_path)
@@ -308,6 +345,11 @@ class SummaryReportGenerator:
                 )
                 if df.empty:
                     continue
+                if output_columns:
+                    for column in output_columns:
+                        if column not in df.columns:
+                            df[column] = pd.NA
+                    df = df[output_columns]
                 self._append_summary_csv(df, csv_path, write_header=not wrote_header)
                 wrote_header = True
                 output_rows += len(df)
@@ -315,7 +357,7 @@ class SummaryReportGenerator:
                 logger.warning(f"Failed to stream {source_sheet} from {file_path}: {e}")
 
         if not wrote_header:
-            pd.DataFrame(columns=empty_columns).to_csv(
+            pd.DataFrame(columns=output_columns or empty_columns).to_csv(
                 csv_path, index=False, encoding='utf-8-sig'
             )
         logger.info(
@@ -341,6 +383,12 @@ class SummaryReportGenerator:
         parse_cols = parse_cols or []
         filter_cols = filter_cols or []
         input_rows = self._count_excel_sheet_rows(files, [source_sheet])
+        output_columns = self._collect_excel_sheet_columns(files, source_sheet) or empty_columns
+        if file_date_col and file_date_col not in output_columns:
+            if reorder_date_first:
+                output_columns = [file_date_col] + output_columns
+            else:
+                output_columns = output_columns + [file_date_col]
         if input_rows is None or input_rows > self.LOCAL_SUMMARY_EXCEL_ROW_LIMIT:
             return self._stream_tabular_summary_to_csv(
                 files=files,
@@ -353,6 +401,7 @@ class SummaryReportGenerator:
                 reorder_date_first=reorder_date_first,
                 sort_cols=sort_cols,
                 input_rows=input_rows,
+                output_columns=output_columns,
             )
 
         frames = []
@@ -380,10 +429,7 @@ class SummaryReportGenerator:
             if sort_cols:
                 actual_sort_cols = [col for col in sort_cols if col in combined.columns]
                 if actual_sort_cols:
-                    combined = combined.sort_values(
-                        by=actual_sort_cols,
-                        kind='mergesort',
-                    ).reset_index(drop=True)
+                    combined = stable_sort_for_output(combined, actual_sort_cols)
         else:
             combined = pd.DataFrame(columns=empty_columns)
 
@@ -392,7 +438,7 @@ class SummaryReportGenerator:
             stem=stem,
             sheet_name=output_sheet,
             input_rows=input_rows,
-            columns=None if frames else empty_columns,
+            columns=output_columns,
         )
 
     def _generate_order_shipment_report(self, daily_files: Dict) -> str:
@@ -406,7 +452,8 @@ class SummaryReportGenerator:
 
         order_qty: Dict[tuple, float] = {}
         shipment_qty: Dict[tuple, float] = {}
-        cut_keys = set()
+        cut_qty_total: Dict[tuple, float] = {}
+        seen_order_keys = set()
 
         def accumulate_quantity(df: pd.DataFrame, simulation_date: str, target: Dict[tuple, float]) -> None:
             required = {'date', 'material', 'location', 'quantity'}
@@ -426,6 +473,42 @@ class SummaryReportGenerator:
                 key = (simulation_date, date_value, material, location)
                 target[key] = target.get(key, 0) + float(qty)
 
+        def normalize_key_value(value: object) -> object:
+            if pd.isna(value):
+                return None
+            if isinstance(value, pd.Timestamp):
+                return value.isoformat()
+            if hasattr(value, "item"):
+                try:
+                    value = value.item()
+                except Exception:
+                    pass
+            if isinstance(value, str):
+                return value.strip()
+            return value
+
+        def drop_seen_orders(df: pd.DataFrame) -> pd.DataFrame:
+            required = {'date', 'material', 'location', 'quantity'}
+            if df is None or df.empty or not required.issubset(df.columns):
+                return df
+
+            work = df.copy()
+            work['date'] = pd.to_datetime(work['date'], errors='coerce')
+            dedup_cols = ['date', 'material', 'location', 'quantity']
+            if 'demand_type' in work.columns:
+                dedup_cols.append('demand_type')
+            work = work.drop_duplicates(subset=dedup_cols, keep='first')
+
+            keep_mask = []
+            for _, row in work[dedup_cols].iterrows():
+                key = tuple(normalize_key_value(row[col]) for col in dedup_cols)
+                if key in seen_order_keys:
+                    keep_mask.append(False)
+                    continue
+                seen_order_keys.add(key)
+                keep_mask.append(True)
+            return work.loc[keep_mask].reset_index(drop=True)
+
         for file_path in files:
             try:
                 simulation_date = self._extract_date_from_filename(file_path)
@@ -433,14 +516,7 @@ class SummaryReportGenerator:
                     if 'OrderLog' in xl.sheet_names:
                         orders_df = xl.parse('OrderLog')
                         if not orders_df.empty:
-                            orders_df['simulation_date'] = simulation_date
-                            dedup_cols = [
-                                'date', 'material', 'location', 'quantity', 'simulation_date'
-                            ]
-                            if 'demand_type' in orders_df.columns:
-                                dedup_cols.append('demand_type')
-                            dedup_cols = [col for col in dedup_cols if col in orders_df.columns]
-                            orders_df = orders_df.drop_duplicates(subset=dedup_cols, keep='first')
+                            orders_df = drop_seen_orders(orders_df)
                             accumulate_quantity(orders_df, simulation_date, order_qty)
 
                     if 'ShipmentLog' in xl.sheet_names:
@@ -449,13 +525,11 @@ class SummaryReportGenerator:
 
                     if 'CutLog' in xl.sheet_names:
                         cuts_df = xl.parse('CutLog')
-                        cut_qty: Dict[tuple, float] = {}
-                        accumulate_quantity(cuts_df, simulation_date, cut_qty)
-                        cut_keys.update(cut_qty.keys())
+                        accumulate_quantity(cuts_df, simulation_date, cut_qty_total)
             except Exception as e:
                 logger.warning(f"Failed to read {file_path}: {e}")
 
-        all_keys = set(order_qty.keys()) | set(shipment_qty.keys()) | cut_keys
+        all_keys = set(order_qty.keys()) | set(shipment_qty.keys()) | set(cut_qty_total.keys())
         records = []
         for key in sorted(all_keys, key=lambda item: tuple(str(part) for part in item)):
             order_value = int(order_qty.get(key, 0))
@@ -467,14 +541,14 @@ class SummaryReportGenerator:
                 'location': key[3],
                 'order_qty': order_value,
                 'shipment_qty': shipment_value,
-                'cut_qty': max(order_value - shipment_value, 0),
+                'cut_qty': int(cut_qty_total.get(key, 0)),
             })
 
         summary = pd.DataFrame.from_records(records, columns=column_order)
         if not summary.empty:
-            summary = summary.sort_values(
-                ['simulation_date', 'date', 'material', 'location']
-            ).reset_index(drop=True)
+            summary = stable_sort_for_output(
+                summary, ['simulation_date', 'date', 'material', 'location']
+            )
 
         return self._write_summary_output(
             summary,
@@ -580,7 +654,7 @@ class SummaryReportGenerator:
     def _extract_date_from_filename(self, file_path: str) -> str:
         """从文件名中提取日期"""
         import re
-        match = re.search(r'(\d{8})', file_path)
+        match = re.search(r'(\d{8})', Path(file_path).name)
         if match:
             date_str = match.group(1)
             return pd.to_datetime(date_str, format='%Y%m%d').strftime('%Y-%m-%d')

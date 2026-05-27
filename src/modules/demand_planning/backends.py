@@ -279,9 +279,9 @@ class _PandasBackend:
         
 
         df['rescue_rate'] = (
-            df.groupby(['material', 'location', 'month'])
-            .apply(lambda g: g['quantity_total'].sum()/2 / g['cov_quantity_raw'].sum())
-            .reindex(df.set_index(['material', 'location', 'month']).index)
+            df.groupby(['material', 'location', 'month', 'order_type'])
+            .apply(lambda g: g['split_quantity'].sum() / g['cov_quantity_raw'].sum())
+            .reindex(df.set_index(['material', 'location', 'month', 'order_type']).index)
             .values
         )
 
@@ -527,10 +527,11 @@ class _PolarsBackend:
         self._dps_sc_config = None
 
     def _to_pl(self, df):
-        if df is None or (isinstance(df, (pd.DataFrame, pl.DataFrame)) and len(df) == 0):
+        if df is None:
             return pl.DataFrame()
         if isinstance(df, pl.DataFrame):
             return df
+        # 空 DataFrame 也走 numpy 转换，以保留 dtype
         # 将 nullable / extension dtypes 转为 numpy-backed dtypes，
         # 避免 pl.from_pandas 要求 pyarrow 依赖。
         converted = {}
@@ -784,8 +785,8 @@ class _PolarsBackend:
         df = df.with_columns(pl.Series("cov_quantity_raw", cov))
 
         df = df.with_columns(
-            (pl.col("quantity_total").sum() / 2 / pl.col("cov_quantity_raw").sum())
-            .over(["material", "location", "month"])
+            (pl.col("split_quantity").sum() / pl.col("cov_quantity_raw").sum())
+            .over(["material", "location", "month", "order_type"])
             .alias("rescue_rate"),
         )
         df = df.with_columns(

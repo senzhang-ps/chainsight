@@ -97,8 +97,8 @@ class Orchestrator:
                           'M1_SupplyChoiceConfig']
         for sheet in required_sheet:
             df = self.all_config.get(sheet, pd.DataFrame())
-            if sheet!='M1_SupplyChoiceConfig' and df.empty:
-                raise ValueError(f"缺少必需的配置数据：{sheet}")
+            # if sheet!='M1_SupplyChoiceConfig' and df.empty:
+            #     raise ValueError(f"缺少必需的配置数据：{sheet}")
             df = self._normalize_m1_datas(df, sheet)
             dfs.append(df)
         return dfs

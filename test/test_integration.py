@@ -236,7 +236,7 @@ def run_integrated_simulation_refactor(
         output_dir=orch.get_output('module1'),
         orchestrator=orchestrator,
         orch=orch,
-        engine='pandas',
+        engine='polars',
     )
     m1.prepare()
 

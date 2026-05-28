@@ -105,6 +105,20 @@ class ModuleOne(Module):
     def build_order_df(self, ao_detail):
         return self._backend.build_order_df(ao_detail)
 
+    # ---- 新流程方法 ----
+
+    def build_dps(self):
+        return self._backend.build_dps()
+
+    def build_cov(self, demand_total, ao_config_summary):
+        return self._backend.build_cov(demand_total, ao_config_summary)
+
+    def build_daily_order(self, demand_forecast, qty_col="quantity_total"):
+        return self._backend.build_daily_order(demand_forecast, qty_col=qty_col)
+
+    def adjust_daily_order_ao(self, daily_order):
+        return self._backend.adjust_daily_order_ao(daily_order)
+
     def merge_with_history(self, today_orders_df):
         return self._backend.merge_with_history(today_orders_df)
 
@@ -136,22 +150,25 @@ class ModuleOne(Module):
         # 1) AO 汇总
         ao_config, ao_config_summary = self.prepare_ao_summary()
 
-        # 2) DPS 拆分 + 周预测准备
-        demand_total, demand_total_sc, order_cal = self.apply_dps_and_supply_choice()
+        # 2) DPS 拆分（周级）
+        demand_total, demand_total_sc = self.build_dps()
 
-        # 3) 日度拆分
-        daily_detail = self.distribute_to_daily(demand_total)
-        daily_detail_sc = self.distribute_to_daily(demand_total_sc)
+        # 3) AO 拆分 + 误差抽样（周级，产出 cov_quantity）
+        df_with_cov = self.build_cov(demand_total, ao_config_summary)
 
-        # 4) AO 拆分 + 误差应用
-        df_with_error = self.split_by_ao_and_apply_error(demand_total, ao_config_summary)
+        # 4) 日度拆分 — 订单流（关联 order_calendar，基于 cov_quantity）
+        daily_order = self.build_daily_order(df_with_cov, qty_col="cov_quantity")
 
-        # 5) advance_days 拆分 + 构建订单
-        order_df = self.split_ao_by_advance_days(df_with_error, order_cal)
+        # 5) AO detail 拆分 + 日期调整（关联 ao_detail，调整 advance_days）
+        order_df = self.adjust_daily_order_ao(daily_order)
+
+        # 6) 日度拆分 — consumption（直接拆 quantity_total，跳过 cov）
+        daily_detail_sc = self.build_daily_order(demand_total_sc, qty_col="quantity_total")
+
         self.order_df = order_df
-        self.daily_detail = daily_detail
+        self.daily_detail = daily_order
         self.daily_detail_sc = daily_detail_sc
-        self.order_cal = order_cal
+        self.order_cal = self.order_calendar
 
     def run(self):
         try:

@@ -26,6 +26,44 @@ except ImportError:
     DUCKDB_AVAILABLE = False
 
 
+def _lookup_rate(
+    rate_map,
+    material: Any,
+    location: Any,
+    line: Any,
+    default: float = 1.0
+) -> float:
+    """Look up production rate by location-aware key, with legacy fallback."""
+    for key in ((material, location, line), (material, line)):
+        try:
+            value = rate_map.get(key, None)
+        except (KeyError, IndexError, TypeError):
+            value = None
+
+        if value is None:
+            continue
+
+        if isinstance(value, pd.Series):
+            values = pd.to_numeric(value, errors='coerce').dropna().unique()
+            if len(values) == 1:
+                return float(values[0])
+            if len(values) > 1:
+                raise ValueError(
+                    "Conflicting prd_rate values for rate_map key "
+                    f"{key}: {values.tolist()}"
+                )
+            continue
+
+        try:
+            if pd.isna(value):
+                continue
+        except (TypeError, ValueError):
+            pass
+        return float(value)
+
+    return float(default)
+
+
 def centralized_capacity_allocation_with_changeover(
     uncon: pd.DataFrame,
     cap_df: pd.DataFrame,
@@ -504,7 +542,7 @@ class CapacityAllocator:
         if co_remain == 0 and is_first_co_day:
             changeover_done = True
 
-        rate = float(self.rate_map.get((material, line), 1))
+        rate = _lookup_rate(self.rate_map, material, location, line)
         can_produce = min(prod_remain, int(today_cap * rate))
         hours_used = can_produce / rate if rate else 0
 
@@ -673,10 +711,11 @@ def _calculate_group_hours(
     # 优化：使用 itertuples() 替代 iterrows()，速度快 10-100 倍
     for row in group.itertuples(index=False):
         material = row.material
+        location = row.location
         quantity = row.con_planned_qty
         changeover_id = getattr(row, 'changeover_id', None)
 
-        rate = rate_map.get((material, line), 1)
+        rate = _lookup_rate(rate_map, material, location, line)
         total += quantity / rate if rate else 0
 
         if changeover_id and changeover_def and pd.notna(changeover_id):
@@ -890,13 +929,14 @@ def _check_line_changeover(
     sorted_group = prod_group.sort_values('production_plan_date')
     for row in sorted_group.itertuples(index=False):
         material = row.material
+        location = row.location
         quantity = row.con_planned_qty
         changeover_id = getattr(row, 'changeover_id', None)
 
         if changeover_id and pd.notna(changeover_id):
             total_allocated += co_def.get((changeover_id, line), 0)
 
-        rate = rate_map.get((material, line), 1)
+        rate = _lookup_rate(rate_map, material, location, line)
         if rate and quantity > 0:
             total_allocated += quantity / rate
 
@@ -987,6 +1027,18 @@ def _prepare_changeover_def(
     return clean.set_index(['changeover_id', 'line'])
 
 
+def _to_float_or_zero(value: Any) -> float:
+    """Convert optional numeric config values, treating pandas missing values as 0."""
+    if value is None:
+        return 0.0
+    try:
+        if pd.isna(value):
+            return 0.0
+    except (TypeError, ValueError):
+        pass
+    return float(value)
+
+
 def _create_changeover_record(
     row,
     def_indexed: pd.DataFrame
@@ -1018,13 +1070,13 @@ def _create_changeover_record(
         definition = def_indexed.loc[(changeover_id, line)]
 
         if isinstance(definition, pd.Series):
-            time_per = float(definition.get('time', 0))
-            cost_per = float(definition.get('cost', 0))
-            mu_loss_per = float(definition.get('mu_loss', 0))
+            time_per = _to_float_or_zero(definition.get('time', 0))
+            cost_per = _to_float_or_zero(definition.get('cost', 0))
+            mu_loss_per = _to_float_or_zero(definition.get('mu_loss', 0))
         else:
-            time_per = float(definition.iloc[0].get('time', 0))
-            cost_per = float(definition.iloc[0].get('cost', 0))
-            mu_loss_per = float(definition.iloc[0].get('mu_loss', 0))
+            time_per = _to_float_or_zero(definition.iloc[0].get('time', 0))
+            cost_per = _to_float_or_zero(definition.iloc[0].get('cost', 0))
+            mu_loss_per = _to_float_or_zero(definition.iloc[0].get('mu_loss', 0))
 
     except KeyError:
         time_per = cost_per = mu_loss_per = 0

@@ -9,8 +9,13 @@ from psycopg import sql
 import pandas as pd
 from typing import Optional, List, Dict, Any
 from contextlib import contextmanager
+import logging
 import time
 from datetime import datetime
+
+from src.utils.numeric_safe import coerce_db_float, coerce_db_int
+
+logger = logging.getLogger(__name__)
 
 
 class DatabaseConnection:
@@ -151,7 +156,7 @@ class DatabaseConnection:
                 exists = cursor.fetchone() is not None
             return exists
         except Exception as e:
-            return False
+            raise
         finally:
             if temp_conn and not temp_conn.closed:
                 temp_conn.close()
@@ -185,7 +190,7 @@ class DatabaseConnection:
                 )
             return True
         except Exception as e:
-            return False
+            raise
         finally:
             if temp_conn and not temp_conn.closed:
                 temp_conn.close()
@@ -233,7 +238,7 @@ class DatabaseConnection:
                 result["success"] = True
                 result["message"] = "连接成功"
         except Exception as e:
-            result["message"] = f"连接失败: {str(e)}"
+            raise
         finally:
             result["connection_time_ms"] = round((time.time() - start_time) * 1000, 2)
         
@@ -304,7 +309,7 @@ class DatabaseConnection:
                 )
                 return cursor.fetchone() is not None
         except Exception as e:
-            return False
+            raise
     
     def delete_config_data(self, table_name: str, config_name: str) -> int:
         """
@@ -334,7 +339,7 @@ class DatabaseConnection:
                     pass
                 return deleted_count
         except Exception as e:
-            return 0
+            raise
     
     def create_table_from_df(
         self,
@@ -501,6 +506,8 @@ class DatabaseConnection:
             DATE_LIKE_TYPES = {
                 'DATE', 'TIMESTAMP', 'TIMESTAMP WITHOUT TIME ZONE', 'TIMESTAMP WITH TIME ZONE',
             }
+            TEXT_TYPES = {'TEXT', 'VARCHAR', 'CHARACTER VARYING', 'CHAR', 'CHARACTER'}
+            TEXT_UPGRADE_TARGETS = {'BOOLEAN', 'DOUBLE PRECISION', 'BIGINT'}
             for col_name in (df_cols & existing_cols):  # 仅检查已存在的公共列
                 df_dtype = df_col_types.get(col_name)
                 if df_dtype is None:
@@ -540,7 +547,12 @@ class DatabaseConnection:
                                 sql.Identifier(col_name),
                                 sql.Identifier(col_name)
                             ))
-            
+                # TEXT → BOOLEAN/DOUBLE/BIGINT：修复历史上被误建为 TEXT 的 bool/数值列
+                # （配合 _pandas_to_pg_type 收紧标识符匹配后，期望类型已回归原生）。
+                # 防御性：cast 失败（含非数值/非布尔脏值）则保持 TEXT 并告警，不影响写入。
+                elif existing_pg_type in TEXT_TYPES and expected_pg_type in TEXT_UPGRADE_TARGETS:
+                    self._upgrade_text_column(table_name, col_name, expected_pg_type)
+
             # 检查DataFrame的列是否都在现有表中（允许现有表有额外列）
             missing_cols = df_cols - existing_cols
             if missing_cols:
@@ -563,8 +575,41 @@ class DatabaseConnection:
             
             return True
         except Exception as e:
+            raise
+
+    def _upgrade_text_column(self, table_name: str, col_name: str, target_pg_type: str) -> bool:
+        """将历史误建为 TEXT 的列升级到 target_pg_type。
+
+        仅当该列全部非空值可被 PostgreSQL 安全 cast 时才成功；任一值无法转换
+        （例如混入 'ALL' 之类的脏字符串）则 ALTER 失败，本方法吞掉异常并保持 TEXT，
+        因此绝不会破坏已有数据或中断写入。
+        """
+        cast_suffix = {
+            'BOOLEAN': sql.SQL("::BOOLEAN"),
+            'DOUBLE PRECISION': sql.SQL("::DOUBLE PRECISION"),
+            # 经 DOUBLE 中转可同时容忍 '2' 与 '2.0' 文本
+            'BIGINT': sql.SQL("::DOUBLE PRECISION::BIGINT"),
+        }.get(target_pg_type)
+        if cast_suffix is None:
             return False
-    
+        try:
+            with self.get_cursor() as cursor:
+                cursor.execute(
+                    sql.SQL("ALTER TABLE {t} ALTER COLUMN {c} TYPE {ty} USING {c}{cast}").format(
+                        t=sql.Identifier(table_name),
+                        c=sql.Identifier(col_name),
+                        ty=sql.SQL(target_pg_type),
+                        cast=cast_suffix,
+                    )
+                )
+            logger.info(f"[schema] {table_name}.{col_name} TEXT→{target_pg_type} 升级成功")
+            return True
+        except Exception as exc:  # noqa: BLE001 - 升级失败时保持 TEXT 即可
+            logger.warning(
+                f"[schema] {table_name}.{col_name} 保持 TEXT（无法升级到 {target_pg_type}: {exc}）"
+            )
+            return False
+
     def _clean_name(self, name: str) -> str:
         """清理名称，使其符合PostgreSQL命名规范"""
         # 替换空格和特殊字符
@@ -583,17 +628,31 @@ class DatabaseConnection:
         # 针对特定列名的规则增强（统一输入输出表的类型）
         if col_name:
             col_name_lower = str(col_name).lower()
-            
+
+            # 0. 布尔类 -> BOOLEAN（永远不是标识符，必须优先于下方名称启发式）
+            #    覆盖 bool dtype，以及 is_/has_ 前缀、_flag 后缀的布尔标志列。
+            #    防止如 is_cross_node 被 'node' 标识符规则误判成 TEXT。
+            if "bool" in dtype_str or col_name_lower.startswith(("is_", "has_")) or col_name_lower.endswith("_flag"):
+                return "BOOLEAN"
+
             # 1. 标识符类 -> 始终使用 TEXT (防止前导零丢失)
             text_identifiers = [
-                'material', 'location', 'sending', 'receiving', 'sourcing', 
-                'dps_location', 'line', 'truck', 'vehicle', 'vendor', 'customer',
+                'material', 'location', 'sending', 'receiving', 'sourcing',
+                'dps_location', 'line', 'vendor', 'customer',
                 'item', 'sku', 'node', 'plant', 'warehouse', 'dc',
                 'status', 'type', 'group', 'category', 'id', 'uid', 'uuid',
                 'file_date', 'sim_date', 'run_id', 'issue', 'severity', 'impact',
                 'demand_element', 'demand_type', 'element'  # 需求元素标识符
             ]
-            if any(name == col_name_lower or col_name_lower.endswith('_' + name) or col_name_lower.startswith(name + '_') for name in text_identifiers):
+            # 'truck'/'vehicle' 仅作为完整列名才算标识符；作为前缀会误伤
+            # truck_used / truck_load_pct / vehicle_no 等度量/计数列（应为数值，而非 TEXT）。
+            exact_only_identifiers = ('truck', 'vehicle')
+            if col_name_lower in exact_only_identifiers or any(
+                name == col_name_lower
+                or col_name_lower.endswith('_' + name)
+                or col_name_lower.startswith(name + '_')
+                for name in text_identifiers
+            ):
                  return "TEXT"
             
             # 2. 日期/时间类 -> 优先检查，避免被数量类误匹配
@@ -716,23 +775,17 @@ class DatabaseConnection:
         for i, row in enumerate(records):
             new_row = []
             for j, val in enumerate(row):
-                if pd.isna(val) if not isinstance(val, str) else False:
-                    new_row.append(None)
-                elif j in int_col_indices:
-                    try:
-                        # 兼容处理：float -> int
-                        new_row.append(int(float(val)))
-                    except (ValueError, TypeError):
-                        new_row.append(None)
+                if j in int_col_indices:
+                    new_row.append(coerce_db_int(val))
                 elif j in float_col_indices:
-                    try:
-                        float_val = float(val)
-                        if round_float_values:
-                            new_row.append(round(float_val, 15))
-                        else:
-                            new_row.append(float_val)
-                    except (ValueError, TypeError):
-                        new_row.append(None)
+                    new_row.append(
+                        coerce_db_float(
+                            val,
+                            round_values=round_float_values,
+                        )
+                    )
+                elif pd.isna(val) if not isinstance(val, str) else False:
+                    new_row.append(None)
                 elif j in text_col_indices:
                     # Convert booleans to "True"/"False" strings to match
                     # 与 Dev/Src 的 xlsx 输出格式保持一致（避免 PG 将 bool->text 转成 `t`/`f`）
@@ -851,7 +904,7 @@ class DatabaseConnection:
                             indexes_created.append(f"{clean_col}({index_type})")
                 except Exception as e:
                     # 索引创建失败不影响主流程
-                    pass
+                    raise
         
         if indexes_created:
             pass
@@ -887,6 +940,35 @@ class DatabaseConnection:
         with self.get_cursor(commit=False) as cursor:
             cursor.execute(query, params)
             return cursor.fetchall()
+
+    def execute_query_df(self, query: str, params: tuple = None) -> pd.DataFrame:
+        """执行查询并以带列名的DataFrame返回结果。"""
+        with self.get_cursor(commit=False) as cursor:
+            cursor.execute(query, params)
+            columns = [desc[0] for desc in cursor.description] if cursor.description else []
+            return pd.DataFrame(cursor.fetchall(), columns=columns)
+
+    def iter_query_chunks(self, query, params=None, chunksize: int = 100_000):
+        """服务端游标流式产出 DataFrame chunk，避免大结果集一次性加载到内存。
+
+        autocommit=True 下，server-side cursor 必须包在 conn.transaction()
+        里（DECLARE CURSOR 需要显式事务），由本方法自行管理。
+        """
+        import secrets
+        conn = self.connect()
+        cur_name = f"sc_{secrets.token_hex(4)}"
+        with conn.transaction():
+            with conn.cursor(name=cur_name) as cur:
+                cur.execute(query, params)
+                columns = (
+                    [desc[0] for desc in cur.description]
+                    if cur.description else []
+                )
+                while True:
+                    rows = cur.fetchmany(chunksize)
+                    if not rows:
+                        break
+                    yield pd.DataFrame(rows, columns=columns)
     
     def execute_non_query(self, query: str, params: tuple = None):
         """执行非查询语句（INSERT, UPDATE, DELETE等）"""

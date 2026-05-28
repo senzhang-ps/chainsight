@@ -17,6 +17,7 @@ from ...utils.normalization import (
     normalize_location,
     normalize_material,
 )
+from ...utils.numeric_safe import safe_int_series
 
 
 def simulate_shipment_for_single_day(
@@ -70,27 +71,35 @@ def simulate_shipment_for_single_day(
 
     # 合并订单和库存
     merged = ord_g.merge(inv_df, on=['material', 'location'], how='left')
-    merged['qty_avail'] = merged['qty_avail'].fillna(0).astype(int)
-    merged['qty_ordered'] = merged['qty_ordered'].fillna(0).astype(int)
+    merged['qty_avail'] = safe_int_series(
+        merged['qty_avail'].fillna(0), context='module1.simulate_shipment.qty_avail'
+    )
+    merged['qty_ordered'] = safe_int_series(
+        merged['qty_ordered'].fillna(0), context='module1.simulate_shipment.qty_ordered'
+    )
 
-    # 计算发货和缺货
-    merged['shipped'] = np.minimum(
-        merged['qty_ordered'], merged['qty_avail']
-    ).astype(int)
-    merged['cut'] = (merged['qty_ordered'] - merged['shipped']).astype(int)
+    # 计算发货和缺货（此时 qty_* 已无 NaN/inf）
+    merged['shipped'] = safe_int_series(
+        np.minimum(merged['qty_ordered'], merged['qty_avail']),
+        context='module1.simulate_shipment.shipped',
+    )
+    merged['cut'] = safe_int_series(
+        merged['qty_ordered'] - merged['shipped'],
+        context='module1.simulate_shipment.cut',
+    )
 
     # 构建输出DataFrame
     shipment_df = pd.DataFrame({
         'date': simulation_date,
         'material': merged['material'].astype(str),
         'location': merged['location'].astype(str),
-        'quantity': merged['shipped'].astype(int)
+        'quantity': safe_int_series(merged['shipped'], context='module1.simulate_shipment.shipment.quantity')
     })
     cut_df = pd.DataFrame({
         'date': simulation_date,
         'material': merged['material'].astype(str),
         'location': merged['location'].astype(str),
-        'quantity': merged['cut'].astype(int)
+        'quantity': safe_int_series(merged['cut'], context='module1.simulate_shipment.cut.quantity')
     })
 
     # 规范化
@@ -222,7 +231,7 @@ def _build_available_inventory_from_orchestrator(
         inv_df.get('quantity_prod', 0) +
         inv_df.get('quantity', 0)
     )
-    inv_df['qty'] = pd.to_numeric(qty, errors='coerce').fillna(0).astype(int)
+    inv_df['qty'] = safe_int_series(qty, context='module1._build_available_inventory.qty')
     inv_df = inv_df[['material', 'location', 'qty']]
 
     return {

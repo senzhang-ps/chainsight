@@ -14,6 +14,7 @@ import pandas as pd
 from .daily_ops import OrchestratorDailyOpsMixin
 from .inventory_log import OrchestratorInventoryLogMixin
 from ...utils.normalization import normalize_identifiers
+from ...utils.numeric_safe import safe_int_scalar
 from .persistence import OrchestratorPersistenceMixin
 from .processors import OrchestratorProcessorsMixin
 from .views import OrchestratorViewsMixin
@@ -32,19 +33,26 @@ class Orchestrator(
         self,
         start_date: str,
         output_dir: str = "./orchestrator_output",
+        persist_to_disk: bool = True,
     ):
         """初始化编排器
 
         Args:
             start_date: 仿真开始日期（YYYY-MM-DD）
             output_dir: 持久化存储目录
+            persist_to_disk: 是否将每日状态落盘为 CSV。数据库模式应传 False，
+                此时 save_daily_state 不写任何 orchestrator CSV，入库改由
+                prepare_orchestrator_day_dataframes_from_orch 从内存视图构建
+                （与 CSV 同源等价），从而消除临时文件。
         """
         self.start_date = (
             pd.to_datetime(start_date).normalize()
         )
         self.current_date = self.start_date
         self.output_dir = Path(output_dir)
-        self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.persist_to_disk = persist_to_disk
+        if self.persist_to_disk:
+            self.output_dir.mkdir(parents=True, exist_ok=True)
 
         # 核心状态管理
         self.unrestricted_inventory: Dict[
@@ -220,11 +228,16 @@ class Orchestrator(
                 return 0
 
             # 转换为int
-            return int(float(value))
+            return safe_int_scalar(
+                value,
+                context="orchestrator._safe_convert_to_int",
+                default=0,
+            )
 
         except (
             ValueError,
             TypeError,
+            OverflowError,
             IndexError,
             AttributeError,
         ) as e:
@@ -236,15 +249,17 @@ class Orchestrator(
 
 
 def create_orchestrator(
-    start_date: str, output_dir: str = "./orchestrator_output"
+    start_date: str, output_dir: str = "./orchestrator_output",
+    persist_to_disk: bool = True,
 ) -> Orchestrator:
     """创建并初始化编排器实例
 
     Args:
         start_date: 仿真开始日期（YYYY-MM-DD）
         output_dir: 持久化存储输出目录
+        persist_to_disk: 是否将每日状态落盘为 CSV（数据库模式传 False 以消除临时文件）
 
     Returns:
         Orchestrator 实例
     """
-    return Orchestrator(start_date, output_dir)
+    return Orchestrator(start_date, output_dir, persist_to_disk=persist_to_disk)

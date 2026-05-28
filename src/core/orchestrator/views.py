@@ -14,6 +14,7 @@ from ...utils.normalization import (
     normalize_receiving,
     normalize_sending,
 )
+from ...utils.numeric_safe import safe_int_series
 
 
 class OrchestratorViewsMixin:
@@ -332,7 +333,11 @@ class OrchestratorViewsMixin:
             ['material', 'location', 'available_date'],
             as_index=False,
         ).agg({'quantity': 'sum'})
-        out['quantity'] = out['quantity'].astype(int)
+        out['quantity'] = safe_int_series(
+            out['quantity'],
+            context="orchestrator.production_plan_backlog_view.quantity",
+            default=0,
+        )
         return out
 
     def get_production_gr_view(

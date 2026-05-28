@@ -230,9 +230,9 @@ class DailyProductionPlanner:
         cap_df['date'] = pd.to_datetime(cap_df['date'])
 
         rate_map = mlcfg.set_index(
-            ['material', 'delegate_line']
+            ['material', 'location', 'delegate_line']
         )['prd_rate']
-        rate_map.index.set_names(['material', 'line'], inplace=True)
+        rate_map.index.set_names(['material', 'location', 'line'], inplace=True)
 
         return centralized_capacity_allocation_with_changeover(
             uncon_plan, cap_df, rate_map, co_mat, co_def, mlcfg,
@@ -283,7 +283,7 @@ class DailyProductionPlanner:
         )
 
         rate_map = mlcfg.set_index(
-            ['material', 'delegate_line']
+            ['material', 'location', 'delegate_line']
         )['prd_rate'].to_dict()
         co_def = cfg['ChangeoverDefinition'].set_index(
             ['changeover_id', 'line']
@@ -322,7 +322,7 @@ class DailyProductionPlanner:
         )['time'].to_dict()
 
         rate_map = mlcfg.set_index(
-            ['material', 'delegate_line']
+            ['material', 'location', 'delegate_line']
         )['prd_rate'].to_dict()
 
         line_states = extract_line_states_from_plan(
@@ -527,8 +527,10 @@ def _run_legacy_mode(args) -> None:
 
     cap_df = cfg['LineCapacity']
 
-    rate_map = mlcfg.set_index(['material', 'delegate_line'])['prd_rate']
-    rate_map.index.set_names(['material', 'line'], inplace=True)
+    rate_map = mlcfg.set_index(
+        ['material', 'location', 'delegate_line']
+    )['prd_rate']
+    rate_map.index.set_names(['material', 'location', 'line'], inplace=True)
 
     uncon = pd.DataFrame(columns=[
         'material', 'location', 'line', 'planned_date',

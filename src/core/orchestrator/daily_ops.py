@@ -305,7 +305,7 @@ class OrchestratorDailyOpsMixin:
             ])
 
         # 写审计CSV
-        if write_audit:
+        if write_audit and getattr(self, 'persist_to_disk', True):
             date_str = cleanup_date.strftime(
                 '%Y%m%d'
             )
@@ -313,6 +313,7 @@ class OrchestratorDailyOpsMixin:
                 f"open_deployment_pastdue_"
                 f"cleanup_{date_str}.csv"
             )
+            out_path.parent.mkdir(parents=True, exist_ok=True)
             normalize_identifiers(cleanup_df).to_csv(
                 out_path, index=False
             )

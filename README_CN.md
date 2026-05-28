@@ -99,19 +99,23 @@ python -c "import pandas, numpy, scipy, duckdb, openpyxl, yaml, tqdm, psycopg, p
 
 ### 文件模式
 
-文件模式下，`--config` 传 Excel 路径：
+文件模式首选 `--config-dir`，传入 `workspace/<project>/<scenario>/config/` 目录。该目录内必须有且只有一个 Excel 文件；同目录 CSV 会按 sheet 名大小写不敏感匹配，并优先于 Excel sheet 读取。
 
 ```powershell
-python run.py --config config/BC_S5.xlsx --start-date 2025-10-06 --end-date 2025-10-10
-python run.py --config config/OC_Paste_S1_20251224.xlsx --end-date 2025-12-16 --force-restart --non-interactive
-python run.py --config config/BC_S5.xlsx --end-date 2025-10-15 --resume
+python run.py --config-dir D:/PG/chainsight/workspace/SDC/baseline/config --start-date 2025-10-06 --end-date 2025-10-10
+python run.py --config-dir SDC/baseline --end-date 2025-12-16 --force-restart --non-interactive
+python run.py --config-dir SDC/baseline --end-date 2025-10-15 --resume
 ```
+
+短格式 `<project>/<scenario>` 会展开为 `<workspace_root>/<project>/<scenario>/config`。`workspace_root` 优先级为：环境变量 `CHAINSIGHT_WORKSPACE` > 项目根 `.env` 中的 `CHAINSIGHT_WORKSPACE=...` > `config/defaults.yaml` 的 `workspace_root` > 项目根 `workspace/`。旧 `--config` Excel 路径仍在过渡期内可用，但文件模式新调用应迁移到 `--config-dir`。
 
 ### 数据库模式
 
-数据库模式下，`--config` 传配置名，并加 `--use-db`：
+数据库模式下，`--config` 可传配置名、Excel 文件路径，或包含唯一 Excel 的配置目录路径，并加 `--use-db`。传目录时会自动选中目录内唯一 Excel，`config_name` 使用 Excel 文件名：
 
 ```powershell
+python run.py --config D:/PG/chainsight/config/sdc --start-date 2026-06-29 --end-date 2026-07-01 --use-db --non-interactive
+python run.py --config D:/PG/chainsight/config/sdc/sdc.xlsx --start-date 2026-06-29 --end-date 2026-07-01 --use-db --non-interactive
 python run.py --config BC_S5 --start-date 2025-10-06 --end-date 2025-10-06 --use-db
 python run.py --config OC_Paste_S1_20251224 --start-date 2025-12-15 --end-date 2025-12-16 --use-db
 ```
@@ -134,7 +138,8 @@ python run.py --config OC_Paste_S1_20251224 --start-date 2025-12-15 --end-date 2
 
 | 参数 | 说明 |
 |---|---|
-| `--config` | 文件模式传 Excel 路径；数据库模式传配置名 |
+| `--config-dir` | 文件模式传场景 `config/` 目录，支持绝对路径或 `<project>/<scenario>` 短格式 |
+| `--config` | 已废弃的文件模式 Excel 路径；数据库模式传配置名、Excel 路径或含唯一 Excel 的目录路径 |
 | `--start-date` | 首次运行必填，格式 `YYYY-MM-DD` |
 | `--end-date` | 必填，格式 `YYYY-MM-DD` |
 | `--resume` | 自动续跑 |
@@ -159,6 +164,8 @@ chainsight/
 │   └── *.xlsx
 ├── docs/
 ├── outputs/
+├── workspace/
+│   └── <project>/<scenario>/config/
 ├── pgsql_db/
 └── src/
     ├── core/

@@ -62,6 +62,34 @@ class SummaryReportGenerator:
         except:
             return location_str
     
+    # Excel (.xlsx) 单表硬上限为 1,048,576 行（含表头），即最多 1,048,575 行数据。
+    # 超过该上限时 openpyxl 保存会失败（表现为 "At least one sheet must be visible"），
+    # 故对超限报告改写 CSV——与重构版大输出处理保持一致（如部署计划约 115 万行）。
+    XLSX_MAX_DATA_ROWS = 1_048_575
+
+    def _write_full_report(
+        self,
+        df: pd.DataFrame,
+        output_file,
+        sheet_name: str,
+    ) -> str:
+        """写出单表汇总报告：行数超过 xlsx 上限时改写同名 .csv。
+
+        返回实际写出的文件路径。小报告仍按原行为写 .xlsx，输出完全不变。
+        """
+        output_file = Path(output_file)
+        if len(df) > self.XLSX_MAX_DATA_ROWS:
+            csv_path = output_file.with_suffix('.csv')
+            df.to_csv(csv_path, index=False, encoding='utf-8-sig')
+            print(
+                f"📊 {sheet_name} 行数 {len(df)} 超过 xlsx 上限 "
+                f"{self.XLSX_MAX_DATA_ROWS}，改写 CSV：{csv_path.name}"
+            )
+            return str(csv_path)
+        with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
+            df.to_excel(writer, sheet_name=sheet_name, index=False)
+        return str(output_file)
+
     def generate_all_reports(self, start_date: str, end_date: str) -> Dict[str, str]:
         """
         生成所有汇总报告
@@ -140,7 +168,7 @@ class SummaryReportGenerator:
         all_shipments = []
         all_cuts = []
         
-        # 收集所有天的数据，并添加simulation_date
+        # 收集所有天的数据，并补齐缺失的 simulation_date
         for file_path in daily_files['module1']:
             try:
                 # 从文件名提取simulation_date
@@ -150,20 +178,17 @@ class SummaryReportGenerator:
                 
                 if 'OrderLog' in xl.sheet_names:
                     orders_df = xl.parse('OrderLog')
-                    if not orders_df.empty and simulation_date:
-                        orders_df['simulation_date'] = simulation_date
+                    orders_df = self._fill_missing_simulation_date(orders_df, simulation_date)
                     all_orders.append(orders_df)
                 
                 if 'ShipmentLog' in xl.sheet_names:
                     shipments_df = xl.parse('ShipmentLog')
-                    if not shipments_df.empty and simulation_date:
-                        shipments_df['simulation_date'] = simulation_date
+                    shipments_df = self._fill_missing_simulation_date(shipments_df, simulation_date)
                     all_shipments.append(shipments_df)
                 
                 if 'CutLog' in xl.sheet_names:
                     cuts_df = xl.parse('CutLog')
-                    if not cuts_df.empty and simulation_date:
-                        cuts_df['simulation_date'] = simulation_date
+                    cuts_df = self._fill_missing_simulation_date(cuts_df, simulation_date)
                     all_cuts.append(cuts_df)
             except Exception as e:
                 print(f"Warning: Failed to read {file_path}: {e}")
@@ -176,14 +201,20 @@ class SummaryReportGenerator:
         combined_shipments = pd.concat(all_shipments, ignore_index=True) if all_shipments else pd.DataFrame()
         combined_cuts = pd.concat(all_cuts, ignore_index=True) if all_cuts else pd.DataFrame()
         
-        # 🔧 关键修复：去除重复的 AO 订单
-        # AO 订单可能在多个 simulation_date 被重复记录，需要按唯一键去重
+        # 🔧 关键修复：去除重复的 AO 订单（与 src/DB 口径一致）
+        # 同一订单 (date, material, location, quantity[, demand_type]) 会在多个
+        # simulation_date 被重复记录。去重键**不含 simulation_date**，按 simulation_date
+        # 升序保留首次（即最早）出现，与 src 全局 seen-set / DB ROW_NUMBER(ORDER BY sim_date)
+        # 完全一致；否则同一订单每个 simulation_date 各留一份，行数偏多（58908 vs 56128）。
         if not combined_orders.empty:
             original_count = len(combined_orders)
-            # 按 date, material, location, quantity,（若有）demand_type, simulation_date 去重（保留第一条）
-            dedup_cols = ['date', 'material', 'location', 'quantity', 'simulation_date']
+            dedup_cols = ['date', 'material', 'location', 'quantity']
             if 'demand_type' in combined_orders.columns:
                 dedup_cols.append('demand_type')
+            if 'simulation_date' in combined_orders.columns:
+                combined_orders = combined_orders.sort_values(
+                    'simulation_date', kind='mergesort'
+                )
             combined_orders = combined_orders.drop_duplicates(subset=dedup_cols, keep='first')
             dedup_count = len(combined_orders)
             if original_count != dedup_count:
@@ -246,7 +277,7 @@ class SummaryReportGenerator:
             summary['order_qty'] = summary['order_qty'].fillna(0).infer_objects(copy=False).astype(int)
             summary['shipment_qty'] = summary['shipment_qty'].fillna(0).infer_objects(copy=False).astype(int)
             summary['cut_qty'] = summary['cut_qty'].fillna(0).infer_objects(copy=False).astype(int)
-            
+
             # 🔧 过滤掉超出模拟日期范围的数据
             if 'date' in summary.columns:
                 original_count = len(summary)
@@ -276,10 +307,11 @@ class SummaryReportGenerator:
             column_order = ['simulation_date', 'date', 'material', 'location', 'order_qty', 'shipment_qty', 'cut_qty']
             summary = summary[column_order]
             
-            # 输出到Excel
-            with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
-                summary.to_excel(writer, sheet_name='OrderShipmentCutSummary', index=False)
-        
+            # 输出到Excel（超限自动改写 CSV）
+            return self._write_full_report(
+                summary, output_file, 'OrderShipmentCutSummary'
+            )
+
         return str(output_file)
     
     def _generate_delivery_report(self, daily_files: Dict) -> str:
@@ -326,9 +358,10 @@ class SummaryReportGenerator:
             # 按需求添加字段: date, material, sending, receiving, planned_qty, delivered_qty, planned_deploy_date, actual_ship_date
             required_columns = ['date', 'material', 'sending', 'receiving', 'planned_qty', 'delivered_qty', 'planned_deploy_date', 'actual_ship_date']
             
-            with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
-                combined_deliveries.to_excel(writer, sheet_name='FullDeliveryPlan', index=False)
-        
+            return self._write_full_report(
+                combined_deliveries, output_file, 'FullDeliveryPlan'
+            )
+
         return str(output_file)
     
     def _generate_truck_usage_report(self, daily_files: Dict) -> str:
@@ -363,8 +396,9 @@ class SummaryReportGenerator:
             
             # 按需求字段: date, sending, receiving, truck_type, available_trucks, used_trucks, wfr, vfr
             
-            with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
-                combined_usage.to_excel(writer, sheet_name='FullTruckUsage', index=False)
+            return self._write_full_report(
+                combined_usage, output_file, 'FullTruckUsage'
+            )
         
         return str(output_file)
     
@@ -398,8 +432,9 @@ class SummaryReportGenerator:
                 if original_count != filtered_count:
                     print(f"📊 Capacity Exceed 过滤：{original_count} 条 → {filtered_count} 条（移除了 {original_count - filtered_count} 条超出日期范围的记录）")
             
-            with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
-                combined_exceeds.to_excel(writer, sheet_name='FullCapacityExceed', index=False)
+            return self._write_full_report(
+                combined_exceeds, output_file, 'FullCapacityExceed'
+            )
         
         return str(output_file)
     
@@ -441,9 +476,10 @@ class SummaryReportGenerator:
                     if original_count != filtered_count:
                         print(f"📊 Changeover Log 过滤：{original_count} 条 → {filtered_count} 条（移除了 {original_count - filtered_count} 条超出日期范围的记录）")
                 
-                with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
-                    combined_changeovers.to_excel(writer, sheet_name='FullChangeoverLog', index=False)
-        
+                return self._write_full_report(
+                    combined_changeovers, output_file, 'FullChangeoverLog'
+                )
+
         return str(output_file)
     
     def _generate_deployment_report(self, daily_files: Dict) -> str:
@@ -483,8 +519,9 @@ class SummaryReportGenerator:
             if original_count != filtered_count:
                 print(f"📊 Deployment Plan 过滤：{original_count} 条 → {filtered_count} 条（移除了 {original_count - filtered_count} 条超出日期范围的记录）")
             
-            with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
-                combined_deployments.to_excel(writer, sheet_name='FullDeploymentPlan', index=False)
+            return self._write_full_report(
+                combined_deployments, output_file, 'FullDeploymentPlan'
+            )
         
         return str(output_file)
     
@@ -523,19 +560,33 @@ class SummaryReportGenerator:
                 if original_count != filtered_count:
                     print(f"📊 Production Plan 过滤：{original_count} 条 → {filtered_count} 条（移除了 {original_count - filtered_count} 条超出日期范围的记录）")
             
-            with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
-                combined_productions.to_excel(writer, sheet_name='FullProductionPlan', index=False)
+            return self._write_full_report(
+                combined_productions, output_file, 'FullProductionPlan'
+            )
         
         return str(output_file)
     
     def _extract_date_from_filename(self, file_path: str) -> str:
         """从文件名中提取日期"""
         import re
-        match = re.search(r'(\d{8})', file_path)
+        match = re.search(r'(\d{8})', Path(file_path).name)
         if match:
             date_str = match.group(1)
             return pd.to_datetime(date_str, format='%Y%m%d').strftime('%Y-%m-%d')
         return None
+
+    @staticmethod
+    def _fill_missing_simulation_date(df: pd.DataFrame, simulation_date: str) -> pd.DataFrame:
+        """保留源 simulation_date，仅用文件日期补齐缺失值。"""
+        if df.empty or not simulation_date:
+            return df
+        if 'simulation_date' not in df.columns:
+            df['simulation_date'] = pd.to_datetime(simulation_date)
+            return df
+        missing_mask = df['simulation_date'].isna()
+        if missing_mask.any():
+            df.loc[missing_mask, 'simulation_date'] = pd.to_datetime(simulation_date)
+        return df
     
     def _generate_historical_inventory_report(self, start_date: str, end_date: str) -> str:
         """生成历史库存记录CSV报告"""

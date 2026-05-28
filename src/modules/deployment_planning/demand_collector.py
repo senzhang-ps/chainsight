@@ -17,6 +17,7 @@ from .cache_utils import (
 )
 from .constants import DEFAULT_MOQ, DEFAULT_RV
 from src.utils.ptf_lsk import get_ptf_lsk
+from src.utils.numeric_safe import safe_int_array
 
 
 def _lookup_moq_rv(
@@ -42,40 +43,36 @@ def _lookup_moq_rv(
     返回：
         tuple: (moq, rv)
     """
-    try:
-        # 尝试三键匹配
-        if 'receiving' in deploy_cfg.columns and receiving is not None:
-            rows = deploy_cfg[
-                (deploy_cfg['material'] == str(material)) &
-                (deploy_cfg['sending'] == str(sending)) &
-                (deploy_cfg['receiving'] == str(receiving))
-            ]
-            if not rows.empty:
-                moq = int(pd.to_numeric(
-                    rows.iloc[0].get('moq', 1), errors='coerce'
-                ) or 1)
-                rv = int(pd.to_numeric(
-                    rows.iloc[0].get('rv', 1), errors='coerce'
-                ) or 1)
-                return max(0, moq), max(0, rv)
-
-        # 回退到两键匹配
-        rows2 = deploy_cfg[
+    # 尝试三键匹配
+    if 'receiving' in deploy_cfg.columns and receiving is not None:
+        rows = deploy_cfg[
             (deploy_cfg['material'] == str(material)) &
-            (deploy_cfg['sending'] == str(sending))
+            (deploy_cfg['sending'] == str(sending)) &
+            (deploy_cfg['receiving'] == str(receiving))
         ]
-        if not rows2.empty:
-            moq = int(pd.to_numeric(
-                rows2.iloc[0].get('moq', 1), errors='coerce'
-            ) or 1)
-            rv = int(pd.to_numeric(
-                rows2.iloc[0].get('rv', 1), errors='coerce'
-            ) or 1)
-            return max(0, moq), max(0, rv)
-    except Exception:
-        pass
+        if not rows.empty:
+            return _moq_rv_from_row(rows.iloc[0])
+
+    # 回退到两键匹配
+    rows2 = deploy_cfg[
+        (deploy_cfg['material'] == str(material)) &
+        (deploy_cfg['sending'] == str(sending))
+    ]
+    if not rows2.empty:
+        return _moq_rv_from_row(rows2.iloc[0])
 
     return DEFAULT_MOQ, DEFAULT_RV
+
+
+def _moq_rv_from_row(row) -> tuple:
+    """从一行 DeployConfig 取出 (moq, rv)；空/非法/非有限值回退默认值，真正的错误不吞。"""
+    def _to_pos_int(val, default: int) -> int:
+        num = pd.to_numeric(val, errors='coerce')
+        if pd.isna(num) or num in (float('inf'), float('-inf')):
+            return default
+        return max(0, int(num))
+
+    return _to_pos_int(row.get('moq', 1), DEFAULT_MOQ), _to_pos_int(row.get('rv', 1), DEFAULT_RV)
 
 
 def _collect_sdl_demands(
@@ -145,8 +142,8 @@ def _collect_sdl_demands(
         'sending': upstream,
         'receiving': location,
         'demand_element': combined['demand_element'].values,
-        'demand_qty': combined['quantity'].astype(int).values,
-        'planned_qty': combined['quantity'].astype(int).values,
+        'demand_qty': safe_int_array(combined['quantity'], context='deployment.collect_sdl.demand_qty'),
+        'planned_qty': safe_int_array(combined['quantity'], context='deployment.collect_sdl.planned_qty'),
         'moq': DEFAULT_MOQ,
         'rv': DEFAULT_RV,
         'leadtime': leadtime_val,
@@ -304,8 +301,8 @@ def _collect_order_demands(
         'sending': upstream,
         'receiving': location,
         'demand_element': orders['demand_element'].astype(str).values,
-        'demand_qty': orders['quantity'].astype(int).values,
-        'planned_qty': orders['quantity'].astype(int).values,
+        'demand_qty': safe_int_array(orders['quantity'], context='deployment.collect_orders.demand_qty'),
+        'planned_qty': safe_int_array(orders['quantity'], context='deployment.collect_orders.planned_qty'),
         'moq': DEFAULT_MOQ,
         'rv': DEFAULT_RV,
         'leadtime': leadtime_val,

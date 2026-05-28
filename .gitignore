@@ -33,6 +33,7 @@ MANIFEST
 .pytest_cache/
 .coverage
 htmlcov/
+tests/
 
 # IDEs
 .vscode/
@@ -58,6 +59,7 @@ Thumbs.db
 *.tmp
 .temp/
 temp/
+.env
 
 # Outputs (generated reports, not tracked)
 outputs/
@@ -81,8 +83,19 @@ archive/ChainSight_Dev/**/run_*/
 .opencode/
 AGENTS.md
 
+# CodeGraph local index
+.codegraph/
+
 # Sisyphus plans
 .sisyphus/
 
 # csv
 *.csv
+
+# 业务输入数据（input/）：仅保留 BC 作为样例数据，其余 scenario 不入仓
+input/*
+!input/BC/
+!input/BC/**
+# BC 下的 CSV/CSV 大写后缀需显式重新纳入，避免被 *.csv 规则吞掉
+!input/BC/**/*.csv
+!input/BC/**/*.CSV

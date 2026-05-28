@@ -13,6 +13,7 @@ import numpy as np
 import pandas as pd
 
 from ...utils.normalization import normalize_identifiers
+from ...utils.numeric_safe import safe_int_series
 
 
 def apply_dps(df: pd.DataFrame, dps_cfg: pd.DataFrame) -> pd.DataFrame:
@@ -51,8 +52,12 @@ def apply_dps(df: pd.DataFrame, dps_cfg: pd.DataFrame) -> pd.DataFrame:
     m['dps_percent'] = m['dps_percent'].fillna(0.0)
 
     # 计算拆分量和保留量
-    m['split_qty'] = np.round(m['quantity'] * m['dps_percent']).astype(int)
-    m['remain_qty'] = (m['quantity'] - m['split_qty']).astype(int)
+    m['split_qty'] = safe_int_series(
+        np.round(m['quantity'] * m['dps_percent']), context='module1.apply_dps.split_qty'
+    )
+    m['remain_qty'] = safe_int_series(
+        m['quantity'] - m['split_qty'], context='module1.apply_dps.remain_qty'
+    )
 
     # 构建保留部分和拆分部分
     remain = m[['material', 'location', 'week', 'remain_qty']].rename(
@@ -67,7 +72,7 @@ def apply_dps(df: pd.DataFrame, dps_cfg: pd.DataFrame) -> pd.DataFrame:
     out = out.groupby(
         ['material', 'location', 'week'], as_index=False
     )['quantity'].sum()
-    out['quantity'] = out['quantity'].astype(int)
+    out['quantity'] = safe_int_series(out['quantity'], context='module1.apply_dps.quantity')
 
     elapsed = time.perf_counter() - t0
 
@@ -104,7 +109,10 @@ def apply_supply_choice(
 
     # 合并并应用调整
     m = df_g.merge(sup_g, on=['material', 'location', 'week'], how='left')
-    m['quantity'] = (m['quantity'] + m['adjust_quantity'].fillna(0)).astype(int)
+    m['quantity'] = safe_int_series(
+        m['quantity'] + m['adjust_quantity'].fillna(0),
+        context='module1.apply_supply_choice.quantity',
+    )
     out = m[['material', 'location', 'week', 'quantity']]
 
     elapsed = time.perf_counter() - t0

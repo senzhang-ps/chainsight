@@ -748,7 +748,7 @@ class _PolarsBackend:
         ao_config_summary = (
             ao_config
             .group_by(["material", "location"])
-            .agg(ao_percent=pl.col("ao_percent").sum())
+            .agg(ao_percent=pl.col("ao_percent").sum().round(6))
         )
 
         ao_config = ao_config.with_columns(
@@ -1041,17 +1041,20 @@ class _PolarsBackend:
 
         df = df.join(self.forecast_error, on=["material", "location", "order_type"], how="left")
         df = df.with_columns(
-            pl.col("error_std_percent").fill_null(0),
+            pl.col("error_std_percent").fill_null(0).round(3),
         )
-        df = df.with_columns(
-            (pl.col("split_quantity") * pl.col("error_std_percent")).alias("abs_std"),
-        )
+        df = df.with_columns([
+            (pl.col("split_quantity") * pl.col("error_std_percent")).alias("abs_std").round(3)
+        ])
+        df = df.sort(["material", "location", "week_start", "order_type", "split_quantity"])
 
-        # 随机数仍用 numpy
-        split_qty = df["split_quantity"].to_numpy().astype(float)
-        abs_std = df["abs_std"].to_numpy().astype(float)
-        raw = np.random.normal(np.nan_to_num(split_qty), np.nan_to_num(abs_std))
-        cov = np.maximum(0, np.round(np.nan_to_num(raw))).astype(int)
+        # np.random.seed(42)
+        rng = np.random.default_rng(42)
+        # raw = rng.normal(split_qty, abs_std)
+
+        split_qty = np.round(np.nan_to_num(df["split_quantity"].to_numpy().astype(float)), 3)
+        abs_std = np.round(np.nan_to_num(df["abs_std"].to_numpy().astype(float)), 3)
+        cov = np.maximum(0, np.round(rng.normal(split_qty, abs_std))).astype(int)
         cov = np.where(cov == 0, 1, cov)
         df = df.with_columns(pl.Series("cov_quantity_raw", cov))
 

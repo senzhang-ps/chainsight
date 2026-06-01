@@ -55,6 +55,7 @@ class ConfigDir:
         d = d.resolve()
         if not d.is_dir():
             raise FileNotFoundError(f"config 目录不存在：{d}")
+        _validate_project_scenario_layout(d)
 
         # ---- Excel 唯一性 ----
         xls_files = sorted(
@@ -87,6 +88,7 @@ class ConfigDir:
         if not p.is_file():
             raise FileNotFoundError(f"配置文件不存在：{p}")
         d = p.parent
+        _validate_project_scenario_layout(d)
         csv_map = _collect_csvs_or_raise(d, scope_label="Excel 同目录")
         return cls(dir_path=d, excel_path=p, csv_map=csv_map)
 
@@ -134,6 +136,20 @@ class ConfigDir:
         return Path(self.project) / self.scenario
 
 # ---------- 内部辅助 ----------
+def _validate_project_scenario_layout(d: Path) -> None:
+    """Reject ``<project>/scenarios/config`` because it is missing scenario."""
+    if d.name != "config" or d.parent.name != "scenarios":
+        return
+
+    msg = (
+        "Invalid config directory layout: expected "
+        "<project>/scenarios/<scenario>/config, got "
+        f"{d}. Missing <scenario> between 'scenarios' and 'config'."
+    )
+    logger.warning(msg)
+    raise ValueError(msg)
+
+
 def _collect_csvs_or_raise(d: Path, *, scope_label: str) -> dict[str, Path]:
     """收集 ``d`` 下的 ``.csv``，校验大小写不敏感唯一性。
 

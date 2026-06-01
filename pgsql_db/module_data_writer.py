@@ -126,16 +126,16 @@ class ModuleDataWriter:
                     cursor.execute("""
                         SELECT EXISTS (
                             SELECT FROM information_schema.tables
-                            WHERE table_schema = 'public'
+                            WHERE table_schema = %s
                             AND table_name = %s
                         )
-                    """, (table_name,))
+                    """, (self.db.schema, table_name))
                     exists = cursor.fetchone()[0]
 
                     if exists:
                         cursor.execute(
                             sql.SQL('DELETE FROM {} WHERE run_id = %s').format(
-                                sql.Identifier(table_name)
+                                self.db._qualified(table_name)
                             ),
                             (run_id,)
                         )
@@ -205,28 +205,33 @@ class ModuleDataWriter:
         返回：
             int: 新创建的表数量
         """
-        common_columns = [
-            '"run_id" TEXT',
-            '"sim_date" TEXT',
-            '"config_name" TEXT',
-            '"db_write_time" TIMESTAMP',
-        ]
-        cols_sql = ", ".join(common_columns)
+        common_columns_sql = sql.SQL(", ").join([
+            sql.SQL('{} TEXT').format(sql.Identifier("run_id")),
+            sql.SQL('{} TEXT').format(sql.Identifier("sim_date")),
+            sql.SQL('{} TEXT').format(sql.Identifier("config_name")),
+            sql.SQL('{} TIMESTAMP').format(sql.Identifier("db_write_time")),
+        ])
         created = 0
         with self.db.get_cursor() as cur:
             for table_name in self.ALL_OUTPUT_TABLES:
                 cur.execute(
                     "SELECT EXISTS(SELECT 1 FROM information_schema.tables "
-                    "WHERE table_schema = 'public' AND table_name = %s)",
-                    (table_name,),
+                    "WHERE table_schema = %s AND table_name = %s)",
+                    (self.db.schema, table_name),
                 )
                 if not cur.fetchone()[0]:
-                    cur.execute(f'CREATE TABLE "{table_name}" ({cols_sql})')
+                    cur.execute(
+                        sql.SQL("CREATE TABLE {} ({})").format(
+                            self.db._qualified(table_name), common_columns_sql
+                        )
+                    )
                     created += 1
         if created > 0:
             pass
         else:
             pass
+        from pgsql_db.daily_log_ledger import ensure_daily_log_ledger_schema
+        ensure_daily_log_ledger_schema(self.db)
         return created
 
     def prepare_orchestrator_day_dataframes(
@@ -809,37 +814,37 @@ class ModuleDataWriter:
                 # 检查表是否存在
                 rows = self.db.execute_query(
                     "SELECT EXISTS(SELECT 1 FROM information_schema.tables "
-                    "WHERE table_schema = 'public' AND table_name = %s)",
-                    (table_name,)
+                    "WHERE table_schema = %s AND table_name = %s)",
+                    (self.db.schema, table_name)
                 )
                 if not rows or not rows[0][0]:
                     continue
                 # 检查是否有 sim_date 列
                 sim_date_check = self.db.execute_query(
                     "SELECT EXISTS(SELECT 1 FROM information_schema.columns "
-                    "WHERE table_name = %s AND column_name = 'sim_date')",
-                    (table_name,)
+                    "WHERE table_schema = %s AND table_name = %s AND column_name = 'sim_date')",
+                    (self.db.schema, table_name)
                 )
                 if not sim_date_check or not sim_date_check[0][0]:
                     continue
                 # 检查是否有 run_id 列，按 sim_date + run_id 删除
                 run_id_check = self.db.execute_query(
                     "SELECT EXISTS(SELECT 1 FROM information_schema.columns "
-                    "WHERE table_name = %s AND column_name = 'run_id')",
-                    (table_name,)
+                    "WHERE table_schema = %s AND table_name = %s AND column_name = 'run_id')",
+                    (self.db.schema, table_name)
                 )
                 has_run_id = run_id_check and run_id_check[0][0]
                 if has_run_id and run_id:
                     self.db.execute_non_query(
                         sql.SQL('DELETE FROM {} WHERE sim_date >= %s AND run_id = %s').format(
-                            sql.Identifier(table_name)
+                            self.db._qualified(table_name)
                         ),
                         (batch_start_date, run_id)
                     )
                 else:
                     self.db.execute_non_query(
                         sql.SQL('DELETE FROM {} WHERE sim_date >= %s').format(
-                            sql.Identifier(table_name)
+                            self.db._qualified(table_name)
                         ),
                         (batch_start_date,)
                     )
@@ -1294,8 +1299,9 @@ class ModuleDataWriter:
         # 转换日期为 datetime，用于过滤
         end_date_dt = pd.to_datetime(end_date) if end_date else None
 
-        # 为汇总聚合的高频过滤/分组列建立复合索引（幂等，IF NOT EXISTS）
-        self._ensure_summary_source_indexes()
+        # 注：Summary 宽 BTREE 索引由 db_runner 调用 index_registry.ensure_summary_wide_indexes
+        # 在调用本函数之前统一建立；为避免重复 DDL 往返，此处不再重复触发。保留
+        # ``_ensure_summary_source_indexes`` 方法以兼容其他可能的直接调用方。
 
         # 1. 生成订单/发货/缺货汇总报告
         try:
@@ -1382,32 +1388,32 @@ class ModuleDataWriter:
         return results
     
     def _get_table_columns(self, table_name: str) -> set:
-        """返回表的列名集合；表不存在时返回空集合。"""
+        """返回表的列名集合；表不存在时返回空集合（限定到当前 schema）。"""
         try:
             with self.db.get_cursor(commit=False) as cursor:
                 cursor.execute(
                     """
                     SELECT column_name FROM information_schema.columns
-                    WHERE table_name = %s
+                    WHERE table_schema = %s AND table_name = %s
                     """,
-                    (table_name,),
+                    (self.db.schema, table_name),
                 )
                 return {row[0] for row in cursor.fetchall()}
         except Exception:
             return set()
 
     def _get_table_column_info(self, table_name: str) -> List[tuple[str, str]]:
-        """按表内字段顺序返回字段名和 PostgreSQL 类型。"""
+        """按表内字段顺序返回字段名和 PostgreSQL 类型（限定到当前 schema）。"""
         try:
             with self.db.get_cursor(commit=False) as cursor:
                 cursor.execute(
                     """
                     SELECT column_name, data_type
                     FROM information_schema.columns
-                    WHERE table_name = %s
+                    WHERE table_schema = %s AND table_name = %s
                     ORDER BY ordinal_position
                     """,
-                    (table_name,),
+                    (self.db.schema, table_name),
                 )
                 return [(row[0], str(row[1])) for row in cursor.fetchall()]
         except Exception:
@@ -1417,16 +1423,16 @@ class ModuleDataWriter:
     # 前导列 run_id 服务 WHERE 等值过滤，其余列服务 GROUP BY / ORDER BY，
     # 让 PostgreSQL 尽量走索引扫描并省去额外排序。
     def _get_table_column_types(self, table_name: str) -> Dict[str, str]:
-        """返回每个字段在 information_schema 中登记的小写数据类型。"""
+        """返回每个字段在 information_schema 中登记的小写数据类型（限定到当前 schema）。"""
         try:
             with self.db.get_cursor(commit=False) as cursor:
                 cursor.execute(
                     """
                     SELECT column_name, data_type
                     FROM information_schema.columns
-                    WHERE table_name = %s
+                    WHERE table_schema = %s AND table_name = %s
                     """,
-                    (table_name,),
+                    (self.db.schema, table_name),
                 )
                 return {row[0]: str(row[1]).lower() for row in cursor.fetchall()}
         except Exception:
@@ -1442,7 +1448,7 @@ class ModuleDataWriter:
         with self.db.get_cursor() as cursor:
             cursor.execute(
                 sql.SQL("CREATE TABLE IF NOT EXISTS {} ({})").format(
-                    sql.Identifier(table_name),
+                    self.db._qualified(table_name),
                     cols_sql,
                 )
             )
@@ -1454,7 +1460,7 @@ class ModuleDataWriter:
             with self.db.get_cursor() as cursor:
                 cursor.execute(
                     sql.SQL("ALTER TABLE {} ADD COLUMN {} {}").format(
-                        sql.Identifier(table_name),
+                        self.db._qualified(table_name),
                         sql.Identifier(col),
                         sql.SQL(pg_type),
                     )
@@ -1477,7 +1483,7 @@ class ModuleDataWriter:
                                 "ALTER TABLE {tbl} ALTER COLUMN {col} TYPE BIGINT "
                                 "USING TRUNC({col})::bigint"
                             ).format(
-                                tbl=sql.Identifier(table_name),
+                                tbl=self.db._qualified(table_name),
                                 col=sql.Identifier(col),
                             )
                         )
@@ -1506,13 +1512,13 @@ class ModuleDataWriter:
             if run_id and "run_id" in cols:
                 cursor.execute(
                     sql.SQL("DELETE FROM {} WHERE run_id = %s").format(
-                        sql.Identifier(table_name)
+                        self.db._qualified(table_name)
                     ),
                     (run_id,),
                 )
             elif not run_id:
                 cursor.execute(
-                    sql.SQL("TRUNCATE TABLE {}").format(sql.Identifier(table_name))
+                    sql.SQL("TRUNCATE TABLE {}").format(self.db._qualified(table_name))
                 )
 
     def _timestamp_expr(self, column: str, col_type: Optional[str]) -> Any:
@@ -1635,7 +1641,7 @@ class ModuleDataWriter:
         with self.db.get_cursor() as cursor:
             cursor.execute(
                 sql.SQL("CREATE TABLE IF NOT EXISTS {} ({})").format(
-                    sql.Identifier(target_table),
+                    self.db._qualified(target_table),
                     cols_sql,
                 )
             )
@@ -1647,7 +1653,7 @@ class ModuleDataWriter:
             with self.db.get_cursor() as cursor:
                 cursor.execute(
                     sql.SQL("ALTER TABLE {} ADD COLUMN {} {}").format(
-                        sql.Identifier(target_table),
+                        self.db._qualified(target_table),
                         sql.Identifier(col),
                         sql.SQL(pg_type),
                     )
@@ -1667,7 +1673,7 @@ class ModuleDataWriter:
                             sql.SQL(
                                 "ALTER TABLE {} ALTER COLUMN {} TYPE TEXT USING {}::TEXT"
                             ).format(
-                                sql.Identifier(target_table),
+                                self.db._qualified(target_table),
                                 sql.Identifier(col),
                                 sql.Identifier(col),
                             )
@@ -1679,7 +1685,7 @@ class ModuleDataWriter:
                                 "ALTER TABLE {} ALTER COLUMN {} TYPE DOUBLE PRECISION "
                                 "USING {}::DOUBLE PRECISION"
                             ).format(
-                                sql.Identifier(target_table),
+                                self.db._qualified(target_table),
                                 sql.Identifier(col),
                                 sql.Identifier(col),
                             )
@@ -1741,7 +1747,7 @@ class ModuleDataWriter:
     ) -> bool:
         """判断源表过滤后是否存在数据，避免无数据时创建空 Summary 表。"""
         query = sql.SQL("SELECT 1 FROM {tbl} {where} LIMIT 1").format(
-            tbl=sql.Identifier(source_table),
+            tbl=self.db._qualified(source_table),
             where=where_sql,
         )
         with self.db.get_cursor(commit=False) as cursor:
@@ -1858,7 +1864,7 @@ class ModuleDataWriter:
                         cursor.execute(
                             # 目标表名使用 sql.Identifier 安全拼接，run_id 使用参数绑定。
                             sql.SQL("DELETE FROM {} WHERE run_id = %s").format(
-                                sql.Identifier(target_table)
+                                self.db._qualified(target_table)
                             ),
                             (run_id,),
                         )
@@ -1867,7 +1873,7 @@ class ModuleDataWriter:
                         cursor.execute(
                             # TRUNCATE 仅在缺少 run_id 的历史兼容场景使用。
                             sql.SQL("TRUNCATE TABLE {}").format(
-                                sql.Identifier(target_table)
+                                self.db._qualified(target_table)
                             )
                         )
 
@@ -1919,13 +1925,13 @@ class ModuleDataWriter:
             """
         ).format(
             # target：目标 Summary 表名，用 sql.Identifier 防止表名拼接风险。
-            target=sql.Identifier(target_table),
+            target=self.db._qualified(target_table),
             # target_cols：INSERT INTO (...) 中的目标字段列表。
             target_cols=sql.SQL(", ").join(sql.Identifier(c) for c in output_columns),
             # select_items：SELECT 后面的字段表达式，包含源字段透传和元数据字段覆盖。
             select_items=sql.SQL(", ").join(select_items),
             # source：FROM 后面的来源模块输出表名。
-            source=sql.Identifier(source_table),
+            source=self.db._qualified(source_table),
             # where：WHERE 过滤片段，包含当前 run_id 和日期上限过滤。
             where=where_sql,
             # order：ORDER BY 排序片段，用于保持输出顺序稳定。
@@ -1945,55 +1951,18 @@ class ModuleDataWriter:
             self.written_tables[target_table] = {"module": "summary", "rows": rows}
         return rows
 
-    _SUMMARY_SOURCE_INDEX_SPECS = [
-        ("module1_output_orderlog", ["run_id", "date", "material", "location"]),
-        ("module1_output_shipmentlog", ["run_id", "date", "material", "location"]),
-        ("module1_output_cutlog", ["run_id", "date", "material", "location"]),
-        ("module4_output_changeoverlog", ["run_id", "changeover_end_date"]),
-        ("module4_output_capacityexceed", ["run_id", "date"]),
-        ("module4_output_productionplan", ["run_id", "available_date"]),
-        ("module5_output_deploymentplan", ["run_id", "date"]),
-        ("module6_output_deliveryplan", ["run_id", "actual_ship_date"]),
-        ("module6_output_truckusagelog", ["run_id", "date"]),
-    ]
-
     def _ensure_summary_source_indexes(self) -> int:
-        """为 summary 聚合的源表建立复合索引（幂等）。
+        """Create summary source indexes through the central index registry."""
+        try:
+            from .index_registry import ensure_summary_wide_indexes
 
-        - CREATE INDEX IF NOT EXISTS：已存在则跳过，无副作用。
-        - 仅对存在的表、且复合列全部存在时建立；缺列时退化为已存在列的前缀。
-        - 单个索引建立失败不影响其余（大表首次建索引耗时，但仅一次性成本）。
-
-        返回成功执行 CREATE 的索引数量（已存在的也计入，因为 IF NOT EXISTS 不报错）。
-        """
-        created = 0
-        for table_name, cols in self._SUMMARY_SOURCE_INDEX_SPECS:
-            existing = self._get_table_columns(table_name)
-            if not existing:
-                continue
-            idx_cols = [c for c in cols if c in existing]
-            # 至少需要 run_id + 1 个分组/过滤列才有意义
-            if len(idx_cols) < 2:
-                continue
-            index_name = f"idx_{table_name}_summary"
-            col_idents = sql.SQL(", ").join(sql.Identifier(c) for c in idx_cols)
-            query = sql.SQL(
-                "CREATE INDEX IF NOT EXISTS {idx} ON {tbl} ({cols})"
-            ).format(
-                idx=sql.Identifier(index_name),
-                tbl=sql.Identifier(table_name),
-                cols=col_idents,
+            return ensure_summary_wide_indexes(self.db)
+        except Exception as e:
+            _summary_logger.warning(
+                "[INDEX] Summary index registry skipped: %s",
+                e,
             )
-            try:
-                with self.db.get_cursor() as cursor:
-                    cursor.execute(query)
-                created += 1
-            except Exception as e:
-                _summary_logger.warning(
-                    "[INDEX] 复合索引建立跳过 %s(%s): %s",
-                    table_name, ", ".join(idx_cols), e,
-                )
-        return created
+            return 0
 
     def _sample_config_sim_date(self, run_id: str, candidate_tables: list) -> str:
         """从候选表的 config_name 列采样一行，提取 8 位日期 → 'YYYY-MM-DD'。"""
@@ -2007,7 +1976,7 @@ class ModuleDataWriter:
                 params = (run_id,) if (run_id and 'run_id' in cols) else None
                 query = sql.SQL(
                     "SELECT config_name FROM {tbl} {where} LIMIT 1"
-                ).format(tbl=sql.Identifier(tbl), where=where)
+                ).format(tbl=self.db._qualified(tbl), where=where)
                 with self.db.get_cursor(commit=False) as cursor:
                     cursor.execute(query, params)
                     row = cursor.fetchone()
@@ -2082,7 +2051,7 @@ class ModuleDataWriter:
             """
         ).format(
             select_items=sql.SQL(", ").join(select_items),
-            table=sql.Identifier(table_name),
+            table=self.db._qualified(table_name),
             where=where_sql,
         )
         if dedup:
@@ -2171,7 +2140,7 @@ class ModuleDataWriter:
                         cursor.execute(
                             # 安全拼接目标表名，避免表名字符串直接进入 SQL。
                             sql.SQL("DELETE FROM {} WHERE run_id = %s").format(
-                                sql.Identifier(target_table)
+                                self.db._qualified(target_table)
                             ),
                             # run_id 作为参数绑定，避免 SQL 注入和转义问题。
                             (run_id,),
@@ -2181,7 +2150,7 @@ class ModuleDataWriter:
                         cursor.execute(
                             # TRUNCATE 只在没有 run_id 的历史兼容场景使用。
                             sql.SQL("TRUNCATE TABLE {}").format(
-                                sql.Identifier(target_table)
+                                self.db._qualified(target_table)
                             )
                         )
 
@@ -2238,7 +2207,7 @@ class ModuleDataWriter:
         # 构造源表查询：读取源表全部字段，并下推 WHERE / ORDER BY 到 PostgreSQL。
         query = sql.SQL("SELECT * FROM {tbl} {where} {order}").format(
             # tbl 是来源模块输出表名，用 sql.Identifier 安全转义。
-            tbl=sql.Identifier(source_table),
+            tbl=self.db._qualified(source_table),
             # where 是前面构造的过滤片段；无过滤时为空。
             where=where_sql,
             # order 是前面构造的排序片段；无排序时为空。
@@ -2476,7 +2445,7 @@ class ModuleDataWriter:
             # 注入结束日期动态过滤片段。
             end_filter=end_filter_sql,
             # 注入目标表名，并通过 sql.Identifier 防止查询标识符拼接风险。
-            target=sql.Identifier(table_name),
+            target=self.db._qualified(table_name),
         )
 
         try:

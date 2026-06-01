@@ -17,40 +17,53 @@ from ..main_integration import run_integrated_simulation
 
 
 def _load_config_from_database(db, config_name: str) -> dict:
-    """从数据库加载配置表"""
-    
+    """从数据库加载配置表。
+
+    P1 计划书 §6 优化：把 ``read_table(table_name)`` + pandas 过滤改为
+    ``read_table(table_name, filters={'config_name': ...})``——DB 侧过滤命中
+    ``cfg_*(config_name)`` 索引，避免整表读入内存，对大配置表显著降低 IO 与内存压力。
+
+    `config_name` 兼容 ``BC/BC_S5`` 这种带路径前缀的输入：先用原值过滤，未命中再
+    用 basename 重新查一次（两次查询都走索引）。
+    """
     all_tables = db.get_all_tables()
     config_data = {}
-    
+
     # 计算旧格式的配置前缀（如 bc_s5_）
     old_prefix = (
         config_name.lower().replace("-", "_").replace(" ", "_") + "_"
     )
-    
+
+    config_basename = (
+        config_name.split('/')[-1] if '/' in config_name else config_name
+    )
+
     # 优先尝试新格式（cfg_开头，通过 config_name 字段区分）
     for table_name in all_tables:
         if not table_name.startswith('cfg_'):
             continue
-            
+
+        # 通过 information_schema 缓存判断目标表是否带 config_name 列；
+        # 没有则跳过——cfg_import_manifest 等管理表会落在这里。
+        col_types = db._get_column_types(table_name)
+        if 'config_name' not in col_types:
+            continue
+
         try:
-            df = db.read_table(table_name)
-        except Exception as e:
+            # DB 侧过滤：精确匹配 config_name
+            filtered = db.read_table(table_name, filters={'config_name': config_name})
+        except Exception:
             continue
-        
-        # 只接受包含 config_name 列的表；并按指定配置过滤
-        if 'config_name' not in df.columns:
-            continue
-        
-        # 优先精确匹配 config_name，无数据时回退到 basename
-        filtered = df[df['config_name'] == config_name]
-        if filtered.empty:
-            config_basename = (
-                config_name.split('/')[-1]
-                if '/' in config_name else config_name
-            )
-            if config_basename != config_name:
-                filtered = df[df['config_name'] == config_basename]
-        
+
+        # 兼容 ``BC/BC_S5``：精确无数据时回退到 basename
+        if filtered.empty and config_basename != config_name:
+            try:
+                filtered = db.read_table(
+                    table_name, filters={'config_name': config_basename}
+                )
+            except Exception:
+                filtered = pd.DataFrame()
+
         # 清理 DB 元数据列和非标准列（unnamed_*、全 NULL 列等）
         drop_cols = [
             c for c in filtered.columns
@@ -67,28 +80,28 @@ def _load_config_from_database(db, config_name: str) -> dict:
 
         # 去掉 cfg_ 前缀，作为配置数据的 key
         clean_table_name = table_name[4:]
-        
+
         # 即使过滤后为空，也保留表结构（对于某些模块配置表是必要的）
         config_data[clean_table_name] = filtered
-    
-    # 如果新格式没有数据，回退到旧格式（兼容旧数据）
+
+    # 如果新格式没有数据，回退到旧格式（兼容旧数据；旧格式没有 config_name 列）
     if not config_data:
         for table_name in all_tables:
             if not table_name.startswith(old_prefix):
                 continue
-                
+
             try:
                 df = db.read_table(table_name)
-            except Exception as e:
+            except Exception:
                 continue
-            
+
             if df.empty:
                 continue
-            
+
             # 去掉旧前缀，作为配置数据的 key
             clean_table_name = table_name[len(old_prefix):]
             config_data[clean_table_name] = df
-    
+
     return config_data if config_data else None
 
 

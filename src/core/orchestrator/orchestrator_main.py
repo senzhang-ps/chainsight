@@ -102,6 +102,10 @@ class Orchestrator(
 
         # 用于审计的每日日志
         self.daily_logs: List[Dict] = []
+        self.daily_log_mode: str = "cumulative_snapshot"
+        self.daily_log_next_seq: int = 1
+        self.daily_log_last_committed_seq: int = 0
+        self.daily_log_pending_events: List[Dict] = []
 
         # 期初和期末库存存储
         self.daily_beginning_inventory: Dict[

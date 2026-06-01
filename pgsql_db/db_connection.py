@@ -27,7 +27,9 @@ class DatabaseConnection:
         port: Optional[int] = None,
         database: Optional[str] = None,
         user: Optional[str] = None,
-        password: Optional[str] = None
+        password: Optional[str] = None,
+        schema: Optional[str] = None,
+        auto_create_schema: Optional[bool] = None,
     ):
         """
         初始化数据库连接参数
@@ -40,17 +42,26 @@ class DatabaseConnection:
             database: 数据库名称
             user: 用户名
             password: 密码
+            schema: P1 schema 隔离时使用的 PostgreSQL schema 名（已小写化校验）。
+                不传时回落到 defaults.yaml 的 ``database.default_schema``。
+            auto_create_schema: 缺失 schema 时是否自动 ``CREATE SCHEMA IF NOT EXISTS``。
         """
         from .settings import resolve_database_config
         cfg = resolve_database_config(
-            host=host, port=port, database=database, user=user, password=password
+            host=host, port=port, database=database, user=user, password=password,
+            auto_create_schema=auto_create_schema,
         )
         self.host = cfg["host"]
         self.port = cfg["port"]
         self.database = cfg["database"]
         self.user = cfg["user"]
         self.password = cfg["password"]
+        # schema 缺省 -> default_schema；调用方应优先显式传入校验过的值。
+        self.schema = (schema or cfg.get("default_schema") or "public")
+        self.auto_create_schema = bool(cfg.get("auto_create_schema", True))
         self._connection = None
+        # 标记 schema 是否已在当前连接上被 ensure 过，避免每次 connect() 重复创建。
+        self._schema_ensured = False
     
     @property
     def connection_string(self) -> str:
@@ -89,6 +100,9 @@ class DatabaseConnection:
                     autocommit=True,
                     connect_timeout=30,
                 )
+                # 新连接需要重新 ensure schema（哪怕之前的 connection 已 ensure 过）
+                self._schema_ensured = False
+                self._ensure_schema_ready()
                 return self._connection
             except (psycopg.OperationalError, psycopg.errors.ConnectionTimeout) as e:
                 last_err = e
@@ -96,6 +110,53 @@ class DatabaseConnection:
                 if attempt < 2:
                     time.sleep(5 * (2 ** attempt))  # 5s, 10s
         raise last_err
+
+    def _ensure_schema_ready(self) -> None:
+        """在当前连接上 ``CREATE SCHEMA IF NOT EXISTS``，仅执行一次。
+
+        - 仅当 ``auto_create_schema=True`` 时创建。
+        - SQL 通过 ``sql.Identifier`` 引用 schema 名，兼容 ``bc-dev`` 这类含 ``-`` 的名字。
+        - 不依赖 ``search_path``：表 SQL 一律使用 schema-qualified identifier。
+        """
+        if self._schema_ensured:
+            return
+        if not self.auto_create_schema:
+            self._schema_ensured = True
+            return
+        try:
+            conn = self._connection
+            if conn is None or conn.closed:
+                return
+            with conn.cursor() as cur:
+                cur.execute(
+                    sql.SQL("CREATE SCHEMA IF NOT EXISTS {}").format(
+                        sql.Identifier(self.schema)
+                    )
+                )
+            self._schema_ensured = True
+        except Exception as e:
+            logger.warning(
+                f"[schema] CREATE SCHEMA IF NOT EXISTS {self.schema!r} 失败：{e}"
+            )
+            # 不抛出：调用方在后续 SQL 中若 schema 真缺失，会以更明确的错误暴露。
+
+    def _qualified(self, table_name: str, schema: Optional[str] = None) -> sql.Composed:
+        """返回 schema-qualified 的 ``sql.Identifier``，供 ``sql.SQL().format(...)`` 拼接使用。
+
+        当 schema 含 ``-`` 等需 quoting 的字符时，``sql.Identifier`` 会自动加引号。
+        """
+        return sql.Identifier(schema or self.schema, self._clean_name(table_name))
+
+    def qualified_name(self, table_name: str, schema: Optional[str] = None) -> str:
+        """返回 ``"schema"."table"`` 形式的字符串，便于历史的字符串 SQL 拼接。
+
+        - ``schema`` / ``table`` 已通过 ``_clean_name`` 限定到 ``[a-z0-9_]``，
+          再加上 schema 限定到 ``[a-z0-9_-]``，双引号包裹后**不会**产生 SQL 注入。
+        - 兼容含 ``-`` 的 schema 名（如 ``bc-dev``）。
+        """
+        target_schema = schema or self.schema
+        clean_table = self._clean_name(table_name)
+        return f'"{target_schema}"."{clean_table}"'
     
     def close(self):
         """关闭数据库连接"""
@@ -195,18 +256,19 @@ class DatabaseConnection:
             if temp_conn and not temp_conn.closed:
                 temp_conn.close()
     
-    def check_tables_exist(self, table_names: List[str]) -> Dict[str, bool]:
+    def check_tables_exist(self, table_names: List[str], schema: Optional[str] = None) -> Dict[str, bool]:
         """
         检查多个表是否存在
-        
+
         参数：
             table_names: 表名列表
-        
+            schema: 目标 schema（默认使用 self.schema）
+
         返回：
             dict: 表名 -> 是否存在
         """
         result = {}
-        existing_tables = set(self.get_all_tables())
+        existing_tables = set(self.get_all_tables(schema=schema))
         for table_name in table_names:
             clean_name = self._clean_name(table_name)
             result[table_name] = clean_name in existing_tables
@@ -244,33 +306,35 @@ class DatabaseConnection:
         
         return result
     
-    def table_exists(self, table_name: str, schema: str = "public") -> bool:
-        """检查表是否存在"""
+    def table_exists(self, table_name: str, schema: Optional[str] = None) -> bool:
+        """检查表是否存在（默认使用 self.schema）。"""
+        target_schema = schema or self.schema
         with self.get_cursor() as cursor:
             cursor.execute("""
                 SELECT EXISTS (
-                    SELECT FROM information_schema.tables 
+                    SELECT FROM information_schema.tables
                     WHERE table_schema = %s AND table_name = %s
                 );
-            """, (schema, table_name))
+            """, (target_schema, table_name))
             return cursor.fetchone()[0]
-    
-    def get_all_tables(self, schema: str = "public") -> List[str]:
-        """获取所有表名"""
+
+    def get_all_tables(self, schema: Optional[str] = None) -> List[str]:
+        """获取所有表名（默认使用 self.schema）。"""
+        target_schema = schema or self.schema
         with self.get_cursor() as cursor:
             cursor.execute("""
                 SELECT table_name FROM information_schema.tables
                 WHERE table_schema = %s
                 ORDER BY table_name;
-            """, (schema,))
+            """, (target_schema,))
             return [row[0] for row in cursor.fetchall()]
-    
-    def drop_table(self, table_name: str, cascade: bool = False):
-        """删除表"""
+
+    def drop_table(self, table_name: str, cascade: bool = False, schema: Optional[str] = None):
+        """删除表（默认在 self.schema 中）。"""
         cascade_str = "CASCADE" if cascade else ""
         with self.get_cursor() as cursor:
             query = sql.SQL("DROP TABLE IF EXISTS {} {}").format(
-                sql.Identifier(table_name),
+                self._qualified(table_name, schema),
                 sql.SQL(cascade_str)
             )
             cursor.execute(query)
@@ -278,59 +342,59 @@ class DatabaseConnection:
     def check_config_exists(self, table_name: str, config_name: str) -> bool:
         """
         检查指定配置是否已在表中存在数据
-        
+
         参数：
             table_name: 表名
             config_name: 配置名称（如 BC_S5, BC_S9）
-        
+
         返回：
             bool: 配置是否已存在
         """
         clean_name = self._clean_name(table_name)
         if not self.table_exists(clean_name):
             return False
-        
+
         try:
             with self.get_cursor(commit=False) as cursor:
-                # 先检查表是否有 config_name 列
+                # 先检查表是否有 config_name 列（限定到当前 schema 防止跨 schema 同名表干扰）
                 cursor.execute("""
                     SELECT column_name FROM information_schema.columns
-                    WHERE table_name = %s AND column_name = 'config_name'
-                """, (clean_name,))
+                    WHERE table_schema = %s AND table_name = %s AND column_name = 'config_name'
+                """, (self.schema, clean_name))
                 if not cursor.fetchone():
                     return False
-                
+
                 # 检查是否有该配置的数据
                 cursor.execute(
                     sql.SQL("SELECT 1 FROM {} WHERE config_name = %s LIMIT 1").format(
-                        sql.Identifier(clean_name)
+                        self._qualified(clean_name)
                     ),
                     (config_name,)
                 )
                 return cursor.fetchone() is not None
         except Exception as e:
             raise
-    
+
     def delete_config_data(self, table_name: str, config_name: str) -> int:
         """
         删除表中指定配置的数据
-        
+
         参数：
             table_name: 表名
             config_name: 配置名称（如 BC_S5, BC_S9）
-        
+
         返回：
             int: 删除的行数
         """
         clean_name = self._clean_name(table_name)
         if not self.table_exists(clean_name):
             return 0
-        
+
         try:
             with self.get_cursor() as cursor:
                 cursor.execute(
                     sql.SQL("DELETE FROM {} WHERE config_name = %s").format(
-                        sql.Identifier(clean_name)
+                        self._qualified(clean_name)
                     ),
                     (config_name,)
                 )
@@ -420,13 +484,18 @@ class DatabaseConnection:
             for col_name, dtype in df_to_write.dtypes.items():
                 clean_col = self._clean_name(str(col_name))
                 pg_type = self._pandas_to_pg_type(dtype, col_name=clean_col)
-                columns.append(f'"{clean_col}" {pg_type}')
-            
-            create_sql = f'CREATE TABLE IF NOT EXISTS "{clean_table_name}" ({", ".join(columns)})'
-            
+                columns.append(
+                    sql.SQL("{} {}").format(sql.Identifier(clean_col), sql.SQL(pg_type))
+                )
+
+            create_sql = sql.SQL("CREATE TABLE IF NOT EXISTS {} ({})").format(
+                self._qualified(clean_table_name),
+                sql.SQL(", ").join(columns),
+            )
+
             with self.get_cursor() as cursor:
                 cursor.execute(create_sql)
-            
+
         else:
             if is_empty_table:
                 pass
@@ -471,14 +540,14 @@ class DatabaseConnection:
             bool: 是否兼容
         """
         try:
-            # 获取现有表的列信息（含类型）
+            # 获取现有表的列信息（含类型）；限定到当前 schema 避免跨 schema 误读
             with self.get_cursor(commit=False) as cursor:
                 cursor.execute("""
                     SELECT column_name, data_type
                     FROM information_schema.columns
-                    WHERE table_name = %s
+                    WHERE table_schema = %s AND table_name = %s
                     ORDER BY ordinal_position;
-                """, (table_name,))
+                """, (self.schema, table_name))
                 existing_col_info = {row[0]: row[1].upper() for row in cursor.fetchall()}
             existing_cols = set(existing_col_info.keys())
             
@@ -498,7 +567,7 @@ class DatabaseConnection:
                 with self.get_cursor() as cursor:
                     cursor.execute(sql.SQL("""
                         ALTER TABLE {} ADD COLUMN db_write_time TIMESTAMP
-                    """).format(sql.Identifier(table_name)))
+                    """).format(self._qualified(table_name)))
                 existing_cols.add('db_write_time')
             
             # 列类型升级：BIGINT → DOUBLE PRECISION（防止浮点数截断）
@@ -520,7 +589,7 @@ class DatabaseConnection:
                         cursor.execute(sql.SQL("""
                             ALTER TABLE {} ALTER COLUMN {} TYPE DOUBLE PRECISION USING {}::DOUBLE PRECISION
                         """).format(
-                            sql.Identifier(table_name),
+                            self._qualified(table_name),
                             sql.Identifier(col_name),
                             sql.Identifier(col_name)
                         ))
@@ -543,7 +612,7 @@ class DatabaseConnection:
                             cursor.execute(sql.SQL("""
                                 ALTER TABLE {} ALTER COLUMN {} TYPE TEXT USING {}::TEXT
                             """).format(
-                                sql.Identifier(table_name),
+                                self._qualified(table_name),
                                 sql.Identifier(col_name),
                                 sql.Identifier(col_name)
                             ))
@@ -566,7 +635,7 @@ class DatabaseConnection:
                         cursor.execute(sql.SQL("""
                             ALTER TABLE {} ADD COLUMN {} {}
                         """).format(
-                            sql.Identifier(table_name),
+                            self._qualified(table_name),
                             sql.Identifier(col_name),
                             sql.SQL(pg_type)
                         ))
@@ -596,7 +665,7 @@ class DatabaseConnection:
             with self.get_cursor() as cursor:
                 cursor.execute(
                     sql.SQL("ALTER TABLE {t} ALTER COLUMN {c} TYPE {ty} USING {c}{cast}").format(
-                        t=sql.Identifier(table_name),
+                        t=self._qualified(table_name),
                         c=sql.Identifier(col_name),
                         ty=sql.SQL(target_pg_type),
                         cast=cast_suffix,
@@ -806,9 +875,11 @@ class DatabaseConnection:
                     new_row.append(val)
             records[i] = tuple(new_row)
         
-        # 构建COPY语句 - 使用psycopg3的copy功能
-        cols_str = ", ".join([f'"{col}"' for col in clean_columns])
-        copy_sql = f'COPY "{table_name}" ({cols_str}) FROM STDIN'
+        # 构建 COPY 语句 - 使用 psycopg3 的 copy 功能；通过 sql.Composed 安全引用 schema.table
+        copy_sql = sql.SQL("COPY {} ({}) FROM STDIN").format(
+            self._qualified(table_name),
+            sql.SQL(", ").join(sql.Identifier(col) for col in clean_columns),
+        )
         
         conn = self.connect()
         
@@ -832,15 +903,16 @@ class DatabaseConnection:
             # 无需手动 rollback
             raise error
     
-    def _get_column_types(self, table_name: str) -> Dict[str, str]:
-        """获取表的列名和数据类型映射"""
+    def _get_column_types(self, table_name: str, schema: Optional[str] = None) -> Dict[str, str]:
+        """获取表的列名和数据类型映射（默认限定到当前 schema）。"""
+        target_schema = schema or self.schema
         try:
             with self.get_cursor(commit=False) as cursor:
                 cursor.execute("""
                     SELECT column_name, data_type
                     FROM information_schema.columns
-                    WHERE table_name = %s
-                """, (table_name,))
+                    WHERE table_schema = %s AND table_name = %s
+                """, (target_schema, table_name))
                 return {row[0]: row[1] for row in cursor.fetchall()}
         except Exception:
             return {}
@@ -887,20 +959,31 @@ class DatabaseConnection:
                 
                 try:
                     with self.get_cursor() as cursor:
-                        # 检查索引是否已存在
+                        # 检查索引是否已存在（限定到当前 schema 防止跨 schema 重名干扰）
                         cursor.execute("""
-                            SELECT 1 FROM pg_indexes 
-                            WHERE tablename = %s AND indexname = %s
-                        """, (table_name, index_name))
-                        
+                            SELECT 1 FROM pg_indexes
+                            WHERE schemaname = %s AND tablename = %s AND indexname = %s
+                        """, (self.schema, table_name, index_name))
+
                         if cursor.fetchone() is None:
-                            # 创建索引
+                            # 创建索引 - schema-qualified；自动为含 - 的 schema 加引号
                             if index_type == 'HASH':
-                                create_idx_sql = f'CREATE INDEX "{index_name}" ON "{table_name}" USING HASH ("{clean_col}")'
+                                idx_sql = sql.SQL(
+                                    "CREATE INDEX {iname} ON {tbl} USING HASH ({col})"
+                                ).format(
+                                    iname=sql.Identifier(index_name),
+                                    tbl=self._qualified(table_name),
+                                    col=sql.Identifier(clean_col),
+                                )
                             else:
-                                create_idx_sql = f'CREATE INDEX "{index_name}" ON "{table_name}" ("{clean_col}")'
-                            
-                            cursor.execute(create_idx_sql)
+                                idx_sql = sql.SQL(
+                                    "CREATE INDEX {iname} ON {tbl} ({col})"
+                                ).format(
+                                    iname=sql.Identifier(index_name),
+                                    tbl=self._qualified(table_name),
+                                    col=sql.Identifier(clean_col),
+                                )
+                            cursor.execute(idx_sql)
                             indexes_created.append(f"{clean_col}({index_type})")
                 except Exception as e:
                     # 索引创建失败不影响主流程
@@ -909,9 +992,10 @@ class DatabaseConnection:
         if indexes_created:
             pass
     
-    def read_table(self, table_name: str, filters: Optional[Dict[str, Any]] = None) -> pd.DataFrame:
-        """读取表数据到DataFrame，可选按列等值过滤。"""
-        query = sql.SQL("SELECT * FROM {}").format(sql.Identifier(table_name))
+    def read_table(self, table_name: str, filters: Optional[Dict[str, Any]] = None, schema: Optional[str] = None) -> pd.DataFrame:
+        """读取表数据到 DataFrame，可选按列等值过滤（默认从 self.schema 读取）。"""
+        qualified = self._qualified(table_name, schema)
+        query = sql.SQL("SELECT * FROM {}").format(qualified)
         params = None
         if filters:
             conditions = []
@@ -924,7 +1008,7 @@ class DatabaseConnection:
                     conditions.append(sql.SQL("{} = %s").format(identifier))
                     params_list.append(value)
             query = sql.SQL("SELECT * FROM {} WHERE {}").format(
-                sql.Identifier(table_name),
+                qualified,
                 sql.SQL(" AND ").join(conditions),
             )
             params = tuple(params_list)
@@ -975,24 +1059,28 @@ class DatabaseConnection:
         with self.get_cursor() as cursor:
             cursor.execute(query, params)
     
-    def get_table_info(self, table_name: str) -> Dict[str, Any]:
-        """获取表信息"""
+    def get_table_info(self, table_name: str, schema: Optional[str] = None) -> Dict[str, Any]:
+        """获取表信息（默认从 self.schema 读取）。"""
+        target_schema = schema or self.schema
         with self.get_cursor(commit=False) as cursor:
             # 获取列信息
             cursor.execute("""
                 SELECT column_name, data_type, is_nullable
                 FROM information_schema.columns
-                WHERE table_name = %s
+                WHERE table_schema = %s AND table_name = %s
                 ORDER BY ordinal_position;
-            """, (table_name,))
+            """, (target_schema, table_name))
             columns = cursor.fetchall()
-            
+
             # 获取行数
-            cursor.execute(sql.SQL("SELECT COUNT(*) FROM {}").format(sql.Identifier(table_name)))
+            cursor.execute(sql.SQL("SELECT COUNT(*) FROM {}").format(
+                self._qualified(table_name, target_schema)
+            ))
             row_count = cursor.fetchone()[0]
-            
+
             return {
                 "table_name": table_name,
+                "schema": target_schema,
                 "columns": [{"name": c[0], "type": c[1], "nullable": c[2]} for c in columns],
                 "row_count": row_count
             }

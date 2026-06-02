@@ -31,7 +31,7 @@ class Orchestrator:
 
     def load_datas(self, module) -> None:
         """按 module.schema 加载数据，直接写入 module.datas。"""
-        from ..modules.module import Module
+        from ...modules.module import Module
         if not isinstance(module, Module):
             raise TypeError(f"load_datas 期望 Module 实例，收到 {type(module).__name__}")
         schema = getattr(module, 'schema', {})

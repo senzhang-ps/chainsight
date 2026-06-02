@@ -14,7 +14,7 @@ from tqdm import tqdm
 
 from src.core.orchestrator import create_orchestrator, Orch
 from src.utils.time_manager import initialize_time_manager
-from src.modules import module1
+from src.modules import module1, module4
 from src.modules.demand_planning.integration_refactor import ModuleOne
 from src.utils.normalization import normalize_identifiers
 from src.core.main_integration.seed import set_module_seeds
@@ -204,9 +204,9 @@ def run_integrated_simulation_refactor(
     end_date: str,
     output_base_dir: str = "./integrated_output",
 ):
-    start_date
+    
     orch = Orch(start_date = start_date, end_date = end_date, config_path = config_path, output_path = output_base_dir)
-    orch.load_datas('M1')
+    # orch.load_datas('M1')
 
     # 初始化Orchestrator
     logger.info("🎯 初始化Orchestrator")
@@ -231,14 +231,14 @@ def run_integrated_simulation_refactor(
     orch.all_results['module1'] = []
 
     simulation_start_time = time.time()
-    m1 = module1.ModuleOne(
-        simulation_date=str(start_date),
-        output_dir=orch.get_output('module1'),
-        orchestrator=orchestrator,
-        orch=orch,
-        engine='polars',
-    )
-    m1.prepare()
+    # m1 = module1.ModuleOne(
+    #     simulation_date=str(start_date),
+    #     output_dir=orch.get_output('module1'),
+    #     orchestrator=orchestrator,
+    #     orch=orch,
+    #     engine='polars',
+    # )
+    # m1.prepare()
 
     for i, current_date in orch.iter_dates():
         progress_info = f"第 {i}/{len(orch.sim_dates)} 天"
@@ -291,13 +291,11 @@ def run_integrated_simulation_refactor(
             #     orchestrator=orchestrator,
             #     orch=orch,engine = 'polars',verbose=True
             # )
-            m1.simulation_date = current_date
-            m1.run()
-            m1_result = m1.output()
-            # orch.save(m1)
+            # m1.simulation_date = current_date
+            # m1.run()
             # m1_result = m1.output()
 
-            m1_shipments = m1_result.get('shipment_df', pd.DataFrame())
+            # m1_shipments = m1_result.get('shipment_df', pd.DataFrame())
 
             if not m1_shipments.empty:
                 logger.info("🚚 立即处理M1 shipment，扣减库存...")
@@ -308,15 +306,61 @@ def run_integrated_simulation_refactor(
                 )
                 logger.info(f"✅ 已扣减 {len(m1_shipments_normalized)} 个shipment的库存")
 
-            logger.info(
-                f"✅ Module1 完成 - 生成 {len(m1_result.get('orders_df', []))} 个订单, "
-                f"{len(m1_shipments)} 个发货"
-            )
-            m1_result['simulation_date'] = current_date
-            orch.all_results['module1'].append(m1_result)
+            # logger.info(
+            #     f"✅ Module1 完成 - 生成 {len(m1_result.get('orders_df', []))} 个订单, "
+            #     f"{len(m1_shipments)} 个发货"
+            # )
+            # m1_result['simulation_date'] = current_date
+            # orch.all_results['module1'].append(m1_result)
 
         except Exception as e:
             logger.error(f"❌ Module1 失败: {e}")
+
+        # ========== M4: 生产计划 + 立即当日生产入库 ==========
+        logger.info("2️⃣ 运行 Module4 - 生产计划")
+        try:
+            # 使用集成模式直接调用 Module4 (改进的解决方案)
+            # m4_result = module4.run_daily_production_planning_integrated(
+            #     config_dict=config_dict,
+            #     module3_output_dir='D:\chainsight\outputs\OC_Paste_S1_20251224_extension',
+            #     simulation_date=current_date,
+            #     simulation_start=pd.to_datetime(start_date),
+            #     output_dir=orch.get_output('module4')
+            # )
+            m4 = module4.ModuleFour(
+                simulation_date=current_date,
+                simulation_start_date = start_date,
+                output_dir=orch.get_output('module4'),
+                orchestrator=orchestrator,
+                orch=orch,
+                net_demand_path = 'D:\chainsight\outputs\OC_Paste_S1_20251224_extension\Module3Output_20251215.xlsx'
+            )
+            m4.prepare()
+
+            # 从返回结果中获取 production_df
+            m4_production = m4_result.get('production_df', pd.DataFrame())
+
+            # 🔄 简化调用：仅持久化“未来 available_date”的生产计划，避免重复当日GR
+            if not m4_production.empty and 'available_date' in m4_production.columns:
+                m4_production['available_date'] = pd.to_datetime(m4_production['available_date'])
+                future_plans = m4_production[m4_production['available_date'].dt.normalize() > current_date.normalize()]
+                if not future_plans.empty:
+                    logger.info("🗓️ 持久化未来生产计划（不触发当日GR）...")
+                    future_plans_normalized = normalize_identifiers(future_plans)
+                    orchestrator.process_module4_production(future_plans_normalized, current_date.strftime('%Y-%m-%d'))
+                    logger.info(f"✅ 已写入未来计划回补: {len(future_plans_normalized)} 条")
+                else:
+                    logger.info("📦 当日无未来 available_date 的计划需要持久化")
+            else:
+                logger.info("📦 M4当日未生成生产计划或缺少 available_date 列")
+
+            logger.info(f"✅ Module4 完成 - 生成生产计划: {len(m4_production)} 条记录")
+            # 存储完整的Module4结果（包含所有输出表）
+            m4_result['simulation_date'] = current_date
+            all_results['module4'].append(m4_result)
+        except Exception as e:
+            logger.error(f"❌ Module4 失败: {e}")
+            m4_production = pd.DataFrame()  # 失败时使用空数据
 
         # ==================== 每日结束：保存状态 ====================
         try:

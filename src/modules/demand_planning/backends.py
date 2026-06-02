@@ -93,34 +93,35 @@ class _PandasBackend:
     def __init__(self, owner):
         self._o = owner
         self._ao_config = None  # prepare_ao_summary 后缓存
+        self.datas = owner.datas
 
     # ---- 数据访问（直接返回 pandas DataFrame） ----
 
     @property
     def demand_forecast(self):
-        return self._o.orchestrator.m1_demandforecast
+        return self.datas.get('M1_DemandForecast', pd.DataFrame())
 
     @property
     def forecast_error(self):
-        return self._o.orchestrator.m1_forecasterror
+        return self.datas.get('M1_ForecastError', pd.DataFrame())
 
     @property
     def order_calendar(self):
-        return self._o.orchestrator.m1_ordercalendar
+        return self.datas.get('M1_OrderCalendar', pd.DataFrame())
 
     @property
     def ao_config(self):
         if self._ao_config is not None:
             return self._ao_config
-        return self._o.orchestrator.m1_aoconfig
+        return self.datas.get('M1_AOConfig', pd.DataFrame())
 
     @property
     def dps_config(self):
-        return self._o.orchestrator.m1_dpsconfig
+        return self.datas.get('M1_DPSConfig', pd.DataFrame())
 
     @property
     def dps_sc_config(self):
-        return self._o.orchestrator.m1_supplychoiceconfig
+        return self.datas.get('M1_SupplyChoiceConfig', pd.DataFrame())
 
     # ---- 步骤方法 ----
 
@@ -677,6 +678,7 @@ class _PolarsBackend:
         self._ao_config = None
         self._dps_config = None
         self._dps_sc_config = None
+        self.datas = owner.datas
 
     def _to_pl(self, df):
         if df is None:
@@ -702,19 +704,19 @@ class _PolarsBackend:
     @property
     def demand_forecast(self):
         if self._demand_forecast is None:
-            self._demand_forecast = self._to_pl(self._o.orchestrator.m1_demandforecast)
+            self._demand_forecast = self._to_pl(self.datas.get('M1_DemandForecast', pd.DataFrame()))
         return self._demand_forecast
 
     @property
     def forecast_error(self):
         if self._forecast_error is None:
-            self._forecast_error = self._to_pl(self._o.orchestrator.m1_forecasterror)
+            self._forecast_error = self._to_pl(self.datas.get('M1_ForecastError', pd.DataFrame()))
         return self._forecast_error
 
     @property
     def order_calendar(self):
         if self._order_calendar is None:
-            oc = self._to_pl(self._o.orchestrator.m1_ordercalendar)
+            oc = self._to_pl(self.datas.get('M1_OrderCalendar', pd.DataFrame()))
             if not oc.is_empty() and "date" in oc.columns:
                 oc = oc.with_columns(pl.col("date").cast(pl.Date))
             self._order_calendar = oc
@@ -723,19 +725,19 @@ class _PolarsBackend:
     @property
     def ao_config(self):
         if self._ao_config is None:
-            self._ao_config = self._to_pl(self._o.orchestrator.m1_aoconfig)
+            self._ao_config = self._to_pl(self.datas.get('M1_AOConfig', pd.DataFrame()))
         return self._ao_config
 
     @property
     def dps_config(self):
         if self._dps_config is None:
-            self._dps_config = self._to_pl(self._o.orchestrator.m1_dpsconfig)
+            self._dps_config = self._to_pl(self.datas.get('M1_DPSConfig', pd.DataFrame()))
         return self._dps_config
 
     @property
     def dps_sc_config(self):
         if self._dps_sc_config is None:
-            self._dps_sc_config = self._to_pl(self._o.orchestrator.m1_supplychoiceconfig)
+            self._dps_sc_config = self._to_pl(self.datas.get('M1_SupplyChoiceConfig', pd.DataFrame()))
         return self._dps_sc_config
 
     # ---- 步骤方法 ----

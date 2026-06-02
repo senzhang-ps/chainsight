@@ -48,17 +48,36 @@ class TimedMeta(ABCMeta):
 class Module(ABC, metaclass=TimedMeta):
     _timed_exclude = {'run', 'output', 'validate_data'}
 
-    def __init__(self, simulation_date, orchestrator, module_config, verbose=False):
+    schema: dict = {}
+
+    def __init__(self, simulation_date, orchestrator, module_config,
+                 verbose=False, config=None, schema=None):
         self.simulation_date = simulation_date
         self.orchestrator = orchestrator
+        self.module_config = module_config
         self.verbose = verbose
-        self.params = orchestrator.load_params(module_config)
-        self.datas = orchestrator.load_datas(module_config)
         self.spends = {}
         self._result = {}
 
+        if schema is not None:
+            self.schema = schema
+
+        self._engine = getattr(orchestrator, 'engine', 'pandas') if orchestrator else 'pandas'
+
+        self.config = dict(config or {})
+        if orchestrator is not None:
+            orch_config = orchestrator.get_module_config(module_config)
+            if orch_config:
+                self.config.update(orch_config)
+
+        self.params = None
+        self.datas = {}
+
     def run(self):
         raise NotImplementedError
+    
+    def prepare(self):
+        raise NotImplementedError 
 
     def output(self):
         return self._result

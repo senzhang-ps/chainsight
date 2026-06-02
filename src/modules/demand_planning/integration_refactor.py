@@ -28,23 +28,46 @@ class ModuleOne(Module):
     Parameters
     ----------
     engine : str
-        计算后端，``'pandas'`` 或 ``'polars'``，默认 ``'pandas'``。
+        计算后端，从 orchestrator.engine 获取，``'pandas'`` 或 ``'polars'``。
     """
+
+    schema = {
+        'M1_DemandForecast': {
+            'material': 'str', 'location': 'str', 'week': 'int', 'quantity': 'float',
+        },
+        'M1_ForecastError': {
+            'material': 'str', 'location': 'str', 'order_type': 'str',
+            'error_std_percent': 'float',
+        },
+        'M1_OrderCalendar': {
+            'date': 'datetime', 'order_day_flag': 'int',
+        },
+        'M1_AOConfig': {
+            'material': 'str', 'location': 'str', 'advance_days': 'int',
+            'ao_percent': 'float',
+        },
+        'M1_DPSConfig': {
+            'material': 'str', 'location': 'str', 'dps_location': 'str',
+            'dps_percent': 'float',
+        },
+        'M1_SupplyChoiceConfig': {
+            'material': 'str', 'location': 'str', 'week': 'int',
+            'adjust_quantity': 'float',
+        },
+    }
 
     def __init__(self, simulation_date, output_dir='',
                  orchestrator=None, orch=None,
                  skip_file_output=False, previous_orders_df=None,
-                 verbose=False, engine='pandas'):
-        super().__init__(simulation_date, orch, 'M1', verbose)
-        self._engine = engine
+                 verbose=False, config=None):
+        super().__init__(simulation_date, orch, 'M1', verbose, config=config)
         self.legacy_orchestrator = orchestrator
         self.output_dir = output_dir
         self.skip_file_output = skip_file_output
         self.previous_orders_df = previous_orders_df
         self.order_df = None
 
-        # 选择 backend
-        if engine == 'polars':
+        if self._engine == 'polars':
             self._backend = _PolarsBackend(self)
         else:
             self._backend = _PandasBackend(self)
@@ -147,6 +170,10 @@ class ModuleOne(Module):
     # ------------------------------------------------------------------
 
     def prepare(self):
+        # 0) 数据加载
+        if self.orchestrator is not None:
+            self.orchestrator.load_datas(self)
+
         # 1) AO 汇总
         ao_config, ao_config_summary = self.prepare_ao_summary()
 
@@ -303,15 +330,9 @@ class ModuleOne(Module):
 def run_daily_order_generation(
     simulation_date, output_dir='', orchestrator=None, orch=None,
     skip_file_output=False, previous_orders_df=None,
-    engine='pandas',**kwargs
+    **kwargs
 ):
-    """兼容入口：创建 ModuleOne 实例并执行。
-
-    Parameters
-    ----------
-    engine : str
-        计算后端，``'pandas'`` 或 ``'polars'``，默认 ``'pandas'``。
-    """
+    """兼容入口：创建 ModuleOne 实例并执行。"""
     m1 = ModuleOne(
         simulation_date=simulation_date,
         output_dir=output_dir,
@@ -319,7 +340,7 @@ def run_daily_order_generation(
         orch=orch,
         skip_file_output=skip_file_output,
         previous_orders_df=previous_orders_df,
-        engine=engine,**kwargs
+        **kwargs
     )
     if m1.order_df is None:
         m1.prepare()

@@ -10,49 +10,12 @@ from tqdm import tqdm
 
 logger = logging.getLogger(__name__)
 
-# M1 各 sheet 的列名与期望类型定义
-_M1_SCHEMA = {
-    'M1_DemandForecast': {
-        'material': 'str',
-        'location': 'str',
-        'week': 'int',
-        'quantity': 'float',
-    },
-    'M1_ForecastError': {
-        'material': 'str',
-        'location': 'str',
-        'order_type': 'str',
-        'error_std_percent': 'float',
-    },
-    'M1_OrderCalendar': {
-        'date': 'datetime',
-        'order_day_flag': 'int',
-    },
-    'M1_AOConfig': {
-        'material': 'str',
-        'location': 'str',
-        'advance_days': 'int',
-        'ao_percent': 'float',
-    },
-    'M1_DPSConfig': {
-        'material': 'str',
-        'location': 'str',
-        'dps_location': 'str',
-        'dps_percent': 'float',
-    },
-    'M1_SupplyChoiceConfig': {
-        'material': 'str',
-        'location': 'str',
-        'week': 'int',
-        'adjust_quantity': 'float',
-    },
-}
 
 class Orchestrator:
-    def __init__(self, start_date, end_date, config_path, output_path, config_dict=None):
+    def __init__(self, start_date, end_date, config_path, output_path,
+                 config_dict=None, engine='pandas'):
         self.start_date = start_date if isinstance(start_date, date) else pd.Timestamp(start_date).date()
         self.end_date = end_date if isinstance(end_date, date) else pd.Timestamp(end_date).date()
-        self.datas = None
         self.config_path = config_path
         self.output_path = output_path
         self.module_idx = [1, 3, 4, 5, 6]
@@ -61,76 +24,49 @@ class Orchestrator:
         self.build_output_folder()
         self.all_results = {}
         self.sim_dates = []
-        # data
-        self.m1_demandforecast = None 
-        self.m1_forecasterror = None
-        self.m1_ordercalendar = None 
-        self.m1_aoconfig = None 
-        self.m1_dpsconfig = None
-        self.m1_supplychoiceconfig = None 
-        
+        self.engine = engine
 
     def load_params(self, module_config):
-        if module_config == 'M1':
-            return self._load_m1_params()
-
-    def _load_m1_params(self):
         return None
 
-    def load_datas(self, module_config):
-        if module_config == 'M1':
-            datas = self._load_m1_datas()
-            self.m1_demandforecast = datas[0]
-            self.m1_forecasterror = datas[1]
-            self.m1_ordercalendar = datas[2]
-            self.m1_aoconfig = datas[3]
-            self.m1_dpsconfig = datas[4]
-            self.m1_supplychoiceconfig = datas[5]
+    def load_datas(self, module) -> None:
+        """按 module.schema 加载数据，直接写入 module.datas。"""
+        from ..modules.module import Module
+        if not isinstance(module, Module):
+            raise TypeError(f"load_datas 期望 Module 实例，收到 {type(module).__name__}")
+        schema = getattr(module, 'schema', {})
+        if not schema:
+            return
+        datas = {}
+        for sheet_name, col_schema in schema.items():
+            df = self.all_config.get(sheet_name, pd.DataFrame())
+            if not df.empty:
+                df = self._normalize_datas(df, sheet_name, col_schema)
+            datas[sheet_name] = df
+        module.datas = datas
 
-    def _load_m1_datas(self):
-        dfs = []
-        required_sheet = ['M1_DemandForecast',
-                          'M1_ForecastError',
-                          'M1_OrderCalendar',
-                          'M1_AOConfig',
-                          'M1_DPSConfig',
-                          'M1_SupplyChoiceConfig']
-        for sheet in required_sheet:
-            df = self.all_config.get(sheet, pd.DataFrame())
-            # if sheet!='M1_SupplyChoiceConfig' and df.empty:
-            #     raise ValueError(f"缺少必需的配置数据：{sheet}")
-            df = self._normalize_m1_datas(df, sheet)
-            dfs.append(df)
-        return dfs
+    def get_module_config(self, module_config: str) -> dict:
+        """从 all_config 中提取模块相关配置子集。默认返回空。"""
+        return {}
 
     @staticmethod
-    def _normalize_m1_datas(df: pd.DataFrame, sheet_name: str) -> pd.DataFrame:
-        """按 schema 校验并转换 M1 配置表的列名与类型。
-
-        1. 检查必需列是否存在
-        2. 按声明类型尝试转换
-        3. 转换后检查是否产生新的 NaN（转换失败的值）
-        4. 失败则报错，成功则只返回 schema 定义的列
-        """
+    def _normalize_datas(df: pd.DataFrame, sheet_name: str, col_schema: dict) -> pd.DataFrame:
+        """按 schema 校验并转换配置表的列名与类型。"""
         if df.empty:
             return df
 
-        schema = _M1_SCHEMA.get(sheet_name)
-        if schema is None:
-            logger.warning("_normalize_m1_datas: 未知 sheet '%s'，跳过校验", sheet_name)
+        if col_schema is None:
+            logger.warning("_normalize_datas: 未知 sheet '%s'，跳过校验", sheet_name)
             return df
 
-        # 1) 检查必需列
-        missing = [c for c in schema if c not in df.columns]
+        missing = [c for c in col_schema if c not in df.columns]
         if missing:
             raise ValueError(f"[{sheet_name}] 缺少必需列: {missing}")
 
-        # 只保留 schema 定义的列
-        result = df[list(schema.keys())].copy()
+        result = df[list(col_schema.keys())].copy()
 
-        # 2) 按类型逐列转换
         conversion_failures = {}
-        for col, dtype in schema.items():
+        for col, dtype in col_schema.items():
             series = result[col]
 
             if dtype == 'str':
@@ -157,7 +93,6 @@ class Orchestrator:
                     conversion_failures[col] = int(bad.sum())
                 result[col] = converted
 
-        # 3) 转换失败则报错
         if conversion_failures:
             raise ValueError(
                 f"[{sheet_name}] 以下列存在无法转换的值（已用默认值填充）: "

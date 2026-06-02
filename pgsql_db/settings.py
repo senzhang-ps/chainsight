@@ -23,6 +23,14 @@ _DATABASE_CONFIG_KEYS = (
     "maintenance_database",
 )
 
+# P1 schema 隔离相关字段：未在 defaults.yaml 显式声明时使用保守默认，
+# 既兼容现有部署（schema=public），也允许逐步开启。
+_SCHEMA_CONFIG_DEFAULTS: dict[str, Any] = {
+    "schema_mode": "project",
+    "default_schema": "public",
+    "auto_create_schema": True,
+}
+
 
 def get_database_config_path() -> Path:
     """返回数据库配置文件路径（defaults.yaml）。"""
@@ -63,6 +71,21 @@ def get_database_config() -> dict[str, Any]:
     # password 可能是整数(如 123456),统一转为字符串
     resolved["password"] = str(resolved["password"])
 
+    # P1 schema 隔离字段：缺失时填默认；非法值（如 schema_mode 非字符串）告警后回落
+    for key, default_value in _SCHEMA_CONFIG_DEFAULTS.items():
+        if key in config and config[key] is not None:
+            resolved[key] = config[key]
+        else:
+            resolved[key] = default_value
+
+    # 规范化 auto_create_schema 为 bool（YAML 解析后通常已是 bool，
+    # 但允许用户写 "true"/"false" 字符串时也能识别）
+    raw_auto = resolved.get("auto_create_schema", True)
+    if isinstance(raw_auto, str):
+        resolved["auto_create_schema"] = raw_auto.strip().lower() in {"1", "true", "yes", "on"}
+    else:
+        resolved["auto_create_schema"] = bool(raw_auto)
+
     return resolved
 
 
@@ -73,8 +96,15 @@ def resolve_database_config(
     user: Optional[str] = None,
     password: Optional[str] = None,
     maintenance_database: Optional[str] = None,
+    schema_mode: Optional[str] = None,
+    default_schema: Optional[str] = None,
+    auto_create_schema: Optional[bool] = None,
 ) -> dict[str, Any]:
-    """返回应用显式覆盖后的数据库配置。"""
+    """返回应用显式覆盖后的数据库配置。
+
+    schema_mode/default_schema/auto_create_schema 为 P1 schema 隔离字段，
+    调用方（如 ``DatabaseConnection.__init__``）可显式覆盖来源于 defaults.yaml 的值。
+    """
     config = get_database_config().copy()
 
     overrides = {
@@ -84,12 +114,16 @@ def resolve_database_config(
         "user": user,
         "password": password,
         "maintenance_database": maintenance_database,
+        "schema_mode": schema_mode,
+        "default_schema": default_schema,
+        "auto_create_schema": auto_create_schema,
     }
     for key, value in overrides.items():
         if value is not None:
             config[key] = value
 
     config["port"] = int(config["port"])
+    config["auto_create_schema"] = bool(config.get("auto_create_schema", True))
     return config
 
 

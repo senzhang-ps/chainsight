@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -83,6 +84,11 @@ def _build_expected_local_config(config_arg: str) -> dict:
     return expected
 
 
+def _resolve_local_config_source(config_arg: str) -> Optional[Path]:
+    """复用 ``_find_local_config_file`` 拿到本地配置文件路径（便于附加 mtime/source）。"""
+    return _find_local_config_file(config_arg)
+
+
 def _diff_local_vs_db_config(expected_config: dict, db_config: dict) -> dict:
     """比较本地期望配置与DB配置，返回差异分类。"""
     expected_keys = set(expected_config.keys())
@@ -110,30 +116,231 @@ def _diff_local_vs_db_config(expected_config: dict, db_config: dict) -> dict:
     }
 
 
-def _sync_config_by_diff(db, config_name: str, expected_config: dict, diff_result: dict, logger) -> None:
-    """按差异最小化同步：仅更新新增/变更表，并删除本地已不存在的表数据。"""
+def _diff_local_vs_db_via_manifest(
+    expected_config: dict,
+    expected_hashes: dict[str, str],
+    manifest: dict[str, dict],
+    db,
+    config_name: str,
+    logger,
+) -> dict:
+    """基于 manifest hash 快速判定差异；仅对疑似变更表读取 DB 明细做兜底校验。
+
+    **键约定**：
+    - ``expected_config`` / ``expected_hashes`` 用 *db_key*（无 ``cfg_`` 前缀，如
+      ``global_seed``）作 key——这是 :func:`_build_expected_local_config` 已剥
+      前缀后的产物，也是下游 :func:`_sync_config_by_diff` 期望接收的键形态。
+    - ``manifest`` 用 *table_name*（带 ``cfg_`` 前缀，如 ``cfg_global_seed``）作
+      key——这是物理表名，与 PG 中真实存在的表对得上。
+
+    本函数内部把两者统一转换为 db_key 形态做集合运算，输出依旧是 db_key 形态，
+    避免 :func:`_sync_config_by_diff` 中 ``f"cfg_{db_key}"`` 再次拼接形成
+    ``cfg_cfg_xxx`` 的双前缀，也避免每次运行把所有表错判成新增/删除。
+
+    流程：
+      1. 用预先算好的 ``expected_hashes`` 与 manifest 中的 ``content_hash`` 比较。
+      2. hash 一致 -> ``unchanged_tables``，不读 DB。
+      3. hash 不一致 -> 只读取该 ``cfg_*`` 表 ``WHERE config_name = %s`` 的明细，
+         经 :func:`_normalize_for_compare` 标准化后再判定 changed / unchanged。
+      4. ``expected - manifest`` -> ``new_tables``；``manifest - expected`` -> ``deleted_tables``。
+    """
+
+    # 把 manifest 的物理 table_name 还原回 db_key（去掉 cfg_ 前缀），统一基线。
+    # 非 cfg_ 前缀的 manifest 行视为遗留数据，跳过——它们不来自正规配置导入路径。
+    manifest_by_dbkey: dict[str, dict] = {}
+    for table_name, entry in manifest.items():
+        if not isinstance(table_name, str) or not table_name.startswith("cfg_"):
+            continue
+        manifest_by_dbkey[table_name[4:]] = entry
+
+    expected_keys = set(expected_config.keys())
+    manifest_keys = set(manifest_by_dbkey.keys())
+
+    new_tables = sorted(expected_keys - manifest_keys)
+    deleted_tables = sorted(manifest_keys - expected_keys)
+    changed_tables: list[str] = []
+    unchanged_tables: list[str] = []
+
+    fallback_read_count = 0
+    for db_key in sorted(expected_keys & manifest_keys):
+        local_hash = expected_hashes.get(db_key)
+        remote_hash = manifest_by_dbkey[db_key].get("content_hash")
+        if local_hash and remote_hash and local_hash == remote_hash:
+            unchanged_tables.append(db_key)
+            continue
+
+        # hash 不一致：只读取该 cfg_* 表中当前 config_name 的明细做兜底比对，
+        # 防止 manifest 落后于实际数据（例如手工写库）时误判为变更。
+        table_name = f"cfg_{db_key}"
+        fallback_read_count += 1
+        try:
+            df = db.read_table(table_name, filters={"config_name": config_name})
+        except Exception as e:
+            logger.warning(f"  [manifest] 读取 {table_name} 兜底比对失败：{e}")
+            changed_tables.append(db_key)
+            continue
+
+        drop_cols = [
+            c for c in df.columns
+            if c in ("config_name", "config_type", "db_write_time")
+            or str(c).startswith("unnamed") or str(c).startswith("Unnamed")
+        ]
+        if drop_cols:
+            df = df.drop(columns=drop_cols, errors="ignore")
+
+        left = _normalize_for_compare(expected_config.get(db_key, pd.DataFrame()))
+        right = _normalize_for_compare(df)
+        if left.equals(right):
+            unchanged_tables.append(db_key)
+        else:
+            changed_tables.append(db_key)
+
+    if fallback_read_count:
+        logger.info(
+            f"  [manifest] hash 不一致触发兜底读取 {fallback_read_count} 张 cfg_* 明细"
+        )
+
+    return {
+        "new_tables": new_tables,
+        "deleted_tables": deleted_tables,
+        "changed_tables": changed_tables,
+        "unchanged_tables": sorted(unchanged_tables),
+    }
+
+
+def _verify_cfg_table_persisted(db, table_name: str, config_name: str, expect_rows: bool) -> bool:
+    """确认某个 ``cfg_*`` 表对当前 config_name 已成功持久化到 DB。
+
+    用于 manifest 写入前的把关，避免"导入函数报成功但实际部分 sheet 写失败"
+    （:func:`pgsql_db.excel_importer.ExcelImporter.import_excel_file` 会吞异常并
+    在 results 中记为 ``-1``）导致 manifest 与 DB 状态分裂。
+
+    判定规则：
+    - 表不存在 -> ``False``。
+    - 本地 DataFrame 为空 (``expect_rows=False``)：表存在即视为成功（首次导入
+      会为空 sheet 也建立 header-only 表）。
+    - 本地 DataFrame 非空：必须能在 DB 中找到至少一行 ``config_name = %s``。
+    """
+    table_exists = getattr(db, "table_exists", None)
+    if not callable(table_exists) or not table_exists(table_name):
+        return False
+    if not expect_rows:
+        return True
+    try:
+        qualified = db.qualified_name(table_name)
+        rows = db.execute_query(
+            f"SELECT 1 FROM {qualified} WHERE config_name = %s LIMIT 1",
+            (config_name,),
+        )
+        return bool(rows)
+    except Exception:
+        return False
+
+
+def _precheck_config_table_write(db, table_name: str, df: pd.DataFrame, config_name: str) -> None:
+    """Fail before deleting old config rows when an existing table is incompatible."""
+    table_exists = getattr(db, "table_exists", None)
+    check_compatible = getattr(db, "_check_table_compatible", None)
+    if not callable(table_exists) or not callable(check_compatible):
+        return
+    if not table_exists(table_name):
+        return
+
+    candidate = df.copy()
+    if candidate.empty:
+        candidate["config_name"] = pd.Series(dtype="object")
+        candidate["config_type"] = pd.Series(dtype="object")
+        candidate["db_write_time"] = pd.Series(dtype="datetime64[ns]")
+    else:
+        candidate["config_name"] = config_name
+        candidate["config_type"] = config_name
+        candidate["db_write_time"] = datetime.now()
+
+    if not check_compatible(table_name, candidate):
+        raise RuntimeError(
+            f"Config table {table_name} is incompatible; old rows were not deleted."
+        )
+
+
+def _sync_config_by_diff(
+    db,
+    config_name: str,
+    expected_config: dict,
+    diff_result: dict,
+    logger,
+    *,
+    expected_hashes: dict[str, str] | None = None,
+    source_file: Path | None = None,
+) -> None:
+    """按差异最小化同步：仅更新新增/变更表，并删除本地已不存在的表数据。
+
+    若提供 ``expected_hashes`` / ``source_file``，会同步更新
+    ``cfg_import_manifest``，让下次比对直接命中 hash 快速路径。
+    """
+    from pgsql_db.config_manifest import (
+        ensure_manifest_table,
+        upsert_manifest_entry,
+        delete_manifest_entry,
+    )
+
     config_basename = Path(config_name).stem
 
     to_upsert = sorted(set(diff_result["new_tables"] + diff_result["changed_tables"]))
     to_delete = diff_result["deleted_tables"]
 
+    manifest_enabled = expected_hashes is not None
+    if manifest_enabled:
+        # 幂等创建 manifest 表，确保 schema 切换后仍可用。
+        ensure_manifest_table(db)
+
+    source_mtime: Optional[datetime] = None
+    source_path_str: Optional[str] = None
+    if source_file is not None:
+        try:
+            source_mtime = datetime.fromtimestamp(source_file.stat().st_mtime)
+            source_path_str = str(source_file)
+        except OSError:
+            source_mtime = None
+            source_path_str = str(source_file)
+
     for db_key in to_upsert:
         table_name = f"cfg_{db_key}"
         df = expected_config.get(db_key, pd.DataFrame())
+        _precheck_config_table_write(db, table_name, df, config_basename)
         deleted = db.delete_config_data(table_name, config_basename)
-        db.create_table_from_df(
+        write_ok = db.create_table_from_df(
             df,
             table_name,
             if_exists="append",
             config_name=config_basename,
             config_type=config_basename,
         )
+        if not write_ok:
+            raise RuntimeError(
+                f"Config table {table_name} write failed; manifest update and simulation are aborted."
+            )
         logger.info(f"  🔄 同步配置表 {table_name}: 删除 {deleted} 行，写入 {len(df)} 行")
+        if manifest_enabled:
+            upsert_manifest_entry(
+                db,
+                config_name=config_basename,
+                table_name=table_name,
+                row_count=len(df),
+                content_hash=expected_hashes.get(db_key, ""),
+                source_file=source_path_str,
+                source_mtime=source_mtime,
+            )
 
     for db_key in to_delete:
         table_name = f"cfg_{db_key}"
         deleted = db.delete_config_data(table_name, config_basename)
         logger.info(f"  🗑️ 删除本地已不存在配置表数据 {table_name}: 删除 {deleted} 行")
+        if manifest_enabled:
+            delete_manifest_entry(
+                db,
+                config_name=config_basename,
+                table_name=table_name,
+            )
 
 
 def _apply_csv_overrides_for_db(config_data: dict, config_name: str, logger, db=None) -> None:
@@ -195,6 +402,23 @@ def _run_with_database(ns: argparse.Namespace) -> int:
 
     # 输出二级子路径（DB 模式与文件模式共用此规则）
     _output_subpath = cfg.output_subpath if cfg is not None else Path(config_name) / config_name
+
+    # P1 schema 隔离：从 ConfigDir.project 推导 schema，纯 --config 模式回退 default_schema。
+    # schema 解析失败（非法字符 / 缺失）以 ValueError 终止，对应退出码 2。
+    try:
+        from .schema_resolver import resolve_project_schema
+        from pgsql_db.settings import resolve_database_config as _resolve_db_cfg
+        _db_cfg = _resolve_db_cfg()
+        _project = cfg.project if cfg is not None else None
+        _scenario = cfg.scenario if cfg is not None else None
+        db_schema = resolve_project_schema(
+            _project,
+            default_schema=_db_cfg.get("default_schema"),
+        )
+    except ValueError as e:
+        print(f"[ConfigError] {e}", file=sys.stderr)
+        return 2
+
     start_date = ns.start_date
     end_date = ns.end_date
     
@@ -217,7 +441,8 @@ def _run_with_database(ns: argparse.Namespace) -> int:
         port=ns.db_port,
         database=ns.db_name,
         user=ns.db_user,
-        password=ns.db_password
+        password=ns.db_password,
+        schema=db_schema,
     )
     
     # 执行初始化（检测数据库、创建数据库、检测配置表、导入配置）
@@ -257,6 +482,13 @@ def _run_with_database(ns: argparse.Namespace) -> int:
     logger.info("🕐 程序时间信息")
     logger.info("=" * 60)
     logger.info(f"📅 程序开始时间: {program_start_datetime.strftime('%Y-%m-%d %H:%M:%S')}")
+    logger.info(
+        "[DB] project={project}, scenario={scenario}, db_schema={schema}".format(
+            project=_project or "(none)",
+            scenario=_scenario or "(none)",
+            schema=db_schema,
+        )
+    )
     
     try:
         # ========== 步骤0.5: 同名配置比对并按需同步 ==========
@@ -264,11 +496,27 @@ def _run_with_database(ns: argparse.Namespace) -> int:
         logger.info("🔄 步骤0.5: 检查同名配置并按差异同步数据库")
         logger.info("=" * 60)
 
+        from pgsql_db.config_manifest import (
+            ensure_manifest_table,
+            load_manifest,
+            upsert_manifest_entry,
+            compute_table_hash,
+        )
+
         # 构建本地期望配置（Excel + CSV覆盖）—— 用原始 --config 输入（支持任意路径/子目录）
         expected_config = _build_expected_local_config(_raw_config)
         if not expected_config:
             logger.info(f"  ℹ️ 未找到本地配置文件 {config_name}.xlsx（输入：{_raw_config}），直接使用数据库配置")
         else:
+            # 预计算每个 cfg_* 的稳定 content hash（不依赖 DB），用于 manifest 快速比对。
+            expected_hashes = {
+                key: compute_table_hash(df) for key, df in expected_config.items()
+            }
+            local_source = _resolve_local_config_source(_raw_config)
+            config_basename = Path(config_name).stem
+
+            ensure_manifest_table(db)
+
             exists, _ = initializer.check_config_data_exists(config_name)
             if not exists:
                 logger.info("  ℹ️ 数据库中不存在同名配置，执行首次导入")
@@ -282,10 +530,60 @@ def _run_with_database(ns: argparse.Namespace) -> int:
                     return 1
                 imported_count = len([r for r in import_results.values() if r >= 0])
                 logger.info(f"  ✅ 首次导入完成: {imported_count} 个配置表")
+                # 首次导入后：先用 DB 状态逐表验证（excel_importer 会吞异常并把
+                # 失败表记为 -1，但只要还有一个成功就整体 success=True）。
+                # 任一 expected 表未通过 DB 验证即视为部分失败，整体退出，避免
+                # 把"部分导入失败"固化成"已成功导入"。
+                try:
+                    src_mtime = (
+                        datetime.fromtimestamp(local_source.stat().st_mtime)
+                        if local_source is not None else None
+                    )
+                except OSError:
+                    src_mtime = None
+                missing_tables: list[str] = []
+                for db_key, df in expected_config.items():
+                    table_name = f"cfg_{db_key}"
+                    if not _verify_cfg_table_persisted(
+                        db, table_name, config_basename, expect_rows=not df.empty
+                    ):
+                        missing_tables.append(table_name)
+                if missing_tables:
+                    logger.error(
+                        "[ERROR] 首次导入存在部分失败：以下配置表未在 DB 验证到本 config 的数据，"
+                        " 已拒绝写入 manifest 并终止运行 -> "
+                        + ", ".join(missing_tables)
+                    )
+                    return 1
+                for db_key, df in expected_config.items():
+                    upsert_manifest_entry(
+                        db,
+                        config_name=config_basename,
+                        table_name=f"cfg_{db_key}",
+                        row_count=len(df),
+                        content_hash=expected_hashes.get(db_key, ""),
+                        source_file=str(local_source) if local_source else None,
+                        source_mtime=src_mtime,
+                    )
             else:
                 logger.info("  ℹ️ 检测到数据库存在同名配置，开始比对本地与数据库")
-                db_snapshot = _load_config_from_database(db, config_name) or {}
-                diff_result = _diff_local_vs_db_config(expected_config, db_snapshot)
+                manifest = load_manifest(db, config_basename)
+
+                if manifest:
+                    # manifest 命中：走 hash 快速路径，只在 hash 不一致时读取 cfg_* 明细。
+                    diff_result = _diff_local_vs_db_via_manifest(
+                        expected_config,
+                        expected_hashes,
+                        manifest,
+                        db,
+                        config_basename,
+                        logger,
+                    )
+                else:
+                    # 无 manifest：回退到原有的"整表读取 + pandas 比对"。
+                    logger.info("  ℹ️ 未找到 manifest，回退到整表读取比对（首次升级路径）")
+                    db_snapshot = _load_config_from_database(db, config_name) or {}
+                    diff_result = _diff_local_vs_db_config(expected_config, db_snapshot)
 
                 changed_count = len(diff_result["changed_tables"])
                 new_count = len(diff_result["new_tables"])
@@ -293,11 +591,48 @@ def _run_with_database(ns: argparse.Namespace) -> int:
 
                 if changed_count == 0 and new_count == 0 and deleted_count == 0:
                     logger.info("  ✅ 本地配置与数据库无差异，直接读取数据库配置")
+                    # 即便无差异，也对照 manifest 兜底刷新（缺 manifest 行的补齐）。
+                    # 同样使用 DB 状态验证：本地非空但 DB 未发现该 config 数据时跳过，
+                    # 避免遗留数据库 + 缺 manifest 场景下把空表当作"已导入"记进 manifest。
+                    if not manifest:
+                        try:
+                            src_mtime = (
+                                datetime.fromtimestamp(local_source.stat().st_mtime)
+                                if local_source is not None else None
+                            )
+                        except OSError:
+                            src_mtime = None
+                        skipped_backfill: list[str] = []
+                        for db_key, df in expected_config.items():
+                            table_name = f"cfg_{db_key}"
+                            if not _verify_cfg_table_persisted(
+                                db, table_name, config_basename, expect_rows=not df.empty
+                            ):
+                                skipped_backfill.append(table_name)
+                                continue
+                            upsert_manifest_entry(
+                                db,
+                                config_name=config_basename,
+                                table_name=table_name,
+                                row_count=len(df),
+                                content_hash=expected_hashes.get(db_key, ""),
+                                source_file=str(local_source) if local_source else None,
+                                source_mtime=src_mtime,
+                            )
+                        if skipped_backfill:
+                            logger.warning(
+                                "  [manifest] 兜底回填跳过未验证表："
+                                + ", ".join(skipped_backfill)
+                            )
                 else:
                     logger.info(
                         f"  🔍 差异检测结果: 变更 {changed_count}，新增 {new_count}，删除 {deleted_count}"
                     )
-                    _sync_config_by_diff(db, config_name, expected_config, diff_result, logger)
+                    _sync_config_by_diff(
+                        db, config_name, expected_config, diff_result, logger,
+                        expected_hashes=expected_hashes,
+                        source_file=local_source,
+                    )
                     logger.info("  ✅ 差异同步完成")
 
         # ========== 步骤1: 从数据库获取配置 ==========
@@ -326,6 +661,21 @@ def _run_with_database(ns: argparse.Namespace) -> int:
                 "[WARN] 当前 ModuleDataWriter 不包含 ensure_output_tables_exist，"
                 "已跳过预建输出表；请同步 `pgsql_db/module_data_writer.py` 与当前运行代码版本。"
             )
+
+        # P1 索引注册器：cfg_* (config_name) + 输出表轻量 (run_id, sim_date)。
+        # 配置阶段已 ensure_manifest_table，再在此一次性把所有 cfg_* 索引补齐。
+        try:
+            from pgsql_db.index_registry import (
+                ensure_config_indexes,
+                ensure_output_lightweight_indexes,
+            )
+            cfg_idx = ensure_config_indexes(db)
+            out_idx = ensure_output_lightweight_indexes(db)
+            logger.info(
+                f"[INDEX] 注册 cfg_* 索引 {cfg_idx} 个，输出表轻量索引 {out_idx} 个"
+            )
+        except Exception as _ix_err:
+            logger.warning(f"[INDEX] 注册索引时发生异常（不阻塞主流程）：{_ix_err}")
 
         # 并发保护（最佳努力）：尝试避免同一 config_name 被多个进程同时运行
         from pgsql_db.checkpoint import try_acquire_run_lock, release_run_lock
@@ -464,6 +814,13 @@ def _run_with_database(ns: argparse.Namespace) -> int:
         # Summary 汇总报告生成
         # 必须使用与模块数据相同的 run_id 进行过滤，否则查不到数据
         logger.info(f"[DATA] 从数据库生成 Summary 汇总报告（run_id={run_id}）...")
+        # P1 索引注册器：Summary 前建立宽 BTREE 索引，配合 group by / order by 命中。
+        try:
+            from pgsql_db.index_registry import ensure_summary_wide_indexes
+            wide_idx = ensure_summary_wide_indexes(db)
+            logger.info(f"[INDEX] Summary 前注册宽索引 {wide_idx} 个")
+        except Exception as _ix_err:
+            logger.warning(f"[INDEX] Summary 宽索引注册失败（不阻塞主流程）：{_ix_err}")
         summary_success = False
         summary_results = {}
         try:
@@ -579,7 +936,7 @@ def _run_with_database(ns: argparse.Namespace) -> int:
                 _target_run_id = locals().get('effective_run_id')
                 if _target_run_id:
                     _status_rows = db.execute_query(
-                        "SELECT COALESCE(status, 'running') FROM sim_checkpoint WHERE run_id = %s",
+                        f"SELECT COALESCE(status, 'running') FROM {db.qualified_name('sim_checkpoint')} WHERE run_id = %s",
                         (_target_run_id,),
                     )
                     if _status_rows and _status_rows[0][0] == 'running':

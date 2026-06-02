@@ -13,8 +13,9 @@ from typing import Optional, TYPE_CHECKING
 if TYPE_CHECKING:
     from pgsql_db.db_connection import DatabaseConnection
 
-CREATE_CHECKPOINT_TABLE = """
-CREATE TABLE IF NOT EXISTS sim_checkpoint (
+_CHECKPOINT_TABLE = "sim_checkpoint"
+
+_CHECKPOINT_COLUMNS_SQL = """(
     run_key         TEXT NOT NULL,
     run_id          TEXT NOT NULL,
     config_name     TEXT NOT NULL,
@@ -27,36 +28,46 @@ CREATE TABLE IF NOT EXISTS sim_checkpoint (
     created_at      TIMESTAMP DEFAULT NOW(),
     updated_at      TIMESTAMP DEFAULT NOW(),
     PRIMARY KEY (run_id)
-);
-"""
+)"""
 
-# 数据定义语句：为已有表添加 `status` / `error_message` / `created_at` 列（幂等）
-ALTER_ADD_STATUS = "ALTER TABLE sim_checkpoint ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'running';"
-ALTER_ADD_ERROR  = "ALTER TABLE sim_checkpoint ADD COLUMN IF NOT EXISTS error_message TEXT;"
-ALTER_ADD_CREATED = "ALTER TABLE sim_checkpoint ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW();"
-
-# 数据定义语句：主键从 `run_key` 迁移到 `run_id`（幂等）
-# 先删旧约束再建新约束；如果旧约束不存在则忽略
-MIGRATE_PK_TO_RUN_ID = [
-    "ALTER TABLE sim_checkpoint DROP CONSTRAINT IF EXISTS sim_checkpoint_pkey;",
-    "ALTER TABLE sim_checkpoint ADD PRIMARY KEY (run_id);",
-]
 
 def ensure_checkpoint_table(db: "DatabaseConnection") -> None:
-    """确保 sim_checkpoint 表存在并包含所有需要的列（幂等）"""
-    db.execute_non_query(CREATE_CHECKPOINT_TABLE)
+    """确保 sim_checkpoint 表存在并包含所有需要的列（幂等）。
+
+    P1 之后 schema 名由 db 注入（默认 ``self.schema``），不同 project 各自拥有
+    独立的 checkpoint，避免 BC 与 BC-DEV 续跑互相干扰。
+    """
+    qualified = db.qualified_name(_CHECKPOINT_TABLE)
+    db.execute_non_query(f"CREATE TABLE IF NOT EXISTS {qualified} {_CHECKPOINT_COLUMNS_SQL};")
     # 兼容旧表：追加新列
-    for ddl in (ALTER_ADD_STATUS, ALTER_ADD_ERROR, ALTER_ADD_CREATED):
+    for col_ddl in (
+        "ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'running'",
+        "ADD COLUMN IF NOT EXISTS error_message TEXT",
+        "ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()",
+    ):
         try:
-            db.execute_non_query(ddl)
+            db.execute_non_query(f"ALTER TABLE {qualified} {col_ddl};")
         except Exception:
             pass  # 列已存在或不支持 IF NOT EXISTS
     # 兼容旧表：主键从 run_key 迁移到 run_id
-    for ddl in MIGRATE_PK_TO_RUN_ID:
+    for ddl in (
+        f"ALTER TABLE {qualified} DROP CONSTRAINT IF EXISTS sim_checkpoint_pkey;",
+        f"ALTER TABLE {qualified} ADD PRIMARY KEY (run_id);",
+    ):
         try:
             db.execute_non_query(ddl)
         except Exception:
             pass  # 约束已存在或已迁移
+    # P1 性能：按计划书建立部分索引，加速 load_checkpoint 中 status IN (...) 的命中。
+    # 部分索引仅覆盖 running/failed/interrupted，远小于全量数据，索引体积更小。
+    try:
+        db.execute_non_query(
+            f'CREATE INDEX IF NOT EXISTS "idx_sim_checkpoint_resume" '
+            f'ON {qualified} (run_key, start_date, end_date, created_at, updated_at, run_id) '
+            f"WHERE status IN ('running', 'failed', 'interrupted');"
+        )
+    except Exception:
+        pass
 
 def save_checkpoint(
     db: "DatabaseConnection",
@@ -70,11 +81,12 @@ def save_checkpoint(
     status: str = "running",
     error_message: str = None,
 ) -> None:
-    """UPSERT 一条 checkpoint 记录（含运行状态）"""
+    """UPSERT 一条 checkpoint 记录（含运行状态）。"""
+    qualified = db.qualified_name(_CHECKPOINT_TABLE)
     orch_json = json.dumps(orch_state_dict, default=_json_serializer, ensure_ascii=False)
     db.execute_non_query(
-        """
-        INSERT INTO sim_checkpoint
+        f"""
+        INSERT INTO {qualified}
             (run_key, run_id, config_name, start_date, end_date,
              last_batch_end, orch_state_json, status, error_message, created_at)
         VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s, NOW())
@@ -112,11 +124,12 @@ def load_checkpoint(
         where.append("end_date = %s")
         params.append(str(end_date))
 
+    qualified = db.qualified_name(_CHECKPOINT_TABLE)
     rows = db.execute_query(
         "SELECT run_key, run_id, config_name, start_date::text, end_date::text, "
         "last_batch_end::text, orch_state_json::text, "
         "COALESCE(status, 'running'), error_message "
-        f"FROM sim_checkpoint WHERE {' AND '.join(where)} "
+        f"FROM {qualified} WHERE {' AND '.join(where)} "
         "ORDER BY created_at ASC NULLS LAST, updated_at ASC NULLS LAST, run_id ASC LIMIT 1",
         tuple(params),
     )
@@ -138,9 +151,10 @@ def load_checkpoint(
 
 def update_checkpoint_status(db: "DatabaseConnection", run_id: str, status: str, error_message: str = None) -> None:
     """按 run_id 更新 checkpoint 的运行状态（running/completed/failed/interrupted）"""
+    qualified = db.qualified_name(_CHECKPOINT_TABLE)
     db.execute_non_query(
-        """
-        UPDATE sim_checkpoint
+        f"""
+        UPDATE {qualified}
         SET status = %s, error_message = %s, updated_at = NOW()
         WHERE run_id = %s
         """,
@@ -148,16 +162,17 @@ def update_checkpoint_status(db: "DatabaseConnection", run_id: str, status: str,
     )
 
 def delete_checkpoint(db: "DatabaseConnection", run_id: str) -> None:
-    """按 run_id 删除 checkpoint 记录"""
+    """按 run_id 删除 checkpoint 记录。"""
+    qualified = db.qualified_name(_CHECKPOINT_TABLE)
     db.execute_non_query(
-        "DELETE FROM sim_checkpoint WHERE run_id = %s", (run_id,)
+        f"DELETE FROM {qualified} WHERE run_id = %s", (run_id,)
     )
 
 def serialize_orchestrator_state(orch, max_log_entries: int = 1000) -> dict:
     """将 Orchestrator 内存状态序列化为纯 Python dict（可 JSON 存储）
 
-    max_log_entries 限制历史日志列表的最大条目数（保留最新的 N 条），
-    防止长仿真中 orch_state_json 膨胀导致 checkpoint 写入超时。
+    max_log_entries 保留为兼容参数。daily_logs 历史不再写入 checkpoint，
+    checkpoint 只保存累计快照恢复游标，防止长仿真中 orch_state_json 膨胀。
     核心状态（inventory/in_transit/open_deployment/space_quota）不受限制。
     """
     # 历史日志类状态已按天落库，checkpoint 仅保留断点续跑所需的轻量状态。
@@ -211,8 +226,6 @@ def serialize_orchestrator_state(orch, max_log_entries: int = 1000) -> dict:
     dlv_ship_log = []
     inv_change_log = []
 
-    daily_logs = []
-
     cur_date = getattr(orch, 'current_date', None)
     cur_date_str = cur_date.isoformat() if isinstance(cur_date, (date, datetime, pd.Timestamp)) else str(cur_date) if cur_date else None
 
@@ -255,7 +268,9 @@ def serialize_orchestrator_state(orch, max_log_entries: int = 1000) -> dict:
         "shipment_log":           shipment_log,
         "delivery_shipment_log":  dlv_ship_log,
         "inventory_change_log":   inv_change_log,
-        "daily_logs":             daily_logs,
+        "daily_log_mode":         getattr(orch, "daily_log_mode", "cumulative_snapshot"),
+        "daily_log_next_seq":     int(getattr(orch, "daily_log_next_seq", 1) or 1),
+        "daily_log_last_committed_seq": int(getattr(orch, "daily_log_last_committed_seq", 0) or 0),
         "current_date":           cur_date_str,
     }
 
@@ -348,7 +363,16 @@ def deserialize_orchestrator_state(orch, state_dict: dict) -> None:
                                   for r in state_dict.get("delivery_shipment_log", [])]
     orch.inventory_change_log  = [_restore_dates(r) if isinstance(r, dict) else r
                                   for r in state_dict.get("inventory_change_log", [])]
-    orch.daily_logs            = state_dict.get("daily_logs", [])
+    # DB mode keeps historical daily_logs in orchestrator_daily_logs. Do not
+    # restore old cumulative log lists into memory; only lightweight cursors are
+    # restored and later re-synchronized from DB.
+    orch.daily_logs            = []
+    orch.daily_log_pending_events = []
+    orch.daily_log_mode        = state_dict.get("daily_log_mode", "cumulative_snapshot")
+    orch.daily_log_next_seq    = int(state_dict.get("daily_log_next_seq", 1) or 1)
+    orch.daily_log_last_committed_seq = int(
+        state_dict.get("daily_log_last_committed_seq", 0) or 0
+    )
 
     cur = state_dict.get("current_date")
     if cur:
@@ -432,20 +456,22 @@ def next_day(date_str: str) -> str:
 # 存入 DB 表 sim_m4_state，在断点续跑时恢复到临时目录，替代对本地文件的依赖。
 # ---------------------------------------------------------------------------
 
-CREATE_M4_STATE_TABLE = """
-CREATE TABLE IF NOT EXISTS sim_m4_state (
+_M4_STATE_TABLE = "sim_m4_state"
+
+_M4_STATE_COLUMNS_SQL = """(
     run_id      TEXT NOT NULL,
     sim_date    DATE NOT NULL,
     file_type   TEXT NOT NULL,
     file_content BYTEA NOT NULL,
     updated_at  TIMESTAMP DEFAULT NOW(),
     PRIMARY KEY (run_id, sim_date, file_type)
-);
-"""
+)"""
+
 
 def ensure_m4_state_table(db: "DatabaseConnection") -> None:
-    """确保 sim_m4_state 表存在（幂等）"""
-    db.execute_non_query(CREATE_M4_STATE_TABLE)
+    """确保 sim_m4_state 表存在（幂等）。"""
+    qualified = db.qualified_name(_M4_STATE_TABLE)
+    db.execute_non_query(f"CREATE TABLE IF NOT EXISTS {qualified} {_M4_STATE_COLUMNS_SQL};")
 
 
 def save_m4_state_files(
@@ -479,9 +505,10 @@ def save_m4_state_files(
         try:
             with open(file_path, 'rb') as fh:
                 content = fh.read()
+            qualified = db.qualified_name(_M4_STATE_TABLE)
             db.execute_non_query(
-                """
-                INSERT INTO sim_m4_state (run_id, sim_date, file_type, file_content, updated_at)
+                f"""
+                INSERT INTO {qualified} (run_id, sim_date, file_type, file_content, updated_at)
                 VALUES (%s, %s::date, %s, %s, NOW())
                 ON CONFLICT (run_id, sim_date, file_type) DO UPDATE SET
                     file_content = EXCLUDED.file_content,
@@ -507,9 +534,10 @@ def restore_m4_state_files(
         恢复的文件数量
     """
     os.makedirs(m4_output_dir, exist_ok=True)
+    qualified = db.qualified_name(_M4_STATE_TABLE)
     rows = db.execute_query(
         "SELECT sim_date::text, file_type, file_content "
-        "FROM sim_m4_state WHERE run_id = %s ORDER BY sim_date",
+        f"FROM {qualified} WHERE run_id = %s ORDER BY sim_date",
         (run_id,),
     )
     if not rows:

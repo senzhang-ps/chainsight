@@ -50,7 +50,28 @@ def _flush_batch_to_db(
 
     logger.info(f"\n💾 批次写入: {batch_start_date} ~ {batch_end_date}")
 
-    # 步骤 0：在事务外先序列化编排器状态（纯 CPU 操作，无 DB 交互）
+    # 步骤 0：在事务外预处理批次数据为可写入的 DataFrame
+    prepared_tables = writer.prepare_batch_dataframes(batch_results, run_id=run_id)
+
+    # 步骤 0b：预处理当日编排器数据为可写入的 DataFrame
+    # [DB-MEM] 优先使用直接从 orchestrator 对象读取的视图（无需 CSV 中间文件），
+    # 回退到基于 CSV 文件的兼容路径，以保持向后兼容。
+    orchestrator_tables = prepare_orchestrator_day_dataframes_from_orch(
+        orch=orch,
+        run_id=run_id,
+        sim_date=batch_end_date,
+        config_name=config_name,
+        cleanup_audit_df=getattr(runtime_state, 'cleanup_audit_df', None) if runtime_state else None,
+    )
+    if orchestrator_tables:
+        orch_total_rows = sum(df.shape[0] for df, _ in orchestrator_tables.values())
+        logger.info(f"  📋 Orchestrator 当日数据: {len(orchestrator_tables)} 张表, 共 {orch_total_rows} 行")
+        for tbl_name, (df, _) in orchestrator_tables.items():
+            logger.info(f"    - {tbl_name}: {len(df)} 行")
+    prepared_tables.update(orchestrator_tables)
+
+    # 步骤 0c：在事务外序列化 checkpoint 状态。daily_logs 历史不写入 JSON；
+    # DB resume 会从 orchestrator_daily_logs 的上一完成日累计快照恢复。
     orch_state = serialize_orchestrator_state(orch)
     # m1_previous_orders is rebuilt from DB orderlog on resume to keep checkpoint small.
     # [DB-MEM] 将 DbRuntimeState 序列化进 checkpoint JSON（M4 line states, capacity, M3 result）
@@ -61,54 +82,27 @@ def _flush_batch_to_db(
     if orch_json_bytes >= 16 * 1024 * 1024:
         logger.warning(f"  [WARN] checkpoint JSON size={orch_json_bytes / 1024 / 1024:.2f} MB")
 
-    # 步骤 0b：在事务外预处理批次数据为可写入的 DataFrame
-    prepared_tables = writer.prepare_batch_dataframes(batch_results, run_id=run_id)
-
-    # 步骤 0b-2：预处理当日编排器数据为可写入的 DataFrame
-    # [DB-MEM] 优先使用直接从 orchestrator 对象读取的视图（无需 CSV 中间文件），
-    # 回退到基于 CSV 文件的兼容路径，以保持向后兼容。
-    orchestrator_tables = prepare_orchestrator_day_dataframes_from_orch(
-        orch=orch,
-        run_id=run_id,
-        sim_date=batch_end_date,
-        config_name=config_name,
-        cleanup_audit_df=getattr(runtime_state, 'cleanup_audit_df', None) if runtime_state else None,
-    )
-    if not orchestrator_tables:
-        # 回退：尝试基于 CSV 文件的兼容路径（适用于仍会写出 CSV 的运行）
-        orchestrator_tables = writer.prepare_orchestrator_day_dataframes(
-            orchestrator_dir=str(orch.output_dir),
-            run_id=run_id,
-            sim_date=batch_end_date,
-        )
-    if orchestrator_tables:
-        orch_total_rows = sum(df.shape[0] for df, _ in orchestrator_tables.values())
-        logger.info(f"  📋 Orchestrator 当日数据: {len(orchestrator_tables)} 张表, 共 {orch_total_rows} 行")
-        for tbl_name, (df, _) in orchestrator_tables.items():
-            logger.info(f"    - {tbl_name}: {len(df)} 行")
-    prepared_tables.update(orchestrator_tables)
-
     # 获取底层连接
     conn = db.connect()
 
     # 步骤 0c：在事务外预查表元数据，减少事务内 information_schema 查询
     # autocommit=True 模式下，SELECT 语句自动提交，不会开启隐式事务，
     # 因此后续 conn.transaction() 始终创建顶层 BEGIN...COMMIT 事务。
-    table_meta = _precheck_table_metadata(conn)
+    table_meta = _precheck_table_metadata(conn, schema=db.schema)
 
     try:
         with conn.transaction():
             with conn.cursor() as cur:
                 # 步骤 1：幂等清理（适用于断点续跑重试场景）
-                _atomic_delete_batch(cur, run_id, batch_start_date, table_meta=table_meta)
+                _atomic_delete_batch(cur, run_id, batch_start_date, table_meta=table_meta, db=db)
 
                 # 步骤 2：通过 COPY 写入模块结果
                 _atomic_copy_batch(conn, cur, prepared_tables, db)
 
                 # 步骤 3：UPSERT checkpoint
                 cur.execute(
-                    """
-                    INSERT INTO sim_checkpoint
+                    f"""
+                    INSERT INTO {db.qualified_name('sim_checkpoint')}
                         (run_key, run_id, config_name, start_date, end_date,
                          last_batch_end, orch_state_json, status)
                     VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb, 'running')
@@ -129,19 +123,18 @@ def _flush_batch_to_db(
         raise
 
 
-def _precheck_table_metadata(conn) -> dict:
-    """在事务外一次性查询所有输出表的元数据（表存在性、列存在性）。
+def _precheck_table_metadata(conn, schema: str = "public") -> dict:
+    """在事务外一次性查询当前 schema 内输出表的元数据。
 
-    返回：{表名: {'has_sim_date': bool, 'has_run_id': bool}}，不存在的表不出现在 dict 中
+    返回：``{表名: {'has_sim_date': bool, 'has_run_id': bool}}``，不存在的表不出现在 dict 中。
     """
     with conn.cursor() as cur:
-        # 一次查询获取所有 public 表及其列
         cur.execute("""
             SELECT table_name, column_name
             FROM information_schema.columns
-            WHERE table_schema = 'public'
+            WHERE table_schema = %s
               AND column_name IN ('sim_date', 'run_id')
-        """)
+        """, (schema,))
         meta = {}
         for row in cur.fetchall():
             tname, cname = row[0], row[1]
@@ -154,7 +147,7 @@ def _precheck_table_metadata(conn) -> dict:
     return meta
 
 
-def _atomic_delete_batch(cur, run_id: str, batch_start_date: str, table_meta: dict = None) -> None:
+def _atomic_delete_batch(cur, run_id: str, batch_start_date: str, table_meta: dict = None, *, db=None) -> None:
     """在已有事务内删除批次数据（含模块输出 + Summary + Orchestrator 表）。
 
     当 table_meta 已提供时，直接使用缓存的表元数据，
@@ -206,6 +199,7 @@ def _atomic_delete_batch(cur, run_id: str, batch_start_date: str, table_meta: di
         'orchestrator_daily_logs',
     ]
     deleted_total = 0
+    schema_name = db.schema if db is not None else "public"
     for table_name in output_tables:
         # 使用缓存的元数据（如果可用），否则回退到事务内查询
         if table_meta is not None:
@@ -215,42 +209,43 @@ def _atomic_delete_batch(cur, run_id: str, batch_start_date: str, table_meta: di
             has_sim_date = meta['has_sim_date']
             has_run_id = meta['has_run_id']
         else:
-            # 回退：事务内查询 information_schema
+            # 回退：事务内查询 information_schema（限定到当前 schema）
             cur.execute(
                 "SELECT EXISTS(SELECT 1 FROM information_schema.tables "
-                "WHERE table_schema = 'public' AND table_name = %s)",
-                (table_name,)
+                "WHERE table_schema = %s AND table_name = %s)",
+                (schema_name, table_name)
             )
             if not cur.fetchone()[0]:
                 continue
             cur.execute(
                 "SELECT EXISTS(SELECT 1 FROM information_schema.columns "
-                "WHERE table_name = %s AND column_name = 'sim_date')",
-                (table_name,)
+                "WHERE table_schema = %s AND table_name = %s AND column_name = 'sim_date')",
+                (schema_name, table_name)
             )
             has_sim_date = cur.fetchone()[0]
             cur.execute(
                 "SELECT EXISTS(SELECT 1 FROM information_schema.columns "
-                "WHERE table_name = %s AND column_name = 'run_id')",
-                (table_name,)
+                "WHERE table_schema = %s AND table_name = %s AND column_name = 'run_id')",
+                (schema_name, table_name)
             )
             has_run_id = cur.fetchone()[0]
 
         if not has_sim_date:
             continue
-        # 按 sim_date + run_id 删除
+        # 按 sim_date + run_id 删除 - schema-qualified 标识符
+        qualified = (
+            db._qualified(table_name)
+            if db is not None
+            else psql.Identifier(table_name)
+        )
         if has_run_id and run_id:
             cur.execute(
-                psql.SQL('DELETE FROM {} WHERE sim_date >= %s AND run_id = %s').format(
-                    psql.Identifier(table_name)
-                ),
+                psql.SQL('DELETE FROM {} WHERE sim_date >= %s AND run_id = %s').format(qualified),
                 (batch_start_date, run_id)
             )
         else:
             cur.execute(
-                psql.SQL('DELETE FROM {} WHERE sim_date >= %s').format(
-                    psql.Identifier(table_name)
-                ),
+                psql.SQL('DELETE FROM {} WHERE sim_date >= %s').format(qualified),
                 (batch_start_date,)
             )
         deleted_total += 1
@@ -259,24 +254,27 @@ def _atomic_delete_batch(cur, run_id: str, batch_start_date: str, table_meta: di
 
 
 def _atomic_copy_batch(conn, cur, prepared_tables: dict, db) -> None:
-    """在已有事务内使用 COPY 批量写入预处理好的数据。"""
+    """在已有事务内使用 COPY 批量写入预处理好的数据（schema-aware）。"""
+    schema_name = db.schema if db is not None else "public"
     for table_name, (df, clean_columns) in prepared_tables.items():
         if df.empty:
             continue
+        qualified_tbl = db.qualified_name(table_name) if db is not None else f'"{table_name}"'
         # 确保表存在（在事务内创建）
-        if not _table_exists_in_txn(cur, table_name):
+        if not _table_exists_in_txn(cur, table_name, schema=schema_name):
             columns = []
             for col_name, dtype in df.dtypes.items():
                 clean_col = db._clean_name(str(col_name))
                 pg_type = db._pandas_to_pg_type(dtype, col_name=clean_col)
                 columns.append(f'"{clean_col}" {pg_type}')
-            cur.execute(f'CREATE TABLE IF NOT EXISTS "{table_name}" ({", ".join(columns)})')
+            cur.execute(f'CREATE TABLE IF NOT EXISTS {qualified_tbl} ({", ".join(columns)})')
 
         # 准备数据
         col_types = {}
         cur.execute(
-            "SELECT column_name, data_type FROM information_schema.columns WHERE table_name = %s",
-            (table_name,)
+            "SELECT column_name, data_type FROM information_schema.columns "
+            "WHERE table_schema = %s AND table_name = %s",
+            (schema_name, table_name)
         )
         for row in cur.fetchall():
             col_types[row[0]] = row[1]
@@ -289,7 +287,7 @@ def _atomic_copy_batch(conn, cur, prepared_tables: dict, db) -> None:
                     col_idx = list(clean_columns).index(col_name)
                     df_dtype = df.iloc[:, col_idx].dtype
                     pg_type = db._pandas_to_pg_type(df_dtype, col_name=col_name)
-                    cur.execute(f'ALTER TABLE "{table_name}" ADD COLUMN IF NOT EXISTS "{col_name}" {pg_type}')
+                    cur.execute(f'ALTER TABLE {qualified_tbl} ADD COLUMN IF NOT EXISTS "{col_name}" {pg_type}')
                     col_types[col_name] = pg_type
                     logger.info(f'    [ALTER] 为 {table_name} 添加新列: {col_name} ({pg_type})')
         import numpy as np
@@ -313,14 +311,14 @@ def _atomic_copy_batch(conn, cur, prepared_tables: dict, db) -> None:
                     expected_pg = db._pandas_to_pg_type(df_dtype, col_name=cn)
                     ctu = ct.upper()
                     if expected_pg == 'DOUBLE PRECISION' and ctu in _INT_TYPES:
-                        cur.execute(f'ALTER TABLE "{table_name}" ALTER COLUMN "{cn}" TYPE DOUBLE PRECISION USING "{cn}"::DOUBLE PRECISION')
+                        cur.execute(f'ALTER TABLE {qualified_tbl} ALTER COLUMN "{cn}" TYPE DOUBLE PRECISION USING "{cn}"::DOUBLE PRECISION')
                         col_types[cn] = 'DOUBLE PRECISION'
                     elif ctu in _TEXT_TYPES and expected_pg in _TEXT_UPGRADE_CAST:
                         # 共享事务内用 SAVEPOINT 保护：cast 失败仅回滚本列并保持 TEXT，不废整批
                         cast = _TEXT_UPGRADE_CAST[expected_pg]
                         try:
                             cur.execute('SAVEPOINT sp_text_upg')
-                            cur.execute(f'ALTER TABLE "{table_name}" ALTER COLUMN "{cn}" TYPE {expected_pg} USING "{cn}"{cast}')
+                            cur.execute(f'ALTER TABLE {qualified_tbl} ALTER COLUMN "{cn}" TYPE {expected_pg} USING "{cn}"{cast}')
                             cur.execute('RELEASE SAVEPOINT sp_text_upg')
                             col_types[cn] = expected_pg
                             logger.info(f'    [UPGRADE] {table_name}.{cn} TEXT→{expected_pg}')
@@ -384,7 +382,7 @@ def _atomic_copy_batch(conn, cur, prepared_tables: dict, db) -> None:
             records[i] = tuple(new_row)
 
         cols_str = ", ".join([f'"{col}"' for col in clean_columns])
-        copy_sql = f'COPY "{table_name}" ({cols_str}) FROM STDIN'
+        copy_sql = f'COPY {qualified_tbl} ({cols_str}) FROM STDIN'
         with cur.copy(copy_sql) as copy:
             for record in records:
                 copy.write_row(record)
@@ -499,7 +497,7 @@ def prepare_orchestrator_day_dataframes_from_orch(
         _safe_view(orch, "generate_inventory_change_log", date_arg),
         True,
     ))
-    # 11. daily_logs（不做规范化 — 与 persistence.py 一致）
+    # 11. daily_logs cumulative snapshot.
     _daily_logs = getattr(orch, 'daily_logs', [])
     _logs_df = pd.DataFrame(_daily_logs) if _daily_logs else pd.DataFrame(
         columns=['timestamp', 'date', 'event_type', 'message']
@@ -551,11 +549,11 @@ def _safe_view(orch, method_name: str, date_arg: str) -> pd.DataFrame:
         raise
 
 
-def _table_exists_in_txn(cur, table_name: str) -> bool:
-    """在事务内检查表是否存在。"""
+def _table_exists_in_txn(cur, table_name: str, schema: str = "public") -> bool:
+    """在事务内检查表是否存在（默认 ``public``）。"""
     cur.execute(
         "SELECT EXISTS(SELECT 1 FROM information_schema.tables "
-        "WHERE table_schema = 'public' AND table_name = %s)",
-        (table_name,)
+        "WHERE table_schema = %s AND table_name = %s)",
+        (schema, table_name)
     )
     return cur.fetchone()[0]

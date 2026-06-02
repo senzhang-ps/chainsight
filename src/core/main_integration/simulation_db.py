@@ -93,12 +93,12 @@ def _checkpoint_has_committed_payload(db, run_id: str, last_batch_end: str) -> b
                bool_or(column_name = 'run_id') AS has_run_id,
                bool_or(column_name = 'sim_date') AS has_sim_date
         FROM information_schema.columns
-        WHERE table_schema = 'public'
+        WHERE table_schema = %s
           AND table_name = ANY(%s)
           AND column_name IN ('run_id', 'sim_date')
         GROUP BY table_name
         """,
-        (list(_CHECKPOINT_PAYLOAD_TABLES),),
+        (db.schema, list(_CHECKPOINT_PAYLOAD_TABLES)),
     )
     if meta.empty:
         return False
@@ -108,7 +108,7 @@ def _checkpoint_has_committed_payload(db, run_id: str, last_batch_end: str) -> b
             continue
         table_name = str(row.table_name)
         rows = db.execute_query(
-            f'SELECT 1 FROM "{table_name}" '
+            f'SELECT 1 FROM {db.qualified_name(table_name)} '
             "WHERE run_id = %s AND LEFT(sim_date::text, 10) <= %s LIMIT 1",
             (run_id, last_batch_end),
         )
@@ -125,14 +125,17 @@ def _load_m1_previous_orders_from_db(
 ) -> pd.DataFrame:
     """Restore Module1 carry-over orders from DB using the correct OrderLog grain."""
     is_day_grain_orderlog = (config_name or '').upper().startswith('OC')
+    # P1 schema 隔离：续跑必须查到本 project 自己的 orderlog，否则会读到
+    # public 旧表或别的 project 表，导致历史订单错位。
+    orderlog_tbl = db.qualified_name("module1_output_orderlog")
     if is_day_grain_orderlog:
         fallback_sql = (
-            "SELECT * FROM module1_output_orderlog "
+            f"SELECT * FROM {orderlog_tbl} "
             "WHERE run_id = %s AND LEFT(sim_date::text, 10) <= %s"
         )
     else:
         fallback_sql = (
-            "SELECT * FROM module1_output_orderlog "
+            f"SELECT * FROM {orderlog_tbl} "
             "WHERE run_id = %s AND LEFT(sim_date::text, 10) = %s"
         )
     previous_orders = db.execute_query_df(fallback_sql, (run_id, last_batch_end))
@@ -266,8 +269,10 @@ def run_integrated_simulation_from_dict(
     # 确保 checkpoint 表存在并包含所有列（幂等）
     if db is not None:
         from pgsql_db.checkpoint import ensure_checkpoint_table, ensure_m4_state_table
+        from pgsql_db.daily_log_ledger import ensure_daily_log_ledger_schema
         ensure_checkpoint_table(db)
         ensure_m4_state_table(db)
+        ensure_daily_log_ledger_schema(db)
 
     checkpoint_has_payload = None
     if resume and db is not None:
@@ -318,6 +323,15 @@ def run_integrated_simulation_from_dict(
                 'run_id': run_id_override,
             }
         deserialize_orchestrator_state(orch, checkpoint['orch_state_json'])
+        if db is not None:
+            from pgsql_db.daily_log_ledger import initialize_daily_log_ledger_from_db
+            _restored_logs = initialize_daily_log_ledger_from_db(
+                db,
+                orch,
+                run_id_override,
+                last_batch_end=checkpoint['last_batch_end'],
+            )
+            logger.info(f"  ✅ DB daily_logs 累计快照已恢复: {_restored_logs} 条")
         # 从恢复后的 flat list 重建 *_by_date 索引字典
         # deserialize_orchestrator_state 恢复了 delivery_gr / production_gr / shipment_log /
         # delivery_shipment_log 四个 flat list，但对应的 *_by_date 索引未序列化。
@@ -404,6 +418,10 @@ def run_integrated_simulation_from_dict(
     else:
         # 设置初始库存
         logger.info("🆕 全新开始：设置初始状态")
+        if db is not None and run_id_override:
+            from pgsql_db.daily_log_ledger import initialize_daily_log_ledger_from_db
+            _restored_logs = initialize_daily_log_ledger_from_db(db, orch, run_id_override)
+            logger.info(f"  ✅ DB daily_logs 累计快照已初始化: {_restored_logs} 条")
         if 'M1_InitialInventory' in config_dict and not config_dict['M1_InitialInventory'].empty:
             orch.initialize_inventory(config_dict['M1_InitialInventory'])
         else:

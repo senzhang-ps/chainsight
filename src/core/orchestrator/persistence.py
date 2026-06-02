@@ -236,14 +236,16 @@ class OrchestratorPersistenceMixin:
             event_type: 事件类型
             message: 事件消息
         """
-        self.daily_logs.append({
-            'timestamp': datetime.now().isoformat(),
-            'date': self.current_date.strftime(
-                '%Y-%m-%d'
-            ),
+        timestamp = datetime.now().isoformat()
+        event_date = self.current_date.strftime('%Y-%m-%d')
+        legacy_record = {
+            'timestamp': timestamp,
+            'date': event_date,
             'event_type': event_type,
             'message': message,
-        })
+        }
+
+        self.daily_logs.append(legacy_record)
 
     def output_daily_inventory_summary(
         self, date: str

@@ -160,14 +160,32 @@ class ExcelImporter:
                 if df.empty:
                     # 检查是否有列定义
                     if len(df.columns) > 0:
-                        self.db.create_table_from_df(df, table_name, if_exists, config_name=config_name, config_type=config_type)
+                        write_ok = self.db.create_table_from_df(
+                            df,
+                            table_name,
+                            if_exists,
+                            config_name=config_name,
+                            config_type=config_type,
+                        )
+                        if not write_ok:
+                            results[sheet_name] = -1
+                            continue
                         results[sheet_name] = 0
                     else:
                         results[sheet_name] = -1
                     continue
                 
                 # 写入数据库，添加config_name和config_type字段
-                self.db.create_table_from_df(df, table_name, if_exists, config_name=config_name, config_type=config_type)
+                write_ok = self.db.create_table_from_df(
+                    df,
+                    table_name,
+                    if_exists,
+                    config_name=config_name,
+                    config_type=config_type,
+                )
+                if not write_ok:
+                    results[sheet_name] = -1
+                    continue
                 results[sheet_name] = len(df)
                 
                 # 记录导入信息

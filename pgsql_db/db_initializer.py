@@ -19,7 +19,9 @@ class DatabaseInitializer:
         database: Optional[str] = None,
         user: Optional[str] = None,
         password: Optional[str] = None,
-        config_search_paths: Optional[List[Path]] = None
+        config_search_paths: Optional[List[Path]] = None,
+        schema: Optional[str] = None,
+        auto_create_schema: Optional[bool] = None,
     ):
         """
         初始化数据库初始化器
@@ -33,17 +35,24 @@ class DatabaseInitializer:
             user: 用户名
             password: 密码
             config_search_paths: 配置文件搜索路径列表
+            schema: P1 schema 隔离时使用的 PostgreSQL schema 名（来自
+                ``resolve_project_schema``）。不传时回落到
+                ``database.default_schema``，通常为 ``public``。
+            auto_create_schema: 缺失 schema 时是否自动 ``CREATE SCHEMA IF NOT EXISTS``。
         """
         from .settings import resolve_database_config
         cfg = resolve_database_config(
-            host=host, port=port, database=database, user=user, password=password
+            host=host, port=port, database=database, user=user, password=password,
+            auto_create_schema=auto_create_schema,
         )
         self.host = cfg["host"]
         self.port = cfg["port"]
         self.database = cfg["database"]
         self.user = cfg["user"]
         self.password = cfg["password"]
-        
+        self.schema = schema or cfg.get("default_schema") or "public"
+        self.auto_create_schema = bool(cfg.get("auto_create_schema", True))
+
         # 默认配置文件搜索路径
         if config_search_paths is None:
             project_root = Path(__file__).parent.parent
@@ -54,13 +63,13 @@ class DatabaseInitializer:
             ]
         else:
             self.config_search_paths = config_search_paths
-        
+
         self._db = None
         self._importer = None
     
     @property
     def db(self):
-        """延迟加载数据库连接"""
+        """延迟加载数据库连接（带 P1 schema 隔离参数）。"""
         if self._db is None:
             from .db_connection import DatabaseConnection
             self._db = DatabaseConnection(
@@ -68,7 +77,9 @@ class DatabaseInitializer:
                 port=self.port,
                 database=self.database,
                 user=self.user,
-                password=self.password
+                password=self.password,
+                schema=self.schema,
+                auto_create_schema=self.auto_create_schema,
             )
         return self._db
     
@@ -160,7 +171,7 @@ class DatabaseInitializer:
                     # 有config_name列，检查数据（兼容带/不带路径前缀的config_name）
                     config_basename = config_name.split('/')[-1] if '/' in config_name else config_name
                     result = self.db.execute_query(
-                        f'SELECT COUNT(*) FROM "{tbl}" WHERE config_name = %s OR config_name = %s',
+                        f'SELECT COUNT(*) FROM {self.db.qualified_name(tbl)} WHERE config_name = %s OR config_name = %s',
                         (config_name, config_basename)
                     )
                     total_rows += result[0][0] if result else 0
@@ -171,7 +182,7 @@ class DatabaseInitializer:
                     pass
             except Exception:
                 continue
-        
+
         return total_rows > 0, total_rows
     
     def get_available_configs(self) -> List[str]:
@@ -202,7 +213,7 @@ class DatabaseInitializer:
             
             try:
                 rows = self.db.execute_query(
-                    f'SELECT DISTINCT config_name FROM "{table}" WHERE config_name IS NOT NULL'
+                    f'SELECT DISTINCT config_name FROM {self.db.qualified_name(table)} WHERE config_name IS NOT NULL'
                 )
                 for r in rows or []:
                     if r and r[0]:
@@ -277,7 +288,7 @@ class DatabaseInitializer:
             config_name=config_name
         )
         
-        if not results or all(v < 0 for v in results.values()):
+        if not results or any(v < 0 for v in results.values()):
             return False, results or {"error": "导入失败"}
         
         return True, results
@@ -454,7 +465,9 @@ def initialize_database(
     user: Optional[str] = None,
     password: Optional[str] = None,
     auto_import: bool = True,
-    verbose: bool = True
+    verbose: bool = True,
+    schema: Optional[str] = None,
+    auto_create_schema: Optional[bool] = None,
 ) -> Dict[str, any]:
     """
     便捷函数：初始化数据库
@@ -470,6 +483,8 @@ def initialize_database(
         password: 密码
         auto_import: 是否自动导入缺失的配置
         verbose: 是否输出详细信息
+        schema: P1 schema 隔离时使用的 PostgreSQL schema 名。
+        auto_create_schema: 缺失 schema 时是否自动 ``CREATE SCHEMA IF NOT EXISTS``。
 
     返回：
         Dict: 初始化结果
@@ -479,7 +494,9 @@ def initialize_database(
         port=port,
         database=database,
         user=user,
-        password=password
+        password=password,
+        schema=schema,
+        auto_create_schema=auto_create_schema,
     )
     return initializer.initialize(
         config_name=config_name,

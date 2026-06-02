@@ -1,4 +1,4 @@
-# Virtual Environment
+﻿# Virtual Environment
 .venv/
 venv/
 env/
@@ -99,3 +99,5 @@ input/*
 # BC 下的 CSV/CSV 大写后缀需显式重新纳入，避免被 *.csv 规则吞掉
 !input/BC/**/*.csv
 !input/BC/**/*.CSV
+# Understand Anything local index
+.understand-anything/

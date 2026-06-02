@@ -74,7 +74,14 @@ logistics_execution:
 database:
   host: localhost
   port: 5432
-  database: test_db
+  database: test_bc
   user: postgres
   password: "123456"
   maintenance_database: postgres
+  # P1 schema 隔离：每个 project 对应一个 PostgreSQL schema
+  #   - schema_mode=project：从 ConfigDir.project 派生 schema（小写化、保留 -）
+  #   - default_schema：纯 --config 模式无法解析 project 时的兜底 schema
+  #   - auto_create_schema：缺失 schema 时自动 CREATE SCHEMA IF NOT EXISTS
+  schema_mode: project
+  default_schema: public
+  auto_create_schema: true

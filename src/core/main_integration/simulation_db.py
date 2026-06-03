@@ -166,8 +166,9 @@ def run_integrated_simulation_from_dict(
         output_dir=str(orchestrator_output_dir)
     )
     # 初始化新Orchestrator类
-    orch_new = Orch(start_date = start_date, end_date = end_date, config_path = 'None', output_path = output_base_dir, config_dict=config_dict)
-    orch_new.load_datas('M1')
+    orch_new = Orch(start_date = start_date, end_date = end_date, config_path = 'None', output_path = output_base_dir, config_dict=config_dict,
+        engine='polars')
+    # orch_new.load_datas('M1')
 
     # 实例化M1
     m1 = module1.ModuleOne(
@@ -175,7 +176,6 @@ def run_integrated_simulation_from_dict(
         output_dir=orch_new.get_output('module1'),
         orchestrator=orch,
         orch=orch_new,
-        engine='polars',
     )
     m1.prepare()
 

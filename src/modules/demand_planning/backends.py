@@ -93,7 +93,10 @@ class _PandasBackend:
     def __init__(self, owner):
         self._o = owner
         self._ao_config = None  # prepare_ao_summary 后缓存
-        self.datas = owner.datas
+
+    @property
+    def datas(self):
+        return self._o.datas
 
     # ---- 数据访问（直接返回 pandas DataFrame） ----
 
@@ -678,7 +681,10 @@ class _PolarsBackend:
         self._ao_config = None
         self._dps_config = None
         self._dps_sc_config = None
-        self.datas = owner.datas
+
+    @property
+    def datas(self):
+        return self._o.datas
 
     def _to_pl(self, df):
         if df is None:

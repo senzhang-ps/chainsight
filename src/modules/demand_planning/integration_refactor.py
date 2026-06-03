@@ -67,7 +67,7 @@ class ModuleOne(Module):
         self.previous_orders_df = previous_orders_df
         self.order_df = None
 
-        if self._engine == 'polars':
+        if self.orchestrator.engine == 'polars':
             self._backend = _PolarsBackend(self)
         else:
             self._backend = _PandasBackend(self)

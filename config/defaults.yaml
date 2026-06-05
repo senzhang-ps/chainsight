@@ -85,3 +85,69 @@ database:
   schema_mode: project
   default_schema: public
   auto_create_schema: true
+
+# ---------------------------------------------------------------------------
+# 输入配置表数据质量检测
+# ---------------------------------------------------------------------------
+data_quality:
+  enabled: true
+  mode: audit_only
+  fail_on_error: false
+  sample_limit: 20
+  report_dir: input_quality
+  config_tables:
+    required_import:
+      - Global_seed
+      - Global_Network
+      - Global_SpaceCapacity
+      - Global_LeadTime
+      - Global_DemandPriority
+      - M1_InitialInventory
+      - M1_DemandForecast
+      - M1_ForecastError
+      - M1_OrderCalendar
+      - M3_SafetyStock
+      - M4_MaterialLocationLineCfg
+      - M4_LineCapacity
+      - M4_ChangeoverMatrix
+      - M4_ChangeoverDefinition
+      - M4_ProductionReliability
+      - M5_PushPullModel
+      - M5_DeployConfig
+      - M6_TruckReleaseCon
+      - M6_MaterialMD
+      - M6_DeliveryDelayDistribution
+      - M6_MDQBypassRules
+      - M6_TruckTypeSpecs
+      - M6_TruckCapacityPlan
+    optional_import:
+      - M1_AOConfig
+      - M1_DPSConfig
+      - M1_SupplyChoiceConfig
+    quality_check_enabled:
+      Global_seed: true
+      Global_Network: true
+      Global_SpaceCapacity: true
+      Global_LeadTime: true
+      Global_DemandPriority: true
+      M1_InitialInventory: true
+      M1_DemandForecast: true
+      M1_ForecastError: true
+      M1_OrderCalendar: true
+      M1_AOConfig: true
+      M1_DPSConfig: true
+      M1_SupplyChoiceConfig: true
+      M3_SafetyStock: true
+      M4_MaterialLocationLineCfg: true
+      M4_LineCapacity: true
+      M4_ChangeoverMatrix: true
+      M4_ChangeoverDefinition: true
+      M4_ProductionReliability: true
+      M5_PushPullModel: true
+      M5_DeployConfig: true
+      M6_TruckReleaseCon: true
+      M6_MaterialMD: true
+      M6_DeliveryDelayDistribution: true
+      M6_MDQBypassRules: true
+      M6_TruckTypeSpecs: true
+      M6_TruckCapacityPlan: true

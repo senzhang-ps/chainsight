@@ -26,9 +26,14 @@ def load_global_seed(config_dict: dict) -> int:
     逻辑：
         - 按优先级读取 → 打印提示 → 返回默认值或实际种子
     """
-    if 'Global_Seed' in config_dict and not config_dict[
-        'Global_Seed'].empty:
-        seed_df = config_dict['Global_Seed']
+    seed_key = None
+    for candidate in ('Global_seed', 'Global_Seed'):
+        if candidate in config_dict and not config_dict[candidate].empty:
+            seed_key = candidate
+            break
+
+    if seed_key:
+        seed_df = config_dict[seed_key]
         if 'seed' in seed_df.columns:
             seed_value = int(seed_df.iloc[0]['seed'])
             return seed_value

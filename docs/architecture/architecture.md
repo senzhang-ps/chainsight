@@ -680,7 +680,7 @@ flowchart TB
 
 | 表域 | 前缀/示例 | 作用 | 主过滤键 |
 |---|---|---|---|
-| 配置表域 | `cfg_global_network`、`cfg_m1_demandforecast` | 存储仿真输入配置 | `config_name`、`config_type` |
+| 配置表域 | `cfg_global_network`、`cfg_m1_demandforecast` | 存储仿真输入配置 | `config_name` |
 | 模块输出表域 | `module1_output_orderlog` 等 | 存储模块逐日明细输出 | `run_id`、`sim_date` |
 | Orchestrator 状态表域 | `orchestrator_unrestricted_inventory` 等 | 存储跨模块全局状态轨迹 | `run_id`、`file_date`、`sim_date` |
 | Summary 表域 | `summary_output_*` | 存储汇总报表结果 | `run_id`、时间区间 |
@@ -700,7 +700,6 @@ flowchart TB
 | 字段 | 来源 | 用途 |
 |---|---|---|
 | `config_name` | 配置导入阶段 | 区分 BC/OC/不同场景 |
-| `config_type` | `ExcelImporter` 推导 | 快速筛选配置类别（BC/OC/OTHER） |
 | `db_write_time` | 写入时自动追加 | 审计与追踪 |
 | `run_id` | 运行写入阶段 | 区分不同仿真批次 |
 | `sim_date` / `file_date` | 模块与Orchestrator写入阶段 | 支持日级查询与回放 |
@@ -726,7 +725,7 @@ flowchart TB
 |---|---|---|
 | 高频写入模块输出 | `LIST(run_id)` + 子分区 `RANGE(sim_date)` | 保证单批次运行隔离，提升清理效率 |
 | 历史汇总表 | `RANGE(month(sim_date))` | 降低长期归档成本 |
-| 配置表 | 非分区或按 `config_type` 轻分区 | 配置体量通常较小 |
+| 配置表 | 非分区 | 配置体量通常较小 |
 
 ### 2.6 写入性能考虑
 
@@ -820,7 +819,7 @@ with conn.transaction():
 1. 检测数据库是否存在，不存在则自动创建；
 2. 检测目标 `config_name` 是否已入库；
 3. 若缺失，使用 `ExcelImporter.import_excel_file()` 导入；
-4. 所有配置进入统一 `cfg_*` 表，并带 `config_name/config_type`。
+4. 所有配置进入统一 `cfg_*` 表，并带 `config_name`。
 
 ### 4.2 运行时主同步链路
 
@@ -947,7 +946,7 @@ def calc_net_demand(df, _use_duckdb=False):
 
 | 控制点 | 实现机制 | 目标 |
 |---|---|---|
-| 配置隔离 | `config_name/config_type` | 多场景共库不串数 |
+| 配置隔离 | `config_name` | 多场景共库不串数 |
 | 运行隔离 | `run_id` | 多批次并行分析可追踪 |
 | 时间隔离 | `sim_date/file_date` | 日度回放与同比分析 |
 | 库存对账 | `InventoryBalanceChecker`（主流程后置校验） | 保证库存平衡关系成立 |

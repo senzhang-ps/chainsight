@@ -9,7 +9,6 @@ from typing import Dict, List, Optional
 import time
 
 from .db_connection import DatabaseConnection
-from . import table_mapping
 
 
 class ExcelImporter:
@@ -44,27 +43,25 @@ class ExcelImporter:
         _fonts.Font.__init__ = _patched_init
 
     @staticmethod
-    def _derive_config_type(config_name: str) -> str:
-        """根据 config_name 推导配置类型。
-
-        规则：
-        - 统一使用配置名本身（去掉路径和扩展名）作为 config_type
-          例如 config/BC_S9.xlsx -> BC_S9
-        """
-        if not config_name:
-            return 'UNKNOWN'
-
-        # 去掉可能的路径前缀和扩展名，只保留配置标识
-        basename = Path(config_name).stem
-        if not basename:
-            return 'UNKNOWN'
-
-        return basename
-
-    @staticmethod
     def _scan_csv_overrides(excel_path: str) -> Dict[str, pd.DataFrame]:
         """[已废弃] 数据库导入已改用 ``load_excel_file_with_csv_priority``。"""
         return {}
+
+    @staticmethod
+    def _project_import_fields(sheet_name: str, df: pd.DataFrame) -> pd.DataFrame:
+        """Keep only fixed-schema business fields for config tables."""
+        from pgsql_db.config_table_schema import get_config_table_schema_by_sheet
+
+        table_schema = get_config_table_schema_by_sheet(sheet_name)
+        if table_schema is None:
+            return df
+        import_fields = [
+            str(field.get("local_name"))
+            for field in table_schema.get("fields") or []
+            if field.get("local_name") is not None
+        ]
+        present_fields = [field for field in import_fields if field in df.columns]
+        return df.loc[:, present_fields].copy()
 
     @staticmethod
     def load_excel_file_with_csv_priority(excel_path: str) -> Dict[str, pd.DataFrame]:
@@ -93,14 +90,19 @@ class ExcelImporter:
             for sheet_name in sheet_names:
                 csv_path = cfg_dir.csv_for_sheet(sheet_name)
                 if csv_path is not None:
-                    sheet_data[sheet_name] = pd.read_csv(csv_path)
+                    raw_df = pd.read_csv(csv_path)
                 else:
-                    sheet_data[sheet_name] = xl.parse(sheet_name)
+                    raw_df = xl.parse(sheet_name)
+                sheet_data[sheet_name] = ExcelImporter._project_import_fields(sheet_name, raw_df)
 
             loaded_lower = {s.lower() for s in sheet_names}
             for stem_lower, csv_path in cfg_dir.csv_map.items():
                 if stem_lower not in loaded_lower:
-                    sheet_data[csv_path.stem] = pd.read_csv(csv_path)
+                    raw_df = pd.read_csv(csv_path)
+                    sheet_data[csv_path.stem] = ExcelImporter._project_import_fields(
+                        csv_path.stem,
+                        raw_df,
+                    )
 
             return sheet_data
         finally:
@@ -115,7 +117,8 @@ class ExcelImporter:
         excel_path: str,
         prefix: str = None,
         if_exists: str = "replace",
-        config_name: str = None
+        config_name: str = None,
+        input_quality_report_dir: str = None,
     ) -> Dict[str, int]:
         """
         导入单个Excel文件的所有sheet到数据库
@@ -141,12 +144,25 @@ class ExcelImporter:
         if config_name is None:
             config_name = path.stem  # 例如: BC_S5.xlsx -> BC_S5
         
-        # 推导配置类型
-        config_type = self._derive_config_type(config_name)
-
-        
         # 读取所有配置表：同目录同名 CSV 无条件优先于 Excel sheet。
         sheet_data = self.load_excel_file_with_csv_priority(excel_path)
+        from src.utils.data_quality import ConfigInputDataQualityChecker
+
+        report_dir = input_quality_report_dir
+        if report_dir is None:
+            report_dir = str(path.parent / "input_quality")
+        checker = ConfigInputDataQualityChecker.from_defaults(report_dir=report_dir)
+        dq_result = checker.validate_or_raise(
+            sheet_data,
+            config_name=config_name,
+            sub_node="input_pre.excel_import",
+            write_reports=True,
+            output_dir=report_dir,
+        )
+        sheet_data = dq_result["db_ready_tables"]
+        from pgsql_db.config_comments import load_config_table_comment_map
+
+        table_comment_map = load_config_table_comment_map()
         results = {}
         
         start_time = time.time()
@@ -154,7 +170,8 @@ class ExcelImporter:
         for sheet_name, df in sheet_data.items():
             try:
                 # 构建表名: 使用统一配置表名（同结构同表），通过 config_name 字段区分不同配置
-                table_name = table_mapping.get_config_table_name(sheet_name)
+                table_name = checker.table_name_for_sheet(sheet_name)
+                comment_meta = table_comment_map.get(table_name, {})
                 
                 # 空表也要创建（只要有列名）
                 if df.empty:
@@ -165,7 +182,11 @@ class ExcelImporter:
                             table_name,
                             if_exists,
                             config_name=config_name,
-                            config_type=config_type,
+                            table_comment=comment_meta.get("table_comment"),
+                            column_comments=comment_meta.get("column_comments"),
+                            column_types=comment_meta.get("column_types"),
+                            primary_key_columns=comment_meta.get("primary_key_columns"),
+                            index_columns=comment_meta.get("index_columns"),
                         )
                         if not write_ok:
                             results[sheet_name] = -1
@@ -175,13 +196,17 @@ class ExcelImporter:
                         results[sheet_name] = -1
                     continue
                 
-                # 写入数据库，添加config_name和config_type字段
+                # 写入数据库，添加 config_name 字段
                 write_ok = self.db.create_table_from_df(
                     df,
                     table_name,
                     if_exists,
                     config_name=config_name,
-                    config_type=config_type,
+                    table_comment=comment_meta.get("table_comment"),
+                    column_comments=comment_meta.get("column_comments"),
+                    column_types=comment_meta.get("column_types"),
+                    primary_key_columns=comment_meta.get("primary_key_columns"),
+                    index_columns=comment_meta.get("index_columns"),
                 )
                 if not write_ok:
                     results[sheet_name] = -1

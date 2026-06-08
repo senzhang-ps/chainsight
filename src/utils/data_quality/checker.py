@@ -127,11 +127,26 @@ class ConfigTableQualityRules:
     }
 
     def __init__(self, *, issue_factory, missing_mask, sample_limit: int) -> None:
-        self._issue_factory = issue_factory
-        self._missing_mask = missing_mask
-        self.sample_limit = sample_limit
+        """初始化表级专属质量规则调度器。
+
+        Args:
+            issue_factory: 构造统一问题明细记录的工厂函数，复用主检测器的 ``_issue``。
+            missing_mask: 识别空值和空白字符串的掩码函数，复用主检测器的 ``_missing_mask``。
+            sample_limit: 单类问题最多记录的样例数量。
+        """
+        self._issue_factory = issue_factory  # 构造统一问题明细记录的工厂函数
+        self._missing_mask = missing_mask  # 识别空值和空白字符串的掩码函数
+        self.sample_limit = sample_limit  # 单类问题最多记录的样例数量
 
     def method_name_for_sheet(self, sheet_name: str) -> str | None:
+        """返回某个 Sheet 对应的专属规则函数名。
+
+        Args:
+            sheet_name: 本地配置表 Sheet 名。
+
+        Returns:
+            映射到的规则函数名；该 Sheet 无专属规则时返回 None。
+        """
         return self.TABLE_METHODS.get(sheet_name)
 
     def validate_all(
@@ -199,56 +214,72 @@ class ConfigTableQualityRules:
         getattr(self, method_name)(context)
 
     def check_global_seed(self, context: _TableRuleContext) -> None:
+        """Global_seed 表专属规则：无业务级专属约束，仅占位以保持一表一函数。"""
         pass
 
     def check_global_network(self, context: _TableRuleContext) -> None:
+        """Global_Network 表专属规则：校验生效区间 eff_to 不早于 eff_from。"""
         self._check_date_order(context, "eff_from", "eff_to")
 
     def check_global_spacecapacity(self, context: _TableRuleContext) -> None:
+        """Global_SpaceCapacity 表专属规则：校验生效区间顺序，并要求 capacity 非负。"""
         self._check_date_order(context, "eff_from", "eff_to")
         self._check_non_negative_numbers(context, ("capacity",))
 
     def check_global_leadtime(self, context: _TableRuleContext) -> None:
+        """Global_LeadTime 表专属规则：要求各项提前期 PDT/GR/MCT/OTD 非负。"""
         self._check_non_negative_numbers(context, ("PDT", "GR", "MCT", "OTD"))
 
     def check_global_demandpriority(self, context: _TableRuleContext) -> None:
+        """Global_DemandPriority 表专属规则：要求需求优先级 priority 非负。"""
         self._check_non_negative_numbers(context, ("priority",))
 
     def check_m1_initialinventory(self, context: _TableRuleContext) -> None:
+        """M1_InitialInventory 表专属规则：要求期初库存数量 quantity 非负。"""
         self._check_non_negative_numbers(context, ("quantity",))
 
     def check_m1_demandforecast(self, context: _TableRuleContext) -> None:
+        """M1_DemandForecast 表专属规则：要求需求预测数量 quantity 非负。"""
         self._check_non_negative_numbers(context, ("quantity",))
 
     def check_m1_forecasterror(self, context: _TableRuleContext) -> None:
+        """M1_ForecastError 表专属规则：要求预测误差标准差百分比 error_std_percent 非负。"""
         self._check_non_negative_numbers(context, ("error_std_percent",))
 
     def check_m1_ordercalendar(self, context: _TableRuleContext) -> None:
+        """M1_OrderCalendar 表专属规则：无业务级专属约束，仅占位以保持一表一函数。"""
         pass
 
     def check_m1_aoconfig(self, context: _TableRuleContext) -> None:
+        """M1_AOConfig 表专属规则：要求提前下单天数 advance_days 非负，AO 占比 ao_percent 落在 [0, 1]。"""
         self._check_non_negative_numbers(context, ("advance_days",))
         self._check_number_range(context, ("ao_percent",), min_value=0, max_value=1)
 
     def check_m1_dpsconfig(self, context: _TableRuleContext) -> None:
+        """M1_DPSConfig 表专属规则：要求 DPS 占比 dps_percent 落在 [0, 1] 区间。"""
         self._check_number_range(context, ("dps_percent",), min_value=0, max_value=1)
 
     def check_m1_supplychoiceconfig(self, context: _TableRuleContext) -> None:
+        """M1_SupplyChoiceConfig 表专属规则：无业务级专属约束，仅占位以保持一表一函数。"""
         pass
 
     def check_m3_safetystock(self, context: _TableRuleContext) -> None:
+        """M3_SafetyStock 表专属规则：要求安全库存数量 safety_stock_qty 非负。"""
         self._check_non_negative_numbers(context, ("safety_stock_qty",))
 
     def check_m4_materiallocationlinecfg(self, context: _TableRuleContext) -> None:
+        """M4_MaterialLocationLineCfg 表专属规则：要求产能、批量等各项数值参数非负。"""
         self._check_non_negative_numbers(
             context,
             ("prd_rate", "min_batch", "rv", "ptf", "lsk", "day", "MCT"),
         )
 
     def check_m4_linecapacity(self, context: _TableRuleContext) -> None:
+        """M4_LineCapacity 表专属规则：要求产线产能 capacity 非负。"""
         self._check_non_negative_numbers(context, ("capacity",))
 
     def check_m4_changeovermatrix(self, context: _TableRuleContext) -> None:
+        """M4_ChangeoverMatrix 表专属规则：要求同一切换物料对的 changeover_id 取值一致、无冲突。"""
         self._check_conflicting_values(
             context,
             key_columns=("from_material", "to_material"),
@@ -256,12 +287,15 @@ class ConfigTableQualityRules:
         )
 
     def check_m4_changeoverdefinition(self, context: _TableRuleContext) -> None:
+        """M4_ChangeoverDefinition 表专属规则：要求切换耗时 time、成本 cost、产能损失 mu_loss 非负。"""
         self._check_non_negative_numbers(context, ("time", "cost", "mu_loss"))
 
     def check_m4_productionreliability(self, context: _TableRuleContext) -> None:
+        """M4_ProductionReliability 表专属规则：要求生产可靠率 pr 落在 [0, 1] 区间。"""
         self._check_number_range(context, ("pr",), min_value=0, max_value=1)
 
     def check_m5_pushpullmodel(self, context: _TableRuleContext) -> None:
+        """M5_PushPullModel 表专属规则：要求 model 取 push、pull 或 soft push 之一。"""
         self._check_enum(
             context,
             "model",
@@ -271,32 +305,39 @@ class ConfigTableQualityRules:
         )
 
     def check_m5_deployconfig(self, context: _TableRuleContext) -> None:
+        """M5_DeployConfig 表专属规则：要求 moq、rv、lsk、day 等部署参数非负。"""
         self._check_non_negative_numbers(context, ("moq", "rv", "lsk", "day"))
 
     def check_m6_truckreleasecon(self, context: _TableRuleContext) -> None:
+        """M6_TruckReleaseCon 表专属规则：要求 WFR/VFR 为非空数值，且最小发货量 MDQ 非负。"""
         self._check_m6_wfr_vfr_numeric(context)
         self._check_non_negative_numbers(context, ("MDQ",))
 
     def check_m6_materialmd(self, context: _TableRuleContext) -> None:
+        """M6_MaterialMD 表专属规则：要求需求单位到重量、到体积的换算系数非负。"""
         self._check_non_negative_numbers(
             context,
             ("demand_unit_to_weight", "demand_unit_to_volume"),
         )
 
     def check_m6_deliverydelaydistribution(self, context: _TableRuleContext) -> None:
+        """M6_DeliveryDelayDistribution 表专属规则：要求延误天数 delay_days 非负，概率 probability 落在 [0, 1]。"""
         self._check_non_negative_numbers(context, ("delay_days",))
         self._check_number_range(context, ("probability",), min_value=0, max_value=1)
 
     def check_m6_mdqbypassrules(self, context: _TableRuleContext) -> None:
+        """M6_MDQBypassRules 表专属规则：无业务级专属约束，仅占位以保持一表一函数。"""
         pass
 
     def check_m6_trucktypespecs(self, context: _TableRuleContext) -> None:
+        """M6_TruckTypeSpecs 表专属规则：要求车型按重量、体积计的运力 capacity_qty_* 非负。"""
         self._check_non_negative_numbers(
             context,
             ("capacity_qty_in_weight", "capacity_qty_in_volume"),
         )
 
     def check_m6_truckcapacityplan(self, context: _TableRuleContext) -> None:
+        """M6_TruckCapacityPlan 表专属规则：要求车辆数量 truck_number 非负。"""
         self._check_non_negative_numbers(context, ("truck_number",))
 
     def _check_non_negative_numbers(
@@ -545,6 +586,14 @@ class ConfigTableQualityRules:
 
     @staticmethod
     def _row_index(idx: Any) -> int | str:
+        """将 DataFrame 行索引规范化为问题明细可用的整数或字符串。
+
+        Args:
+            idx: 原始 DataFrame 行索引值。
+
+        Returns:
+            整数索引保持为 int，其余索引转换为 str。
+        """
         return int(idx) if isinstance(idx, int) else str(idx)
 
     def _check_m6_wfr_vfr_numeric(self, context: _TableRuleContext) -> None:
@@ -618,27 +667,29 @@ class ConfigInputDataQualityChecker:
                 "mapping_config_path is no longer supported; config table fields "
                 "are fixed in pgsql_db.config_table_schema"
             )
-        self.mapping_config_path = None
-        self._schema_config_override = schema_config
-        self.mode = str(mode or "audit_only")
+        self.mapping_config_path = None  # 已废弃的外部映射配置路径，固定为 None
+        self._schema_config_override = schema_config  # 测试或特殊场景注入的 schema 覆盖配置
+        self.mode = str(mode or "audit_only")  # 数据质量检测模式：off/audit_only/enforce
         if self.mode not in {"off", "audit_only", "enforce"}:
             raise ValueError(f"Unsupported data_quality mode: {self.mode}")
-        self.fail_on_error = bool(fail_on_error)
-        self.sample_limit = int(sample_limit)
-        self.report_dir = Path(report_dir) if report_dir is not None else None
-        self.required_import_tables = {str(x) for x in (required_import_tables or [])}
-        self.optional_import_tables = {str(x) for x in (optional_import_tables or [])}
+        self.fail_on_error = bool(fail_on_error)  # 非强制模式下遇 ERROR 级问题是否即阻断
+        self.sample_limit = int(sample_limit)  # 单类问题最多记录的样例数量
+        self.report_dir = Path(report_dir) if report_dir is not None else None  # 默认报告输出目录
+        self.required_import_tables = {str(x) for x in (required_import_tables or [])}  # 必需入库表集合，缺失按阻断
+        self.optional_import_tables = {str(x) for x in (optional_import_tables or [])}  # 非必需入库表集合，缺失按告警
         self.quality_check_enabled = {
+            # 按 Sheet 名控制质量检测是否开启的开关映射
             str(table): self._coerce_bool(enabled)
             for table, enabled in (quality_check_enabled or {}).items()
         }
 
-        self._raw_config = self._load_mapping_config()
-        self._contracts = self._load_contracts()
+        self._raw_config = self._load_mapping_config()  # 加载后的原始固定 schema 映射
+        self._contracts = self._load_contracts()  # 规范化后的表级入库契约列表
         self._contracts_by_sheet = {
+            # 本地 Sheet 名到入库契约的索引，便于按 Sheet 快速查找
             contract.local_sheet: contract for contract in self._contracts
         }
-        self._table_rules = ConfigTableQualityRules(
+        self._table_rules = ConfigTableQualityRules(  # 表级专属质量规则调度器
             issue_factory=self._issue,
             missing_mask=self._missing_mask,
             sample_limit=self.sample_limit,

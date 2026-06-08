@@ -7,9 +7,10 @@ PostgreSQL数据库连接模块
 import psycopg
 from psycopg import sql
 import pandas as pd
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Sequence
 from contextlib import contextmanager
 import logging
+import re
 import time
 from datetime import datetime
 
@@ -412,8 +413,12 @@ class DatabaseConnection:
         if_exists: str = "replace",
         add_write_time: bool = True,
         config_name: Optional[str] = None,
-        config_type: Optional[str] = None,
-        round_float_values: Optional[bool] = None
+        round_float_values: Optional[bool] = None,
+        table_comment: Optional[str] = None,
+        column_comments: Optional[Dict[str, str]] = None,
+        column_types: Optional[Dict[str, str]] = None,
+        primary_key_columns: Optional[Sequence[str]] = None,
+        index_columns: Optional[Sequence[Sequence[str]]] = None,
     ) -> bool:
         """
         根据DataFrame创建表并写入数据
@@ -424,8 +429,12 @@ class DatabaseConnection:
             if_exists: 如果表存在的处理方式 ('replace', 'append', 'fail')
             add_write_time: 是否自动添加写入时间列
             config_name: 配置文件标识（如 BC_S5, BC_S9），用于区分不同配置的数据
-            config_type: 配置类型 ('OC' / 'BC' / 'OTHER')，用于快速区分配置类别
             round_float_values: 是否在写入前将浮点数四舍五入到10位小数；默认对 cfg_* 表关闭，对其他表开启
+            table_comment: 可选的 PostgreSQL 表注释
+            column_comments: 可选的 PostgreSQL 字段注释，key 为写库字段名
+            column_types: 可选的 PostgreSQL 字段类型，key 为写库字段名
+            primary_key_columns: 可选的 PostgreSQL 主键字段，key 为写库字段名
+            index_columns: 可选的 PostgreSQL 索引字段组，每组为一个普通索引
         
         返回：
             bool: 是否成功
@@ -448,13 +457,6 @@ class DatabaseConnection:
             else:
                 df_to_write['config_name'] = config_name
         
-        # 添加config_type列（用于快速区分 OC / BC 配置）
-        if config_type:
-            if is_empty_table:
-                df_to_write['config_type'] = pd.Series(dtype='object')
-            else:
-                df_to_write['config_type'] = config_type
-        
         # 添加写入时间列
         if add_write_time:
             if is_empty_table:
@@ -462,20 +464,45 @@ class DatabaseConnection:
                 df_to_write['db_write_time'] = pd.Series(dtype='datetime64[ns]')
             else:
                 df_to_write['db_write_time'] = datetime.now()
+
+        write_columns = [self._clean_name(str(col)) for col in df_to_write.columns]
+        clean_column_types = self._normalize_column_types(
+            column_types,
+            existing_columns=write_columns,
+        )
+        clean_primary_key_columns = self._normalize_primary_key_columns(
+            primary_key_columns,
+            existing_columns=write_columns,
+            include_config_name=bool(config_name),
+        )
+        clean_index_columns = self._normalize_index_columns(
+            index_columns,
+            existing_columns=write_columns,
+        )
         
         # 检查表是否存在
         exists = self.table_exists(clean_table_name)
+        if exists and clean_table_name.startswith("cfg_"):
+            self.drop_column_if_exists(clean_table_name, "config_type")
         
         if exists:
             if if_exists == "fail":
                 raise ValueError(f"表 {clean_table_name} 已存在")
             elif if_exists == "replace":
                 # 为避免丢失历史数据，replace模式改为追加写入
-                if not self._check_table_compatible(clean_table_name, df_to_write):
+                if not self._check_table_compatible(
+                    clean_table_name,
+                    df_to_write,
+                    column_types=clean_column_types,
+                ):
                     return False
             elif if_exists == "append":
                 # 追加模式（append）：检查表结构是否兼容
-                if not self._check_table_compatible(clean_table_name, df_to_write):
+                if not self._check_table_compatible(
+                    clean_table_name,
+                    df_to_write,
+                    column_types=clean_column_types,
+                ):
                     return False
         
         # 创建表（如果不存在）
@@ -483,9 +510,20 @@ class DatabaseConnection:
             columns = []
             for col_name, dtype in df_to_write.dtypes.items():
                 clean_col = self._clean_name(str(col_name))
-                pg_type = self._pandas_to_pg_type(dtype, col_name=clean_col)
+                pg_type = clean_column_types.get(clean_col) or self._pandas_to_pg_type(
+                    dtype,
+                    col_name=clean_col,
+                )
                 columns.append(
                     sql.SQL("{} {}").format(sql.Identifier(clean_col), sql.SQL(pg_type))
+                )
+            if clean_primary_key_columns:
+                columns.append(
+                    sql.SQL("PRIMARY KEY ({})").format(
+                        sql.SQL(", ").join(
+                            [sql.Identifier(col) for col in clean_primary_key_columns]
+                        )
+                    )
                 )
 
             create_sql = sql.SQL("CREATE TABLE IF NOT EXISTS {} ({})").format(
@@ -501,6 +539,20 @@ class DatabaseConnection:
                 pass
             else:
                 pass
+
+            self._ensure_primary_key(clean_table_name, clean_primary_key_columns)
+
+        self._apply_table_comments(
+            clean_table_name,
+            table_comment=table_comment,
+            column_comments=column_comments,
+            existing_columns=[self._clean_name(str(col)) for col in df_to_write.columns],
+        )
+        self._create_fixed_indexes(
+            clean_table_name,
+            clean_index_columns,
+            primary_key_columns=clean_primary_key_columns,
+        )
         
         # 插入数据（非空表才插入）
         if not is_empty_table:
@@ -519,11 +571,311 @@ class DatabaseConnection:
             self._create_auto_indexes(clean_table_name, df_to_write)
         
         return True
+
+    def _apply_table_comments(
+        self,
+        table_name: str,
+        *,
+        table_comment: Optional[str] = None,
+        column_comments: Optional[Dict[str, str]] = None,
+        existing_columns: Optional[List[str]] = None,
+    ) -> None:
+        """写入 PostgreSQL 表/字段注释。"""
+        normalized_table_comment = self._normalize_comment(table_comment)
+        normalized_column_comments = {
+            self._clean_name(str(column)): self._normalize_comment(comment)
+            for column, comment in (column_comments or {}).items()
+        }
+        normalized_column_comments = {
+            column: comment
+            for column, comment in normalized_column_comments.items()
+            if comment
+        }
+
+        if not normalized_table_comment and not normalized_column_comments:
+            return
+
+        allowed_columns = (
+            {self._clean_name(str(column)) for column in existing_columns}
+            if existing_columns is not None
+            else None
+        )
+        with self.get_cursor() as cursor:
+            if normalized_table_comment:
+                cursor.execute(
+                    sql.SQL("COMMENT ON TABLE {} IS {}").format(
+                        self._qualified(table_name),
+                        sql.Literal(normalized_table_comment),
+                    )
+                )
+
+            for column, comment in normalized_column_comments.items():
+                if allowed_columns is not None and column not in allowed_columns:
+                    continue
+                cursor.execute(
+                    sql.SQL("COMMENT ON COLUMN {}.{} IS {}").format(
+                        self._qualified(table_name),
+                        sql.Identifier(column),
+                        sql.Literal(comment),
+                    )
+                )
+
+    @staticmethod
+    def _normalize_comment(comment: Any) -> str:
+        if comment is None:
+            return ""
+        text = str(comment).strip()
+        if not text or text.lower() == "nan":
+            return ""
+        return text
+
+    def apply_table_comments(
+        self,
+        table_name: str,
+        *,
+        table_comment: Optional[str] = None,
+        column_comments: Optional[Dict[str, str]] = None,
+    ) -> None:
+        """对已存在表刷新 PostgreSQL 表/字段注释。"""
+        clean_table_name = self._clean_name(table_name)
+        if not self.table_exists(clean_table_name):
+            return
+        existing_columns = list(self._get_column_types(clean_table_name).keys())
+        self._apply_table_comments(
+            clean_table_name,
+            table_comment=table_comment,
+            column_comments=column_comments,
+            existing_columns=existing_columns,
+        )
+
+    def drop_column_if_exists(self, table_name: str, column_name: str) -> None:
+        """删除指定表的指定列（若存在）。"""
+        clean_table_name = self._clean_name(table_name)
+        clean_column_name = self._clean_name(column_name)
+        if not self.table_exists(clean_table_name):
+            return
+        with self.get_cursor() as cursor:
+            cursor.execute(
+                sql.SQL("ALTER TABLE {} DROP COLUMN IF EXISTS {}").format(
+                    self._qualified(clean_table_name),
+                    sql.Identifier(clean_column_name),
+                )
+            )
+
+    def _normalize_primary_key_columns(
+        self,
+        primary_key_columns: Optional[Sequence[str]],
+        *,
+        existing_columns: Sequence[str],
+        include_config_name: bool = False,
+    ) -> List[str]:
+        """标准化并过滤主键列；配置表按 config_name 共表存储时自动纳入配置名。"""
+        allowed = {self._clean_name(str(column)) for column in existing_columns}
+        columns: List[str] = []
+
+        def add_column(column: str) -> None:
+            clean_column = self._clean_name(str(column))
+            if clean_column and clean_column in allowed and clean_column not in columns:
+                columns.append(clean_column)
+
+        if include_config_name and primary_key_columns and "config_name" in allowed:
+            add_column("config_name")
+        for column in primary_key_columns or []:
+            add_column(str(column))
+        return columns
+
+    def _normalize_column_types(
+        self,
+        column_types: Optional[Dict[str, str]],
+        *,
+        existing_columns: Sequence[str],
+    ) -> Dict[str, str]:
+        """标准化 YAML 中声明的 PostgreSQL 字段类型。"""
+        allowed_columns = {self._clean_name(str(column)) for column in existing_columns}
+        normalized: Dict[str, str] = {}
+        for column, db_type in (column_types or {}).items():
+            clean_column = self._clean_name(str(column))
+            if clean_column not in allowed_columns:
+                continue
+            pg_type = self._normalize_pg_type(db_type)
+            if pg_type:
+                normalized[clean_column] = pg_type
+        return normalized
+
+    def _normalize_index_columns(
+        self,
+        index_columns: Optional[Sequence[Sequence[str]]],
+        *,
+        existing_columns: Sequence[str],
+    ) -> List[List[str]]:
+        """标准化固定索引字段组。"""
+        allowed = {self._clean_name(str(column)) for column in existing_columns}
+        normalized: List[List[str]] = []
+        seen: set[tuple[str, ...]] = set()
+        for group in index_columns or []:
+            cols: List[str] = []
+            for column in group or []:
+                clean_column = self._clean_name(str(column))
+                if clean_column and clean_column in allowed and clean_column not in cols:
+                    cols.append(clean_column)
+            key = tuple(cols)
+            if key and key not in seen:
+                normalized.append(cols)
+                seen.add(key)
+        return normalized
+
+    @staticmethod
+    def _normalize_pg_type(db_type: Any) -> str:
+        """将 YAML 字段类型别名转换为安全的 PostgreSQL DDL 类型。"""
+        if db_type is None:
+            return ""
+        text = str(db_type).strip()
+        if not text:
+            return ""
+        compact = " ".join(text.lower().split())
+        aliases = {
+            "str": "TEXT",
+            "string": "TEXT",
+            "text": "TEXT",
+            "object": "TEXT",
+            "int": "BIGINT",
+            "int8": "BIGINT",
+            "int64": "BIGINT",
+            "bigint": "BIGINT",
+            "integer": "INTEGER",
+            "int4": "INTEGER",
+            "smallint": "SMALLINT",
+            "int2": "SMALLINT",
+            "float": "DOUBLE PRECISION",
+            "float8": "DOUBLE PRECISION",
+            "float64": "DOUBLE PRECISION",
+            "double": "DOUBLE PRECISION",
+            "double precision": "DOUBLE PRECISION",
+            "real": "REAL",
+            "float4": "REAL",
+            "bool": "BOOLEAN",
+            "boolean": "BOOLEAN",
+            "date": "DATE",
+            "datetime": "TIMESTAMP",
+            "datetime64[ns]": "TIMESTAMP",
+            "datetime64[us]": "TIMESTAMP",
+            "timestamp": "TIMESTAMP",
+            "timestamp without time zone": "TIMESTAMP WITHOUT TIME ZONE",
+            "timestamp with time zone": "TIMESTAMP WITH TIME ZONE",
+            "json": "JSON",
+            "jsonb": "JSONB",
+        }
+        if compact in aliases:
+            return aliases[compact]
+
+        upper = " ".join(text.upper().split())
+        allowed_types = {
+            "TEXT",
+            "BIGINT",
+            "INTEGER",
+            "SMALLINT",
+            "DOUBLE PRECISION",
+            "REAL",
+            "BOOLEAN",
+            "DATE",
+            "TIMESTAMP",
+            "TIMESTAMP WITHOUT TIME ZONE",
+            "TIMESTAMP WITH TIME ZONE",
+            "JSON",
+            "JSONB",
+        }
+        if upper in allowed_types:
+            return upper
+        if re.fullmatch(r"(NUMERIC|DECIMAL)\(\d+(,\s*\d+)?\)", upper):
+            return upper.replace(" ", "")
+        return ""
+
+    def _get_primary_key_columns(self, table_name: str) -> List[str]:
+        """读取当前 schema 下表的主键字段顺序。"""
+        with self.get_cursor(commit=False) as cursor:
+            cursor.execute(
+                """
+                SELECT a.attname
+                FROM pg_index i
+                JOIN LATERAL unnest(i.indkey) WITH ORDINALITY AS k(attnum, ord)
+                  ON TRUE
+                JOIN pg_attribute a
+                  ON a.attrelid = i.indrelid
+                 AND a.attnum = k.attnum
+                WHERE i.indrelid = %s::regclass
+                  AND i.indisprimary
+                ORDER BY k.ord;
+                """,
+                (self.qualified_name(table_name),),
+            )
+            return [row[0] for row in cursor.fetchall()]
+
+    def _ensure_primary_key(
+        self,
+        table_name: str,
+        primary_key_columns: Sequence[str],
+    ) -> None:
+        """为已存在表补齐主键约束；已有主键时保持原状。"""
+        if not primary_key_columns:
+            return
+
+        existing_pk = self._get_primary_key_columns(table_name)
+        if existing_pk:
+            if list(existing_pk) != list(primary_key_columns):
+                logger.warning(
+                    "[schema] %s 已存在主键 %s，跳过映射主键 %s",
+                    table_name,
+                    existing_pk,
+                    list(primary_key_columns),
+                )
+            return
+
+        constraint_name = self._clean_name(f"{table_name}_pkey")
+        with self.get_cursor() as cursor:
+            cursor.execute(
+                sql.SQL("ALTER TABLE {} ADD CONSTRAINT {} PRIMARY KEY ({})").format(
+                    self._qualified(table_name),
+                    sql.Identifier(constraint_name),
+                    sql.SQL(", ").join(
+                        [sql.Identifier(col) for col in primary_key_columns]
+                    ),
+                )
+            )
+
+    def _create_fixed_indexes(
+        self,
+        table_name: str,
+        index_columns: Sequence[Sequence[str]],
+        *,
+        primary_key_columns: Sequence[str],
+    ) -> None:
+        """按固定 schema 创建普通索引，跳过主键前缀重复索引。"""
+        if not index_columns:
+            return
+        for columns in index_columns:
+            clean_columns = [self._clean_name(str(column)) for column in columns if column]
+            if not clean_columns:
+                continue
+            if list(primary_key_columns[: len(clean_columns)]) == clean_columns:
+                continue
+            suffix = "_".join(clean_columns)
+            index_name = self._clean_name(f"idx_{table_name}_{suffix}")
+            with self.get_cursor() as cursor:
+                cursor.execute(
+                    sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {} ({})").format(
+                        sql.Identifier(index_name),
+                        self._qualified(table_name),
+                        sql.SQL(", ").join(
+                            [sql.Identifier(column) for column in clean_columns]
+                        ),
+                    )
+                )
     
     def _check_table_compatible(
         self,
         table_name: str,
-        df: pd.DataFrame
+        df: pd.DataFrame,
+        column_types: Optional[Dict[str, str]] = None,
     ) -> bool:
         """
         检查DataFrame与现有表结构是否兼容
@@ -581,7 +933,9 @@ class DatabaseConnection:
                 df_dtype = df_col_types.get(col_name)
                 if df_dtype is None:
                     continue
-                expected_pg_type = self._pandas_to_pg_type(df_dtype, col_name=col_name)
+                expected_pg_type = (column_types or {}).get(
+                    col_name
+                ) or self._pandas_to_pg_type(df_dtype, col_name=col_name)
                 existing_pg_type = existing_col_info.get(col_name, '').upper()
                 # 如果 DataFrame 期望 DOUBLE PRECISION 但 DB 现有列是整型 → 升级
                 if expected_pg_type == 'DOUBLE PRECISION' and existing_pg_type in INT_TYPES:
@@ -630,7 +984,9 @@ class DatabaseConnection:
                     dtype = df_col_types.get(col_name)
                     if dtype is None:
                         continue
-                    pg_type = self._pandas_to_pg_type(dtype, col_name=col_name)
+                    pg_type = (column_types or {}).get(
+                        col_name
+                    ) or self._pandas_to_pg_type(dtype, col_name=col_name)
                     with self.get_cursor() as cursor:
                         cursor.execute(sql.SQL("""
                             ALTER TABLE {} ADD COLUMN {} {}

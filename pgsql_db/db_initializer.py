@@ -260,7 +260,8 @@ class DatabaseInitializer:
         self, 
         config_name: str, 
         config_file: Optional[Path] = None,
-        if_exists: str = 'replace'
+        if_exists: str = 'replace',
+        input_quality_report_dir: Optional[Path] = None,
     ) -> Tuple[bool, Dict[str, int]]:
         """
         从Excel导入配置到数据库
@@ -285,7 +286,10 @@ class DatabaseInitializer:
             str(config_file), 
             prefix=None,
             if_exists=if_exists,
-            config_name=config_name
+            config_name=config_name,
+            input_quality_report_dir=(
+                str(input_quality_report_dir) if input_quality_report_dir else None
+            ),
         )
         
         if not results or any(v < 0 for v in results.values()):

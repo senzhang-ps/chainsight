@@ -538,9 +538,9 @@
 - 输入：配置名、是否自动导入配置。
 - 输出：初始化结果字典，含 `success`、`database_created`、`config_imported` 等字段。
 
-### 13.2 `DatabaseConnection.create_table_from_df(df, table_name, if_exists, add_write_time, config_name, config_type) -> bool`
+### 13.2 `DatabaseConnection.create_table_from_df(df, table_name, if_exists, add_write_time, config_name) -> bool`
 - 功能：根据 DataFrame 自动建表和写入。
-- 自动元数据列：`config_name`, `config_type`, `db_write_time`。
+- 自动元数据列：`config_name`, `db_write_time`。
 
 ### 13.3 `ModuleDataWriter.write_module_results_from_dict(all_results, run_id, if_exists, truncate_first) -> dict`
 - 功能：把内存中的模块结果直接写入标准输出表。

@@ -786,7 +786,12 @@ def run_pre_simulation_validation(config_path: str, output_dir: str) -> tuple:
         # 惰性导入 ConfigDir，避免 core.run -> main_integration -> config_validator 循环依赖
         from ..core.run.config_dir import ConfigDir
         cfg_dir = ConfigDir.from_excel_path(config_path)
-        config_dict = load_configuration(cfg_dir)
+        config_dict = load_configuration(
+            cfg_dir,
+            input_quality_context={
+                "report_dir": str(Path(output_dir) / "input_quality")
+            },
+        )
     except Exception as e:
         validation_manager.add_error("ConfigLoader", "LoadError", f"Failed to load config file: {str(e)}")
         report_path = validation_manager.write_report()

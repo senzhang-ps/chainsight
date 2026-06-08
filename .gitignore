@@ -33,6 +33,7 @@ MANIFEST
 .pytest_cache/
 .coverage
 htmlcov/
+functional_tests/
 
 # IDEs
 .vscode/
@@ -60,6 +61,9 @@ Thumbs.db
 # Outputs (generated reports, not tracked)
 outputs/
 
+# Local scripts
+scripts/
+
 # ChainSight Dev generated output folders
 ChainSight_Dev/*/
 !ChainSight_Dev/.vscode/
@@ -68,8 +72,10 @@ archive/ChainSight_Dev/*/
 !archive/ChainSight_Dev/.vscode/
 !archive/ChainSight_Dev/.vscode/**
 
-# csv
-*.csv
+# ChainSight Dev run outputs
+ChainSight_Dev/**/run_*/
+archive/ChainSight_Dev/**/run_*/
 
-# Input data
-input
+# 业务输入数据（input/）：仅保留 input 目录，目录内文件不入仓
+input/*
+!input/.gitkeep

@@ -13,7 +13,7 @@ from typing import Optional
 
 import pandas as pd
 
-from pgsql_db import table_mapping
+from src.utils.data_quality import DataQualityError
 from .db_config import _load_config_from_database
 from .local_writer import _write_results_to_local_dev_format
 from .utils import resolve_excel_path, _PROJECT_ROOT
@@ -63,7 +63,15 @@ def _resolve_db_config_input(config_arg: str) -> tuple[str, Path | None]:
     return Path(config_arg).stem, None
 
 
-def _build_expected_local_config(config_arg: str) -> dict:
+def _build_expected_local_config(
+    config_arg: str,
+    *,
+    config_name: str | None = None,
+    report_dir: str | Path | None = None,
+    confirm_on_dq_block: bool = False,
+    logger=None,
+    input_func=input,
+) -> dict:
     """构建本地期望配置（Excel + 同目录 CSV 无条件优先）。
 
     ``config_arg`` 是用户原始输入（名字 / 相对路径 / 绝对路径）。
@@ -73,15 +81,199 @@ def _build_expected_local_config(config_arg: str) -> dict:
         return {}
 
     from pgsql_db.excel_importer import ExcelImporter
+    from src.utils.data_quality import ConfigInputDataQualityChecker
+
     sheet_data = ExcelImporter.load_excel_file_with_csv_priority(str(config_file))
+    checker = ConfigInputDataQualityChecker.from_defaults(report_dir=report_dir)
+    dq_result = checker.validate(
+        sheet_data,
+        config_name=config_name or config_file.stem,
+        sub_node="input_pre.db_runner",
+        write_reports=report_dir is not None,
+        output_dir=report_dir,
+    )
+    if dq_result["blocked"]:
+        _confirm_and_merge_m1_demandforecast_quantity(
+            dq_result["db_ready_by_db_key"],
+            logger=logger,
+            input_func=input_func,
+        )
+        if not confirm_on_dq_block or not _confirm_continue_after_dq_block(
+            dq_result,
+            report_dir=report_dir,
+            logger=logger,
+            input_func=input_func,
+        ):
+            raise DataQualityError(
+                "Input configuration data quality check failed; "
+                f"errors={dq_result['summary'].get('errors', 0)}"
+            )
 
-    expected = {}
-    for sheet_name, df in sheet_data.items():
-        table_name = table_mapping.get_config_table_name(sheet_name)
-        db_key = table_name[4:] if table_name.startswith("cfg_") else table_name
-        expected[db_key] = df
+    return dq_result["db_ready_by_db_key"]
 
-    return expected
+
+def _m1_demandforecast_duplicate_mask(df: pd.DataFrame) -> pd.Series:
+    """识别 M1_DemandForecast 中需要人工确认合并的重复业务键。
+
+    Args:
+        df: M1_DemandForecast 的 DB-ready DataFrame。
+
+    Returns:
+        标识 ``week/material/location`` 重复行的布尔 Series。
+    """
+    key_columns = ["week", "material", "location"]
+    if df.empty or not set(key_columns + ["quantity"]).issubset(df.columns):
+        return pd.Series(False, index=df.index)
+    return df.duplicated(subset=key_columns, keep=False)
+
+
+def _merge_m1_demandforecast_quantity(df: pd.DataFrame) -> pd.DataFrame:
+    """按 week、material、location 汇总 M1_DemandForecast.quantity。
+
+    Args:
+        df: M1_DemandForecast 的 DB-ready DataFrame。
+
+    Returns:
+        按业务键合并 quantity 后的 DataFrame；非 quantity 字段保留首条记录。
+    """
+    key_columns = ["week", "material", "location"]
+    work = df.copy()
+    work["quantity"] = pd.to_numeric(work["quantity"], errors="coerce").fillna(0)
+    aggregations = {
+        column: "first" for column in work.columns if column not in key_columns + ["quantity"]
+    }
+    aggregations["quantity"] = "sum"
+    ordered_columns = list(work.columns)
+    merged = (
+        work.groupby(key_columns, as_index=False, dropna=False)
+        .agg(aggregations)
+        .reindex(columns=ordered_columns)
+    )
+    return merged.reset_index(drop=True)
+
+
+def _confirm_and_merge_m1_demandforecast_quantity(
+    expected_config: dict,
+    *,
+    logger=None,
+    input_func=input,
+) -> bool:
+    """在最终入库确认前，按操作员选择合并 M1_DemandForecast.quantity。
+
+    Args:
+        expected_config: 以 db_key 为 key 的 DB-ready 配置表数据。
+        logger: 可选日志对象；为空时直接打印。
+        input_func: 交互输入函数，测试时可注入。
+
+    Returns:
+        True 表示已执行合并，False 表示未发现重复或操作员选择不合并。
+    """
+    db_key = "m1_demandforecast"
+    df = expected_config.get(db_key)
+    if df is None:
+        return False
+
+    duplicate_mask = _m1_demandforecast_duplicate_mask(df)
+    duplicate_count = int(duplicate_mask.sum())
+    if duplicate_count == 0:
+        return False
+
+    _log_or_print(
+        logger,
+        "warning",
+        "[DQ] M1_DemandForecast 存在相同 week/material/location 组合的数据，"
+        f"涉及 {duplicate_count} 行。",
+    )
+    prompt = (
+        "是否按 week、material、location 合并 M1_DemandForecast.quantity？"
+        "请输入 Y/N: "
+    )
+    while True:
+        try:
+            answer = input_func(prompt)
+        except (EOFError, KeyboardInterrupt):
+            _log_or_print(logger, "error", "[DQ] 未收到合并确认，默认不合并。")
+            return False
+        normalized = str(answer).strip()
+        if normalized in {"Y", "y"}:
+            before_rows = len(df)
+            expected_config[db_key] = _merge_m1_demandforecast_quantity(df)
+            after_rows = len(expected_config[db_key])
+            _log_or_print(
+                logger,
+                "warning",
+                "[DQ] 已按 week/material/location 合并 M1_DemandForecast.quantity："
+                f"{before_rows} 行 -> {after_rows} 行。",
+            )
+            return True
+        if normalized in {"N", "n"}:
+            _log_or_print(
+                logger,
+                "warning",
+                "[DQ] 操作员选择不合并 M1_DemandForecast.quantity。",
+            )
+            return False
+        _log_or_print(logger, "warning", "[DQ] 输入无效，请输入 Y/y 或 N/n。")
+
+
+def _log_or_print(logger, level: str, message: str) -> None:
+    if logger is not None:
+        getattr(logger, level)(message)
+    else:
+        print(message)
+
+
+def _confirm_continue_after_dq_block(
+    dq_result: dict,
+    *,
+    report_dir: str | Path | None,
+    logger=None,
+    input_func=input,
+) -> bool:
+    """Warn operator about DQ hard blocks and require Y/N confirmation."""
+    summary = dq_result.get("summary", {})
+    dq_dir = Path(report_dir) if report_dir is not None else None
+    _log_or_print(logger, "error", "[DQ] 输入配置表数据质量检测发现阻断问题。")
+    _log_or_print(
+        logger,
+        "error",
+        "[DQ] summary: issues={issues}, errors={errors}, hard_blocks={hard_blocks}, "
+        "ignored_sheets={ignored_sheets}, ignored_columns={ignored_columns}".format(
+            issues=summary.get("issues", 0),
+            errors=summary.get("errors", 0),
+            hard_blocks=summary.get("hard_blocks", 0),
+            ignored_sheets=summary.get("ignored_sheets", 0),
+            ignored_columns=summary.get("ignored_columns", 0),
+        ),
+    )
+    if dq_dir is not None:
+        _log_or_print(logger, "error", f"[DQ] 报告目录: {dq_dir}")
+        report_xlsx = dq_dir / "input_quality.xlsx"
+        if report_xlsx.exists():
+            _log_or_print(logger, "error", f"[DQ] 数据质量检测报告已输出: {report_xlsx}")
+        else:
+            _log_or_print(logger, "error", f"[DQ] 数据质量检测报告尚未生成: {report_xlsx}")
+    _log_or_print(
+        logger,
+        "warning",
+        "[DQ] 继续执行会使用治理后的 DB-ready 数据继续同步/写入数据库。",
+    )
+
+    prompt = "是否继续往下执行并写入数据库？请输入 Y/N: "
+    while True:
+        try:
+            answer = input_func(prompt)
+        except (EOFError, KeyboardInterrupt):
+            _log_or_print(logger, "error", "[DQ] 未收到操作员确认，已停止执行。")
+            return False
+        normalized = str(answer).strip()
+        if normalized in {"Y", "y"}:
+            _log_or_print(logger, "warning", "[DQ] 操作员确认继续执行。")
+            return True
+        if normalized in {"N", "n"}:
+            _log_or_print(logger, "error", "[DQ] 操作员选择停止执行。")
+            return False
+        _log_or_print(logger, "warning", "[DQ] 输入无效，请输入 Y/y 或 N/n。")
 
 
 def _resolve_local_config_source(config_arg: str) -> Optional[Path]:
@@ -211,9 +403,8 @@ def _diff_local_vs_db_via_manifest(
 def _verify_cfg_table_persisted(db, table_name: str, config_name: str, expect_rows: bool) -> bool:
     """确认某个 ``cfg_*`` 表对当前 config_name 已成功持久化到 DB。
 
-    用于 manifest 写入前的把关，避免"导入函数报成功但实际部分 sheet 写失败"
-    （:func:`pgsql_db.excel_importer.ExcelImporter.import_excel_file` 会吞异常并
-    在 results 中记为 ``-1``）导致 manifest 与 DB 状态分裂。
+    用于 manifest 写入前的把关，避免配置表部分写入失败后仍把 manifest 标成成功，
+    导致 manifest 与 DB 状态分裂。
 
     判定规则：
     - 表不存在 -> ``False``。
@@ -249,11 +440,9 @@ def _precheck_config_table_write(db, table_name: str, df: pd.DataFrame, config_n
     candidate = df.copy()
     if candidate.empty:
         candidate["config_name"] = pd.Series(dtype="object")
-        candidate["config_type"] = pd.Series(dtype="object")
         candidate["db_write_time"] = pd.Series(dtype="datetime64[ns]")
     else:
         candidate["config_name"] = config_name
-        candidate["config_type"] = config_name
         candidate["db_write_time"] = datetime.now()
 
     if not check_compatible(table_name, candidate):
@@ -271,6 +460,7 @@ def _sync_config_by_diff(
     *,
     expected_hashes: dict[str, str] | None = None,
     source_file: Path | None = None,
+    table_comment_map: dict[str, dict] | None = None,
 ) -> None:
     """按差异最小化同步：仅更新新增/变更表，并删除本地已不存在的表数据。
 
@@ -306,6 +496,7 @@ def _sync_config_by_diff(
     for db_key in to_upsert:
         table_name = f"cfg_{db_key}"
         df = expected_config.get(db_key, pd.DataFrame())
+        comment_meta = (table_comment_map or {}).get(table_name, {})
         _precheck_config_table_write(db, table_name, df, config_basename)
         deleted = db.delete_config_data(table_name, config_basename)
         write_ok = db.create_table_from_df(
@@ -313,7 +504,11 @@ def _sync_config_by_diff(
             table_name,
             if_exists="append",
             config_name=config_basename,
-            config_type=config_basename,
+            table_comment=comment_meta.get("table_comment"),
+            column_comments=comment_meta.get("column_comments"),
+            column_types=comment_meta.get("column_types"),
+            primary_key_columns=comment_meta.get("primary_key_columns"),
+            index_columns=comment_meta.get("index_columns"),
         )
         if not write_ok:
             raise RuntimeError(
@@ -341,6 +536,55 @@ def _sync_config_by_diff(
                 config_name=config_basename,
                 table_name=table_name,
             )
+
+
+def _refresh_config_table_comments(
+    db,
+    expected_config: dict,
+    table_comment_map: dict[str, dict],
+    logger,
+) -> None:
+    """刷新所有期望配置表的 PostgreSQL 表/字段注释。"""
+    if not table_comment_map or not hasattr(db, "apply_table_comments"):
+        return
+
+    refreshed = 0
+    for db_key in sorted(expected_config):
+        table_name = f"cfg_{db_key}"
+        comment_meta = table_comment_map.get(table_name)
+        if not comment_meta:
+            continue
+        try:
+            db.apply_table_comments(
+                table_name,
+                table_comment=comment_meta.get("table_comment"),
+                column_comments=comment_meta.get("column_comments"),
+            )
+            refreshed += 1
+        except Exception as exc:
+            logger.warning(f"  [COMMENT] 刷新配置表注释失败 {table_name}: {exc}")
+
+    if refreshed:
+        logger.info(f"  [COMMENT] 已刷新配置表注释 {refreshed} 张")
+
+
+def _drop_legacy_config_type_columns(db, expected_config: dict, logger) -> None:
+    """删除旧版配置表中冗余的 config_type 列。"""
+    drop_column = getattr(db, "drop_column_if_exists", None)
+    if not callable(drop_column):
+        return
+
+    dropped = 0
+    for db_key in sorted(expected_config):
+        table_name = f"cfg_{db_key}"
+        try:
+            drop_column(table_name, "config_type")
+            dropped += 1
+        except Exception as exc:
+            logger.warning(f"  [SCHEMA] 删除旧字段 {table_name}.config_type 失败: {exc}")
+
+    if dropped:
+        logger.info(f"  [SCHEMA] 已检查并清理旧字段 config_type: {dropped} 张配置表")
 
 
 def _apply_csv_overrides_for_db(config_data: dict, config_name: str, logger, db=None) -> None:
@@ -428,8 +672,6 @@ def _run_with_database(ns: argparse.Namespace) -> int:
     
     # 导入数据库模块
     try:
-        from pgsql_db.db_connection import DatabaseConnection
-        from pgsql_db.excel_importer import ExcelImporter
         from pgsql_db.module_data_writer import ModuleDataWriter
         from pgsql_db.db_initializer import DatabaseInitializer
     except ImportError as e:
@@ -504,7 +746,13 @@ def _run_with_database(ns: argparse.Namespace) -> int:
         )
 
         # 构建本地期望配置（Excel + CSV覆盖）—— 用原始 --config 输入（支持任意路径/子目录）
-        expected_config = _build_expected_local_config(_raw_config)
+        expected_config = _build_expected_local_config(
+            _raw_config,
+            config_name=config_name,
+            report_dir=log_dir / "input_quality",
+            confirm_on_dq_block=True,
+            logger=logger,
+        )
         if not expected_config:
             logger.info(f"  ℹ️ 未找到本地配置文件 {config_name}.xlsx（输入：{_raw_config}），直接使用数据库配置")
         else:
@@ -512,6 +760,9 @@ def _run_with_database(ns: argparse.Namespace) -> int:
             expected_hashes = {
                 key: compute_table_hash(df) for key, df in expected_config.items()
             }
+            from pgsql_db.config_comments import load_config_table_comment_map
+
+            table_comment_map = load_config_table_comment_map()
             local_source = _resolve_local_config_source(_raw_config)
             config_basename = Path(config_name).stem
 
@@ -520,27 +771,30 @@ def _run_with_database(ns: argparse.Namespace) -> int:
             exists, _ = initializer.check_config_data_exists(config_name)
             if not exists:
                 logger.info("  ℹ️ 数据库中不存在同名配置，执行首次导入")
-                config_file = local_config_file or initializer.find_config_file(config_name)
-                if not config_file:
+                local_source = _resolve_local_config_source(_raw_config)
+                if local_source is None:
                     logger.error(f"[ERROR] 未找到本地配置文件: {config_name}.xlsx（输入：{_raw_config}）")
                     return 1
-                success, import_results = initializer.import_config_from_excel(config_name, config_file)
-                if not success:
-                    logger.error("[ERROR] 首次导入配置失败")
-                    return 1
-                imported_count = len([r for r in import_results.values() if r >= 0])
+                first_import_diff = {
+                    "new_tables": sorted(expected_config.keys()),
+                    "changed_tables": [],
+                    "deleted_tables": [],
+                    "unchanged_tables": [],
+                }
+                _sync_config_by_diff(
+                    db,
+                    config_name,
+                    expected_config,
+                    first_import_diff,
+                    logger,
+                    expected_hashes=expected_hashes,
+                    source_file=local_source,
+                    table_comment_map=table_comment_map,
+                )
+                imported_count = len(expected_config)
                 logger.info(f"  ✅ 首次导入完成: {imported_count} 个配置表")
-                # 首次导入后：先用 DB 状态逐表验证（excel_importer 会吞异常并把
-                # 失败表记为 -1，但只要还有一个成功就整体 success=True）。
-                # 任一 expected 表未通过 DB 验证即视为部分失败，整体退出，避免
-                # 把"部分导入失败"固化成"已成功导入"。
-                try:
-                    src_mtime = (
-                        datetime.fromtimestamp(local_source.stat().st_mtime)
-                        if local_source is not None else None
-                    )
-                except OSError:
-                    src_mtime = None
+                # 首次导入后逐表验证 DB 状态。任一 expected 表未通过验证即视为部分失败，
+                # 整体退出，避免把"部分导入失败"固化成"已成功导入"。
                 missing_tables: list[str] = []
                 for db_key, df in expected_config.items():
                     table_name = f"cfg_{db_key}"
@@ -555,16 +809,6 @@ def _run_with_database(ns: argparse.Namespace) -> int:
                         + ", ".join(missing_tables)
                     )
                     return 1
-                for db_key, df in expected_config.items():
-                    upsert_manifest_entry(
-                        db,
-                        config_name=config_basename,
-                        table_name=f"cfg_{db_key}",
-                        row_count=len(df),
-                        content_hash=expected_hashes.get(db_key, ""),
-                        source_file=str(local_source) if local_source else None,
-                        source_mtime=src_mtime,
-                    )
             else:
                 logger.info("  ℹ️ 检测到数据库存在同名配置，开始比对本地与数据库")
                 manifest = load_manifest(db, config_basename)
@@ -632,8 +876,17 @@ def _run_with_database(ns: argparse.Namespace) -> int:
                         db, config_name, expected_config, diff_result, logger,
                         expected_hashes=expected_hashes,
                         source_file=local_source,
+                        table_comment_map=table_comment_map,
                     )
                     logger.info("  ✅ 差异同步完成")
+
+            _refresh_config_table_comments(
+                db,
+                expected_config,
+                table_comment_map,
+                logger,
+            )
+            _drop_legacy_config_type_columns(db, expected_config, logger)
 
         # ========== 步骤1: 从数据库获取配置 ==========
         logger.info("\n" + "=" * 60)
@@ -719,7 +972,13 @@ def _run_with_database(ns: argparse.Namespace) -> int:
 
         # 落盘 effective_run_id：续跑场景下这里已经是复用的既有 run_id，与 DB 对齐
         from .output_dir import _write_run_id_file
-        _write_run_id_file(log_dir, effective_run_id, "db_run_id.txt", logger)
+        _write_run_id_file(
+            log_dir,
+            effective_run_id,
+            "db_run_id.txt",
+            logger,
+            db_schema=db_schema,
+        )
 
         try:
             result = run_integrated_simulation_from_dict(
@@ -921,6 +1180,15 @@ def _run_with_database(ns: argparse.Namespace) -> int:
         # finally 块会将 checkpoint 标记为 interrupted
         logger.warning("\n[INTERRUPTED] 用户中断 (Ctrl+C)，正在保存状态...")
         return 130  # Unix 惯例: 128 + SIGINT(2)
+
+    except DataQualityError as e:
+        dq_dir = log_dir / "input_quality"
+        logger.error(f"[DQ] 输入配置表数据质量检测阻断: {e}")
+        logger.error(f"[DQ] 报告目录: {dq_dir}")
+        report_xlsx = dq_dir / "input_quality.xlsx"
+        if report_xlsx.exists():
+            logger.error(f"[DQ] 数据质量检测报告: {report_xlsx}")
+        return 1
 
     except Exception as e:
         logger.error(f"[ERROR] 执行出错: {str(e)}")

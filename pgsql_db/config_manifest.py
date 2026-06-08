@@ -14,6 +14,16 @@ if TYPE_CHECKING:  # 仅在类型检查阶段导入，避免运行时循环依�
 logger = logging.getLogger("SupplyChainSimulation")  # 复用仿真主日志。
 
 MANIFEST_TABLE = "cfg_import_manifest"  # 配置导入清单表名。
+MANIFEST_TABLE_COMMENT = "配置导入清单"
+MANIFEST_COLUMN_COMMENTS = {
+    "config_name": "配置名",
+    "table_name": "配置表名",
+    "row_count": "导入行数",
+    "content_hash": "配置表内容哈希",
+    "source_file": "来源文件",
+    "source_mtime": "来源文件修改时间",
+    "imported_at": "导入时间",
+}
 
 # 这些写库元数据不参与业务内容哈希。
 _METADATA_COLS = frozenset({"config_name", "config_type", "db_write_time"})
@@ -46,6 +56,12 @@ def ensure_manifest_table(db: "DatabaseConnection") -> None:
         f'CREATE INDEX IF NOT EXISTS "idx_{MANIFEST_TABLE}_config_name" '
         f"ON {qualified} (config_name);"
     )
+    if hasattr(db, "apply_table_comments"):
+        db.apply_table_comments(
+            MANIFEST_TABLE,
+            table_comment=MANIFEST_TABLE_COMMENT,
+            column_comments=MANIFEST_COLUMN_COMMENTS,
+        )
 
 
 def load_manifest(db: "DatabaseConnection", config_name: str) -> dict[str, dict]:
@@ -183,7 +199,8 @@ def compute_table_hash(df: pd.DataFrame) -> str:
 
     # 3. 规范化缺失值和标量类型。
     if not norm.empty:  # 非空表才需要替换缺失值。
-        norm = norm.where(pd.notna(norm), "")  # NaN/None 统一转为空字符串。
+        # 先转 object，避免 pandas nullable Int64/boolean 等扩展类型拒绝写入 ""。
+        norm = norm.astype("object").where(pd.notna(norm), "")  # NaN/None 统一转为空字符串。
     norm = norm.astype(str)  # 所有值统一转字符串，保证序列化稳定。
 
     # 4. 对行排序，避免输入行顺序影响哈希。

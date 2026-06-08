@@ -997,13 +997,12 @@ def create_table_from_df(
     if_exists: str = "replace",
     add_write_time: bool = True,
     config_name: str = None,
-    config_type: str = None,
 ) -> bool
 ```
 
 **能力**
 - 自动建表（类型推断）；
-- 可追加 `config_name/config_type/db_write_time`；
+- 可追加 `config_name/db_write_time`；
 - 结构不兼容时自动补列。
 
 #### API-2 `_insert_dataframe()`（内部高性能写入）

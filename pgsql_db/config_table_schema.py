@@ -9,6 +9,7 @@ from copy import deepcopy
 from typing import Any
 
 
+# schema 来源元信息：标识当前表结构由 Python 静态定义维护，是运行时权威来源。
 CONFIG_SCHEMA_SOURCE: dict[str, Any] = {
     'mode': 'python_static_schema',
     'authoritative': True,
@@ -17,6 +18,7 @@ CONFIG_SCHEMA_SOURCE: dict[str, Any] = {
         'config_table_import_mapping.yaml for field metadata.'
     ),
 }
+# schema 生效范围：只导入和检查已映射的 Sheet 与字段，未映射内容按策略忽略。
 CONFIG_SCOPE: dict[str, Any] = {
     'only_import_mapped_sheets': True,
     'only_import_mapped_fields': True,
@@ -26,6 +28,7 @@ CONFIG_SCOPE: dict[str, Any] = {
     'ignore_unmapped_fields': True,
     'missing_mapped_field_blocks': True,
 }
+# 系统字段策略：入库时统一追加配置名和写库时间等审计字段。
 SYSTEM_FIELD_POLICY: dict[str, Any] = {
     'append_system_fields': True,
     'fields': [
@@ -33,6 +36,7 @@ SYSTEM_FIELD_POLICY: dict[str, Any] = {
         'db_write_time',
     ],
 }
+# 配置表 schema 主定义：key 为配置表 Sheet 标识，value 为字段、主键、入库表等元数据。
 CONFIG_TABLE_SCHEMAS: dict[str, dict[str, Any]] = {
     'Global_seed': {
         'local_sheet': 'Global_seed',
@@ -2339,12 +2343,12 @@ CONFIG_TABLE_SCHEMAS: dict[str, dict[str, Any]] = {
 
 
 def get_config_table_schemas() -> dict[str, dict[str, Any]]:
-    """????? Sheet key ????????? schema ???"""
+    """返回以 Sheet key 为索引的配置表 schema 深拷贝。"""
     return deepcopy(CONFIG_TABLE_SCHEMAS)
 
 
 def get_config_table_mapping() -> dict[str, Any]:
-    """?????????????????? schema ???"""
+    """返回配置表导入与质量检测使用的完整 schema 映射。"""
     return {
         "version": 1,
         "mapping_source": deepcopy(CONFIG_SCHEMA_SOURCE),
@@ -2355,7 +2359,7 @@ def get_config_table_mapping() -> dict[str, Any]:
 
 
 def get_config_table_schema_by_sheet(sheet_name: str) -> dict[str, Any] | None:
-    """??? Sheet ??????????? schema ???"""
+    """按本地 Sheet 名查找并返回单张配置表 schema 深拷贝。"""
     target = str(sheet_name)
     for key, table_cfg in CONFIG_TABLE_SCHEMAS.items():
         if str(table_cfg.get("local_sheet") or key) == target:

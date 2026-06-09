@@ -21,6 +21,7 @@ from pgsql_db.config_table_schema import get_config_table_mapping
 from src.utils.normalization import normalize_location, normalize_material
 
 
+# 类作用：表示数据质量检测发现阻断级问题，供上层流程捕获并中止后续入库。
 class DataQualityError(RuntimeError):
     """检测到阻断级数据质量问题时抛出的异常。"""
 
@@ -55,6 +56,8 @@ _IGNORED_SHEET_COLUMNS = ["sheet", "reason", "action"]
 _IGNORED_COLUMN_COLUMNS = ["sheet", "column", "reason", "action"]
 
 
+# 类作用：保存单张配置表在固定 schema 中的入库契约和字段定义。
+# 装饰器作用：自动生成初始化、比较等数据类方法，并通过 frozen=True 保证契约实例只读。
 @dataclass(frozen=True)
 class _TableContract:
     """单张配置表的固定入库契约。"""
@@ -67,15 +70,19 @@ class _TableContract:
     primary_key: tuple[str, ...]
     fields: tuple[dict[str, Any], ...]
 
+    # 装饰器作用：把数据库表名派生出的业务 key 暴露为只读属性，调用方可用 contract.db_key 访问。
     @property
     def db_key(self) -> str:
         return self.db_table[4:] if self.db_table.startswith("cfg_") else self.db_table
 
+    # 装饰器作用：把字段配置中提取出的本地字段名列表暴露为只读属性。
     @property
     def local_fields(self) -> list[str]:
         return [str(field["local_name"]) for field in self.fields]
 
 
+# 类作用：封装表级专属规则运行时所需的当前表、全部表、问题列表和检测标识。
+# 装饰器作用：自动生成上下文容器的初始化等样板方法，便于规则函数按属性读取上下文。
 @dataclass
 class _TableRuleContext:
     """表级专属质量规则的执行上下文。"""
@@ -88,6 +95,7 @@ class _TableRuleContext:
     sub_node: str
 
 
+# 类作用：集中调度并执行依赖具体 Sheet 业务语义的表级数据质量规则。
 class ConfigTableQualityRules:
     """配置表专属质量规则调度器。
 
@@ -584,6 +592,7 @@ class ConfigTableQualityRules:
                 if added >= self.sample_limit:
                     return
 
+    # 装饰器作用：声明该工具方法不依赖实例状态，可直接通过类或实例调用。
     @staticmethod
     def _row_index(idx: Any) -> int | str:
         """将 DataFrame 行索引规范化为问题明细可用的整数或字符串。
@@ -626,6 +635,7 @@ class ConfigTableQualityRules:
                     )
                 )
 
+# 类作用：主数据质量检测器，负责加载 schema、投影字段、执行通用/表级规则、转换类型并生成报告。
 class ConfigInputDataQualityChecker:
     """基于固定 schema 契约执行配置表输入数据质量检测。"""
 
@@ -695,6 +705,7 @@ class ConfigInputDataQualityChecker:
             sample_limit=self.sample_limit,
         )
 
+    # 装饰器作用：以 cls 接收当前类，便于子类复用默认构造逻辑并返回对应类实例。
     @classmethod
     def from_defaults(
         cls,
@@ -754,6 +765,7 @@ class ConfigInputDataQualityChecker:
             )
         return loaded
 
+    # 装饰器作用：声明该转换函数不依赖实例状态，可作为类命名空间下的纯工具函数复用。
     @staticmethod
     def _coerce_bool(value: Any) -> bool:
         """将配置值转换为布尔值。
@@ -798,6 +810,7 @@ class ConfigInputDataQualityChecker:
             )
         return contracts
 
+    # 装饰器作用：声明该解析函数不依赖实例状态，只根据传入的表配置计算主键字段。
     @staticmethod
     def _primary_key_columns_from_config(table_cfg: dict[str, Any]) -> tuple[str, ...]:
         """从表级配置和字段级标记中解析主键字段集合。
@@ -1258,6 +1271,7 @@ class ConfigInputDataQualityChecker:
                 record_issues=True,
             )
 
+    # 装饰器作用：声明该排序函数不依赖实例状态，只根据契约中的字段定义返回入库顺序。
     @staticmethod
     def _ordered_fields(contract: _TableContract) -> list[dict[str, Any]]:
         """按固定 schema 中的入库顺序返回字段定义。
@@ -1441,6 +1455,7 @@ class ConfigInputDataQualityChecker:
         )
         return result
 
+    # 装饰器作用：声明该规范化函数不依赖实例状态，只根据字段名和值完成文本标准化。
     @staticmethod
     def _normalize_text_value(column: str, value: Any) -> str:
         """按字段业务语义规范化文本入库值。
@@ -1628,6 +1643,7 @@ class ConfigInputDataQualityChecker:
                 )
             )
 
+    # 装饰器作用：声明该查找函数不依赖实例状态，只从表契约中读取字段数据库类型。
     @staticmethod
     def _field_db_type(contract: _TableContract, column: str) -> str:
         """返回固定 schema 中字段对应的数据库类型。
@@ -1644,6 +1660,7 @@ class ConfigInputDataQualityChecker:
                 return str(field.get("db_type") or "str")
         return "str"
 
+    # 装饰器作用：声明该判断函数不依赖实例状态，只根据数据库类型字符串识别文本字段。
     @staticmethod
     def _is_text_db_type(db_type: str) -> bool:
         """判断数据库字段类型是否属于文本类型。
@@ -1661,6 +1678,7 @@ class ConfigInputDataQualityChecker:
             "character varying",
         }
 
+    # 装饰器作用：声明该分类函数不依赖实例状态，只根据字段值序列识别输入格式类别。
     @staticmethod
     def _column_input_format_categories(series: pd.Series) -> set[str]:
         """返回非空字段值中出现的输入格式类别集合。
@@ -1683,6 +1701,7 @@ class ConfigInputDataQualityChecker:
             categories.add(ConfigInputDataQualityChecker._value_input_format_category(value))
         return categories
 
+    # 装饰器作用：声明该分类函数不依赖实例状态，只根据单个值识别输入格式类别。
     @staticmethod
     def _value_input_format_category(value: Any) -> str:
         """根据原生类型或可解析字符串格式识别单元格输入类别。
@@ -1795,6 +1814,7 @@ class ConfigInputDataQualityChecker:
                 )
             )
 
+    # 装饰器作用：声明该掩码函数不依赖实例状态，只根据字段值序列识别空值位置。
     @staticmethod
     def _missing_mask(series: pd.Series) -> pd.Series:
         """识别字段序列中的空值和空白字符串。
@@ -1860,6 +1880,7 @@ class ConfigInputDataQualityChecker:
             "rule_id": rule_id,
         }
 
+    # 装饰器作用：声明该格式化函数不依赖实例状态，只把任意值转换为报告安全字符串。
     @staticmethod
     def _stringify(value: Any) -> str:
         """将报告字段值转换为空值安全的字符串。
@@ -1935,17 +1956,6 @@ class ConfigInputDataQualityChecker:
         """
         output_path = Path(output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
-        for legacy_name in (
-            "input_quality_issues.csv",
-            "input_quality_missing_sheets.csv",
-            "input_quality_ignored_sheets.csv",
-            "input_quality_ignored_columns.csv",
-            "input_quality_report.csv",
-        ):
-            try:
-                (output_path / legacy_name).unlink(missing_ok=True)
-            except OSError:
-                pass
 
         workbook_path = output_path / "input_quality.xlsx"
         issues_df = self._build_report_issues_frame(result["issues"])
@@ -1999,6 +2009,7 @@ class ConfigInputDataQualityChecker:
             )
         return pd.DataFrame(rows, columns=_ISSUE_COLUMNS)
 
+    # 装饰器作用：声明该合并函数不依赖实例状态，只对传入序列做去重和文本拼接。
     @staticmethod
     def _join_unique(series: pd.Series | None) -> str:
         """使用报告分隔符合并去重后的非空文本值。

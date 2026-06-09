@@ -51,13 +51,14 @@ class Module(ABC, metaclass=TimedMeta):
     schema: dict = {}
 
     def __init__(self, simulation_date, orchestrator, module_config,
-                 verbose=False, config=None, schema=None):
+                 verbose=False, config=None, schema=None, views=None):
         self.simulation_date = simulation_date
         self.orchestrator = orchestrator
         self.module_config = module_config
         self.verbose = verbose
         self.spends = {}
         self._result = {}
+        self.views = views if views is not None else {}
 
         if schema is not None:
             self.schema = schema

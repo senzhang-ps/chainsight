@@ -643,21 +643,6 @@ class _PandasBackend:
             orders_df, self._o.simulation_date, orch, daily_detail, None,
         )
 
-    def save_output(self, orders_df, shipment_df, cut_df, supply_demand_df, summary_df):
-        if self._o.skip_file_output:
-            return None
-        import os
-        from .io_utils import save_module1_output_with_supply_demand
-        date_str = pd.Timestamp(self._o.simulation_date).strftime("%Y%m%d")
-        output_file = os.path.join(
-            self._o.output_dir,
-            f"module1_output_{date_str}.xlsx",
-        )
-        save_module1_output_with_supply_demand(
-            orders_df, shipment_df, supply_demand_df, output_file, cut_df, summary_df
-        )
-        return output_file
-
     def get_order_day_flag(self, order_cal):
         filtered = order_cal.loc[
             order_cal["date"] == self._o.simulation_date, "order_day_flag"
@@ -1565,66 +1550,6 @@ class _PolarsBackend:
         inv_pd["qty_avail"] = inv_pd["quantity"].fillna(0).astype(int)
         inv_pd = inv_pd[["material", "location", "qty_avail"]]
         return self._to_pl(inv_pd)
-
-    def save_output(self, orders_df, shipment_df, cut_df, supply_demand_df, summary_df):
-        """Polars 原生 Excel 输出，datetime 和 quantity 格式化。"""
-        import os
-        import xlsxwriter
-        from datetime import datetime, date
-
-        if self._o.skip_file_output:
-            return None
-
-        date_str = pd.Timestamp(self._o.simulation_date).strftime("%Y%m%d")
-        output_file = os.path.join(
-            self._o.output_dir,
-            f"module1_output_{date_str}.xlsx",
-        )
-
-        try:
-            sheets = {
-                "OrderLog": (orders_df, ["date", "material", "location", "demand_type", "quantity", "simulation_date", "advance_days"]),
-                "ShipmentLog": (shipment_df, ["date", "material", "location", "quantity", "demand_type", "order_id"]),
-                "CutLog": (cut_df, ["date", "material", "location", "quantity"]),
-                "SupplyDemandLog": (supply_demand_df, ["date", "material", "location", "quantity", "demand_element"]),
-                "Summary": (summary_df, ["Total_Orders","Total_Shipments","Total_Cuts","Total_SupplyDemand","Date"])
-            }
-
-            with xlsxwriter.Workbook(output_file) as wb:
-                dt_fmt = wb.add_format({"num_format": "yyyy-mm-dd"})
-                bold = wb.add_format({"bold": True})
-
-                for sheet_name, (df, cols) in sheets.items():
-                    df = self._ensure_cols_pl(df, cols)
-                    df = _normalize_identifiers_polars(df)
-                    ws = wb.add_worksheet(sheet_name)
-
-                    if df.is_empty():
-                        for ci, c in enumerate(cols):
-                            ws.write(0, ci, c, bold)
-                        continue
-
-                    # 表头
-                    for ci, c in enumerate(df.columns):
-                        ws.write(0, ci, c, bold)
-
-                    # 数据行
-                    for ri, row in enumerate(df.iter_rows(), start=1):
-                        for ci, val in enumerate(row):
-                            if val is None:
-                                continue
-                            # datetime / date → 用 datetime 格式写
-                            if isinstance(val, (date, datetime)) and not isinstance(val, bool):
-                                ws.write_datetime(ri, ci, datetime(val.year, val.month, val.day), dt_fmt)
-                            elif isinstance(val, float):
-                                ws.write_number(ri, ci, round(val))
-                            else:
-                                ws.write(ri, ci, val)
-        except Exception:
-            import traceback
-            traceback.print_exc()
-
-        return output_file
 
     @staticmethod
     def _ensure_cols_pl(df, cols):

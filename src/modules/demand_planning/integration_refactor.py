@@ -62,7 +62,7 @@ class ModuleOne(Module):
                  verbose=False, config=None):
         super().__init__(simulation_date, orch, 'M1', verbose, config=config)
         self.legacy_orchestrator = orchestrator
-        self.output_dir = output_dir
+        self.output_dir = orch.get_output('module1')
         self.skip_file_output = skip_file_output
         self.previous_orders_df = previous_orders_df
         self.order_df = None
@@ -159,9 +159,6 @@ class ModuleOne(Module):
     def generate_shipments(self, orders_df):
         return self._backend.generate_shipments(orders_df, self.daily_detail)
 
-    def save_output(self, orders_df, shipment_df, cut_df, supply_demand_df, summary_df):
-        return self._backend.save_output(orders_df, shipment_df, cut_df, supply_demand_df, summary_df)
-
     def get_order_day_flag(self, order_cal):
         return self._backend.get_order_day_flag(order_cal)
 
@@ -198,6 +195,7 @@ class ModuleOne(Module):
         self.order_cal = self.order_calendar
 
     def run(self):
+        logger.info("1️⃣ 运行 Module1 - 订单生成")
         try:
             order_cal = self.order_cal
 
@@ -231,20 +229,18 @@ class ModuleOne(Module):
             # 10) Summary
             summary_df = self.build_summary(all_orders, shipment_df, cut_df, supply_demand_df)
 
-            # 9) 保存输出
-            output_file = self.save_output(all_orders, shipment_df, cut_df, supply_demand_df, summary_df)
-
-
-            # 统一输出为 pandas（外部消费者均为 pandas）
+            # 统一输出为 pandas（持久化由外部 Orch 负责）
             self._result = {
                 'orders_df': self._to_pandas(all_orders),
                 'shipment_df': self._to_pandas(shipment_df),
                 'cut_df': self._to_pandas(cut_df),
                 'supply_demand_df': self._to_pandas(supply_demand_df),
                 'summary_df': self._to_pandas(summary_df),
-                'output_file': output_file,
                 'all_orders_for_next_day': self._to_pandas(all_orders),
             }
+            n_orders = len(all_orders) if hasattr(all_orders, '__len__') else 0
+            n_ship = len(shipment_df) if hasattr(shipment_df, '__len__') else 0
+            logger.info("✅ Module1 完成 - 生成 %d 个订单, %d 个发货", n_orders, n_ship)
         except Exception as e:
             import traceback
             traceback.print_exc()
@@ -291,7 +287,6 @@ class ModuleOne(Module):
             'cut_df': pd.DataFrame(),
             'supply_demand_df': pd.DataFrame(),
             'summary_df': pd.DataFrame(),
-            'output_file': None,
         }
 
     @staticmethod

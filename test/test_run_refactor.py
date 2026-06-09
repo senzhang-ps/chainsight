@@ -27,9 +27,9 @@ def main():
     cfg_path = Path(args.config).resolve()
     output_base_dir = _ensure_output_dir(cfg_path)
 
-    from test_integration import run_integrated_simulation,run_integrated_simulation_refactor
+    from test_integration import run_integrated_simulation
 
-    result = run_integrated_simulation_refactor(
+    result = run_integrated_simulation(
         config_path=str(cfg_path),
         start_date=args.start_date,
         end_date=args.end_date,

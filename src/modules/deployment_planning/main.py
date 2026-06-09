@@ -8,6 +8,7 @@ Module5 主流程模块
 - v3.0: 添加向量化需求收集优化 (demand_collector_vectorized)
 - v3.1: 动态CPU配置，使用90%CPU资源
 """
+import logging
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Dict, List, Optional
@@ -36,6 +37,7 @@ from .cache_utils import (
     get_upstream
 )
 from src.utils.ptf_lsk import build_ptf_lsk_cache, get_ptf_lsk
+from src.utils.deterministic_sort import stable_sort_for_output
 from .constants import USE_VECTORIZED_DEMAND_COLLECTION, USE_MULTIPROCESS_DEMAND_COLLECTION, USE_HORIZON_CACHE
 from .data_loader import load_config, load_integrated_config
 from .demand_collector import collect_node_demands, collect_node_demands_fast
@@ -60,15 +62,13 @@ def _stable_sort_output(
     df: pd.DataFrame,
     preferred_cols: list[str],
 ) -> pd.DataFrame:
-    """对输出 DataFrame 做稳定排序，确保结果可复现。"""
-    if df.empty:
-        return df
+    """对输出 DataFrame 做稳定排序，确保结果可复现。
 
-    sort_cols = [c for c in preferred_cols if c in df.columns]
-    if not sort_cols:
-        return df.reset_index(drop=True)
-
-    return df.sort_values(by=sort_cols, kind='mergesort').reset_index(drop=True)
+    并行处理（``as_completed``）使等价行的输入顺序在多次运行间漂移，仅按优先列
+    排序无法消除这种不确定性。委托给 :func:`stable_sort_for_output`，在优先列之后
+    追加其余所有列作为兜底键，保证行序可复现且不改变任何数值。
+    """
+    return stable_sort_for_output(df, preferred_cols)
 
 
 def _validate_deployment_shipment_constraint(
@@ -1070,6 +1070,16 @@ def run_daily_deployment_planning(
             'demand_element', 'demand_qty',
             'unfulfilled_qty', 'reason',
         ],
+    )
+    # [PROBE-A] module5 产出的 unfulfilled_all（文件与 DB 共用同一对象）
+    try:
+        _self_loop = int((unfulfilled_all['sending'] == unfulfilled_all['receiving']).sum()) \
+            if not unfulfilled_all.empty and 'sending' in unfulfilled_all.columns else 0
+    except Exception:
+        _self_loop = -1
+    logging.getLogger("SupplyChainSimulation").info(
+        f"[PROBE-A] M5 return sim_date={sim_date} unfulfilled_all rows={len(unfulfilled_all)} "
+        f"(self_loop={_self_loop}) deployment rows={len(deployment_plan_rows_df)}"
     )
     stock_on_hand_log_df = _stable_sort_output(
         pd.DataFrame(stock_on_hand_log),

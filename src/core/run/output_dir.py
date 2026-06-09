@@ -199,19 +199,22 @@ def _output_subpath_from_config_source(config_source) -> Path:
 
 
 def _write_run_id_file(
-    log_dir: Path, run_id: str, filename: str, logger
+    log_dir: Path, run_id: str, filename: str, logger, db_schema: str | None = None
 ) -> None:
     """把本次运行的 run_id 落盘到 ``log_dir/<filename>``。
 
-    DB 模式 → ``db_run_id.txt``（内容: ``db_<config>_<ts>``，与 DB 中实际使用的
-    ``effective_run_id`` 一致）。本地模式 → ``run_id.txt``（内容: run 目录
-    basename，与 ``outputs/<...>/<basename>/`` 对得上）。
+    DB 模式 → ``db_run_id.txt``（第一行: ``db_<config>_<ts>``，与 DB 中实际使用的
+    ``effective_run_id`` 一致；第二行可写 ``db_schema=<schema>``）。本地模式 →
+    ``run_id.txt``（内容: run 目录 basename，与 ``outputs/<...>/<basename>/`` 对得上）。
 
     无尾换行、UTF-8 无 BOM —— 便于 ``cat <file>`` 直接拿来当字符串使用；续跑
     命中同一目录时覆盖写也是幂等的。失败仅 ``logger.warning``，不抛异常。
     """
     try:
-        (log_dir / filename).write_text(run_id, encoding="utf-8")
+        content = run_id
+        if filename == "db_run_id.txt" and db_schema:
+            content = f"{run_id}\ndb_schema={db_schema}"
+        (log_dir / filename).write_text(content, encoding="utf-8")
     except OSError as e:
         logger.warning(f"[WARN] 写入 {filename} 失败（不影响仿真）: {e}")
 

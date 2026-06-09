@@ -221,7 +221,7 @@
 | `write_module_results_from_dict()` | 主流程内存结果 `all_results` | `module*_output_*` | `sim_date`, `run_id`, `config_name` |
 | `write_orchestrator_data()` | `orchestrator/*.csv` | `orchestrator_*` | `file_date`, `sim_date`, `run_id` |
 | `truncate_output_tables()` | `run_id` | 按 run 删除旧数据 | 保证幂等重跑 |
-| `create_table_from_df()` | DataFrame、表名 | 自动建表/补列/写库 | 可追加 `config_name`, `config_type`, `db_write_time` |
+| `create_table_from_df()` | DataFrame、表名 | 自动建表/补列/写库 | 可追加 `config_name`, `db_write_time` |
 
 ### 10.3 结果表映射矩阵
 

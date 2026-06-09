@@ -71,3 +71,87 @@ def safe_int_array(
 ) -> "np.ndarray":
     """``safe_int_series`` 的 ndarray 版本，返回 ``int64`` 数组。"""
     return safe_int_series(values, context, default=default).to_numpy()
+
+
+def _first_scalar(value: Any) -> Any:
+    """Return a scalar from pandas/numpy containers without changing plain values."""
+    if isinstance(value, pd.Series):
+        return value.iloc[0] if len(value) else None
+    if hasattr(value, "iloc"):
+        try:
+            return value.iloc[0] if len(value) else None
+        except (TypeError, IndexError):
+            return None
+    if hasattr(value, "item"):
+        try:
+            return value.item()
+        except (AttributeError, TypeError, ValueError):
+            pass
+    return value
+
+
+def safe_int_scalar(value: Any, context: str, default: int = 0) -> int:
+    """Safely convert a scalar quantity to int without calling int() on NaN/inf."""
+    value = _first_scalar(value)
+    if value is None:
+        return default
+    try:
+        if pd.isna(value):
+            return default
+    except (TypeError, ValueError):
+        pass
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError, OverflowError) as exc:
+        logger.warning(
+            "[safe int scalar] %s: %r cannot be converted to int, using %d (%s)",
+            context,
+            value,
+            default,
+            exc,
+        )
+        return default
+    if not np.isfinite(numeric):
+        logger.warning(
+            "[safe int scalar] %s: non-finite value %r, using %d",
+            context,
+            value,
+            default,
+        )
+        return default
+    return int(numeric)
+
+
+def coerce_db_int(value: Any, default: int = 0) -> int:
+    """Coerce DB integer fields; non-finite values are invalid integer input."""
+    value = _first_scalar(value)
+    if value is None:
+        return default
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return default
+    if not np.isfinite(numeric):
+        return default
+    return int(numeric)
+
+
+def coerce_db_float(value: Any, round_values: bool = False) -> Any:
+    """Coerce DB float fields while preserving +/-Infinity semantics."""
+    value = _first_scalar(value)
+    if value is None:
+        return None
+    try:
+        if pd.isna(value):
+            return None
+    except (TypeError, ValueError):
+        pass
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if np.isnan(numeric):
+        return None
+    if np.isinf(numeric):
+        return numeric
+    return round(numeric, 15) if round_values else numeric

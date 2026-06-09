@@ -7,7 +7,6 @@
 - generate_supply_demand_log_for_integration: 生成供需日志
 """
 
-import logging
 import os
 import time
 from typing import Any, Optional
@@ -15,12 +14,9 @@ from typing import Any, Optional
 import numpy as np
 import pandas as pd
 
-logger = logging.getLogger("SupplyChainSimulation")
-
 from .constants import DEFAULT_MAX_ADVANCE_DAYS
 from ...utils.defaults import M1_FUTURE_CUTOFF_DAYS
 from ...utils.normalization import normalize_identifiers
-from ...utils.numeric_safe import safe_int_series
 from .dps import apply_dps, apply_supply_choice
 from .forecast import expand_forecast_to_days_integer_split
 from .order import generate_daily_orders
@@ -52,20 +48,20 @@ def run_daily_order_generation(
     返回:
         包含订单、发货、缺货、供需日志的字典。
     """
-    try:
-        # 1) 校验配置
-        configs = _validate_config(config_dict)
-        demand_forecast, forecast_error, order_calendar, ao_config = configs
+    # 1) 校验配置（缺失必填表必须抛 ValueError，不被吞掉）
+    configs = _validate_config(config_dict)
+    demand_forecast, forecast_error, order_calendar, ao_config = configs
 
-        # 2) 准备日度预测
-        daily_for_orders, daily_for_supply = _prepare_forecasts(
+    try:
+        # 2) 准备周级订单基线和日级预测基线
+        weekly_for_orders, daily_for_consumption, daily_for_supply = _prepare_forecasts(
             config_dict, demand_forecast, orchestrator
         )
 
         # 3) 生成当日订单
         t0 = time.perf_counter()
         today_orders_df, _ = generate_daily_orders(
-            simulation_date, daily_for_orders, daily_for_orders,
+            simulation_date, weekly_for_orders, daily_for_consumption,
             ao_config, order_calendar, forecast_error
         )
         elapsed = time.perf_counter() - t0
@@ -78,7 +74,7 @@ def run_daily_order_generation(
 
         # 5) 生成发货（使用累积订单）
         shipment_df, cut_df = _generate_shipments(
-            all_orders_df, simulation_date, orchestrator, daily_for_orders
+            all_orders_df, simulation_date, orchestrator, daily_for_consumption
         )
 
         # 6) 生成供需日志
@@ -95,12 +91,16 @@ def run_daily_order_generation(
             output_dir, simulation_date, skip_file_output
         )
 
-        # 8) 生成Summary（供数据库模式使用，与Excel保持一致：使用累计订单）
-        summary_df = _build_summary_df(all_orders_df, shipment_df, cut_df, supply_demand_df)
+        # 8) 生成Summary（供数据库模式使用，Date 取 simulation_date 而非首行订单日期）
+        summary_df = _build_summary_df(
+            all_orders_df, shipment_df, cut_df, supply_demand_df, simulation_date
+        )
 
+        # `orders_df`：累积订单（`all_orders_df`），与本地 Excel 输出保持一致
+        # 本地 _save_output 使用 all_orders_df 写入 `OrderLog` sheet，
         # 数据库模式也应写入累积订单，确保数据库与本地结果完全一致。
         return {
-            'orders_df': all_orders_df,  # ✅ 累积订单，与本地 Excel `OrderLog` 一致
+            'orders_df': all_orders_df,  # 累积订单，与本地 Excel `OrderLog` 一致
             'shipment_df': shipment_df,
             'cut_df': cut_df,
             'supply_demand_df': supply_demand_df,
@@ -110,7 +110,9 @@ def run_daily_order_generation(
         }
 
     except Exception:
-        raise
+        import traceback
+        traceback.print_exc()
+        return _empty_result()
 
 
 def _empty_result() -> dict:
@@ -129,26 +131,22 @@ def _build_summary_df(
     orders_df: pd.DataFrame,
     shipment_df: pd.DataFrame,
     cut_df: pd.DataFrame,
-    supply_demand_df: pd.DataFrame
+    supply_demand_df: pd.DataFrame,
+    simulation_date: pd.Timestamp,
 ) -> pd.DataFrame:
     """构建汇总DataFrame（供数据库模式使用）。
 
-    参数:
-        orders_df: 订单数据。
-        shipment_df: 发货数据。
-        cut_df: 缺货数据。
-        supply_demand_df: 供需日志数据。
-
-    返回:
-        汇总DataFrame。
+    Date 字段取 simulation_date（即下单日 / 当前仿真日），
+    而非 orders_df['date'].iloc[0]——后者对累积订单池来说是
+    任意首行的需求日期（AO 订单为 simulation_date + advance_days），
+    无法正确反映本日仿真的归属日期。
     """
-    date_val = orders_df['date'].iloc[0] if not orders_df.empty else None
     return pd.DataFrame([{
         'Total_Orders': len(orders_df),
         'Total_Shipments': len(shipment_df),
         'Total_Cuts': len(cut_df),
         'Total_SupplyDemand': len(supply_demand_df),
-        'Date': date_val
+        'Date': pd.to_datetime(simulation_date).normalize()
     }])
 
 
@@ -187,18 +185,19 @@ def _prepare_forecasts(
     demand_forecast: pd.DataFrame,
     orchestrator: Any
 ) -> tuple:
-    """准备日度预测。"""
+    """准备周级订单基线、日级订单消耗基线和日级供需基线。"""
     if orchestrator is None or not hasattr(orchestrator, 'start_date'):
         raise ValueError("orchestrator.start_date 必须提供")
 
     if 'week' not in demand_forecast.columns:
-        return demand_forecast.copy(), demand_forecast.copy()
+        return demand_forecast.copy(), demand_forecast.copy(), demand_forecast.copy()
 
     dps_config = config_dict.get('M1_DPSConfig', pd.DataFrame())
     supply_choice = config_dict.get('M1_SupplyChoiceConfig', pd.DataFrame())
 
     dps_cfg = dps_config if dps_config is not None else pd.DataFrame()
     demand_dps = apply_dps(demand_forecast, dps_cfg)
+    demand_dps.attrs['random_seed'] = config_dict.get('M1_RandomSeed', 0)
 
     sc_cfg = supply_choice if supply_choice is not None else pd.DataFrame()
     demand_dps_sc = apply_supply_choice(demand_dps, sc_cfg)
@@ -215,7 +214,7 @@ def _prepare_forecasts(
         demand_dps_sc, sim_start, max_week_sc
     )
 
-    return daily_for_orders, daily_for_supply
+    return demand_dps, daily_for_orders, daily_for_supply
 
 
 def _get_max_week(df: pd.DataFrame) -> int:
@@ -248,24 +247,16 @@ def _merge_with_history(
     # 🦆 如果提供了内存中的历史订单数据（DB模式），则直接使用，跳过文件读取
     if previous_orders_df is not None and not previous_orders_df.empty:
         previous_orders = previous_orders_df.copy()
-        prev_source = 'previous_orders_df'
     else:
         previous_orders = load_previous_orders(output_dir, simulation_date, max_advance)
-        prev_source = 'history_orderlog_files'
 
     previous_orders = _filter_future_orders(previous_orders, simulation_date)
     previous_orders = _deduplicate_orders(previous_orders)
 
     if today_orders_df is not None and not today_orders_df.empty:
-        frames = []
-        if not previous_orders.empty:
-            frames.append(previous_orders.assign(_quantity_debug_source=prev_source))
-        frames.append(today_orders_df.assign(_quantity_debug_source='today_orders_df'))
-        orders_df = pd.concat(frames, ignore_index=True)
+        orders_df = pd.concat([previous_orders, today_orders_df], ignore_index=True)
     else:
         orders_df = previous_orders.copy()
-        if not orders_df.empty:
-            orders_df['_quantity_debug_source'] = prev_source
 
     return _normalize_orders(orders_df)
 
@@ -302,44 +293,12 @@ def _deduplicate_orders(orders: pd.DataFrame) -> pd.DataFrame:
     return orders
 
 
-def _sanitize_order_quantity(orders_df: pd.DataFrame) -> pd.Series:
-    """把订单 quantity 列转为 int；异常值报带来源定位的错误。
-
-    正常 Module1 计算路径不吞掉坏数据；异常值入库的 0 填充只在 DB 写入边界处理。
-    """
-    qty_numeric = pd.Series(
-        pd.to_numeric(orders_df['quantity'], errors='coerce'),
-        index=orders_df.index,
-    )
-    bad_mask = qty_numeric.isna() | ~np.isfinite(qty_numeric.to_numpy(dtype='float64'))
-    if bad_mask.any():
-        bad_count = int(bad_mask.sum())
-        bad_rows = orders_df.loc[bad_mask]
-        if '_quantity_debug_source' in bad_rows.columns:
-            source_counts = bad_rows['_quantity_debug_source'].value_counts().to_dict()
-        else:
-            source_counts = {'unknown': bad_count}
-        preview_cols = [
-            c for c in ['date', 'material', 'location', 'demand_type',
-                        'simulation_date', 'advance_days', 'quantity',
-                        '_quantity_debug_source']
-            if c in bad_rows.columns
-        ]
-        logger.warning(
-            "Module1 订单 quantity 含 %d 个异常值（NaN/inf/不可转换），已替换为 0；"
-            "来源分布=%s；异常订单行示例:\n%s",
-            bad_count, source_counts, bad_rows[preview_cols].head(20).to_string(),
-        )
-    return safe_int_series(orders_df['quantity'], context='module1._normalize_orders.quantity')
-
-
 def _normalize_orders(orders_df: pd.DataFrame) -> pd.DataFrame:
     """规范化订单。"""
     if orders_df.empty:
-        return orders_df.drop(columns=['_quantity_debug_source'], errors='ignore')
+        return orders_df
     if 'quantity' in orders_df.columns:
-        orders_df['quantity'] = _sanitize_order_quantity(orders_df)
-    orders_df = orders_df.drop(columns=['_quantity_debug_source'], errors='ignore')
+        orders_df['quantity'] = orders_df['quantity'].astype(int)
     if 'simulation_date' not in orders_df.columns:
         orders_df['simulation_date'] = orders_df['date']
     return normalize_identifiers(orders_df)
@@ -403,6 +362,8 @@ def _apply_orders_consumption(
         return consumed
 
     consumed = normalize_identifiers(consumed)
+    # 显式归一化日期类型，避免 idx_map 因 dtype 不一致而静默失配
+    consumed['date'] = pd.to_datetime(consumed['date']).dt.normalize()
     orders_df = normalize_identifiers(orders_df.copy())
     offsets = [0, -1, -2, 1, 2, 3]
 
@@ -431,10 +392,7 @@ def _apply_orders_consumption(
         )
         _apply_fast_consumption(normal_orders, quantities, idx_map, offsets)
 
-    consumed['quantity'] = safe_int_series(
-        pd.Series(quantities, index=consumed.index),
-        context='module1._apply_orders_consumption.quantity',
-    )
+    consumed['quantity'] = quantities.astype(int)
 
     return normalize_identifiers(consumed)
 
@@ -461,7 +419,7 @@ def _apply_fast_consumption(
         for offset in offsets:
             if remaining <= 0:
                 break
-            target_date = order_date + pd.Timedelta(days=offset)
+            target_date = (order_date + pd.Timedelta(days=offset)).normalize()
             key = (mat, loc, target_date)
             
             if key in idx_map:

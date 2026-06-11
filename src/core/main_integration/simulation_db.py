@@ -23,7 +23,7 @@ from ...modules import module1, module3, module4, module5, module6
 from ...utils.defaults import M6_MAX_WAIT_DAYS, M6_RANDOM_SEED
 
 from ...utils.normalization import normalize_identifiers
-from .config_loader import load_configuration_from_dict
+from .config_loader import load_configuration_from_dict, prepare_configuration
 from .seed import set_module_seeds
 from .runtime_state import DbRuntimeState
 from .memory_store import (_ensure_memory_store_imported, _enable_memory_mode,
@@ -242,7 +242,8 @@ def run_integrated_simulation_from_dict(
     
     # 🦆 使用DuckDB处理配置数据（无需临时Excel文件）
     logger.info("🦆 DuckDB处理配置数据...")
-    config_dict = load_configuration_from_dict(config_data, config_name)
+    raw_config = load_configuration_from_dict(config_data, config_name)
+    config_dict = prepare_configuration(raw_config)
     
     # 设置全局随机种子
     global_seed = set_module_seeds(config_dict)

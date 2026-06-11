@@ -44,7 +44,6 @@ CONFIG_TABLE_SCHEMAS: dict[str, dict[str, Any]] = {
         'source_file': None,
         'db_table': 'cfg_global_seed',
         'import_enabled': True,
-        'data_quality_enabled': True,
         'primary_key': [],
         'fields': [
             {
@@ -86,7 +85,6 @@ CONFIG_TABLE_SCHEMAS: dict[str, dict[str, Any]] = {
         'source_file': None,
         'db_table': 'cfg_global_network',
         'import_enabled': True,
-        'data_quality_enabled': True,
         'primary_key': [
             'material',
             'location',
@@ -199,7 +197,6 @@ CONFIG_TABLE_SCHEMAS: dict[str, dict[str, Any]] = {
         'source_file': None,
         'db_table': 'cfg_global_spacecapacity',
         'import_enabled': True,
-        'data_quality_enabled': True,
         'primary_key': [
             'location',
             'eff_from',
@@ -284,7 +281,6 @@ CONFIG_TABLE_SCHEMAS: dict[str, dict[str, Any]] = {
         'source_file': None,
         'db_table': 'cfg_global_leadtime',
         'import_enabled': True,
-        'data_quality_enabled': True,
         'primary_key': [
             'sending',
             'receiving',
@@ -394,7 +390,6 @@ CONFIG_TABLE_SCHEMAS: dict[str, dict[str, Any]] = {
         'source_file': None,
         'db_table': 'cfg_global_demandpriority',
         'import_enabled': True,
-        'data_quality_enabled': True,
         'primary_key': [
             'demand_element',
         ],
@@ -451,7 +446,6 @@ CONFIG_TABLE_SCHEMAS: dict[str, dict[str, Any]] = {
         'source_file': None,
         'db_table': 'cfg_m1_initialinventory',
         'import_enabled': True,
-        'data_quality_enabled': True,
         'primary_key': [
             'material',
             'location',
@@ -522,7 +516,6 @@ CONFIG_TABLE_SCHEMAS: dict[str, dict[str, Any]] = {
         'source_file': None,
         'db_table': 'cfg_m1_demandforecast',
         'import_enabled': True,
-        'data_quality_enabled': True,
         'primary_key': [
             'week',
             'material',
@@ -607,7 +600,6 @@ CONFIG_TABLE_SCHEMAS: dict[str, dict[str, Any]] = {
         'source_file': None,
         'db_table': 'cfg_m1_forecasterror',
         'import_enabled': True,
-        'data_quality_enabled': True,
         'primary_key': [
             'material',
             'location',
@@ -692,7 +684,6 @@ CONFIG_TABLE_SCHEMAS: dict[str, dict[str, Any]] = {
         'source_file': None,
         'db_table': 'cfg_m1_ordercalendar',
         'import_enabled': True,
-        'data_quality_enabled': True,
         'primary_key': [
             'date',
         ],
@@ -749,7 +740,6 @@ CONFIG_TABLE_SCHEMAS: dict[str, dict[str, Any]] = {
         'source_file': None,
         'db_table': 'cfg_m1_aoconfig',
         'import_enabled': True,
-        'data_quality_enabled': True,
         'primary_key': [
             'material',
             'location',
@@ -834,7 +824,6 @@ CONFIG_TABLE_SCHEMAS: dict[str, dict[str, Any]] = {
         'source_file': None,
         'db_table': 'cfg_m1_dpsconfig',
         'import_enabled': True,
-        'data_quality_enabled': True,
         'primary_key': [
             'material',
             'location',
@@ -919,7 +908,6 @@ CONFIG_TABLE_SCHEMAS: dict[str, dict[str, Any]] = {
         'source_file': None,
         'db_table': 'cfg_m1_supplychoiceconfig',
         'import_enabled': True,
-        'data_quality_enabled': True,
         'primary_key': [
             'material',
             'location',
@@ -1004,7 +992,6 @@ CONFIG_TABLE_SCHEMAS: dict[str, dict[str, Any]] = {
         'source_file': None,
         'db_table': 'cfg_m3_safetystock',
         'import_enabled': True,
-        'data_quality_enabled': True,
         'primary_key': [
             'material',
             'location',
@@ -1089,7 +1076,6 @@ CONFIG_TABLE_SCHEMAS: dict[str, dict[str, Any]] = {
         'source_file': None,
         'db_table': 'cfg_m4_materiallocationlinecfg',
         'import_enabled': True,
-        'data_quality_enabled': True,
         'primary_key': [
             'material',
             'location',
@@ -1252,7 +1238,6 @@ CONFIG_TABLE_SCHEMAS: dict[str, dict[str, Any]] = {
         'source_file': None,
         'db_table': 'cfg_m4_linecapacity',
         'import_enabled': True,
-        'data_quality_enabled': True,
         'primary_key': [
             'location',
             'line',
@@ -1337,7 +1322,6 @@ CONFIG_TABLE_SCHEMAS: dict[str, dict[str, Any]] = {
         'source_file': None,
         'db_table': 'cfg_m4_changeovermatrix',
         'import_enabled': True,
-        'data_quality_enabled': True,
         'primary_key': [
             'from_material',
             'to_material',
@@ -1408,7 +1392,6 @@ CONFIG_TABLE_SCHEMAS: dict[str, dict[str, Any]] = {
         'source_file': None,
         'db_table': 'cfg_m4_changeoverdefinition',
         'import_enabled': True,
-        'data_quality_enabled': True,
         'primary_key': [
             'changeover_id',
             'line',
@@ -1505,7 +1488,6 @@ CONFIG_TABLE_SCHEMAS: dict[str, dict[str, Any]] = {
         'source_file': None,
         'db_table': 'cfg_m4_productionreliability',
         'import_enabled': True,
-        'data_quality_enabled': True,
         'primary_key': [
             'location',
             'line',
@@ -1576,7 +1558,6 @@ CONFIG_TABLE_SCHEMAS: dict[str, dict[str, Any]] = {
         'source_file': None,
         'db_table': 'cfg_m5_pushpullmodel',
         'import_enabled': True,
-        'data_quality_enabled': True,
         'primary_key': [
             'material',
             'sending',
@@ -1647,7 +1628,6 @@ CONFIG_TABLE_SCHEMAS: dict[str, dict[str, Any]] = {
         'source_file': None,
         'db_table': 'cfg_m5_deployconfig',
         'import_enabled': True,
-        'data_quality_enabled': True,
         'primary_key': [
             'material',
             'sending',
@@ -1771,7 +1751,6 @@ CONFIG_TABLE_SCHEMAS: dict[str, dict[str, Any]] = {
         'source_file': None,
         'db_table': 'cfg_m6_truckreleasecon',
         'import_enabled': True,
-        'data_quality_enabled': True,
         'primary_key': [
             'sending',
             'receiving',
@@ -1895,7 +1874,6 @@ CONFIG_TABLE_SCHEMAS: dict[str, dict[str, Any]] = {
         'source_file': None,
         'db_table': 'cfg_m6_materialmd',
         'import_enabled': True,
-        'data_quality_enabled': True,
         'primary_key': [
             'material',
         ],
@@ -1965,7 +1943,6 @@ CONFIG_TABLE_SCHEMAS: dict[str, dict[str, Any]] = {
         'source_file': None,
         'db_table': 'cfg_m6_deliverydelaydistribution',
         'import_enabled': True,
-        'data_quality_enabled': True,
         'primary_key': [
             'date',
             'sending',
@@ -2064,7 +2041,6 @@ CONFIG_TABLE_SCHEMAS: dict[str, dict[str, Any]] = {
         'source_file': None,
         'db_table': 'cfg_m6_mdqbypassrules',
         'import_enabled': True,
-        'data_quality_enabled': True,
         'primary_key': [
             'sending',
             'receiving',
@@ -2176,7 +2152,6 @@ CONFIG_TABLE_SCHEMAS: dict[str, dict[str, Any]] = {
         'source_file': None,
         'db_table': 'cfg_m6_trucktypespecs',
         'import_enabled': True,
-        'data_quality_enabled': True,
         'primary_key': [
             'truck_type',
         ],
@@ -2246,7 +2221,6 @@ CONFIG_TABLE_SCHEMAS: dict[str, dict[str, Any]] = {
         'source_file': None,
         'db_table': 'cfg_m6_truckcapacityplan',
         'import_enabled': True,
-        'data_quality_enabled': True,
         'primary_key': [
             'date',
             'sending',

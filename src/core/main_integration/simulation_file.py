@@ -28,7 +28,11 @@ from ...utils.normalization import normalize_identifiers
 from .resume import check_resume_capability, restore_orchestrator_state
 from .seed import set_module_seeds
 from .production_runner import load_current_date_production_gr
-from .config_loader import load_configuration
+from .config_loader import (
+    load_configuration,
+    prepare_configuration,
+    validate_input_quality,
+)
 
 # 复用 src/utils/logger_config.py::DualLogger 创建的同名 logger，
 # 这样消息既能进控制台又能进 simulation_log_*.txt。
@@ -148,7 +152,13 @@ def run_integrated_simulation(
         module_dir.mkdir(parents=True, exist_ok=True)
 
     # 加载配置
-    config_dict = load_configuration(config_path)
+    raw_config = load_configuration(config_path)
+    dq_result = validate_input_quality(
+        raw_config,
+        config_name=Path(config_path).stem,
+        sub_node="input_pre.simulation_file",
+    )
+    config_dict = prepare_configuration(dq_result["cleaned_tables"])
 
     # 设置全局随机种子
     global_seed = set_module_seeds(config_dict)

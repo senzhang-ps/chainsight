@@ -136,7 +136,7 @@ class Snapshot:
         df = pd.DataFrame(rows) if rows else pd.DataFrame(
             columns=['run_id', 'sim_date', 'material', 'location', 'quantity'])
         if not df.empty:
-            self.db._write_df(SNAPSHOT_TABLES['inventory'], df)
+            self.db.write_df(SNAPSHOT_TABLES['inventory'], df)
         logger.debug(f"库存快照: {len(rows)} 条")
 
     def _save_intransit(self, run_id: str, sim_date: str, ctx):
@@ -151,7 +151,7 @@ class Snapshot:
             for uid, rec in in_transit.items()
         ]
         df = pd.DataFrame(rows)
-        self.db._write_df(SNAPSHOT_TABLES['intransit'], df)
+        self.db.write_df(SNAPSHOT_TABLES['intransit'], df)
         logger.debug(f"在途快照: {len(rows)} 条")
 
     def _save_open_deploy(self, run_id: str, sim_date: str, ctx):
@@ -166,7 +166,7 @@ class Snapshot:
             for uid, rec in open_deploy.items()
         ]
         df = pd.DataFrame(rows)
-        self.db._write_df(SNAPSHOT_TABLES['open_deploy'], df)
+        self.db.write_df(SNAPSHOT_TABLES['open_deploy'], df)
         logger.debug(f"调拨快照: {len(rows)} 条")
 
     def _save_backlog(self, run_id: str, sim_date: str, ctx):
@@ -179,7 +179,7 @@ class Snapshot:
             'run_id': run_id, 'sim_date': sim_date,
             'data': json.dumps(backlog, default=str),
         }])
-        self.db._write_df(SNAPSHOT_TABLES['backlog'], df)
+        self.db.write_df(SNAPSHOT_TABLES['backlog'], df)
         logger.debug(f"积压快照: {len(backlog)} 条")
 
     def _save_runtime(self, run_id: str, sim_date: str, ctx):
@@ -205,7 +205,7 @@ class Snapshot:
             for k, v in items.items()
         ]
         df = pd.DataFrame(rows)
-        self.db._write_df(SNAPSHOT_TABLES['runtime'], df)
+        self.db.write_df(SNAPSHOT_TABLES['runtime'], df)
 
     # ── 状态恢复 ─────────────────────────────
 

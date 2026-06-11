@@ -286,9 +286,7 @@ def _align_csv_dtypes_to_excel(
 
 
 def load_configuration(
-    config,
-    input_quality_checker=None,
-    input_quality_context: dict | None = None,
+    config
 ) -> dict:
     """加载与标准化配置数据。
 
@@ -385,36 +383,36 @@ def load_configuration(
             f"CSV 总数: {len(cfg_dir.csv_map)})"
         )
 
-        # ---- input DQ：CSV dtype 对齐之后、identifier normalize 之前 ----
-        try:
-            checker = input_quality_checker
-            if checker is None:
-                from ...utils.data_quality import ConfigInputDataQualityChecker
+        # # ---- input DQ：CSV dtype 对齐之后、identifier normalize 之前 ----
+        # try:
+        #     checker = input_quality_checker
+        #     if checker is None:
+        #         from ...utils.data_quality import ConfigInputDataQualityChecker
 
-                checker = ConfigInputDataQualityChecker.from_defaults()
-            dq_context = input_quality_context or {}
-            dq_result = checker.validate(
-                config_dict,
-                config_name=cfg_dir.excel_path.stem,
-                sub_node="input_pre.config_loader",
-                write_reports=bool(dq_context.get("report_dir")),
-                output_dir=dq_context.get("report_dir"),
-            )
-            config_dict = dq_result["cleaned_tables"]
-            logger.info(
-                "✅ input DQ 完成: issues=%s, ignored_sheets=%s, ignored_columns=%s, blocked=%s",
-                dq_result["summary"].get("issues"),
-                dq_result["summary"].get("ignored_sheets"),
-                dq_result["summary"].get("ignored_columns"),
-                dq_result["blocked"],
-            )
-            if dq_result["blocked"]:
-                from ...utils.data_quality import DataQualityError
+        #         checker = ConfigInputDataQualityChecker.from_defaults()
+        #     dq_context = input_quality_context or {}
+        #     dq_result = checker.validate(
+        #         config_dict,
+        #         config_name=cfg_dir.excel_path.stem,
+        #         sub_node="input_pre.config_loader",
+        #         write_reports=bool(dq_context.get("report_dir")),
+        #         output_dir=dq_context.get("report_dir"),
+        #     )
+        #     config_dict = dq_result["cleaned_tables"]
+        #     logger.info(
+        #         "✅ input DQ 完成: issues=%s, ignored_sheets=%s, ignored_columns=%s, blocked=%s",
+        #         dq_result["summary"].get("issues"),
+        #         dq_result["summary"].get("ignored_sheets"),
+        #         dq_result["summary"].get("ignored_columns"),
+        #         dq_result["blocked"],
+        #     )
+        #     if dq_result["blocked"]:
+        #         from ...utils.data_quality import DataQualityError
 
-                raise DataQualityError("Input DQ blocked config loading")
-        except Exception:
-            logger.exception("❌ input DQ 执行失败")
-            raise
+        #         raise DataQualityError("Input DQ blocked config loading")
+        # except Exception:
+        #     logger.exception("❌ input DQ 执行失败")
+        #     raise
 
         # 确保必要的配置表存在
         required_sheets = [

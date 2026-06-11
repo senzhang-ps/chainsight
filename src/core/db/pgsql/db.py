@@ -1,6 +1,6 @@
 """纯数据库读写层。
 
-职责：连接管理 + SQL 执行 + 按 Module 对象写入。
+职责：连接管理 + SQL 执行 + DataFrame / Module 写入。
 不负责：数据清洗、类型推断、元数据注入（由调用方在传入前完成）。
 """
 from __future__ import annotations
@@ -131,22 +131,43 @@ class DB:
 
     # ── 写入 ─────────────────────────────────
 
-    def write(self, module, run_id: str, sim_date: str):
-        """传入 Module 对象，按 module.output() 写入对应的表。
+    def write(self, source, run_id: str = None, sim_date: str = None,
+              table_name: str = None):
+        """写入数据到数据库。支持两种调用方式：
 
-        module.output() 返回 {table_name: DataFrame}，
-        DataFrame 应由调用方确保元数据列已注入且数据已清洗。
+        1. Module 模式（向后兼容）：
+             write(module, run_id, sim_date)
+           调用 module.output() 获取 {table_name: DataFrame}。
+
+        2. DataFrame 模式：
+             write(df, table_name="my_table")
+           将单个 DataFrame 写入指定表。
+
+        Args:
+            source: Module 实例或 pandas DataFrame。
+            run_id: 运行标识（Module 模式必填）。
+            sim_date: 仿真日期字符串（Module 模式必填）。
+            table_name: 目标表名（DataFrame 模式必填）。
         """
-        results = module.output() if callable(module.output) else module.output
-        if not results:
-            return
-        for table_name, df in results.items():
-            if df is None or (isinstance(df, pd.DataFrame) and df.empty):
-                continue
-            self._write_df(table_name, df)
+        if isinstance(source, pd.DataFrame):
+            # DataFrame 模式
+            if table_name is None:
+                raise ValueError("DataFrame 模式下 table_name 为必填参数")
+            self.write_df(table_name, source)
+        else:
+            # Module 模式（原有逻辑不变）
+            if run_id is None or sim_date is None:
+                raise ValueError("Module 模式下 run_id 和 sim_date 为必填参数")
+            results = source.output() if callable(source.output) else source.output
+            if not results:
+                return
+            for tbl, df in results.items():
+                if df is None or (isinstance(df, pd.DataFrame) and df.empty):
+                    continue
+                self.write_df(tbl, df)
 
-    def _write_df(self, table_name: str, df: pd.DataFrame):
-        """将 DataFrame 写入指定表（COPY 协议批量写入）。
+    def write_df(self, table_name: str, df: pd.DataFrame):
+        """将 DataFrame 写入指定表（COPY 协议批量写入）。公开方法。
 
         调用方应确保元数据列（run_id / sim_date / config_name / db_write_time）
         已在传入前注入完毕。
@@ -215,3 +236,7 @@ class DB:
                 ORDER BY table_name
             """)
             return [row[0] for row in cursor.fetchall()]
+
+    # ── 向后兼容 ──────────────────────────────
+
+    _write_df = write_df

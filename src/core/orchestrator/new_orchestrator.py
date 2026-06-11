@@ -1,9 +1,14 @@
+import hashlib
+import json
 import logging
 from datetime import date, datetime
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 from tqdm import tqdm
+
+from ...utils.data_quality import DataQualityError
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +25,7 @@ class Orchestrator:
 
     def __init__(self, start_date, end_date,
                  config_path=None, output_path=None,
-                 config_dict=None, engine='pandas'):
+                 config_dict=None, engine='pandas', skip_dq=False):
         self.start_date = start_date if isinstance(start_date, date) else pd.Timestamp(start_date).date()
         self.end_date = end_date if isinstance(end_date, date) else pd.Timestamp(end_date).date()
         self.module_idx = [1, 3, 4, 5, 6]
@@ -32,23 +37,28 @@ class Orchestrator:
         self._config_name = None
         self._run_id = None
         self._init_db()
+        
+        # ── 持久化管理 ──
+        from .persistence_manager import PersistenceManager
+        self.persistence = PersistenceManager(self)
 
-        # ── 配置加载 ──
+        # ── 配置加载 + 持久化 ──
         self.sys_config: dict = {}
         self.all_config: dict = {}
+        self._last_dq_result: dict | None = None
 
-        if config_dict is not None:
-            # 兼容路径：DB 模式下调用方已从 DB 加载好 config_dict
-            self.all_config = config_dict
-        elif config_path is not None:
-            # 主路径：从 Excel 文件加载配置
-            from ..main_integration.config_loader import load_configuration
-            logger.info(f"Orch: 从配置文件加载: {config_path}")
-            self.all_config = load_configuration(config_path)
-            # 从文件名提取 config_name（不含扩展名）
-            self._config_name = Path(config_path).stem
-        else:
-            logger.warning("Orch: 未提供 config_path 或 config_dict，配置为空")
+        try:
+            dq_result, needs_write = self._load_config(
+                config_path, config_dict, skip_dq=skip_dq,
+            )
+            if needs_write:
+                self._persist_config(dq_result, write_config=True)
+
+        except DataQualityError:
+            # DQ 阻断：仍持久化检测结果（不含配置数据），供调试排查
+            if self._last_dq_result is not None and self.db is not None:
+                self._persist_config(self._last_dq_result, write_config=False)
+            raise
 
         # ── 随机种子 ──
         from ..main_integration.seed import set_module_seeds
@@ -59,9 +69,6 @@ class Orchestrator:
         self.all_results = {}
         self.sim_dates = []
 
-        # ── 持久化管理 ──
-        from .persistence_manager import PersistenceManager
-        self.persistence = PersistenceManager(self)
 
     # ══════════════════════════════════════════
     # config_name / run_id
@@ -115,7 +122,7 @@ class Orchestrator:
         if 'database' in raw:
             sys_cfg['database'] = raw['database']
         # 扩展：其他 yaml 中的系统级配置项也可在此提取
-        for key in ('engine', 'resource', 'shared'):
+        for key in ('engine', 'resource', 'shared', 'data_quality'):
             if key in raw:
                 sys_cfg[key] = raw[key]
         logger.info(f"系统配置已加载: {list(sys_cfg.keys())}")
@@ -207,6 +214,285 @@ class Orchestrator:
         if drop_cols:
             df = df.drop(columns=drop_cols, errors='ignore')
         return df
+
+    def _load_config(
+        self,
+        config_path: str | None = None,
+        config_dict: dict | None = None,
+        *,
+        skip_dq: bool = False,
+    ) -> tuple[dict | None, bool]:
+        """加载配置数据到 ``self.all_config``（纯读取，不写入 DB）。
+
+        三条路径（优先级从高到低）：
+        1. ``config_dict`` 直接传入 → 直接使用（跳过 DB 缓存和 DQ 校验）
+        2. ``config_path`` → 优先尝试 DB 缓存，失败则从 xlsx 加载 + DQ 校验
+        3. 均为空 → 配置为空，打印警告
+
+        DB 表说明：
+        - ``cfg_dq_check_result``：存储 config_hash (MD5) + DQ 检测结果
+          ``_try_load_config_from_db`` 从此表读 hash，与当前 hash 比对
+        - ``cfg_*`` 配置表：存储清洗后的配置 DataFrame（如 cfg_m1_initialinventory）
+          ``_try_load_config_from_db`` → ``_load_calc_datas`` 从这些表读回配置数据
+
+        Args:
+            config_path: 配置文件路径（xlsx）。
+            config_dict: 已加载好的配置表数据 ``{sheet_name: DataFrame}``。
+            skip_dq: 是否跳过数据质量检测。数据存在已知问题需先跑通下游时可设为 True。
+
+        Returns:
+            ``(dq_result, needs_write)`` 元组：
+            - ``dq_result``：DQ 校验结果字典；未执行 DQ 时为 None。
+            - ``needs_write``：是否需要将配置数据写入 DB 缓存。
+        """
+        if config_dict is not None:
+            self.all_config = config_dict
+            return None, False
+
+        if config_path is None:
+            logger.warning("Orch: 未提供 config_path 或 config_dict，配置为空")
+            return None, False
+
+        self._config_name = Path(config_path).stem
+
+        # 尝试从 DB 缓存加载（hash 去重）
+        if self._try_load_config_from_db():
+            logger.info(f"Orch: 从 DB 缓存加载配置: {self._config_name}")
+            return None, False
+
+        # DB 无缓存或 hash 不一致 → 从 Excel 加载
+        from ..main_integration.config_loader import load_configuration
+        logger.info(f"Orch: 从配置文件加载: {config_path}")
+        self.all_config = load_configuration(config_path)
+
+        if skip_dq:
+            logger.warning("Orch: skip_dq=True，跳过数据质量检测")
+            return None, True
+
+        # 加载后执行 DQ 校验
+        dq_result = self._run_data_quality_check()
+
+        # 用清洗后的数据替换原始数据
+        cleaned = dq_result.get("cleaned_tables", {})
+        if cleaned:
+            self.all_config = cleaned
+            logger.info("Orch: 已用 DQ 清洗后数据替换 all_config")
+
+        return dq_result, True
+
+    # ══════════════════════════════════════════
+    # 配置持久化（写入 DB）
+    # ══════════════════════════════════════════
+
+    def _persist_config(
+        self,
+        dq_result: dict[str, Any] | None = None,
+        *,
+        write_config: bool = True,
+    ) -> None:
+        """将配置数据和/或 DQ 结果写入 DB 缓存。
+
+        统一的持久化入口，仅在 ``__init__`` 中调用。
+        从 ``_load_config`` 和 ``_run_data_quality_check`` 中剥离，
+        保证加载方法只负责读取。
+
+        写入目标：
+        - ``cfg_dq_check_result``：config_hash + DQ 检测结果（后续 hash 去重依据）
+        - ``cfg_*`` 配置表：配置 DataFrame（仅当 ``write_config=True``）
+
+        Args:
+            dq_result: DQ 校验结果；为 None 时仅写配置数据（skip_dq 场景）。
+            write_config: 是否同时将配置数据写入 ``cfg_*`` 表。
+                DQ 阻断时应设为 False，避免问题数据覆盖已有配置。
+        """
+        if self.db is None or not self.all_config:
+            return
+        self._write_to_db(dq_result, write_config=write_config)
+
+    # ══════════════════════════════════════════
+    # 数据质量检测
+    # ══════════════════════════════════════════
+
+    def _run_data_quality_check(self) -> dict[str, Any]:
+        """对 all_config 执行数据质量校验。
+
+        在配置文件加载后调用，使用 ``ConfigInputDataQualityChecker`` 执行校验。
+        若检测到阻断级问题则抛出 ``DataQualityError``。
+
+        Returns:
+            ``validate`` 返回的完整检测结果字典，包含：
+            - passed / blocked / issues / cleaned_tables / summary 等
+        """
+        from ...utils.data_quality import ConfigInputDataQualityChecker
+
+        if not self.all_config:
+            logger.info("DQ: all_config 为空，跳过数据质量检查")
+            return {
+                "passed": True,
+                "blocked": False,
+                "issues": [],
+                "cleaned_tables": {},
+                "summary": {"errors": 0, "warnings": 0, "infos": 0},
+            }
+
+        dq_cfg = (self.sys_config or {}).get('data_quality') or {}
+        if not dq_cfg.get('enabled', True):
+            logger.info("DQ: 数据质量检测已禁用 (sys_cfg.data_quality.enabled=false)")
+            return {
+                "passed": True,
+                "blocked": False,
+                "issues": [],
+                "cleaned_tables": {},
+                "summary": {"errors": 0, "warnings": 0, "infos": 0},
+            }
+
+        config_tables = dq_cfg.get('config_tables') or {}
+        checker = ConfigInputDataQualityChecker(
+            mode=dq_cfg.get('mode', 'audit_only'),
+            fail_on_error=dq_cfg.get('fail_on_error', False),
+            sample_limit=dq_cfg.get('sample_limit', 20),
+            report_dir=dq_cfg.get('report_dir'),
+            required_import_tables=config_tables.get('required_import') or (),
+            optional_import_tables=config_tables.get('optional_import') or (),
+            quality_check_enabled=config_tables.get('quality_check_enabled') or {},
+        )
+        dq_result = checker.validate(
+            self.all_config,
+            config_name=self.config_name,
+            sub_node="input_pre.orchestrator",
+        )
+
+        summary = dq_result.get("summary", {})
+        errors = summary.get("errors", 0)
+        warnings = summary.get("warnings", 0)
+        hard_blocks = summary.get("hard_blocks", 0)
+
+        logger.info(
+            f"DQ: 校验完成 → errors={errors}, "
+            f"warnings={warnings}, hard_blocks={hard_blocks}, "
+            f"blocked={dq_result['blocked']}"
+        )
+
+        if dq_result["blocked"]:
+            # 保存到实例，供 __init__ 在捕获异常后持久化 DQ 结果
+            self._last_dq_result = dq_result
+            raise DataQualityError(
+                "配置数据质量检查发现阻断级问题; "
+                f"config={self.config_name}, "
+                f"errors={errors}, hard_blocks={hard_blocks}"
+            )
+
+        return dq_result
+
+    def _compute_config_hash(self, config_data: dict[str, "pd.DataFrame"]) -> str:
+        """计算配置数据的 MD5 指纹。
+
+        对每张表按 sheet 名排序后逐表算 hash，拼接后取整体 MD5。
+        """
+        from pgsql_db.config_manifest import compute_table_hash
+
+        parts = []
+        for sheet_name in sorted(config_data.keys()):
+            df = config_data[sheet_name]
+            table_hash = compute_table_hash(
+                df if isinstance(df, pd.DataFrame) else pd.DataFrame()
+            )
+            parts.append(f"{sheet_name}:{table_hash}")
+        return hashlib.md5("\n".join(parts).encode("utf-8")).hexdigest()
+
+    def _write_to_db(
+        self,
+        dq_result: dict[str, Any] | None = None,
+        *,
+        write_config: bool = True,
+    ) -> None:
+        """将 DQ 检测结果 + 配置数据写入 DB 缓存。
+
+        Args:
+            dq_result: DQ 校验返回的完整结果。
+            write_config: 是否同时将配置数据写入 cfg_* 表。
+                DQ 阻断时应设为 False，避免将问题数据覆盖已有配置表。
+        """
+        config_hash = self._compute_config_hash(self.all_config)
+        self.persistence.save_dq_result(
+            config_name=self.config_name or "unknown",
+            config_hash=config_hash,
+            config_data=self.all_config,
+            dq_result=dq_result,
+            write_config=write_config,
+        )
+        logger.info(
+            f"DB 缓存: 已写入 hash={config_hash[:12]}... "
+            f"(write_config={write_config}, "
+            f"{len(self.all_config)} 张表)"
+        )
+
+    # ══════════════════════════════════════════
+    # 配置缓存（DB 去重）
+    # ══════════════════════════════════════════
+
+    def _try_load_config_from_db(self) -> bool:
+        """尝试从 DB 缓存加载配置，跳过文件读取和 DQ 校验。
+
+        流程：
+        1. 查 ``cfg_dq_check_result`` 表是否有该 config_name 的缓存记录
+        2. 有记录 → 从 DB cfg_* 表读回配置 → 计算 hash → 与缓存中 hash 比对
+        3. hash 一致 → 填充 ``self.all_config``，返回 True
+        4. 无记录或 hash 不一致 → 返回 False，由调用方走文件加载
+
+        Returns:
+            True 表示成功从 DB 缓存加载，False 表示需要走文件加载。
+        """
+        if self.db is None:
+            return False
+
+        config_name = self.config_name
+        if not config_name:
+            return False
+
+        try:
+            # 查缓存表中是否有该 config_name 的记录
+            table_name = "cfg_dq_check_result"
+            rows = self.db.execute_query(
+                f"SELECT config_hash FROM {table_name} "
+                f"WHERE config_name = %s "
+                f"LIMIT 1",
+                (config_name,),
+            )
+            if not rows:
+                logger.info(f"DB 缓存: 未找到 {config_name} 的记录，将走文件加载")
+                return False
+
+            stored_hash = rows[0][0]
+
+            # 从 cfg_* 表读回配置数据
+            restored = self._load_calc_datas()
+            if not restored:
+                logger.info("DB 缓存: cfg_* 表无数据，将走文件加载")
+                return False
+
+            # 计算读回数据的 hash 并比对
+            current_hash = self._compute_config_hash(restored)
+
+            if current_hash != stored_hash:
+                logger.info(
+                    f"DB 缓存: hash 不一致 "
+                    f"(存储={stored_hash[:12]}..., 当前={current_hash[:12]}...)，"
+                    f"将走文件加载"
+                )
+                return False
+
+            # hash 一致，使用 DB 数据
+            self.all_config = restored
+            logger.info(
+                f"DB 缓存: hash 一致，已从 DB 加载 {len(restored)} 张配置表 "
+                f"(跳过文件加载和 DQ 校验)"
+            )
+            return True
+
+        except Exception as e:
+            logger.info(f"DB 缓存: 查询失败（将走文件加载）: {e}")
+            return False
 
     # ══════════════════════════════════════════
     # 模块配置分发

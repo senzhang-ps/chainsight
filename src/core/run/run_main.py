@@ -37,6 +37,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from ..main_integration import (
     run_integrated_simulation,
     load_configuration,
+    prepare_configuration,
+    validate_input_quality,
     check_resume_capability,
 )
 from ...utils.logger_config import setup_logging
@@ -229,7 +231,13 @@ def main(argv: list[str] | None = None) -> int:
 
     # 尽早加载配置以便在出现结构/格式问题时快速失败
     #（该调用会返回可供运行函数使用的对象，或用于校验配置文件。）
-    _ = load_configuration(cfg)  # noqa: F841
+    raw_config = load_configuration(cfg)
+    dq_result = validate_input_quality(
+        raw_config,
+        config_name=cfg.excel_path.stem,
+        sub_node="input_pre.run_main",
+    )
+    _ = prepare_configuration(dq_result["cleaned_tables"])  # noqa: F841
 
     # 为 --list-runs 提前获取根目录与日期参数。
     # 输出目录命名：使用 ConfigDir.output_subpath = "<project>/<scenario>" 二级目录；

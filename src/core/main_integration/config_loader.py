@@ -1,14 +1,9 @@
-"""
-config_loader.py
-
-配置加载与标准化模块。
-"""
+"""Configuration loading, input quality validation, and preparation helpers."""
 from __future__ import annotations
 
 import logging
-import os
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import pandas as pd
@@ -16,218 +11,205 @@ import pandas as pd
 from ...utils.normalization import normalize_identifiers
 
 if TYPE_CHECKING:
-    # 仅类型检查使用，运行期不导入，避免 main_integration ↔ run 循环依赖。
     from ..run.config_dir import ConfigDir
 
-# 复用 src/utils/logger_config.py::DualLogger 创建的同名 logger，
-# 这样消息既能进控制台又能进 simulation_log_*.txt。
-logger = logging.getLogger("SupplyChainSimulation")
 
+logger = logging.getLogger("SupplyChainSimulation")
 
 _EXCEL_SUFFIXES = {".xlsx", ".xlsm", ".xls"}
 
+_DB_SHEET_MAPPING = {
+    "sit_design": "SIT Design",
+    "global_seed": "Global_seed",
+    "config_guide": "Config Guide",
+    "global_network": "Global_Network",
+    "global_spacecapacity": "Global_SpaceCapacity",
+    "global_leadtime": "Global_LeadTime",
+    "global_demandpriority": "Global_DemandPriority",
+    "m1_initialinventory": "M1_InitialInventory",
+    "m1_initialinventory_30d": "M1_InitialInventory_30D",
+    "sheet1": "Sheet1",
+    "m1_demandforecast": "M1_DemandForecast",
+    "m1_forecasterror": "M1_ForecastError",
+    "m1_ordercalendar": "M1_OrderCalendar",
+    "m1_aoconfig": "M1_AOConfig",
+    "m1_dpsconfig": "M1_DPSConfig",
+    "m1_supplychoiceconfig": "M1_SupplyChoiceConfig",
+    "m3_safetystock": "M3_SafetyStock",
+    "covalidation": "COValidation",
+    "m4_materiallocationlinecfg": "M4_MaterialLocationLineCfg",
+    "m4_linecapacity": "M4_LineCapacity",
+    "m4_changeovermatrix": "M4_ChangeoverMatrix",
+    "m4_changeoverdefinition": "M4_ChangeoverDefinition",
+    "m4_productionreliability": "M4_ProductionReliability",
+    "m5_pushpullmodel": "M5_PushPullModel",
+    "m5_deployconfig": "M5_DeployConfig",
+    "m6_truckreleasecon": "M6_TruckReleaseCon",
+    "m6_materialmd": "M6_MaterialMD",
+    "m6_deliverydelaydistribution": "M6_DeliveryDelayDistribution",
+    "m6_mdqbypassrules": "M6_MDQBypassRules",
+    "m6_trucktypespecs": "M6_TruckTypeSpecs",
+    "m6_truckcapacityplan": "M6_TruckCapacityPlan",
+}
 
-def load_configuration_from_dict(config_data: dict, config_name: str = "DB_Config") -> dict:
-    """从DataFrame字典加载与标准化配置数据（用于数据库模式）
+_DB_COLUMN_MAPPING = {
+    "material": "material",
+    "location": "location",
+    "sourcing": "sourcing",
+    "location_type": "location_type",
+    "quantity": "quantity",
+    "date": "date",
+    "week": "week",
+    "day": "day",
+    "seed": "seed",
+    "eff_from": "eff_from",
+    "eff_to": "eff_to",
+    "demand_element": "demand_element",
+    "priority": "priority",
+    "order_type": "order_type",
+    "error_std_percent": "error_std_percent",
+    "order_day_flag": "order_day_flag",
+    "advance_days": "advance_days",
+    "ao_percent": "ao_percent",
+    "dps_location": "dps_location",
+    "dps_percent": "dps_percent",
+    "safety_stock_qty": "safety_stock_qty",
+    "key": "key",
+    "sending": "sending",
+    "receiving": "receiving",
+    "pdt": "PDT",
+    "gr": "GR",
+    "mct": "MCT",
+    "otd": "OTD",
+    "delegate_line": "delegate_line",
+    "prd_rate": "prd_rate",
+    "min_batch": "min_batch",
+    "rv": "rv",
+    "ptf": "ptf",
+    "lsk": "lsk",
+    "line": "line",
+    "capacity": "capacity",
+    "from_material": "from_material",
+    "to_material": "to_material",
+    "changeover_id": "changeover_id",
+    "from_line": "from line",
+    "to_line": "to line",
+    "time": "time",
+    "cost": "cost",
+    "mu_loss": "mu_loss",
+    "pr": "pr",
+    "model": "model",
+    "moq": "moq",
+    "truck_type": "truck_type",
+    "optimal_type": "optimal_type",
+    "wfr": "WFR",
+    "vfr": "VFR",
+    "mdq": "MDQ",
+    "weight": "weight",
+    "volume": "volume",
+    "demand_unit_to_weight": "demand_unit_to_weight",
+    "demand_unit_to_volume": "demand_unit_to_volume",
+    "delay_days": "delay_days",
+    "probability": "probability",
+    "condition_logic": "condition_logic",
+    "rule_id": "rule_id",
+    "max_weight": "max_weight",
+    "max_volume": "max_volume",
+    "capacity_qty_in_weight": "capacity_qty_in_weight",
+    "capacity_qty_in_volume": "capacity_qty_in_volume",
+}
 
-    目的：
-    - 直接接收DataFrame字典，无需创建临时Excel文件
-    - 执行与load_configuration基本一致的标准化、去重与键映射流程
+_DB_METADATA_COLUMNS = {"config_name", "config_type", "db_write_time"}
+_REQUIRED_SHEET_ORDER = [
+    "M1_InitialInventory",
+    "Global_SpaceCapacity",
+    "Global_Network",
+    "Global_LeadTime",
+    "Global_DemandPriority",
+]
+_REQUIRED_SHEETS = set(_REQUIRED_SHEET_ORDER)
+_IDENTIFIER_COLUMNS = [
+    "material",
+    "location",
+    "sending",
+    "receiving",
+    "sourcing",
+    "dps_location",
+    "from_material",
+    "to_material",
+    "line",
+    "delegate_line",
+    "changeover_id",
+]
+_MODULE4_MAPPINGS = {
+    "M4_MaterialLocationLineCfg": "MaterialLocationLineCfg",
+    "M4_LineCapacity": "LineCapacity",
+    "M4_ChangeoverMatrix": "ChangeoverMatrix",
+    "M4_ChangeoverDefinition": "ChangeoverDefinition",
+    "M4_ProductionReliability": "ProductionReliability",
+}
 
-    Args:
-        config_data: 配置数据字典 {sheet_name: DataFrame}
-        config_name: 配置名称（用于日志）
 
-    Returns:
-        dict: 标准化后的配置数据字典
-    """
-    logger.info(f"📋 处理配置数据: {config_name} (共 {len(config_data)} 个表)")
+def load_configuration_from_dict(
+    config_data: dict,
+    config_name: str = "DB_Config",
+) -> dict[str, pd.DataFrame]:
+    """Convert DB-origin configuration frames into local sheet-shaped tables."""
+    logger.info(
+        "Processing configuration data: %s (%d tables)",
+        config_name,
+        len(config_data),
+    )
 
-    # Sheet 名称映射（数据库小写表名 -> 集成流程沿用的工作表名/历史别名）
-    sheet_mapping = {
-        'sit_design': 'SIT Design',
-        'global_seed': 'Global_seed',
-        'config_guide': 'Config Guide',
-        'global_network': 'Global_Network',
-        'global_spacecapacity': 'Global_SpaceCapacity',
-        'global_leadtime': 'Global_LeadTime',
-        'global_demandpriority': 'Global_DemandPriority',
-        'm1_initialinventory': 'M1_InitialInventory',
-        'm1_initialinventory_30d': 'M1_InitialInventory_30D',
-        'sheet1': 'Sheet1',
-        'm1_demandforecast': 'M1_DemandForecast',
-        'm1_forecasterror': 'M1_ForecastError',
-        'm1_ordercalendar': 'M1_OrderCalendar',
-        'm1_aoconfig': 'M1_AOConfig',
-        'm1_dpsconfig': 'M1_DPSConfig',
-        'm1_supplychoiceconfig': 'M1_SupplyChoiceConfig',
-        'm3_safetystock': 'M3_SafetyStock',
-        'covalidation': 'COValidation',
-        'm4_materiallocationlinecfg': 'M4_MaterialLocationLineCfg',
-        'm4_linecapacity': 'M4_LineCapacity',
-        'm4_changeovermatrix': 'M4_ChangeoverMatrix',
-        'm4_changeoverdefinition': 'M4_ChangeoverDefinition',
-        'm4_productionreliability': 'M4_ProductionReliability',
-        'm5_pushpullmodel': 'M5_PushPullModel',
-        'm5_deployconfig': 'M5_DeployConfig',
-        'm6_truckreleasecon': 'M6_TruckReleaseCon',
-        'm6_materialmd': 'M6_MaterialMD',
-        'm6_deliverydelaydistribution': 'M6_DeliveryDelayDistribution',
-        'm6_mdqbypassrules': 'M6_MDQBypassRules',
-        'm6_trucktypespecs': 'M6_TruckTypeSpecs',
-        'm6_truckcapacityplan': 'M6_TruckCapacityPlan',
-    }
-    
-    # 列名映射（数据库小写 -> 原始大小写）
-    column_mapping = {
-        'material': 'material', 'location': 'location', 'sourcing': 'sourcing',
-        'location_type': 'location_type', 'quantity': 'quantity', 'date': 'date',
-        'week': 'week', 'day': 'day', 'seed': 'seed', 'eff_from': 'eff_from',
-        'eff_to': 'eff_to', 'demand_element': 'demand_element', 'priority': 'priority',
-        'order_type': 'order_type', 'error_std_percent': 'error_std_percent',
-        'order_day_flag': 'order_day_flag', 'advance_days': 'advance_days',
-        'ao_percent': 'ao_percent', 'dps_location': 'dps_location',
-        'dps_percent': 'dps_percent', 'safety_stock_qty': 'safety_stock_qty',
-        'key': 'key', 'sending': 'sending', 'receiving': 'receiving',
-        'pdt': 'PDT', 'gr': 'GR', 'mct': 'MCT', 'otd': 'OTD',
-        'delegate_line': 'delegate_line', 'prd_rate': 'prd_rate',
-        'min_batch': 'min_batch', 'rv': 'rv', 'ptf': 'ptf', 'lsk': 'lsk',
-        'line': 'line', 'capacity': 'capacity', 'from_material': 'from_material',
-        'to_material': 'to_material', 'changeover_id': 'changeover_id',
-        'from_line': 'from line', 'to_line': 'to line', 'time': 'time',
-        'cost': 'cost', 'mu_loss': 'mu_loss', 'pr': 'pr', 'model': 'model',
-        'moq': 'moq', 'truck_type': 'truck_type', 'optimal_type': 'optimal_type',
-        'wfr': 'WFR', 'vfr': 'VFR', 'mdq': 'MDQ', 'weight': 'weight',
-        'volume': 'volume', 'demand_unit_to_weight': 'demand_unit_to_weight',
-        'demand_unit_to_volume': 'demand_unit_to_volume', 'delay_days': 'delay_days',
-        'probability': 'probability', 'condition_logic': 'condition_logic',
-        'rule_id': 'rule_id', 'max_weight': 'max_weight', 'max_volume': 'max_volume',
-        'capacity_qty_in_weight': 'capacity_qty_in_weight',
-        'capacity_qty_in_volume': 'capacity_qty_in_volume',
-    }
-    
-    config_dict = {}
-    
-    # 转换配置数据
+    config_dict: dict[str, pd.DataFrame] = {}
     for db_name, df in config_data.items():
         if not isinstance(df, pd.DataFrame):
             continue
-        
-        # 映射sheet名称
-        sheet_name = sheet_mapping.get(db_name.lower(), db_name)
-        
-        # 恢复列名大小写
-        df_copy = df.copy()
-        df_copy.columns = [column_mapping.get(col.lower(), col) for col in df_copy.columns]
-        
-        # 清理残留的 DB 元数据列和非标准列（防止影响模块计算）
-        drop_cols = [c for c in df_copy.columns 
-                     if c in ('config_name', 'config_type', 'db_write_time')
-                     or c.lower().startswith('unnamed')
-                     or (not c.isascii() and c not in column_mapping.values())]
-        if drop_cols:
-            df_copy = df_copy.drop(columns=drop_cols, errors='ignore')
-        # 删除全为 NULL 的列（来自其他配置的表结构残留），但保留原有列结构
-        cols_before = set(df_copy.columns)
-        df_copy = df_copy.dropna(axis=1, how='all')
-        for col in cols_before - set(df_copy.columns):
-            df_copy[col] = pd.NA
-
-        config_dict[sheet_name] = df_copy
-        logger.info(f"  ✅ 加载配置表: {sheet_name} ({len(df_copy)} 行)")
-    
-    # 确保必要的配置表存在
-    required_sheets = [
-        'M1_InitialInventory',
-        'Global_SpaceCapacity',
-        'Global_Network',
-        'Global_LeadTime',
-        'Global_DemandPriority'
-    ]
-    
-    missing_sheets = [sheet for sheet in required_sheets if sheet not in config_dict]
-    if missing_sheets:
-        logger.warning(f"⚠️  缺少必要配置表: {missing_sheets}")
-        for sheet in missing_sheets:
-            config_dict[sheet] = pd.DataFrame()
-    
-    # 统一标准化所有配置表的标识符字段
-    logger.info("🔧 正在标准化标识符字段...")
-    standardized_count = 0
-    for sheet_name, df in config_dict.items():
-        if isinstance(df, pd.DataFrame) and not df.empty:
-            identifier_cols = ['material', 'location', 'sending', 'receiving', 'sourcing', 
-                             'dps_location', 'from_material', 'to_material', 'line', 
-                             'delegate_line', 'changeover_id']
-            has_identifiers = any(col in df.columns for col in identifier_cols)
-            
-            if has_identifiers:
-                original_dtypes = {col: str(df[col].dtype) for col in identifier_cols if col in df.columns}
-                config_dict[sheet_name] = normalize_identifiers(df)
-                new_dtypes = {col: str(config_dict[sheet_name][col].dtype) for col in identifier_cols if col in config_dict[sheet_name].columns}
-                
-                normalized_fields = []
-                for col in identifier_cols:
-                    if col in df.columns and original_dtypes[col] != new_dtypes[col]:
-                        normalized_fields.append(f"{col}({original_dtypes[col]}→{new_dtypes[col]})")
-                
-                if normalized_fields:
-                    logger.info(f"  🔧 {sheet_name}: {', '.join(normalized_fields)}")
-                    standardized_count += 1
-    
-    if standardized_count > 0:
-        logger.info(f"✅ 已标准化 {standardized_count} 个配置表的标识符字段")
-
-    # Changeover 配置校验和去重
-    if 'M4_ChangeoverMatrix' in config_dict and not config_dict['M4_ChangeoverMatrix'].empty:
-        logger.info("\n🔧 校验 Changeover Matrix 配置...")
-        co_matrix = config_dict['M4_ChangeoverMatrix']
-        duplicates = co_matrix[co_matrix.duplicated(subset=['from_material', 'to_material'], keep=False)]
-        if not duplicates.empty:
-            original_count = len(co_matrix)
-            config_dict['M4_ChangeoverMatrix'] = co_matrix.drop_duplicates(
-                subset=['from_material', 'to_material'], keep='first'
-            )
-            logger.info(f"  🔧 已去除 {original_count - len(config_dict['M4_ChangeoverMatrix'])} 条重复记录")
-        else:
-            logger.info("  ✅ Changeover Matrix 无重复定义")
-
-    # ChangeoverDefinition 配置校验和去重
-    if 'M4_ChangeoverDefinition' in config_dict and not config_dict['M4_ChangeoverDefinition'].empty:
-        logger.info("\n🔧 校验 Changeover Definition 配置...")
-        co_def = config_dict['M4_ChangeoverDefinition']
-        duplicates = co_def[co_def.duplicated(subset=['changeover_id', 'line'], keep=False)]
-        if not duplicates.empty:
-            original_count = len(co_def)
-            config_dict['M4_ChangeoverDefinition'] = co_def.drop_duplicates(
-                subset=['changeover_id', 'line'], keep='first'
-            )
-            logger.info(f"  🔧 已去除 {original_count - len(config_dict['M4_ChangeoverDefinition'])} 条重复记录")
-        else:
-            logger.info("  ✅ Changeover Definition 无重复定义")
-
-    # Module4 配置表映射
-    logger.info("\n🔧 正在映射 Module4 配置表...")
-    module4_mappings = {
-        'M4_MaterialLocationLineCfg': 'MaterialLocationLineCfg',
-        'M4_LineCapacity': 'LineCapacity',
-        'M4_ChangeoverMatrix': 'ChangeoverMatrix',
-        'M4_ChangeoverDefinition': 'ChangeoverDefinition',
-        'M4_ProductionReliability': 'ProductionReliability'
-    }
-    
-    mapped_count = 0
-    for original_key, mapped_key in module4_mappings.items():
-        if original_key in config_dict and not config_dict[original_key].empty:
-            config_dict[mapped_key] = config_dict[original_key]
-            logger.info(f"  🔧 映射 {original_key} → {mapped_key}")
-            mapped_count += 1
-    
-    if mapped_count > 0:
-        logger.info(f"✅ 已映射 {mapped_count} 个 Module4 配置表")
-
-    _validate_config_dict(config_dict)
+        sheet_name = _DB_SHEET_MAPPING.get(str(db_name).lower(), str(db_name))
+        converted_df = _convert_db_config_frame(df)
+        config_dict[sheet_name] = converted_df
+        logger.info(
+            "  Loaded configuration table: %s (%d rows)",
+            sheet_name,
+            len(converted_df),
+        )
     return config_dict
+
+
+def _convert_db_config_frame(df: pd.DataFrame) -> pd.DataFrame:
+    """Restore local column names and drop DB-only metadata columns."""
+    df_copy = df.copy()
+    df_copy.columns = [
+        _DB_COLUMN_MAPPING.get(str(column).lower(), column)
+        for column in df_copy.columns
+    ]
+
+    drop_cols = [
+        column for column in df_copy.columns
+        if _should_drop_db_column(column)
+    ]
+    if drop_cols:
+        df_copy = df_copy.drop(columns=drop_cols, errors="ignore")
+
+    cols_before = list(df_copy.columns)
+    df_copy = df_copy.dropna(axis=1, how="all")
+    for column in cols_before:
+        if column not in df_copy.columns:
+            df_copy[column] = pd.NA
+    return df_copy
+
+
+def _should_drop_db_column(column: object) -> bool:
+    """Return True when a DB-origin column should not reach simulation modules."""
+    column_name = str(column)
+    return (
+        column_name in _DB_METADATA_COLUMNS
+        or column_name.lower().startswith("unnamed")
+        or (
+            not column_name.isascii()
+            and column_name not in _DB_COLUMN_MAPPING.values()
+        )
+    )
 
 
 def _align_csv_dtypes_to_excel(
@@ -235,52 +217,43 @@ def _align_csv_dtypes_to_excel(
     xl: pd.ExcelFile,
     sheet_name: str,
 ) -> list[str]:
-    """以 Excel sheet 的列 dtype 为权威，把 CSV 同名列向其对齐（in-place）。
-
-    背景：纯文本 CSV 读出 ``date``/时间戳列默认是 ``str``；同源 Excel 因 cell
-    格式落成 ``datetime64``。两条路径若不对齐，下游 ``df['date'] == Timestamp``
-    会因 dtype 不匹配静默返回空集合（曾在 Module5 batch_optimizer 安全库存过滤
-    复现）。此函数仅做"以 Excel 为基准"的向上兼容性转换，覆盖 datetime / 数值
-    两大类；不动 Excel 中本来就是 object/str 的列。
-
-    返回：实际被对齐的列名列表（用于日志，便于排查）。
-    失败兜底：任一列 cast 异常仅 ``logger.warning``，不抛——避免单列脏数据
-    拖垮整个加载流程。
-    """
+    """Align CSV columns to the same-sheet Excel dtypes in place."""
     aligned: list[str] = []
     try:
-        # 只读 1 行作为 dtype 探针，开销可忽略
         sample = xl.parse(sheet_name, nrows=1)
-    except Exception as e:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001
         logger.warning(
-            f"[CSV-DtypeAlign] 读取 Excel sheet '{sheet_name}' 探针失败，"
-            f"跳过 dtype 对齐：{e}"
+            "[CSV-DtypeAlign] Failed to inspect Excel sheet '%s': %s",
+            sheet_name,
+            exc,
         )
         return aligned
 
-    for col in sample.columns:
-        if col not in csv_df.columns:
+    for column in sample.columns:
+        if column not in csv_df.columns:
             continue
-        target_dtype = sample[col].dtype
-        # 已经一致就跳过
-        if csv_df[col].dtype == target_dtype:
+        target_dtype = sample[column].dtype
+        if csv_df[column].dtype == target_dtype:
             continue
         try:
             if pd.api.types.is_datetime64_any_dtype(target_dtype):
-                csv_df[col] = pd.to_datetime(csv_df[col], errors="coerce")
-                aligned.append(f"{col}→datetime64")
+                csv_df[column] = pd.to_datetime(csv_df[column], errors="coerce")
+                aligned.append(f"{column}->datetime64")
             elif pd.api.types.is_integer_dtype(target_dtype):
-                # CSV 整数列可能因含 NaN 被 pandas 读成 float；按 Excel 期望整数对齐
-                csv_df[col] = pd.to_numeric(csv_df[col], errors="coerce").astype(target_dtype)
-                aligned.append(f"{col}→{target_dtype}")
+                numeric = pd.to_numeric(csv_df[column], errors="coerce")
+                csv_df[column] = numeric.astype(target_dtype)
+                aligned.append(f"{column}->{target_dtype}")
             elif pd.api.types.is_float_dtype(target_dtype):
-                csv_df[col] = pd.to_numeric(csv_df[col], errors="coerce").astype(target_dtype)
-                aligned.append(f"{col}→{target_dtype}")
-            # 其它 dtype（object/bool/string 等）保持 CSV 原状，避免误判
-        except Exception as e:  # noqa: BLE001
+                numeric = pd.to_numeric(csv_df[column], errors="coerce")
+                csv_df[column] = numeric.astype(target_dtype)
+                aligned.append(f"{column}->{target_dtype}")
+        except Exception as exc:  # noqa: BLE001
             logger.warning(
-                f"[CSV-DtypeAlign] sheet '{sheet_name}' 列 '{col}' "
-                f"对齐到 {target_dtype} 失败（保留 CSV 原 dtype）：{e}"
+                "[CSV-DtypeAlign] Failed to align sheet '%s' column '%s' to %s: %s",
+                sheet_name,
+                column,
+                target_dtype,
+                exc,
             )
     return aligned
 
@@ -325,62 +298,23 @@ def load_configuration(
 
     excel_path = str(cfg_dir.excel_path)
     logger.info(
-        f"📋 加载配置目录: {cfg_dir.dir_path}（Excel: {cfg_dir.excel_path.name}, "
-        f"CSV: {len(cfg_dir.csv_map)} 个）"
+        "Loading config directory: %s (Excel: %s, CSV: %d)",
+        cfg_dir.dir_path,
+        cfg_dir.excel_path.name,
+        len(cfg_dir.csv_map),
     )
 
     xl: pd.ExcelFile | None = None
     try:
-        xl = pd.ExcelFile(excel_path)
-
-        # ---- 先把 Excel 的 sheet 名锁定成元组快照，作为匹配唯一权威 ----
-        sheet_names: tuple[str, ...] = tuple(xl.sheet_names)
-        logger.info(f"  📑 Excel sheet 列表（{len(sheet_names)} 个）: {sheet_names}")
-
-        config_dict: dict = {}
-        applied_csv_count = 0
-
-        # ---- 逐 sheet：CSV 无条件优先；CSV 后用 Excel 同 sheet 的 dtype 对齐 ----
-        # 之所以要对齐：CSV 是纯文本，pandas 读出来 date 列会落成 ``str``，
-        # 而 Excel 同列因 cell 格式会落成 ``datetime64``。下游若直接做
-        # ``df['date'] == Timestamp`` 比较，CSV 路径会因 dtype 不匹配而静默
-        # 返回空集合（曾导致 Module5 batch_optimizer 安全库存过滤失效）。
-        # 修复策略：以 Excel sheet 头部 dtypes 为权威，CSV 同名列若需要则 cast。
-        # ``float_precision="round_trip"``：用慢但完整精度的 float 解析器，避免
-        # 默认 C 解析器在末位舍入导致 CSV 与 Excel 浮点列 1e-13 量级漂移。
-        for sheet_name in sheet_names:
-            csv_path = cfg_dir.csv_for_sheet(sheet_name)  # 内部按 .lower() 查 csv_map
-            if csv_path is not None:
-                csv_df = pd.read_csv(csv_path, float_precision="round_trip")
-                aligned_cols = _align_csv_dtypes_to_excel(csv_df, xl, sheet_name)
-                config_dict[sheet_name] = csv_df
-                applied_csv_count += 1
-                align_note = f"，对齐列: {aligned_cols}" if aligned_cols else ""
-                logger.info(
-                    f"  ✅ [CSV优先] {sheet_name} <- {csv_path.name} "
-                    f"({len(csv_df)} 行){align_note}"
-                )
-            else:
-                config_dict[sheet_name] = xl.parse(sheet_name)
-                logger.info(f"  ✅ [Excel] {sheet_name} ({len(config_dict[sheet_name])} 行)")
-
-        # ---- 仅有 CSV、Excel 无对应 sheet 的扩展数据源 ----
-        loaded_lower = {s.lower() for s in sheet_names}
-        for stem_lower, csv_path in cfg_dir.csv_map.items():
-            if stem_lower not in loaded_lower:
-                # 用 CSV 文件名（保留原大小写）作为 sheet 名
-                config_dict[csv_path.stem] = pd.read_csv(
-                    csv_path, float_precision="round_trip"
-                )
-                logger.info(
-                    f"  ✅ [CSV扩展] {csv_path.stem} <- {csv_path.name} "
-                    f"({len(config_dict[csv_path.stem])} 行)"
-                )
-
+        xl = pd.ExcelFile(str(cfg_dir.excel_path))
+        sheet_names = tuple(xl.sheet_names)
+        config_dict = _load_excel_authoritative_tables(cfg_dir, xl, sheet_names)
+        config_dict.update(_load_csv_extension_tables(cfg_dir, sheet_names))
         logger.info(
-            f"📊 配置加载汇总: 共 {len(config_dict)} 个配置表 "
-            f"(Excel sheet: {len(sheet_names)}, CSV 优先覆盖: {applied_csv_count}, "
-            f"CSV 总数: {len(cfg_dir.csv_map)})"
+            "Configuration load summary: tables=%d, excel_sheets=%d, csv_total=%d",
+            len(config_dict),
+            len(sheet_names),
+            len(cfg_dir.csv_map),
         )
 
         # # ---- input DQ：CSV dtype 对齐之后、identifier normalize 之前 ----
@@ -545,27 +479,286 @@ def load_configuration(
         _validate_config_dict(config_dict)
 
         return config_dict
-    except Exception as e:
-        logger.error(f"❌ 配置加载失败: {e}")
+    except Exception as exc:
+        logger.error("Configuration load failed: %s", exc)
         raise
     finally:
-        # 显式关闭，避免 Windows 上 ExcelFile 句柄滞留导致同目录文件无法删除/移动。
         if xl is not None:
             try:
                 xl.close()
-            except Exception:  # noqa: BLE001 — 关闭失败不该掩盖主异常
+            except Exception:  # noqa: BLE001
                 pass
 
 
-# ---------- 完整性校验 ----------
-# 业务必需 sheet 名称（大小写不敏感匹配）。与 load_configuration 内 required_sheets 一致。
-_REQUIRED_SHEETS: set[str] = {
-    "M1_InitialInventory",
-    "Global_SpaceCapacity",
-    "Global_Network",
-    "Global_LeadTime",
-    "Global_DemandPriority",
-}
+def _coerce_config_dir(config) -> "ConfigDir":
+    """Convert supported config inputs to a ConfigDir."""
+    if hasattr(config, "excel_path") and hasattr(config, "csv_map"):
+        return config
+
+    from ..run.config_dir import ConfigDir
+
+    return ConfigDir.from_excel_path(config)
+
+
+def _load_excel_authoritative_tables(
+    cfg_dir: "ConfigDir",
+    xl: pd.ExcelFile,
+    sheet_names: tuple[str, ...],
+) -> dict[str, pd.DataFrame]:
+    """Load every Excel sheet, replacing a sheet with same-stem CSV when present."""
+    config_dict: dict[str, pd.DataFrame] = {}
+    applied_csv_count = 0
+
+    for sheet_name in sheet_names:
+        csv_path = cfg_dir.csv_for_sheet(sheet_name)
+        if csv_path is None:
+            config_dict[sheet_name] = xl.parse(sheet_name)
+            logger.info(
+                "  Loaded Excel sheet: %s (%d rows)",
+                sheet_name,
+                len(config_dict[sheet_name]),
+            )
+            continue
+
+        csv_df = pd.read_csv(csv_path, float_precision="round_trip")
+        aligned_cols = _align_csv_dtypes_to_excel(csv_df, xl, sheet_name)
+        config_dict[sheet_name] = csv_df
+        applied_csv_count += 1
+        logger.info(
+            "  Loaded CSV override: %s <- %s (%d rows, aligned=%s)",
+            sheet_name,
+            csv_path.name,
+            len(csv_df),
+            aligned_cols,
+        )
+
+    logger.info("CSV overrides applied: %d", applied_csv_count)
+    return config_dict
+
+
+def _load_csv_extension_tables(
+    cfg_dir: "ConfigDir",
+    sheet_names: tuple[str, ...],
+) -> dict[str, pd.DataFrame]:
+    """Load CSV files that do not match any Excel sheet name."""
+    loaded_lower = {sheet_name.lower() for sheet_name in sheet_names}
+    extension_tables: dict[str, pd.DataFrame] = {}
+    for stem_lower, csv_path in cfg_dir.csv_map.items():
+        if stem_lower in loaded_lower:
+            continue
+        extension_tables[csv_path.stem] = pd.read_csv(
+            csv_path,
+            float_precision="round_trip",
+        )
+        logger.info(
+            "  Loaded CSV extension: %s <- %s (%d rows)",
+            csv_path.stem,
+            csv_path.name,
+            len(extension_tables[csv_path.stem]),
+        )
+    return extension_tables
+
+
+def validate_input_quality(
+    config_dict: dict[str, pd.DataFrame],
+    *,
+    config_name: str,
+    sub_node: str,
+    report_dir: str | Path | None = None,
+    checker=None,
+) -> dict[str, Any]:
+    """Run input data quality checks and return the checker result."""
+    if checker is None:
+        from ...utils.data_quality import ConfigInputDataQualityChecker
+
+        checker = ConfigInputDataQualityChecker.from_defaults()
+
+    dq_result = checker.validate(
+        config_dict,
+        config_name=config_name,
+        sub_node=sub_node,
+        write_reports=report_dir is not None,
+        output_dir=report_dir,
+    )
+    logger.info(
+        "Input DQ complete: issues=%s, ignored_sheets=%s, ignored_columns=%s, blocked=%s",
+        dq_result["summary"].get("issues"),
+        dq_result["summary"].get("ignored_sheets"),
+        dq_result["summary"].get("ignored_columns"),
+        dq_result["blocked"],
+    )
+    if dq_result["blocked"]:
+        from ...utils.data_quality import DataQualityError
+
+        raise DataQualityError("Input DQ blocked configuration processing")
+    return dq_result
+
+
+def ensure_required_sheets(
+    config_dict: dict[str, pd.DataFrame],
+) -> dict[str, pd.DataFrame]:
+    """Return a config dict with required sheets present as empty frames."""
+    prepared = dict(config_dict)
+    loaded_lower = {sheet_name.lower() for sheet_name in prepared}
+    missing_sheets = [
+        sheet_name for sheet_name in _REQUIRED_SHEET_ORDER
+        if sheet_name.lower() not in loaded_lower
+    ]
+    if missing_sheets:
+        logger.warning("Missing required configuration sheets: %s", missing_sheets)
+    for sheet_name in missing_sheets:
+        prepared[sheet_name] = pd.DataFrame()
+    return prepared
+
+
+def normalize_configuration_identifiers(
+    config_dict: dict[str, pd.DataFrame],
+) -> dict[str, pd.DataFrame]:
+    """Return a config dict with identifier columns normalized."""
+    prepared = dict(config_dict)
+    standardized_count = 0
+    for sheet_name, df in config_dict.items():
+        if not isinstance(df, pd.DataFrame) or df.empty:
+            continue
+        if not any(column in df.columns for column in _IDENTIFIER_COLUMNS):
+            continue
+
+        original_dtypes = {
+            column: str(df[column].dtype)
+            for column in _IDENTIFIER_COLUMNS
+            if column in df.columns
+        }
+        normalized_df = normalize_identifiers(df)
+        prepared[sheet_name] = normalized_df
+        new_dtypes = {
+            column: str(normalized_df[column].dtype)
+            for column in _IDENTIFIER_COLUMNS
+            if column in normalized_df.columns
+        }
+        changed_fields = [
+            f"{column}({original_dtypes[column]}->{new_dtypes[column]})"
+            for column in original_dtypes
+            if original_dtypes[column] != new_dtypes[column]
+        ]
+        if changed_fields:
+            logger.info("  Normalized %s: %s", sheet_name, ", ".join(changed_fields))
+            standardized_count += 1
+
+    logger.info("Identifier normalization completed for %d tables", standardized_count)
+    return prepared
+
+
+def deduplicate_changeover_configuration(
+    config_dict: dict[str, pd.DataFrame],
+) -> dict[str, pd.DataFrame]:
+    """Return a config dict with duplicate Changeover rows removed."""
+    prepared = dict(config_dict)
+    _deduplicate_changeover_matrix(prepared)
+    _deduplicate_changeover_definition(prepared)
+    return prepared
+
+
+def _deduplicate_changeover_matrix(config_dict: dict[str, pd.DataFrame]) -> None:
+    """Deduplicate M4_ChangeoverMatrix rows in place."""
+    sheet_name = "M4_ChangeoverMatrix"
+    if sheet_name not in config_dict or config_dict[sheet_name].empty:
+        return
+
+    co_matrix = config_dict[sheet_name]
+    duplicates = co_matrix[
+        co_matrix.duplicated(subset=["from_material", "to_material"], keep=False)
+    ]
+    if duplicates.empty:
+        logger.info("  Changeover Matrix has no duplicate definitions")
+        return
+
+    logger.warning("  Found %d duplicate changeover matrix rows", len(duplicates))
+    for (from_mat, to_mat), group in duplicates.groupby(["from_material", "to_material"]):
+        unique_coids = group["changeover_id"].unique()
+        if len(unique_coids) > 1:
+            logger.error(
+                "    %s -> %s has multiple changeover_id values: %s",
+                from_mat,
+                to_mat,
+                list(unique_coids),
+            )
+        else:
+            logger.warning(
+                "    %s -> %s has %d duplicate rows (changeover_id=%s)",
+                from_mat,
+                to_mat,
+                len(group),
+                unique_coids[0],
+            )
+    config_dict[sheet_name] = co_matrix.drop_duplicates(
+        subset=["from_material", "to_material"],
+        keep="first",
+    )
+
+
+def _deduplicate_changeover_definition(config_dict: dict[str, pd.DataFrame]) -> None:
+    """Deduplicate M4_ChangeoverDefinition rows in place."""
+    sheet_name = "M4_ChangeoverDefinition"
+    if sheet_name not in config_dict or config_dict[sheet_name].empty:
+        return
+
+    co_def = config_dict[sheet_name]
+    duplicates = co_def[
+        co_def.duplicated(subset=["changeover_id", "line"], keep=False)
+    ]
+    if duplicates.empty:
+        logger.info("  Changeover Definition has no duplicate definitions")
+        return
+
+    logger.warning("  Found %d duplicate changeover definition rows", len(duplicates))
+    for (coid, line), group in duplicates.groupby(["changeover_id", "line"]):
+        unique_times = group["time"].unique()
+        if len(unique_times) > 1:
+            logger.error(
+                "    changeover_id=%s, line=%s has multiple time values: %s",
+                coid,
+                line,
+                list(unique_times),
+            )
+        else:
+            logger.warning(
+                "    changeover_id=%s, line=%s has %d duplicate rows (time=%s)",
+                coid,
+                line,
+                len(group),
+                unique_times[0],
+            )
+    config_dict[sheet_name] = co_def.drop_duplicates(
+        subset=["changeover_id", "line"],
+        keep="first",
+    )
+
+
+def map_module4_configuration_keys(
+    config_dict: dict[str, pd.DataFrame],
+) -> dict[str, pd.DataFrame]:
+    """Return a config dict with Module4 backward-compatible aliases."""
+    prepared = dict(config_dict)
+    mapped_count = 0
+    for original_key, mapped_key in _MODULE4_MAPPINGS.items():
+        if original_key in prepared and not prepared[original_key].empty:
+            prepared[mapped_key] = prepared[original_key]
+            logger.info("  Mapped %s -> %s", original_key, mapped_key)
+            mapped_count += 1
+    logger.info("Mapped %d Module4 configuration tables", mapped_count)
+    return prepared
+
+
+def prepare_configuration(
+    config_dict: dict[str, pd.DataFrame],
+) -> dict[str, pd.DataFrame]:
+    """Prepare loaded configuration tables for simulation consumers."""
+    prepared = ensure_required_sheets(config_dict)
+    prepared = normalize_configuration_identifiers(prepared)
+    prepared = deduplicate_changeover_configuration(prepared)
+    prepared = map_module4_configuration_keys(prepared)
+    _validate_config_dict(prepared)
+    return prepared
 
 
 def _sample_quantity_warning_values(
@@ -573,6 +766,7 @@ def _sample_quantity_warning_values(
     mask: pd.Series,
     limit: int = 5,
 ) -> list[str]:
+    """Return sample values for quantity validation warnings."""
     samples: list[str] = []
     for idx, value in series[mask].head(limit).items():
         samples.append(f"{idx}={value!r}")
@@ -580,17 +774,17 @@ def _sample_quantity_warning_values(
 
 
 def _warn_bad_quantity_columns(config_dict: dict) -> None:
-    """Print warnings for empty or abnormal values in config columns named quantity."""
+    """Print warnings for empty or abnormal values in columns named quantity."""
     for sheet_name, df in config_dict.items():
         if not isinstance(df, pd.DataFrame) or df.empty:
             continue
 
         quantity_cols = [
-            col for col in df.columns
-            if str(col).strip().lower() == "quantity"
+            column for column in df.columns
+            if str(column).strip().lower() == "quantity"
         ]
-        for col in quantity_cols:
-            series = df[col]
+        for column in quantity_cols:
+            series = df[column]
             null_mask = series.isna()
             blank_mask = series.map(
                 lambda value: isinstance(value, str) and value.strip() == ""
@@ -623,7 +817,7 @@ def _warn_bad_quantity_columns(config_dict: dict) -> None:
                 "[ConfigValidation][quantity] sheet='%s' column='%s' has "
                 "empty=%d, non_numeric=%d, infinite=%d. samples=%s",
                 sheet_name,
-                col,
+                column,
                 empty_count,
                 non_numeric_count,
                 infinite_count,
@@ -635,23 +829,20 @@ def _validate_config_dict(
     config_dict: dict,
     required: set[str] | None = None,
 ) -> None:
-    """校验 ``config_dict`` 中必需 sheet 是否全部加载、各 sheet 是否非空。
-
-    当前实现：必需 sheet 缺失走 warning（与现有 ``load_configuration`` "补空表 + warning"
-    语义一致，避免破坏现有可跑配置）；空 DataFrame 走 info 提示。若团队后续决定改成
-    硬失败（缺失即 raise），把 ``logger.warning`` 替换为 ``raise ValueError`` 即可。
-    """
+    """Validate loaded config table presence and obvious empty tables."""
     _warn_bad_quantity_columns(config_dict)
     if required is None:
         required = _REQUIRED_SHEETS
-    loaded_lower = {k.lower() for k in config_dict}
-    missing = sorted(s for s in required if s.lower() not in loaded_lower)
+    loaded_lower = {key.lower() for key in config_dict}
+    missing = sorted(sheet for sheet in required if sheet.lower() not in loaded_lower)
     if missing:
         logger.warning(
-            f"[ConfigValidation] config_dict 缺少必需 sheet：{missing}（已由上游补空表）"
+            "[ConfigValidation] config_dict is missing required sheets: %s",
+            missing,
         )
     for name, df in config_dict.items():
         if isinstance(df, pd.DataFrame) and df.empty:
             logger.info(
-                f"[ConfigValidation] sheet '{name}' 加载后为空 DataFrame，请确认数据源是否有效"
+                "[ConfigValidation] sheet '%s' is an empty DataFrame after loading",
+                name,
             )

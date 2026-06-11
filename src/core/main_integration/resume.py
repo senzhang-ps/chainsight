@@ -13,8 +13,8 @@ from ...utils.normalization import normalize_identifiers
 from ...utils.numeric_safe import safe_int_scalar, safe_int_series
 
 logger = logging.getLogger("SupplyChainSimulation." + __name__)
-# 复用 src/utils/logger_config.py::DualLogger 创建的同�?logger�?
-# 这样进度信息既能进控制台又能�?simulation_log_*.txt�?
+# 复用 src/utils/logger_config.py::DualLogger 创建的主 logger。
+# 这样进度信息既能输出到控制台，也能写入 simulation_log_*.txt。
 sim_logger = logging.getLogger("SupplyChainSimulation")
 
 

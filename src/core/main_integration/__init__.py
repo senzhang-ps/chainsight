@@ -16,6 +16,8 @@ __all__ = [
     "run_integrated_simulation_from_dict",
     "load_configuration",
     "load_configuration_from_dict",
+    "prepare_configuration",
+    "validate_input_quality",
     "check_resume_capability",
     "main",
 ]

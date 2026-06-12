@@ -43,6 +43,17 @@ _ISSUE_TYPE_LABELS_ZH = {
     "duplicate_value": "重复值",
     "checker_exception": "检测器内部异常",
 }
+# 检测步骤标识与检测方法名一一对应（check_0_prepare 为数据准备阶段），
+# 报告"检测项"列直接展示该英文标识。
+_CHECK_IDS = (
+    "check_0_prepare",
+    "check_1_sheets",
+    "check_2_empty",
+    "check_3_duplicates",
+    "check_4_columns",
+    "check_5_fields",
+    "check_6_pkeys",
+)
 
 class ConfigTableQualityRules:
     """基于 schema 字段属性构建配置表字段级检测规则
@@ -227,22 +238,21 @@ class ConfigTableQualityRules:
         self,
         sheet: str,
         df: pd.DataFrame,
-        *,
-        config_name: str | None = None,
     ) -> list[dict[str, Any]]:
         """对单张表执行全部字段级规则
 
         执行顺序固定为：非空检查、类型检查、枚举检查、范围检查、日期顺序检查
-        缺列问题由 ``check_4_missing_columns`` 统一报告，本函数只校验已经存在
+        缺列问题由 ``check_4_columns`` 统一报告，本函数只校验已经存在
         的字段值
 
         Args:
-            sheet: 本地配置表Sheet名
+            sheet: 本地配置表Sheet名（用于查询该表的规则配置）
             df: 已投影到 schema 声明列并去除填充空行的数据
-            config_name: 当前配置名，用于问题归属
 
         Returns:
-            命中问题明细列表；Sheet 未在 schema 声明时返回空列表
+            轻量命中明细列表；Sheet 未在 schema 声明时返回空列表。
+            问题归属（config_name/sheet/check）与标准记录格式由调用方
+            （Checker）补全，本类不依赖任何流程上下文。
         """
         # 获取当前 Sheet 的规则配置；未知 Sheet 不参与字段级检测
         table = self._tables.get(sheet)
@@ -267,18 +277,16 @@ class ConfigTableQualityRules:
             if rule["notnull"]:
                 issues.extend(
                     self.validate_notnull(
-                        sheet, column, series, missing,
+                        column, series, missing,
                         is_primary_key=column in pk_columns,
-                        config_name=config_name,
                     )
                 )
 
             # 类型规则按 db_type 解析非空值；空值留给非空规则处理
             issues.extend(
                 self.validate_type(
-                    sheet, column, series, missing,
+                    column, series, missing,
                     db_type=rule["db_type"],
-                    config_name=config_name,
                 )
             )
 
@@ -286,9 +294,8 @@ class ConfigTableQualityRules:
             if "enumerate" in rule:
                 issues.extend(
                     self.validate_enum(
-                        sheet, column, series, missing,
+                        column, series, missing,
                         allowed=rule["enumerate"],
-                        config_name=config_name,
                     )
                 )
 
@@ -296,27 +303,24 @@ class ConfigTableQualityRules:
             if "range" in rule:
                 issues.extend(
                     self.validate_range(
-                        sheet, column, series, missing,
+                        column, series, missing,
                         min_value=rule["range"][0],
                         max_value=rule["range"][1],
-                        config_name=config_name,
                     )
                 )
 
         # 表级日期起止字段成对存在时，额外校验 start <= end。
         if table["date_pair"] is not None:
-            issues.extend(self.validate_date_order(sheet, df, config_name=config_name))
+            issues.extend(self.validate_date_order(sheet, df))
         return issues
 
     @staticmethod
     def validate_notnull(
-        sheet: str,
         column: str,
         series: pd.Series,
         missing: pd.Series,
         *,
         is_primary_key: bool = False,
-        config_name: str | None = None,
     ) -> list[dict[str, Any]]:
         """校验字段非空。
 
@@ -324,54 +328,48 @@ class ConfigTableQualityRules:
         都视为缺失值。
 
         Args:
-            sheet: 本地配置表 Sheet 名。
             column: 字段名。
             series: 字段值序列。
             missing: 空值掩码（由调用方统一计算复用）。
             is_primary_key: 是否主键字段，主键空值使用独立规则 ID。
-            config_name: 当前配置名。
 
         Returns:
-            命中问题明细列表（最多 SAMPLE_LIMIT 条样例）。
+            轻量命中明细列表（最多 SAMPLE_LIMIT 条样例）；问题归属与
+            标准记录格式由调用方（Checker）补全。
         """
-        # 初始化问题列表；本函数只返回当前字段的非空问题。
+        # 初始化命中列表；本函数只返回当前字段的非空命中。
         issues: list[dict[str, Any]] = []
 
         # 提取命中缺失掩码的行索引，并限制样例数量。
         for idx in list(series.index[missing])[:SAMPLE_LIMIT]:
-            # 构造标准 issue；主键字段使用更明确的规则 ID 和提示。
+            # 构造轻量命中；主键字段使用更明确的规则 ID 和提示。
             issues.append(
-                ConfigInputDataQualityChecker._build_issue(
-                    config_name=config_name,
-                    sheet=sheet,
-                    column=column,
-                    row_index=ConfigInputDataQualityChecker._normalize_row_index(idx),
-                    check="check_5",
-                    issue_type="null_value",
-                    severity="ERROR",
-                    message=(
+                {
+                    "column": column,
+                    "row_index": idx,
+                    "issue_type": "null_value",
+                    "severity": "ERROR",
+                    "message": (
                         f"Primary key field is empty: {column}"
                         if is_primary_key
                         else f"Mapped import field is empty: {column}"
                     ),
-                    original_value=series.loc[idx],
-                    rule_id=(
+                    "original_value": series.loc[idx],
+                    "rule_id": (
                         "primary_key.not_null" if is_primary_key else "field.not_null"
                     ),
-                )
+                }
             )
         return issues
 
     @classmethod
     def validate_type(
         cls,
-        sheet: str,
         column: str,
         series: pd.Series,
         missing: pd.Series,
         *,
         db_type: str,
-        config_name: str | None = None,
     ) -> list[dict[str, Any]]:
         """按 db_type 解析字段值，并报告不可解析的非空值。
 
@@ -380,15 +378,14 @@ class ConfigTableQualityRules:
         及未识别类型不做检查。
 
         Args:
-            sheet: 本地配置表 Sheet 名。
             column: 字段名。
             series: 字段值序列。
             missing: 空值掩码（空值由非空规则负责，类型规则跳过）。
             db_type: schema 声明的数据库字段类型（已小写规整）。
-            config_name: 当前配置名。
 
         Returns:
-            命中问题明细列表（最多 SAMPLE_LIMIT 条样例）。
+            轻量命中明细列表（最多 SAMPLE_LIMIT 条样例）；问题归属与
+            标准记录格式由调用方（Checker）补全。
         """
         # 根据 db_type 选择解析策略，并生成 invalid 掩码。
         if db_type in cls._NUMERIC_DB_TYPES:
@@ -417,97 +414,85 @@ class ConfigTableQualityRules:
             # 文本及未识别类型不做格式解析，避免误报自由文本字段。
             return []
 
-        # 把 invalid 掩码转换为标准问题明细，并限制样例数量。
+        # 把 invalid 掩码转换为轻量命中明细，并限制样例数量。
         issues: list[dict[str, Any]] = []
         for idx in list(series.index[invalid])[:SAMPLE_LIMIT]:
             issues.append(
-                ConfigInputDataQualityChecker._build_issue(
-                    config_name=config_name,
-                    sheet=sheet,
-                    column=column,
-                    row_index=ConfigInputDataQualityChecker._normalize_row_index(idx),
-                    check="check_5",
-                    issue_type="type_mismatch",
-                    severity="ERROR",
-                    message=message,
-                    original_value=series.loc[idx],
-                    rule_id="field.type_mismatch",
-                )
+                {
+                    "column": column,
+                    "row_index": idx,
+                    "issue_type": "type_mismatch",
+                    "severity": "ERROR",
+                    "message": message,
+                    "original_value": series.loc[idx],
+                    "rule_id": "field.type_mismatch",
+                }
             )
         return issues
 
     @staticmethod
     def validate_enum(
-        sheet: str,
         column: str,
         series: pd.Series,
         missing: pd.Series,
         *,
         allowed: set[str],
-        config_name: str | None = None,
     ) -> list[dict[str, Any]]:
         """校验字段值是否属于schema声明的枚举集合。
         校验时会忽略大小写和首尾空白；空值由非空规则处理，枚举规则跳过。
         Args:
-            sheet: 本地配置表 Sheet 名。
             column: 字段名。
             series: 字段值序列。
             missing: 空值掩码（空值由非空规则负责，枚举规则跳过）。
             allowed: 允许值集合（已小写规整）。
-            config_name: 当前配置名。
         Returns:
-            命中问题明细列表（最多 SAMPLE_LIMIT 条样例）。
+            轻量命中明细列表（最多 SAMPLE_LIMIT 条样例）；问题归属与
+            标准记录格式由调用方（Checker）补全。
         """
         # 将非空值标准化为小写去空白文本，再与允许值集合比较。
         invalid = (~missing) & ~series.map(
             lambda value: str(value).strip().lower() in allowed
         ).astype(bool)
 
-        # 把非法枚举值转换为标准问题明细，并限制样例数量。
+        # 把非法枚举值转换为轻量命中明细，并限制样例数量。
         issues: list[dict[str, Any]] = []
         for idx in list(series.index[invalid])[:SAMPLE_LIMIT]:
             issues.append(
-                ConfigInputDataQualityChecker._build_issue(
-                    config_name=config_name,
-                    sheet=sheet,
-                    column=column,
-                    row_index=ConfigInputDataQualityChecker._normalize_row_index(idx),
-                    check="check_5",
-                    issue_type="invalid_enum",
-                    severity="ERROR",
-                    message=f"{column} must be one of {sorted(allowed)}",
-                    original_value=series.loc[idx],
-                    rule_id="field.enum",
-                )
+                {
+                    "column": column,
+                    "row_index": idx,
+                    "issue_type": "invalid_enum",
+                    "severity": "ERROR",
+                    "message": f"{column} must be one of {sorted(allowed)}",
+                    "original_value": series.loc[idx],
+                    "rule_id": "field.enum",
+                }
             )
         return issues
 
     @staticmethod
     def validate_range(
-        sheet: str,
         column: str,
         series: pd.Series,
         missing: pd.Series,
         *,
         min_value: float | None,
         max_value: float | None,
-        config_name: str | None = None,
     ) -> list[dict[str, Any]]:
         """校验数值字段是否落在 schema 声明的闭区间范围内。
         ``None`` 表示对应一侧无边界。无法解析为数值的内容由类型规则报告，
         本函数只检查已经能够解析为数值的非空值。
 
         Args:
-            sheet: 本地配置表 Sheet 名。
             column: 字段名。
             series: 字段值序列。
             missing: 空值掩码；范围判断只针对能解析为数值的有效值。
             min_value: 允许的最小值；为 None 时不校验下界。
             max_value: 允许的最大值；为 None 时不校验上界。
-            config_name: 当前配置名。
 
         Returns:
-            命中问题明细列表（最多 SAMPLE_LIMIT 条样例）。
+            轻量命中明细列表（最多 SAMPLE_LIMIT 条样例）；问题归属与
+            标准记录格式由调用方（Checker）补全。
         """
         # 先尝试解析为数值；不可解析值不在本函数重复报错。
         numeric = pd.to_numeric(series, errors="coerce")
@@ -530,22 +515,19 @@ class ConfigTableQualityRules:
         else:
             message = f"{column} must be <= {max_value}"
 
-        # 把越界样例转换为标准问题明细。
+        # 把越界样例转换为轻量命中明细。
         issues: list[dict[str, Any]] = []
         for idx in list(series.index[invalid])[:SAMPLE_LIMIT]:
             issues.append(
-                ConfigInputDataQualityChecker._build_issue(
-                    config_name=config_name,
-                    sheet=sheet,
-                    column=column,
-                    row_index=ConfigInputDataQualityChecker._normalize_row_index(idx),
-                    check="check_5",
-                    issue_type="out_of_range",
-                    severity="ERROR",
-                    message=message,
-                    original_value=series.loc[idx],
-                    rule_id="field.range",
-                )
+                {
+                    "column": column,
+                    "row_index": idx,
+                    "issue_type": "out_of_range",
+                    "severity": "ERROR",
+                    "message": message,
+                    "original_value": series.loc[idx],
+                    "rule_id": "field.range",
+                }
             )
         return issues
 
@@ -553,8 +535,6 @@ class ConfigTableQualityRules:
         self,
         sheet: str,
         df: pd.DataFrame,
-        *,
-        config_name: str | None = None,
     ) -> list[dict[str, Any]]:
         """校验 date_flag 标记的起止字段满足 ``start <= end``。
 
@@ -562,12 +542,12 @@ class ConfigTableQualityRules:
         两端都能解析为日期时比较先后顺序。
 
         Args:
-            sheet: 本地配置表 Sheet 名。
+            sheet: 本地配置表 Sheet 名（用于查询起止字段规则配置）。
             df: 已投影的配置表数据。
-            config_name: 当前配置名。
 
         Returns:
-            命中问题明细列表（最多 SAMPLE_LIMIT 条样例）。
+            轻量命中明细列表（最多 SAMPLE_LIMIT 条样例）；问题归属与
+            标准记录格式由调用方（Checker）补全。
         """
         # 读取当前表的 date_flag 起止字段配置；未配置则无需检查。
         table = self._tables.get(sheet)
@@ -595,26 +575,23 @@ class ConfigTableQualityRules:
         # 结束日期早于开始日期即为非法日期范围。
         invalid = valid & (end < start)
 
-        # 把非法日期范围样例转换为标准问题明细。
+        # 把非法日期范围样例转换为轻量命中明细（表级命中不带 column）。
         issues: list[dict[str, Any]] = []
         for idx in list(df.index[invalid])[:SAMPLE_LIMIT]:
             issues.append(
-                ConfigInputDataQualityChecker._build_issue(
-                    config_name=config_name,
-                    sheet=sheet,
-                    row_index=ConfigInputDataQualityChecker._normalize_row_index(idx),
-                    check="check_5",
-                    issue_type="invalid_date_range",
-                    severity="ERROR",
-                    message=(
+                {
+                    "row_index": idx,
+                    "issue_type": "invalid_date_range",
+                    "severity": "ERROR",
+                    "message": (
                         f"{end_column} must be greater than or equal to {start_column}"
                     ),
-                    original_value={
+                    "original_value": {
                         start_column: df.at[idx, start_column],
                         end_column: df.at[idx, end_column],
                     },
-                    rule_id="field.date_order",
-                )
+                    "rule_id": "field.date_order",
+                }
             )
         return issues
 
@@ -629,8 +606,7 @@ class ConfigInputDataQualityChecker:
         self.issues: list[dict[str, Any]] = []
         self.result: dict[str, Any] = {}
 
-    #  流程与记录工具方法（静态，无实例状态；问题记录构造亦供
-    # ConfigTableQualityRules 产出问题时复用）
+    #  流程与记录工具方法（静态，无实例状态；标准 issue 由 Checker 统一构造）
 
     @staticmethod
     def _stringify(value: Any) -> str:
@@ -701,6 +677,28 @@ class ConfigInputDataQualityChecker:
         }
 
     @staticmethod
+    def _load_optional_sheets() -> set[str]:
+        """读取 defaults.yaml#data_quality 的可选表清单（optional_import）。
+
+        可选表在输入中存在时才执行检测；缺失时不做任何检测、不记缺表
+        问题。未列入该清单的 schema 表一律按必需表处理（缺失记 ERROR），
+        防止清单遗漏导致漏检。defaults 不可用时返回空集合。
+
+        Returns:
+            可选配置表 Sheet 名集合。
+        """
+        try:
+            from src.utils.defaults import data_quality_config
+        except ImportError:
+            logger.warning(
+                "defaults module unavailable; all sheets treated as required"
+            )
+            return set()
+        cfg = dict(data_quality_config or {})
+        raw = (cfg.get("config_tables") or {}).get("optional_import") or ()
+        return {str(sheet) for sheet in raw}
+
+    @staticmethod
     def _drop_empty_rows(
         df: pd.DataFrame, rules: ConfigTableQualityRules
     ) -> pd.DataFrame:
@@ -728,7 +726,7 @@ class ConfigInputDataQualityChecker:
         severity: str,
         message: str,
         column: str | None = None,
-        row_index: int | str | None = None,
+        row_index: Any = None,
         original_value: Any = None,
         rule_id: str = "",
     ) -> dict[str, Any]:
@@ -737,12 +735,14 @@ class ConfigInputDataQualityChecker:
         Args:
             config_name: 当前配置名，用于问题归属和报告输出。
             sheet: 问题所属的配置表 Sheet 名。
-            check: 命中问题的检测项编号（check_1 ~ check_6）。
+            check: 命中问题的检测步骤标识，与检测方法名一致
+                （见 ``_CHECK_IDS``：check_0_prepare ~ check_6_pkeys）。
             issue_type: 问题类型编码（见 ``_ISSUE_TYPE_LABELS_ZH``）。
             severity: 严重级别（INFO/WARNING/ERROR）。
             message: 问题说明。
             column: 问题字段名；表级问题可不带。
-            row_index: 问题行索引；表级问题可不带。
+            row_index: 问题行索引，接受原始 DataFrame 索引值并在此统一
+                规范化；表级问题可不带。
             original_value: 原始取值快照。
             rule_id: 命中的规则 ID。
 
@@ -753,7 +753,12 @@ class ConfigInputDataQualityChecker:
             "config_name": config_name or "",
             "sheet": sheet,
             "column": column or "",
-            "row_index": "" if row_index is None else row_index,
+            # 行索引在此统一规范化，规则层只需透传原始索引值。
+            "row_index": (
+                ""
+                if row_index is None
+                else ConfigInputDataQualityChecker._normalize_row_index(row_index)
+            ),
             "check": check,
             "issue_type": issue_type,
             "severity": severity,
@@ -799,6 +804,9 @@ class ConfigInputDataQualityChecker:
             sheet for sheet in rules.sheet_names() if enabled.get(sheet, True)
         ]
 
+        # 可选表清单（optional_import）：存在时才检测，缺失时不报缺表问题。
+        optional_sheets = self._load_optional_sheets()
+
         # 识别输入中存在、但 schema 未声明的 Sheet；这类 Sheet 不参与检测。
         undeclared = sorted(set(tables) - set(rules.sheet_names()))
         if undeclared:
@@ -830,7 +838,7 @@ class ConfigInputDataQualityChecker:
                     self._internal_error_issue(
                         config_name=config_name,
                         sheet=sheet,
-                        check="prepare",
+                        check="check_0_prepare",
                         exc=exc,
                     )
                 )
@@ -840,39 +848,43 @@ class ConfigInputDataQualityChecker:
         steps: tuple[tuple[str, Callable[[], None]], ...] = (
             # 检查 schema 声明且已启用的 Sheet 是否存在于输入数据中。
             (
-                "check_1",
-                lambda: self.check_1_required_sheets(
-                    tables, rules, enabled_sheets=enabled_sheets, config_name=config_name
+                "check_1_sheets",
+                lambda: self.check_1_sheets(
+                    tables,
+                    rules,
+                    enabled_sheets=enabled_sheets,
+                    optional_sheets=optional_sheets,
+                    config_name=config_name,
                 ),
             ),
             # 检查完成字段投影和空行过滤后的 Sheet 是否没有有效数据。
             (
-                "check_2",
-                lambda: self.check_2_empty_table(prepared, rules, config_name=config_name),
+                "check_2_empty",
+                lambda: self.check_2_empty(prepared, rules, config_name=config_name),
             ),
             # 检查同一 Sheet 内是否存在全字段完全相同的重复数据行。
             (
-                "check_3",
-                lambda: self.check_3_global_duplicates(
+                "check_3_duplicates",
+                lambda: self.check_3_duplicates(
                     prepared, rules, config_name=config_name
                 ),
             ),
             # 检查原始输入 Sheet 是否缺少 schema 声明的必需字段。
             (
-                "check_4",
-                lambda: self.check_4_missing_columns(
+                "check_4_columns",
+                lambda: self.check_4_columns(
                     tables, rules, enabled_sheets=enabled_sheets, config_name=config_name
                 ),
             ),
             # 检查字段级规则，包括非空、类型、枚举、范围和日期顺序。
             (
-                "check_5",
-                lambda: self.check_5_field_rules(prepared, rules, config_name=config_name),
+                "check_5_fields",
+                lambda: self.check_5_fields(prepared, rules, config_name=config_name),
             ),
             # 检查 schema 主键字段组合是否在同一 Sheet 内重复。
             (
-                "check_6",
-                lambda: self.check_6_primary_key_duplicates(
+                "check_6_pkeys",
+                lambda: self.check_6_pkeys(
                     prepared, rules, config_name=config_name
                 ),
             ),
@@ -914,15 +926,20 @@ class ConfigInputDataQualityChecker:
         # 返回本次检测结果，调用方可继续读取 self.result。
         return self.result
 
-    def check_1_required_sheets(
+    def check_1_sheets(
         self,
         tables: dict[str, pd.DataFrame],
         rules: ConfigTableQualityRules,
         *,
         enabled_sheets: list[str] | None = None,
+        optional_sheets: set[str] | None = None,
         config_name: str | None = None,
     ) -> None:
-        """检测 1：schema 声明且检测开启的表在输入中是否存在。"""
+        """检测 1：schema 声明且检测开启的必需表在输入中是否存在。
+
+        ``optional_sheets``（defaults.yaml#optional_import）中的可选表
+        存在时才进行后续检测；缺失时不做任何检测、不记缺表问题。
+        """
         # 确定本次需要检查的 Sheet 范围；默认使用 schema 全量 Sheet。
         sheets = rules.sheet_names() if enabled_sheets is None else enabled_sheets
 
@@ -931,12 +948,17 @@ class ConfigInputDataQualityChecker:
             if sheet in tables:
                 continue
 
-            # 缺失 Sheet 记录为 ERROR，后续检测项会自动跳过该表。
+            # 可选表缺失：不做任何检测、不记缺表问题，仅日志留痕。
+            if optional_sheets and sheet in optional_sheets:
+                logger.info("Optional sheet is absent; all checks skipped: %s", sheet)
+                continue
+
+            # 必需表缺失记录为 ERROR，后续检测项会自动跳过该表。
             self.issues.append(
-                ConfigInputDataQualityChecker._build_issue(
+                self._build_issue(
                     config_name=config_name,
                     sheet=sheet,
-                    check="check_1",
+                    check="check_1_sheets",
                     issue_type="missing_sheet",
                     severity="ERROR",
                     message=f"Mapped sheet is missing: {sheet}",
@@ -944,7 +966,7 @@ class ConfigInputDataQualityChecker:
                 )
             )
 
-    def check_2_empty_table(
+    def check_2_empty(
         self,
         prepared: dict[str, pd.DataFrame],
         rules: ConfigTableQualityRules,
@@ -961,10 +983,10 @@ class ConfigInputDataQualityChecker:
 
             # 准备后无有效数据行的 Sheet 记录为空表问题。
             self.issues.append(
-                ConfigInputDataQualityChecker._build_issue(
+                self._build_issue(
                     config_name=config_name,
                     sheet=sheet,
-                    check="check_2",
+                    check="check_2_empty",
                     issue_type="empty_table",
                     severity="ERROR",
                     message=f"Mapped import table is empty: {sheet}",
@@ -972,7 +994,7 @@ class ConfigInputDataQualityChecker:
                 )
             )
 
-    def check_3_global_duplicates(
+    def check_3_duplicates(
         self,
         prepared: dict[str, pd.DataFrame],
         rules: ConfigTableQualityRules,
@@ -993,11 +1015,11 @@ class ConfigInputDataQualityChecker:
             # 将重复行样例写入标准问题明细，不修改原始数据。
             for idx in list(df.index[duplicate_mask])[:SAMPLE_LIMIT]:
                 self.issues.append(
-                    ConfigInputDataQualityChecker._build_issue(
+                    self._build_issue(
                         config_name=config_name,
                         sheet=sheet,
-                        row_index=ConfigInputDataQualityChecker._normalize_row_index(idx),
-                        check="check_3",
+                        row_index=idx,
+                        check="check_3_duplicates",
                         issue_type="duplicate_value",
                         severity="ERROR",
                         message="Row is a full duplicate of another row",
@@ -1008,7 +1030,7 @@ class ConfigInputDataQualityChecker:
                     )
                 )
 
-    def check_4_missing_columns(
+    def check_4_columns(
         self,
         tables: dict[str, pd.DataFrame],
         rules: ConfigTableQualityRules,
@@ -1035,11 +1057,11 @@ class ConfigInputDataQualityChecker:
 
                 # 缺失字段记录为 ERROR，字段级规则不会再重复报告该列。
                 self.issues.append(
-                    ConfigInputDataQualityChecker._build_issue(
+                    self._build_issue(
                         config_name=config_name,
                         sheet=sheet,
                         column=column,
-                        check="check_4",
+                        check="check_4_columns",
                         issue_type="missing_import_column",
                         severity="ERROR",
                         message=f"Mapped field is missing: {column}",
@@ -1047,7 +1069,7 @@ class ConfigInputDataQualityChecker:
                     )
                 )
 
-    def check_5_field_rules(
+    def check_5_fields(
         self,
         prepared: dict[str, pd.DataFrame],
         rules: ConfigTableQualityRules,
@@ -1056,13 +1078,20 @@ class ConfigInputDataQualityChecker:
     ) -> None:
         """检测 5：字段级规则（非空/类型/枚举/范围/日期顺序）。"""
         # 逐表委托给 ConfigTableQualityRules，保持字段规则集中管理。
+        # 规则层只返回轻量命中（不含流程上下文），此处补全问题归属
+        # （config_name/sheet/check）后落为标准问题记录。
         for sheet, df in prepared.items():
-            # 将字段级规则返回的问题统一追加到当前检测器 issues。
-            self.issues.extend(
-                rules.validate_fields(sheet, df, config_name=config_name)
-            )
+            for hit in rules.validate_fields(sheet, df):
+                self.issues.append(
+                    self._build_issue(
+                        config_name=config_name,
+                        sheet=sheet,
+                        check="check_5_fields",
+                        **hit,
+                    )
+                )
 
-    def check_6_primary_key_duplicates(
+    def check_6_pkeys(
         self,
         prepared: dict[str, pd.DataFrame],
         rules: ConfigTableQualityRules,
@@ -1084,11 +1113,11 @@ class ConfigInputDataQualityChecker:
             for idx in list(df.index[duplicate_mask])[:SAMPLE_LIMIT]:
                 key_values = {col: df.at[idx, col] for col in keys}
                 self.issues.append(
-                    ConfigInputDataQualityChecker._build_issue(
+                    self._build_issue(
                         config_name=config_name,
                         sheet=sheet,
-                        row_index=ConfigInputDataQualityChecker._normalize_row_index(idx),
-                        check="check_6",
+                        row_index=idx,
+                        check="check_6_pkeys",
                         issue_type="duplicate_value",
                         severity="ERROR",
                         message=f"Duplicate primary key: {key_values}",
@@ -1209,7 +1238,6 @@ class ConfigInputDataQualityChecker:
         raw["问题类型"] = raw["issue_type"].map(
             lambda value: _ISSUE_TYPE_LABELS_ZH.get(str(value), str(value))
         )
-
         # 按"配置名 + Sheet"聚合为一行，每列合并组内去重后的取值。
         rows: list[dict[str, Any]] = []
         for (config_name, sheet), group in raw.groupby(
@@ -1220,6 +1248,7 @@ class ConfigInputDataQualityChecker:
                     "配置名": config_name,
                     "配置表Sheet": sheet,
                     "字段名": self._join_unique(group.get("column")),
+                    # 检测项直接展示英文标识（与检测方法名一致）。
                     "检测项": self._join_unique(group.get("check")),
                     "问题类型": self._join_unique(group.get("问题类型")),
                     "问题代码": self._join_unique(group.get("issue_type")),

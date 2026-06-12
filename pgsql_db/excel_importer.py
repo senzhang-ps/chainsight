@@ -3,12 +3,66 @@ Excel数据导入模块
 将Excel配置文件的各个sheet导入PostgreSQL数据库
 """
 
+import logging
 import pandas as pd
 from pathlib import Path
 from typing import Dict, List, Optional
 import time
 
 from .db_connection import DatabaseConnection
+
+logger = logging.getLogger(__name__)
+
+
+def merge_m1_demandforecast_quantity(df: pd.DataFrame) -> pd.DataFrame:
+    """入库前按 schema 主键合并 M1_DemandForecast 的 quantity（求和）。
+
+    主键取自 ``CONFIG_TABLE_SCHEMAS``（week/material/location）；同一主键
+    组合的行 quantity 求和，其余非主键字段保留组内首行的值。quantity 中
+    无法解析为数值的取值按 0 参与求和（该问题已由数据质量检测在报告中
+    标出）；主键含空值的行同样作为一组参与合并。
+
+    Args:
+        df: M1_DemandForecast 的原始读取数据。
+
+    Returns:
+        合并后的 DataFrame；无重复主键或缺少必要列时原样返回。
+    """
+    from pgsql_db.config_table_schema import get_config_table_schema_by_sheet
+
+    table_schema = get_config_table_schema_by_sheet("M1_DemandForecast") or {}
+    key_columns = [str(column) for column in table_schema.get("primary_key") or []]
+    if (
+        df.empty
+        or not key_columns
+        or not set(key_columns + ["quantity"]).issubset(df.columns)
+    ):
+        return df
+    if not df.duplicated(subset=key_columns).any():
+        return df
+
+    work = df.copy()
+    work["quantity"] = pd.to_numeric(work["quantity"], errors="coerce").fillna(0)
+    aggregations = {
+        column: "first"
+        for column in work.columns
+        if column not in key_columns + ["quantity"]
+    }
+    aggregations["quantity"] = "sum"
+    ordered_columns = list(work.columns)
+    merged = (
+        work.groupby(key_columns, as_index=False, dropna=False)
+        .agg(aggregations)
+        .reindex(columns=ordered_columns)
+        .reset_index(drop=True)
+    )
+    logger.warning(
+        "[MERGE] M1_DemandForecast 按主键 %s 合并 quantity：%s 行 -> %s 行",
+        key_columns,
+        len(df),
+        len(merged),
+    )
+    return merged
 
 
 class ExcelImporter:
@@ -151,16 +205,17 @@ class ExcelImporter:
         report_dir = input_quality_report_dir
         if report_dir is None:
             report_dir = str(path.parent / "input_quality")
-        checker = ConfigInputDataQualityChecker.from_defaults(report_dir=report_dir)
-        dq_result = checker.validate_or_raise(
-            sheet_data,
-            config_name=config_name,
-            sub_node="input_pre.excel_import",
-            write_reports=True,
-            output_dir=report_dir,
-        )
-        sheet_data = dq_result["db_ready_tables"]
+        # 先检测出质量报告（不阻断）；入库继续使用原始读取数据，
+        # 列名/类型到数据库契约的转换留待后续任务。
+        checker = ConfigInputDataQualityChecker()
+        checker.validate(sheet_data, config_name=config_name, report_dir=report_dir)
+        # 调用本入口即视为入库命令：写库前合并 M1_DemandForecast 重复主键的 quantity。
+        if "M1_DemandForecast" in sheet_data:
+            sheet_data["M1_DemandForecast"] = merge_m1_demandforecast_quantity(
+                sheet_data["M1_DemandForecast"]
+            )
         from pgsql_db.config_comments import load_config_table_comment_map
+        from pgsql_db.config_table_schema import get_config_table_schema_by_sheet
 
         table_comment_map = load_config_table_comment_map()
         results = {}
@@ -169,8 +224,12 @@ class ExcelImporter:
         
         for sheet_name, df in sheet_data.items():
             try:
+                # schema 未声明的 Sheet 不入库（与原 db_ready 链路口径一致）。
+                table_schema = get_config_table_schema_by_sheet(sheet_name)
+                if table_schema is None:
+                    continue
                 # 构建表名: 使用统一配置表名（同结构同表），通过 config_name 字段区分不同配置
-                table_name = checker.table_name_for_sheet(sheet_name)
+                table_name = str(table_schema["db_table"])
                 comment_meta = table_comment_map.get(table_name, {})
                 
                 # 空表也要创建（只要有列名）

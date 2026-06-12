@@ -365,34 +365,27 @@ def validate_input_quality(
     config_dict: dict[str, pd.DataFrame],
     *,
     config_name: str,
-    sub_node: str,
     report_dir: str | Path | None = None,
     checker=None,
 ) -> dict[str, Any]:
-    """Run input data quality checks and return the checker result."""
+    """Run input data quality checks and return the checker result (non-blocking)."""
     if checker is None:
         from ...utils.data_quality import ConfigInputDataQualityChecker
 
-        checker = ConfigInputDataQualityChecker.from_defaults()
+        checker = ConfigInputDataQualityChecker()
 
     dq_result = checker.validate(
         config_dict,
         config_name=config_name,
-        sub_node=sub_node,
-        write_reports=report_dir is not None,
-        output_dir=report_dir,
+        report_dir=report_dir,
     )
     logger.info(
-        "Input DQ complete: issues=%s, ignored_sheets=%s, ignored_columns=%s, blocked=%s",
+        "Input DQ complete: issues=%s, errors=%s, warnings=%s, passed=%s",
         dq_result["summary"].get("issues"),
-        dq_result["summary"].get("ignored_sheets"),
-        dq_result["summary"].get("ignored_columns"),
-        dq_result["blocked"],
+        dq_result["summary"].get("errors"),
+        dq_result["summary"].get("warnings"),
+        dq_result["passed"],
     )
-    if dq_result["blocked"]:
-        from ...utils.data_quality import DataQualityError
-
-        raise DataQualityError("Input DQ blocked configuration processing")
     return dq_result
 
 

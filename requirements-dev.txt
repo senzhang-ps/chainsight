@@ -1,0 +1,12 @@
+-r requirements.txt
+
+# Local quality gate
+ruff>=0.15,<0.16
+mypy>=1.18,<2
+bandit>=1.7,<2
+pip-audit>=2.9,<3
+pre-commit>=4,<5
+
+# Test tooling
+pytest>=9,<10
+pytest-cov>=7,<8

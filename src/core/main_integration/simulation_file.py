@@ -153,12 +153,12 @@ def run_integrated_simulation(
 
     # 加载配置
     raw_config = load_configuration(config_path)
-    dq_result = validate_input_quality(
+    # 检测只出报告不阻断，配置继续使用原始读取数据。
+    validate_input_quality(
         raw_config,
         config_name=Path(config_path).stem,
-        sub_node="input_pre.simulation_file",
     )
-    config_dict = prepare_configuration(dq_result["cleaned_tables"])
+    config_dict = prepare_configuration(raw_config)
 
     # 设置全局随机种子
     global_seed = set_module_seeds(config_dict)

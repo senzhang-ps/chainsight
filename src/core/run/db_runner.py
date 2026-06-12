@@ -13,7 +13,6 @@ from typing import Optional
 
 import pandas as pd
 
-from src.utils.data_quality import DataQualityError
 from .db_config import _load_config_from_database
 from .local_writer import _write_results_to_local_dev_format
 from .utils import resolve_excel_path, _PROJECT_ROOT
@@ -68,187 +67,105 @@ def _build_expected_local_config(
     *,
     config_name: str | None = None,
     report_dir: str | Path | None = None,
-    confirm_on_dq_block: bool = False,
     logger=None,
     input_func=input,
 ) -> dict:
     """构建本地期望配置（Excel + 同目录 CSV 无条件优先）。
 
     ``config_arg`` 是用户原始输入（名字 / 相对路径 / 绝对路径）。
+    流程：先完整执行输入数据质量检测并输出全部问题记录与报告；存在
+    ERROR 时由操作员确认是否继续入库（N 则停止运行）；收到入库确认后
+    才对 M1_DemandForecast 按主键合并 quantity，最后以 schema 表名去
+    ``cfg_`` 前缀为 key 返回数据。列名/类型到数据库契约的转换留待后续。
     """
     config_file = _find_local_config_file(config_arg)
     if config_file is None:
         return {}
 
-    from pgsql_db.excel_importer import ExcelImporter
+    from pgsql_db.config_table_schema import get_config_table_schema_by_sheet
+    from pgsql_db.excel_importer import (
+        ExcelImporter,
+        merge_m1_demandforecast_quantity,
+    )
     from src.utils.data_quality import ConfigInputDataQualityChecker
 
     sheet_data = ExcelImporter.load_excel_file_with_csv_priority(str(config_file))
-    checker = ConfigInputDataQualityChecker.from_defaults(report_dir=report_dir)
+    checker = ConfigInputDataQualityChecker()
     dq_result = checker.validate(
         sheet_data,
         config_name=config_name or config_file.stem,
-        sub_node="input_pre.db_runner",
-        write_reports=report_dir is not None,
-        output_dir=report_dir,
+        report_dir=report_dir,
     )
-    if dq_result["blocked"]:
-        _confirm_and_merge_m1_demandforecast_quantity(
-            dq_result["db_ready_by_db_key"],
-            logger=logger,
-            input_func=input_func,
+
+    # 检测全部完成、错误已统一输出后，由操作员确认是否继续入库。
+    if not dq_result["passed"] and not _confirm_import_after_dq(
+        dq_result,
+        report_dir=report_dir,
+        logger=logger,
+        input_func=input_func,
+    ):
+        raise RuntimeError(
+            "[DQ] 操作员未确认入库，运行已停止；问题明细见 input_quality.xlsx"
         )
-        if not confirm_on_dq_block or not _confirm_continue_after_dq_block(
-            dq_result,
-            report_dir=report_dir,
-            logger=logger,
-            input_func=input_func,
-        ):
-            raise DataQualityError(
-                "Input configuration data quality check failed; "
-                f"errors={dq_result['summary'].get('errors', 0)}"
-            )
 
-    return dq_result["db_ready_by_db_key"]
+    # 收到入库确认后才执行 M1_DemandForecast 主键合并（quantity 求和）。
+    if "M1_DemandForecast" in sheet_data:
+        sheet_data["M1_DemandForecast"] = merge_m1_demandforecast_quantity(
+            sheet_data["M1_DemandForecast"]
+        )
 
-
-def _m1_demandforecast_duplicate_mask(df: pd.DataFrame) -> pd.Series:
-    """识别 M1_DemandForecast 中需要人工确认合并的重复业务键。
-
-    Args:
-        df: M1_DemandForecast 的 DB-ready DataFrame。
-
-    Returns:
-        标识 ``week/material/location`` 重复行的布尔 Series。
-    """
-    key_columns = ["week", "material", "location"]
-    if df.empty or not set(key_columns + ["quantity"]).issubset(df.columns):
-        return pd.Series(False, index=df.index)
-    return df.duplicated(subset=key_columns, keep=False)
-
-
-def _merge_m1_demandforecast_quantity(df: pd.DataFrame) -> pd.DataFrame:
-    """按 week、material、location 汇总 M1_DemandForecast.quantity。
-
-    Args:
-        df: M1_DemandForecast 的 DB-ready DataFrame。
-
-    Returns:
-        按业务键合并 quantity 后的 DataFrame；非 quantity 字段保留首条记录。
-    """
-    key_columns = ["week", "material", "location"]
-    work = df.copy()
-    work["quantity"] = pd.to_numeric(work["quantity"], errors="coerce").fillna(0)
-    aggregations = {
-        column: "first" for column in work.columns if column not in key_columns + ["quantity"]
-    }
-    aggregations["quantity"] = "sum"
-    ordered_columns = list(work.columns)
-    merged = (
-        work.groupby(key_columns, as_index=False, dropna=False)
-        .agg(aggregations)
-        .reindex(columns=ordered_columns)
-    )
-    return merged.reset_index(drop=True)
-
-
-def _confirm_and_merge_m1_demandforecast_quantity(
-    expected_config: dict,
-    *,
-    logger=None,
-    input_func=input,
-) -> bool:
-    """在最终入库确认前，按操作员选择合并 M1_DemandForecast.quantity。
-
-    Args:
-        expected_config: 以 db_key 为 key 的 DB-ready 配置表数据。
-        logger: 可选日志对象；为空时直接打印。
-        input_func: 交互输入函数，测试时可注入。
-
-    Returns:
-        True 表示已执行合并，False 表示未发现重复或操作员选择不合并。
-    """
-    db_key = "m1_demandforecast"
-    df = expected_config.get(db_key)
-    if df is None:
-        return False
-
-    duplicate_mask = _m1_demandforecast_duplicate_mask(df)
-    duplicate_count = int(duplicate_mask.sum())
-    if duplicate_count == 0:
-        return False
-
-    _log_or_print(
-        logger,
-        "warning",
-        "[DQ] M1_DemandForecast 存在相同 week/material/location 组合的数据，"
-        f"涉及 {duplicate_count} 行。",
-    )
-    prompt = (
-        "是否按 week、material、location 合并 M1_DemandForecast.quantity？"
-        "请输入 Y/N: "
-    )
-    while True:
-        try:
-            answer = input_func(prompt)
-        except (EOFError, KeyboardInterrupt):
-            _log_or_print(logger, "error", "[DQ] 未收到合并确认，默认不合并。")
-            return False
-        normalized = str(answer).strip()
-        if normalized in {"Y", "y"}:
-            before_rows = len(df)
-            expected_config[db_key] = _merge_m1_demandforecast_quantity(df)
-            after_rows = len(expected_config[db_key])
-            _log_or_print(
-                logger,
-                "warning",
-                "[DQ] 已按 week/material/location 合并 M1_DemandForecast.quantity："
-                f"{before_rows} 行 -> {after_rows} 行。",
-            )
-            return True
-        if normalized in {"N", "n"}:
-            _log_or_print(
-                logger,
-                "warning",
-                "[DQ] 操作员选择不合并 M1_DemandForecast.quantity。",
-            )
-            return False
-        _log_or_print(logger, "warning", "[DQ] 输入无效，请输入 Y/y 或 N/n。")
+    expected_config: dict[str, pd.DataFrame] = {}
+    for sheet_name, df in sheet_data.items():
+        # schema 未声明的 Sheet 不参与配置比对与入库。
+        table_schema = get_config_table_schema_by_sheet(sheet_name)
+        if table_schema is None:
+            continue
+        expected_config[str(table_schema["db_table"]).removeprefix("cfg_")] = df
+    return expected_config
 
 
 def _log_or_print(logger, level: str, message: str) -> None:
+    """有 logger 时按级别记录，否则直接打印（交互确认场景兜底）。"""
     if logger is not None:
         getattr(logger, level)(message)
     else:
         print(message)
 
 
-def _confirm_continue_after_dq_block(
+def _confirm_import_after_dq(
     dq_result: dict,
     *,
     report_dir: str | Path | None,
     logger=None,
     input_func=input,
 ) -> bool:
-    """Warn operator about DQ hard blocks and require Y/N confirmation."""
+    """检测发现 ERROR 后，要求操作员确认是否继续入库。
+
+    Args:
+        dq_result: ``ConfigInputDataQualityChecker.validate`` 的检测结果。
+        report_dir: 质量报告目录，用于在提示中给出报告路径。
+        logger: 可选日志对象；为空时直接打印。
+        input_func: 交互输入函数，测试时可注入。
+
+    Returns:
+        True 表示操作员确认继续入库；N 或未收到输入返回 False。
+    """
     summary = dq_result.get("summary", {})
-    dq_dir = Path(report_dir) if report_dir is not None else None
-    _log_or_print(logger, "error", "[DQ] 输入配置表数据质量检测发现阻断问题。")
+    _log_or_print(logger, "error", "[DQ] 输入配置表数据质量检测发现问题。")
     _log_or_print(
         logger,
         "error",
-        "[DQ] summary: issues={issues}, errors={errors}, hard_blocks={hard_blocks}, "
-        "ignored_sheets={ignored_sheets}, ignored_columns={ignored_columns}".format(
+        "[DQ] summary: issues={issues}, errors={errors}, warnings={warnings}; "
+        "按检测项: {by_check}; 按Sheet: {by_sheet}".format(
             issues=summary.get("issues", 0),
             errors=summary.get("errors", 0),
-            hard_blocks=summary.get("hard_blocks", 0),
-            ignored_sheets=summary.get("ignored_sheets", 0),
-            ignored_columns=summary.get("ignored_columns", 0),
+            warnings=summary.get("warnings", 0),
+            by_check=summary.get("by_check", {}),
+            by_sheet=summary.get("by_sheet", {}),
         ),
     )
-    if dq_dir is not None:
-        _log_or_print(logger, "error", f"[DQ] 报告目录: {dq_dir}")
-        report_xlsx = dq_dir / "input_quality.xlsx"
+    if report_dir is not None:
+        report_xlsx = Path(report_dir) / "input_quality.xlsx"
         if report_xlsx.exists():
             _log_or_print(logger, "error", f"[DQ] 数据质量检测报告已输出: {report_xlsx}")
         else:
@@ -256,10 +173,10 @@ def _confirm_continue_after_dq_block(
     _log_or_print(
         logger,
         "warning",
-        "[DQ] 继续执行会使用治理后的 DB-ready 数据继续同步/写入数据库。",
+        "[DQ] 确认入库后将合并 M1_DemandForecast 重复主键的 quantity 并继续同步数据库。",
     )
 
-    prompt = "是否继续往下执行并写入数据库？请输入 Y/N: "
+    prompt = "是否继续入库并往下执行？请输入 Y/N: "
     while True:
         try:
             answer = input_func(prompt)
@@ -268,7 +185,7 @@ def _confirm_continue_after_dq_block(
             return False
         normalized = str(answer).strip()
         if normalized in {"Y", "y"}:
-            _log_or_print(logger, "warning", "[DQ] 操作员确认继续执行。")
+            _log_or_print(logger, "warning", "[DQ] 操作员确认继续入库。")
             return True
         if normalized in {"N", "n"}:
             _log_or_print(logger, "error", "[DQ] 操作员选择停止执行。")
@@ -493,27 +410,34 @@ def _sync_config_by_diff(
             source_mtime = None
             source_path_str = str(source_file)
 
+    # 单表失败只记录不中断，所有表都尝试完成后统一报错；
+    # 写入异常时 db_connection 的 conn.transaction() 已自动回滚，连接仍可用。
+    failures: list[tuple[str, str]] = []
+
     for db_key in to_upsert:
         table_name = f"cfg_{db_key}"
         df = expected_config.get(db_key, pd.DataFrame())
         comment_meta = (table_comment_map or {}).get(table_name, {})
-        _precheck_config_table_write(db, table_name, df, config_basename)
-        deleted = db.delete_config_data(table_name, config_basename)
-        write_ok = db.create_table_from_df(
-            df,
-            table_name,
-            if_exists="append",
-            config_name=config_basename,
-            table_comment=comment_meta.get("table_comment"),
-            column_comments=comment_meta.get("column_comments"),
-            column_types=comment_meta.get("column_types"),
-            primary_key_columns=comment_meta.get("primary_key_columns"),
-            index_columns=comment_meta.get("index_columns"),
-        )
-        if not write_ok:
-            raise RuntimeError(
-                f"Config table {table_name} write failed; manifest update and simulation are aborted."
+        try:
+            _precheck_config_table_write(db, table_name, df, config_basename)
+            deleted = db.delete_config_data(table_name, config_basename)
+            write_ok = db.create_table_from_df(
+                df,
+                table_name,
+                if_exists="append",
+                config_name=config_basename,
+                table_comment=comment_meta.get("table_comment"),
+                column_comments=comment_meta.get("column_comments"),
+                column_types=comment_meta.get("column_types"),
+                primary_key_columns=comment_meta.get("primary_key_columns"),
+                index_columns=comment_meta.get("index_columns"),
             )
+            if not write_ok:
+                raise RuntimeError("create_table_from_df returned False")
+        except Exception as exc:  # noqa: BLE001
+            logger.error(f"  ❌ 配置表 {table_name} 同步失败（继续同步其余表）: {exc}")
+            failures.append((table_name, str(exc)))
+            continue
         logger.info(f"  🔄 同步配置表 {table_name}: 删除 {deleted} 行，写入 {len(df)} 行")
         if manifest_enabled:
             upsert_manifest_entry(
@@ -528,7 +452,12 @@ def _sync_config_by_diff(
 
     for db_key in to_delete:
         table_name = f"cfg_{db_key}"
-        deleted = db.delete_config_data(table_name, config_basename)
+        try:
+            deleted = db.delete_config_data(table_name, config_basename)
+        except Exception as exc:  # noqa: BLE001
+            logger.error(f"  ❌ 配置表 {table_name} 数据删除失败（继续处理其余表）: {exc}")
+            failures.append((table_name, str(exc)))
+            continue
         logger.info(f"  🗑️ 删除本地已不存在配置表数据 {table_name}: 删除 {deleted} 行")
         if manifest_enabled:
             delete_manifest_entry(
@@ -536,6 +465,19 @@ def _sync_config_by_diff(
                 config_name=config_basename,
                 table_name=table_name,
             )
+
+    # 全部表尝试完成后统一报错：配置未完整入库时停止后续流程（不跑模拟）。
+    if failures:
+        logger.error(
+            "[SYNC] 配置同步完成，但有 %s 张表失败：%s",
+            len(failures),
+            "；".join(f"{name}: {reason}" for name, reason in failures),
+        )
+        raise RuntimeError(
+            f"Config sync failed for {len(failures)} table(s): "
+            + ", ".join(name for name, _ in failures)
+            + "; simulation is aborted."
+        )
 
 
 def _refresh_config_table_comments(
@@ -750,7 +692,6 @@ def _run_with_database(ns: argparse.Namespace) -> int:
             _raw_config,
             config_name=config_name,
             report_dir=log_dir / "input_quality",
-            confirm_on_dq_block=True,
             logger=logger,
         )
         if not expected_config:
@@ -1180,15 +1121,6 @@ def _run_with_database(ns: argparse.Namespace) -> int:
         # finally 块会将 checkpoint 标记为 interrupted
         logger.warning("\n[INTERRUPTED] 用户中断 (Ctrl+C)，正在保存状态...")
         return 130  # Unix 惯例: 128 + SIGINT(2)
-
-    except DataQualityError as e:
-        dq_dir = log_dir / "input_quality"
-        logger.error(f"[DQ] 输入配置表数据质量检测阻断: {e}")
-        logger.error(f"[DQ] 报告目录: {dq_dir}")
-        report_xlsx = dq_dir / "input_quality.xlsx"
-        if report_xlsx.exists():
-            logger.error(f"[DQ] 数据质量检测报告: {report_xlsx}")
-        return 1
 
     except Exception as e:
         logger.error(f"[ERROR] 执行出错: {str(e)}")

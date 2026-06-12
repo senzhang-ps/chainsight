@@ -31,7 +31,7 @@ _demand: Dict[str, Any] = _cfg.get("demand_planning", {})
 _prod: Dict[str, Any] = _cfg.get("production_planning", {})
 _deploy: Dict[str, Any] = _cfg.get("deployment_planning", {})
 _logistics: Dict[str, Any] = _cfg.get("logistics_execution", {})
-DATA_QUALITY_CONFIG: Dict[str, Any] = dict(_cfg.get("data_quality", {}))
+data_quality_config: Dict[str, Any] = dict(_cfg.get("data_quality", {}))
 
 # ---------------------------------------------------------------------------
 # 跨模块共享默认值

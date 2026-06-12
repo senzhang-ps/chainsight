@@ -1,1032 +1,622 @@
 """配置表输入数据质量检测模块。
-
-本模块基于固定的 cfg_* 入库表契约，对 Excel/CSV 读取后的配置表执行
-字段投影、质量检测、类型转换和报告输出。只有 schema 中声明的 Sheet
-和入库字段会进入检测与入库链路。
+本模块只负责“发现并记录问题”，不负责数据转换、数据清洗或流程阻断
+检测规则由 ``pgsql_db.config_table_schema.CONFIG_TABLE_SCHEMAS`` 中的字段属性
+驱动，包括 ``notnull``、``enumerate``、``range`` 和 ``date_flag``
 """
 from __future__ import annotations
 
 import logging
-import numbers
-import re
-from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field
-from datetime import date, datetime
+from collections import Counter
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
-from pandas.api.types import is_bool_dtype, is_datetime64_any_dtype, is_numeric_dtype
 
-from pgsql_db.config_comments import is_primary_key_marker
-from pgsql_db.config_table_schema import get_config_table_mapping
-from src.utils.normalization import normalize_location, normalize_material
+from pgsql_db.config_table_schema import get_config_table_schemas
 
 logger = logging.getLogger(__name__)
 
+# 单类问题最多记录的样例数量，避免异常数据过多时报告无限膨胀
+SAMPLE_LIMIT = 20
 
-class DataQualityError(RuntimeError):
-    """检测到阻断级数据质量问题时抛出的异常。"""
-
-
+# 质量报告issues工作表的固定列顺序，面向业务/操作人员展示
 _ISSUE_COLUMNS = [
     "配置名",
     "配置表Sheet",
     "字段名",
+    "检测项",
     "问题类型",
     "问题代码",
     "严重级别",
-    "处理动作",
-    "转换后值",
 ]
+# 内部问题类型编码到报告中文标签的映射；未收录编码在报告中原样展示
 _ISSUE_TYPE_LABELS_ZH = {
     "missing_sheet": "缺失Sheet",
     "missing_import_column": "缺失列",
     "empty_table": "空表",
     "null_value": "空值",
-    "mixed_column_type": "同字段多格式",
     "type_mismatch": "类型/格式不可解析",
-    "negative_value": "负数",
     "out_of_range": "超出范围",
     "invalid_enum": "非法枚举",
     "invalid_date_range": "日期范围非法",
     "duplicate_value": "重复值",
-    "duplicate_conflict": "冲突重复",
+    "checker_exception": "检测器内部异常",
 }
-_MISSING_SHEET_COLUMNS = ["sheet", "db_table", "reason", "severity", "action"]
-_IGNORED_SHEET_COLUMNS = ["sheet", "reason", "action"]
-_IGNORED_COLUMN_COLUMNS = ["sheet", "column", "reason", "action"]
-
-
-@dataclass(frozen=True)
-class TableImportPolicy:
-    """配置表入库与质量检测策略。
-
-    Attributes:
-        required_tables: 必需入库配置表名集合，缺失时按阻断处理。
-        optional_tables: 非必需入库配置表名集合，缺失时按告警处理。
-        quality_check_enabled: 按配置表 Sheet 名控制质量检测是否开启。
-    """
-
-    required_tables: Sequence[str] = ()
-    optional_tables: Sequence[str] = ()
-    quality_check_enabled: Mapping[str, Any] | None = None
-
-
-@dataclass(frozen=True)
-class _TableContract:
-    """单张配置表的固定入库契约。"""
-
-    key: str
-    local_sheet: str
-    db_table: str
-    import_enabled: bool
-    data_quality_enabled: bool
-    primary_key: tuple[str, ...]
-    fields: tuple[dict[str, Any], ...]
-
-    @property
-    def db_key(self) -> str:
-        """去除 ``cfg_`` 前缀后的业务 key。"""
-        return self.db_table.removeprefix("cfg_")
-
-    @property
-    def local_fields(self) -> list[str]:
-        """字段配置中提取出的本地字段名列表。"""
-        return [str(field["local_name"]) for field in self.fields]
-
-
-@dataclass
-class _TableRuleContext:
-    """表级专属质量规则的执行上下文。"""
-
-    contract: _TableContract
-    df: pd.DataFrame
-    tables: dict[str, pd.DataFrame]
-    issues: list[dict[str, Any]]
-    config_name: str | None
-    sub_node: str
-
-
-@dataclass(frozen=True)
-class _IssueRecord:
-    """质量问题明细记录的构造参数。"""
-
-    config_name: str | None
-    sub_node: str
-    sheet: str
-    issue_type: str
-    severity: str
-    action: str
-    message: str
-    column: str | None = None
-    row_index: int | str | None = None
-    original_value: Any = None
-    converted_value: Any = None
-    rule_id: str = ""
-
-
-@dataclass(frozen=True)
-class _ConversionContext:
-    """字段类型转换时共享的问题记录上下文。"""
-
-    sheet: str
-    column: str
-    issues: list[dict[str, Any]]
-    config_name: str | None
-    sub_node: str
-    record_issues: bool = True
-
-
-@dataclass
-class _ContractValidationOutcome:
-    """遍历全部表契约后的校验产出汇总。"""
-
-    issues: list[dict[str, Any]] = field(default_factory=list)
-    missing_sheets: list[dict[str, Any]] = field(default_factory=list)
-    ignored_sheets: list[dict[str, Any]] = field(default_factory=list)
-    ignored_columns: list[dict[str, Any]] = field(default_factory=list)
-    cleaned_tables: dict[str, pd.DataFrame] = field(default_factory=dict)
-    db_ready_tables: dict[str, pd.DataFrame] = field(default_factory=dict)
-    db_ready_by_db_key: dict[str, pd.DataFrame] = field(default_factory=dict)
-
+# 检测步骤标识与检测方法名一一对应（check_0_prepare 为数据准备阶段），
+# 报告"检测项"列直接展示该英文标识。
+_CHECK_IDS = (
+    "check_0_prepare",
+    "check_1_sheets",
+    "check_2_empty",
+    "check_3_duplicates",
+    "check_4_columns",
+    "check_5_fields",
+    "check_6_pkeys",
+)
 
 class ConfigTableQualityRules:
-    """配置表专属质量规则调度器。
+    """基于 schema 字段属性构建配置表字段级检测规则
 
-    字段级通用规则由 ``ConfigInputDataQualityChecker`` 统一执行；
-    本类只承载依赖具体配置表业务语义的检测规则。
+    初始化时把 ``CONFIG_TABLE_SCHEMAS`` 解析成逐表规则配置，包括：
+    必需列、主键列、字段规则（db_type/notnull/enumerate/range）以及
+    date_flag 起止对。
+
+    解析阶段会同步校验schema属性组合：
+    - range 只能绑定数值类型
+    - date_flag 只能绑定日期/时间类型
+    - enumerate 必须是非空集合类配置
+    不合法配置会被忽略并记录 warning，不会中断检测流程
     """
 
-    TABLE_METHODS = {
-        "Global_seed": "check_global_seed",
-        "Global_Network": "check_global_network",
-        "Global_SpaceCapacity": "check_global_spacecapacity",
-        "Global_LeadTime": "check_global_leadtime",
-        "Global_DemandPriority": "check_global_demandpriority",
-        "M1_InitialInventory": "check_m1_initialinventory",
-        "M1_DemandForecast": "check_m1_demandforecast",
-        "M1_ForecastError": "check_m1_forecasterror",
-        "M1_OrderCalendar": "check_m1_ordercalendar",
-        "M1_AOConfig": "check_m1_aoconfig",
-        "M1_DPSConfig": "check_m1_dpsconfig",
-        "M1_SupplyChoiceConfig": "check_m1_supplychoiceconfig",
-        "M3_SafetyStock": "check_m3_safetystock",
-        "M4_MaterialLocationLineCfg": "check_m4_materiallocationlinecfg",
-        "M4_LineCapacity": "check_m4_linecapacity",
-        "M4_ChangeoverMatrix": "check_m4_changeovermatrix",
-        "M4_ChangeoverDefinition": "check_m4_changeoverdefinition",
-        "M4_ProductionReliability": "check_m4_productionreliability",
-        "M5_PushPullModel": "check_m5_pushpullmodel",
-        "M5_DeployConfig": "check_m5_deployconfig",
-        "M6_TruckReleaseCon": "check_m6_truckreleasecon",
-        "M6_MaterialMD": "check_m6_materialmd",
-        "M6_DeliveryDelayDistribution": "check_m6_deliverydelaydistribution",
-        "M6_MDQBypassRules": "check_m6_mdqbypassrules",
-        "M6_TruckTypeSpecs": "check_m6_trucktypespecs",
-        "M6_TruckCapacityPlan": "check_m6_truckcapacityplan",
-    }
-
-    def __init__(
-        self,
-        *,
-        issue_factory: Callable[[_IssueRecord], dict[str, Any]],
-        missing_mask: Callable[[pd.Series], pd.Series],
-        sample_limit: int,
-    ) -> None:
-        """初始化表级专属质量规则调度器。
-
-        Args:
-            issue_factory: 构造统一问题明细记录的工厂函数，复用主检测器的
-                ``_build_issue``。
-            missing_mask: 识别空值和空白字符串的掩码函数，复用主检测器的 ``_missing_mask``。
-            sample_limit: 单类问题最多记录的样例数量。
-        """
-        self._issue_factory = issue_factory
-        self._missing_mask = missing_mask
-        self.sample_limit = sample_limit
+    # db_type 归类集合：用于选择字段解析方式，并校验schema属性是否匹配
+    _INTEGER_DB_TYPES = {"bigint", "int", "integer"}
+    _FLOAT_DB_TYPES = {"double precision", "float", "float64", "numeric", "real"}
+    _NUMERIC_DB_TYPES = _INTEGER_DB_TYPES | _FLOAT_DB_TYPES
+    _BOOL_DB_TYPES = {"bool", "boolean"}
+    # 布尔字段允许的真/假字符串表示；比较时忽略大小写和首尾空白
+    _BOOL_TRUTHY = {"true", "1", "y", "yes", "t"}
+    _BOOL_FALSY = {"false", "0", "n", "no", "f"}
 
     @staticmethod
-    def _normalize_row_index(idx: Any) -> int | str:
-        """将 DataFrame 行索引规范化为问题明细可用的整数或字符串。
-
-        Args:
-            idx: 原始 DataFrame 行索引值。
-
-        Returns:
-            整数索引保持为 int，其余索引转换为 str。
-        """
-        return int(idx) if isinstance(idx, int) else str(idx)
-
-    def method_name_for_sheet(self, sheet_name: str) -> str | None:
-        """返回某个 Sheet 对应的专属规则函数名。
-
-        Args:
-            sheet_name: 本地配置表 Sheet 名。
-
-        Returns:
-            映射到的规则函数名；该 Sheet 无专属规则时返回 None。
-        """
-        return self.TABLE_METHODS.get(sheet_name)
-
-    def validate_all(
-        self,
-        tables: dict[str, pd.DataFrame],
-        contracts: list[_TableContract],
-        issues: list[dict[str, Any]],
-        *,
-        config_name: str | None,
-        sub_node: str,
-    ) -> None:
-        """对所有已开启质量检测的表契约执行专属规则。
-
-        Args:
-            tables: 已完成字段投影和通用检测的配置表数据，key 为本地 Sheet 名。
-            contracts: 需要执行表级专属规则的配置表契约列表。
-            issues: 质量问题明细列表；规则函数会在该列表中追加问题记录。
-            config_name: 当前配置名，用于问题归属和报告输出。
-            sub_node: 当前检测节点标识，用于内部问题追踪。
-        """
-        for contract in contracts:
-            df = tables.get(contract.local_sheet)
-            if df is None:
-                continue
-            self.validate_table(
-                contract,
-                df,
-                tables,
-                issues,
-                config_name=config_name,
-                sub_node=sub_node,
-            )
-
-    def validate_table(
-        self,
-        contract: _TableContract,
-        df: pd.DataFrame,
-        tables: dict[str, pd.DataFrame],
-        issues: list[dict[str, Any]],
-        *,
-        config_name: str | None,
-        sub_node: str,
-    ) -> None:
-        """解析并调用单张配置表对应的专属规则函数。
-
-        Args:
-            contract: 当前配置表的固定入库契约。
-            df: 当前配置表经过字段投影后的数据。
-            tables: 所有已投影配置表数据，用于需要跨表上下文的规则。
-            issues: 质量问题明细列表；命中的规则会在该列表中追加记录。
-            config_name: 当前配置名，用于问题归属和报告输出。
-            sub_node: 当前检测节点标识，用于内部问题追踪。
-        """
-        method_name = self.method_name_for_sheet(contract.local_sheet)
-        if method_name is None:
-            return
-        context = _TableRuleContext(
-            contract=contract,
-            df=df,
-            tables=tables,
-            issues=issues,
-            config_name=config_name,
-            sub_node=sub_node,
-        )
-        getattr(self, method_name)(context)
-
-    def check_global_seed(self, context: _TableRuleContext) -> None:
-        """Global_seed 表专属规则：无业务级专属约束，仅占位以保持一表一函数。"""
-
-    def check_global_network(self, context: _TableRuleContext) -> None:
-        """Global_Network 表专属规则：校验生效区间 eff_to 不早于 eff_from。"""
-        self._check_date_order(context, "eff_from", "eff_to")
-
-    def check_global_spacecapacity(self, context: _TableRuleContext) -> None:
-        """Global_SpaceCapacity 表专属规则：校验生效区间顺序，并要求 capacity 非负。"""
-        self._check_date_order(context, "eff_from", "eff_to")
-        self._check_non_negative_numbers(context, ("capacity",))
-
-    def check_global_leadtime(self, context: _TableRuleContext) -> None:
-        """Global_LeadTime 表专属规则：要求各项提前期 PDT/GR/MCT/OTD 非负。"""
-        self._check_non_negative_numbers(context, ("PDT", "GR", "MCT", "OTD"))
-
-    def check_global_demandpriority(self, context: _TableRuleContext) -> None:
-        """Global_DemandPriority 表专属规则：要求需求优先级 priority 非负。"""
-        self._check_non_negative_numbers(context, ("priority",))
-
-    def check_m1_initialinventory(self, context: _TableRuleContext) -> None:
-        """M1_InitialInventory 表专属规则：要求期初库存数量 quantity 非负。"""
-        self._check_non_negative_numbers(context, ("quantity",))
-
-    def check_m1_demandforecast(self, context: _TableRuleContext) -> None:
-        """M1_DemandForecast 表专属规则：要求需求预测数量 quantity 非负。"""
-        self._check_non_negative_numbers(context, ("quantity",))
-
-    def check_m1_forecasterror(self, context: _TableRuleContext) -> None:
-        """M1_ForecastError 表专属规则：要求预测误差标准差百分比 error_std_percent 非负。"""
-        self._check_non_negative_numbers(context, ("error_std_percent",))
-
-    def check_m1_ordercalendar(self, context: _TableRuleContext) -> None:
-        """M1_OrderCalendar 表专属规则：无业务级专属约束，仅占位以保持一表一函数。"""
-
-    def check_m1_aoconfig(self, context: _TableRuleContext) -> None:
-        """M1_AOConfig 表专属规则：要求提前下单天数 advance_days 非负，AO 占比 ao_percent 落在 [0, 1]。"""
-        self._check_non_negative_numbers(context, ("advance_days",))
-        self._check_number_range(context, ("ao_percent",), min_value=0, max_value=1)
-
-    def check_m1_dpsconfig(self, context: _TableRuleContext) -> None:
-        """M1_DPSConfig 表专属规则：要求 DPS 占比 dps_percent 落在 [0, 1] 区间。"""
-        self._check_number_range(context, ("dps_percent",), min_value=0, max_value=1)
-
-    def check_m1_supplychoiceconfig(self, context: _TableRuleContext) -> None:
-        """M1_SupplyChoiceConfig 表专属规则：无业务级专属约束，仅占位以保持一表一函数。"""
-
-    def check_m3_safetystock(self, context: _TableRuleContext) -> None:
-        """M3_SafetyStock 表专属规则：要求安全库存数量 safety_stock_qty 非负。"""
-        self._check_non_negative_numbers(context, ("safety_stock_qty",))
-
-    def check_m4_materiallocationlinecfg(self, context: _TableRuleContext) -> None:
-        """M4_MaterialLocationLineCfg 表专属规则：要求产能、批量等各项数值参数非负。"""
-        self._check_non_negative_numbers(
-            context,
-            ("prd_rate", "min_batch", "rv", "ptf", "lsk", "day", "MCT"),
-        )
-
-    def check_m4_linecapacity(self, context: _TableRuleContext) -> None:
-        """M4_LineCapacity 表专属规则：要求产线产能 capacity 非负。"""
-        self._check_non_negative_numbers(context, ("capacity",))
-
-    def check_m4_changeovermatrix(self, context: _TableRuleContext) -> None:
-        """M4_ChangeoverMatrix 表专属规则：要求同一切换物料对的 changeover_id 取值一致、无冲突。"""
-        self._check_conflicting_values(
-            context,
-            key_columns=("from_material", "to_material"),
-            value_columns=("changeover_id",),
-        )
-
-    def check_m4_changeoverdefinition(self, context: _TableRuleContext) -> None:
-        """M4_ChangeoverDefinition 表专属规则：要求切换耗时 time、成本 cost、产能损失 mu_loss 非负。"""
-        self._check_non_negative_numbers(context, ("time", "cost", "mu_loss"))
-
-    def check_m4_productionreliability(self, context: _TableRuleContext) -> None:
-        """M4_ProductionReliability 表专属规则：要求生产可靠率 pr 落在 [0, 1] 区间。"""
-        self._check_number_range(context, ("pr",), min_value=0, max_value=1)
-
-    def check_m5_pushpullmodel(self, context: _TableRuleContext) -> None:
-        """M5_PushPullModel 表专属规则：要求 model 取 push、pull 或 soft push 之一。"""
-        self._check_enum(
-            context,
-            "model",
-            allowed={"push", "pull", "soft push"},
-            rule_id="m5_pushpullmodel.model.enum",
-            message="model must be one of push, pull, soft push",
-        )
-
-    def check_m5_deployconfig(self, context: _TableRuleContext) -> None:
-        """M5_DeployConfig 表专属规则：要求 moq、rv、lsk、day 等部署参数非负。"""
-        self._check_non_negative_numbers(context, ("moq", "rv", "lsk", "day"))
-
-    def check_m6_truckreleasecon(self, context: _TableRuleContext) -> None:
-        """M6_TruckReleaseCon 表专属规则：要求 WFR/VFR 为非空数值，且最小发货量 MDQ 非负。"""
-        self._check_m6_wfr_vfr_numeric(context)
-        self._check_non_negative_numbers(context, ("MDQ",))
-
-    def check_m6_materialmd(self, context: _TableRuleContext) -> None:
-        """M6_MaterialMD 表专属规则：要求需求单位到重量、到体积的换算系数非负。"""
-        self._check_non_negative_numbers(
-            context,
-            ("demand_unit_to_weight", "demand_unit_to_volume"),
-        )
-
-    def check_m6_deliverydelaydistribution(self, context: _TableRuleContext) -> None:
-        """M6_DeliveryDelayDistribution 表专属规则：要求延误天数 delay_days 非负，概率 probability 落在 [0, 1]。"""
-        self._check_non_negative_numbers(context, ("delay_days",))
-        self._check_number_range(context, ("probability",), min_value=0, max_value=1)
-
-    def check_m6_mdqbypassrules(self, context: _TableRuleContext) -> None:
-        """M6_MDQBypassRules 表专属规则：无业务级专属约束，仅占位以保持一表一函数。"""
-
-    def check_m6_trucktypespecs(self, context: _TableRuleContext) -> None:
-        """M6_TruckTypeSpecs 表专属规则：要求车型按重量、体积计的运力 capacity_qty_* 非负。"""
-        self._check_non_negative_numbers(
-            context,
-            ("capacity_qty_in_weight", "capacity_qty_in_volume"),
-        )
-
-    def check_m6_truckcapacityplan(self, context: _TableRuleContext) -> None:
-        """M6_TruckCapacityPlan 表专属规则：要求车辆数量 truck_number 非负。"""
-        self._check_non_negative_numbers(context, ("truck_number",))
-
-    def _check_non_negative_numbers(
-        self,
-        context: _TableRuleContext,
-        columns: tuple[str, ...],
-    ) -> None:
-        """校验指定数值字段是否满足非负约束。
-
-        Args:
-            context: 表级规则执行上下文，包含当前表数据和问题列表。
-            columns: 需要执行非负约束检测的字段名集合。
-        """
-        self._check_number_range(
-            context,
-            columns,
-            min_value=0,
-            issue_type="negative_value",
-            rule_suffix="non_negative",
-        )
-
-    def _check_number_range(
-        self,
-        context: _TableRuleContext,
-        columns: tuple[str, ...],
-        *,
-        min_value: float | None = None,
-        max_value: float | None = None,
-        issue_type: str = "out_of_range",
-        rule_suffix: str = "range",
-    ) -> None:
-        """校验指定数值字段是否落在闭区间范围内。
-
-        Args:
-            context: 表级规则执行上下文，包含当前表数据和问题列表。
-            columns: 需要检测的字段名集合。
-            min_value: 允许的最小值；为 None 时不校验下界。
-            max_value: 允许的最大值；为 None 时不校验上界。
-            issue_type: 范围检测失败时写入的问题类型编码。
-            rule_suffix: 规则 ID 后缀，用于区分不同范围类规则。
-        """
-        df = context.df
-        sheet_key = context.contract.local_sheet.lower()
-        for column in columns:
-            if column not in df.columns:
-                continue
-            missing = self._missing_mask(df[column])
-            numeric = pd.to_numeric(df[column], errors="coerce")
-            valid = (~missing) & numeric.notna()
-            invalid = pd.Series(False, index=df.index)
-            if min_value is not None:
-                invalid |= valid & (numeric < min_value)
-            if max_value is not None:
-                invalid |= valid & (numeric > max_value)
-            for idx in list(df.index[invalid])[: self.sample_limit]:
-                if min_value is not None and max_value is not None:
-                    message = f"{column} must be between {min_value} and {max_value}"
-                elif min_value is not None:
-                    message = f"{column} must be >= {min_value}"
-                else:
-                    message = f"{column} must be <= {max_value}"
-                context.issues.append(
-                    self._issue_factory(
-                        _IssueRecord(
-                            config_name=context.config_name,
-                            sub_node=context.sub_node,
-                            sheet=context.contract.local_sheet,
-                            column=column,
-                            row_index=self._normalize_row_index(idx),
-                            issue_type=issue_type,
-                            severity="ERROR",
-                            action="block",
-                            message=message,
-                            original_value=df.at[idx, column],
-                            rule_id=f"{sheet_key}.{column}.{rule_suffix}",
-                        )
-                    )
-                )
-
-    def _check_date_order(
-        self,
-        context: _TableRuleContext,
-        start_column: str,
-        end_column: str,
-    ) -> None:
-        """校验结束日期字段不早于开始日期字段。
-
-        Args:
-            context: 表级规则执行上下文，包含当前表数据和问题列表。
-            start_column: 开始日期字段名。
-            end_column: 结束日期字段名。
-        """
-        df = context.df
-        if start_column not in df.columns or end_column not in df.columns:
-            return
-        start_missing = self._missing_mask(df[start_column])
-        end_missing = self._missing_mask(df[end_column])
-        start = pd.to_datetime(df[start_column], errors="coerce")
-        end = pd.to_datetime(df[end_column], errors="coerce")
-        valid = (~start_missing) & (~end_missing) & start.notna() & end.notna()
-        invalid = valid & (end < start)
-        sheet_key = context.contract.local_sheet.lower()
-        for idx in list(df.index[invalid])[: self.sample_limit]:
-            context.issues.append(
-                self._issue_factory(
-                    _IssueRecord(
-                        config_name=context.config_name,
-                        sub_node=context.sub_node,
-                        sheet=context.contract.local_sheet,
-                        row_index=self._normalize_row_index(idx),
-                        issue_type="invalid_date_range",
-                        severity="ERROR",
-                        action="block",
-                        message=(
-                            f"{end_column} must be greater than or equal to {start_column}"
-                        ),
-                        original_value={
-                            start_column: df.at[idx, start_column],
-                            end_column: df.at[idx, end_column],
-                        },
-                        rule_id=f"{sheet_key}.{start_column}_{end_column}.order",
-                    )
-                )
-            )
-
-    def _check_parseable_dates(
-        self,
-        context: _TableRuleContext,
-        columns: tuple[str, ...],
-    ) -> None:
-        """校验指定字段值是否可解析为日期时间。
-
-        Args:
-            context: 表级规则执行上下文，包含当前表数据和问题列表。
-            columns: 需要进行日期解析校验的字段名集合。
-        """
-        df = context.df
-        sheet_key = context.contract.local_sheet.lower()
-        for column in columns:
-            if column not in df.columns:
-                continue
-            missing = self._missing_mask(df[column])
-            parsed = pd.to_datetime(df[column], errors="coerce")
-            invalid = (~missing) & parsed.isna()
-            for idx in list(df.index[invalid])[: self.sample_limit]:
-                context.issues.append(
-                    self._issue_factory(
-                        _IssueRecord(
-                            config_name=context.config_name,
-                            sub_node=context.sub_node,
-                            sheet=context.contract.local_sheet,
-                            column=column,
-                            row_index=self._normalize_row_index(idx),
-                            issue_type="type_mismatch",
-                            severity="ERROR",
-                            action="block",
-                            message=f"{column} must be parseable as a date",
-                            original_value=df.at[idx, column],
-                            rule_id=f"{sheet_key}.{column}.date_parse",
-                        )
-                    )
-                )
-
-    def _check_enum(
-        self,
-        context: _TableRuleContext,
-        column: str,
-        *,
-        allowed: set[str],
-        rule_id: str,
-        message: str,
-    ) -> None:
-        """按忽略大小写的方式校验字符串字段是否属于允许值集合。
-
-        Args:
-            context: 表级规则执行上下文，包含当前表数据和问题列表。
-            column: 需要进行枚举校验的字段名。
-            allowed: 允许值集合，应使用小写标准值。
-            rule_id: 枚举规则命中时写入的问题规则 ID。
-            message: 枚举规则命中时写入的问题说明。
-        """
-        df = context.df
-        if column not in df.columns:
-            return
-        values = df[column].astype("object")
-        invalid = (~self._missing_mask(values)) & ~values.map(
-            lambda value: str(value).strip().lower() in allowed
-        )
-        for idx in list(df.index[invalid])[: self.sample_limit]:
-            context.issues.append(
-                self._issue_factory(
-                    _IssueRecord(
-                        config_name=context.config_name,
-                        sub_node=context.sub_node,
-                        sheet=context.contract.local_sheet,
-                        column=column,
-                        row_index=self._normalize_row_index(idx),
-                        issue_type="invalid_enum",
-                        severity="ERROR",
-                        action="block_on_enforce",
-                        message=message,
-                        original_value=df.at[idx, column],
-                        rule_id=rule_id,
-                    )
-                )
-            )
-
-    def _check_conflicting_values(
-        self,
-        context: _TableRuleContext,
-        *,
-        key_columns: tuple[str, ...],
-        value_columns: tuple[str, ...],
-    ) -> None:
-        """检测同一业务键组合下是否存在互相冲突的字段取值。
-
-        Args:
-            context: 表级规则执行上下文，包含当前表数据和问题列表。
-            key_columns: 用于分组识别同一业务对象的字段集合。
-            value_columns: 在同一业务键下必须保持一致的字段集合。
-        """
-        df = context.df
-        if df.empty or not set(key_columns + value_columns).issubset(df.columns):
-            return
-        sheet_key = context.contract.local_sheet.lower()
-        grouped = df.groupby(list(key_columns), dropna=False)
-        added = 0
-        for key_values, group in grouped:
-            for value_column in value_columns:
-                column = group[value_column]
-                non_missing = column[~self._missing_mask(column)]
-                values = {str(value).strip() for value in non_missing}
-                if len(values) <= 1:
-                    continue
-                context.issues.append(
-                    self._issue_factory(
-                        _IssueRecord(
-                            config_name=context.config_name,
-                            sub_node=context.sub_node,
-                            sheet=context.contract.local_sheet,
-                            column=value_column,
-                            issue_type="duplicate_conflict",
-                            severity="ERROR",
-                            action="block",
-                            message=(
-                                f"{value_column} has conflicting values for key {key_values}"
-                            ),
-                            original_value=sorted(values),
-                            rule_id=f"{sheet_key}.{value_column}.conflict",
-                        )
-                    )
-                )
-                added += 1
-                if added >= self.sample_limit:
-                    return
-
-    def _check_m6_wfr_vfr_numeric(self, context: _TableRuleContext) -> None:
-        """校验 WFR/VFR 是否非空且为数值格式，不施加取值范围约束。
-
-        Args:
-            context: M6_TruckReleaseCon 表级规则执行上下文。
-        """
-        df = context.df
-        for column in ("WFR", "VFR"):
-            if column not in df.columns:
-                continue
-            missing = self._missing_mask(df[column])
-            numeric = pd.to_numeric(df[column], errors="coerce")
-            invalid = (~missing) & numeric.isna()
-            for idx in list(df.index[invalid])[: self.sample_limit]:
-                context.issues.append(
-                    self._issue_factory(
-                        _IssueRecord(
-                            config_name=context.config_name,
-                            sub_node=context.sub_node,
-                            sheet=context.contract.local_sheet,
-                            column=column,
-                            row_index=self._normalize_row_index(idx),
-                            issue_type="type_mismatch",
-                            severity="ERROR",
-                            action="block",
-                            message=f"{column} must be numeric",
-                            original_value=df.at[idx, column],
-                            rule_id="m6_truckreleasecon.wfr_vfr.numeric",
-                        )
-                    )
-                )
-
-
-class ConfigInputDataQualityChecker:
-    """基于固定 schema 契约执行配置表输入数据质量检测。"""
-
-    # pylint: disable=too-many-arguments
-    # Backward-compatible public constructor mirrors the existing keyword API.
-    def __init__(
-        self,
-        *,
-        schema_config: dict[str, Any] | None = None,
-        mode: str = "audit_only",
-        fail_on_error: bool = False,
-        sample_limit: int = 20,
-        report_dir: str | Path | None = None,
-        table_policy: TableImportPolicy | None = None,
-    ) -> None:
-        """初始化配置表输入数据质量检测器。
-
-        Args:
-            schema_config: 测试或特殊场景注入的 schema 配置；为空时读取
-                ``pgsql_db.config_table_schema`` 中的固定 schema。
-            mode: 数据质量检测模式，支持 ``off``、``audit_only`` 和
-                ``enforce``。
-            fail_on_error: 在非强制模式下是否遇到 ERROR 级问题即阻断。
-            sample_limit: 单类问题最多记录的样例数量。
-            report_dir: 默认质量检测报告输出目录。
-            table_policy: 配置表入库与质量检测策略；为空时所有表按必需
-                处理且全部开启质量检测。
-
-        Raises:
-            ValueError: 当传入不支持的 mode 时抛出。
-        """
-        self._schema_config_override = schema_config
-        self.mode = str(mode or "audit_only")
-        if self.mode not in {"off", "audit_only", "enforce"}:
-            raise ValueError(f"Unsupported data_quality mode: {self.mode}")
-        self.fail_on_error = bool(fail_on_error)
-        self.sample_limit = int(sample_limit)
-        self.report_dir = Path(report_dir) if report_dir is not None else None
-        policy = table_policy or TableImportPolicy()
-        self.required_import_tables = {str(x) for x in policy.required_tables}
-        self.optional_import_tables = {str(x) for x in policy.optional_tables}
-        self.quality_check_enabled = {
-            str(table): self._coerce_bool(enabled)
-            for table, enabled in (policy.quality_check_enabled or {}).items()
-        }
-
-        self._schema_mapping = self._load_schema_mapping()
-        self._contracts = self._load_contracts()
-        self._contracts_by_sheet = {
-            contract.local_sheet: contract for contract in self._contracts
-        }
-        self._table_rules = ConfigTableQualityRules(
-            issue_factory=self._build_issue,
-            missing_mask=self._missing_mask,
-            sample_limit=self.sample_limit,
-        )
-
-    @classmethod
-    def from_defaults(
-        cls,
-        *,
-        schema_config: dict[str, Any] | None = None,
-        report_dir: str | Path | None = None,
-        force_fail_on_error: bool | None = None,
-    ) -> ConfigInputDataQualityChecker:
-        """基于 ``config/defaults.yaml#data_quality`` 配置创建检测器。
-
-        Args:
-            schema_config: 测试或特殊场景注入的 schema 配置。
-            report_dir: 覆盖默认报告输出目录。
-            force_fail_on_error: 覆盖 defaults 中的 fail_on_error 配置。
-
-        Returns:
-            已按 defaults 初始化的数据质量检测器实例。
-        """
-        try:
-            from src.utils.defaults import DATA_QUALITY_CONFIG as data_quality_config
-        except ImportError:
-            logger.warning("defaults module unavailable; using built-in data-quality defaults")
-            data_quality_config = {}
-
-        cfg = dict(data_quality_config or {})
-        fail_on_error = cfg.get("fail_on_error", False)
-        if force_fail_on_error is not None:
-            fail_on_error = force_fail_on_error
-        config_tables = cfg.get("config_tables") or {}
-        policy = TableImportPolicy(
-            required_tables=tuple(config_tables.get("required_import") or ()),
-            optional_tables=tuple(config_tables.get("optional_import") or ()),
-            quality_check_enabled=config_tables.get("quality_check_enabled") or {},
-        )
-
-        return cls(
-            schema_config=schema_config,
-            mode=cfg.get("mode", "audit_only") if cfg.get("enabled", True) else "off",
-            fail_on_error=fail_on_error,
-            sample_limit=cfg.get("sample_limit", 20),
-            report_dir=report_dir or cfg.get("report_dir"),
-            table_policy=policy,
-        )
-
-    @staticmethod
-    def _coerce_bool(value: Any) -> bool:
-        """将配置值转换为布尔值。
-
-        Args:
-            value: 待转换的配置值，支持 bool、数值和常见字符串表示。
-
-        Returns:
-            转换后的布尔值。
-        """
-        if isinstance(value, bool):
-            return value
-        if value is None:
-            return False
-        if isinstance(value, (int, float)):
-            return bool(value)
-        return str(value).strip().lower() in {"true", "1", "yes", "y", "on", "是"}
-
-    @staticmethod
-    def _primary_key_columns_from_config(table_cfg: dict[str, Any]) -> tuple[str, ...]:
-        """从表级配置和字段级标记中解析主键字段集合。
-
-        Args:
-            table_cfg: 单张配置表的 schema 定义。
-
-        Returns:
-            去重且保序的主键字段名元组。
-        """
-        columns: list[str] = []
-
-        def add_column(column: Any) -> None:
-            """按原始顺序加入非空且未重复的主键字段。"""
-            text = str(column).strip() if column is not None else ""
-            if text and text not in columns:
-                columns.append(text)
-
-        table_primary_key = table_cfg.get("primary_key") or []
-        if isinstance(table_primary_key, (list, tuple)):
-            for column in table_primary_key:
-                add_column(column)
-        elif table_primary_key:
-            add_column(table_primary_key)
-
-        for field in table_cfg.get("fields") or []:
-            if not isinstance(field, dict):
-                continue
-            db_name = field.get("db_name") or field.get("local_name")
-            if db_name and is_primary_key_marker(field.get("primary_key")):
-                add_column(db_name)
-
-        return tuple(columns)
-
-    @staticmethod
-    def _build_empty_result(tables: dict[str, pd.DataFrame]) -> dict[str, Any]:
-        """返回 mode=off 时的空检测结果。"""
-        return {
-            "passed": True,
-            "blocked": False,
-            "issues": [],
-            "cleaned_tables": dict(tables),
-            "db_ready_tables": {},
-            "db_ready_by_db_key": {},
-            "missing_sheets": [],
-            "ignored_sheets": [],
-            "ignored_columns": [],
-            "summary": {"mode": "off", "errors": 0, "warnings": 0, "infos": 0},
-        }
-
-    @staticmethod
-    def _ordered_fields(contract: _TableContract) -> list[dict[str, Any]]:
-        """按固定 schema 中的入库顺序返回字段定义。
-
-        Args:
-            contract: 当前配置表的固定入库契约。
-
-        Returns:
-            已按 ``db_order`` 或 ``local_order`` 排序的字段定义列表。
-        """
-        return sorted(
-            contract.fields,
-            key=lambda field: int(field.get("db_order") or field.get("local_order") or 0),
-        )
-
-    @staticmethod
-    def _normalize_text_value(column: str, value: Any) -> str:
-        """按字段业务语义规范化文本入库值。
-
-        Args:
-            column: 当前字段名。
-            value: 原始字段值。
-
-        Returns:
-            规范化后的文本值。地点类字段纯数字补零至 4 位，物料类字段去除
-            数值型 ``.0`` 后缀，其他文本字段执行普通字符串转换。
-        """
-        normalized_column = str(column).strip().lower()
-        if normalized_column in {
-            "location",
-            "dps_location",
-            "sending",
-            "receiving",
-            "sourcing",
-        }:
-            return normalize_location(value)
-        if normalized_column in {"material", "from_material", "to_material"}:
-            return normalize_material(value)
-        return str(value)
-
-    @staticmethod
-    def _field_db_type(contract: _TableContract, column: str) -> str:
-        """返回固定 schema 中字段对应的数据库类型。
-
-        Args:
-            contract: 当前配置表的固定入库契约。
-            column: 本地入库字段名。
-
-        Returns:
-            字段对应的数据库类型；未声明时按字符串类型处理。
-        """
-        for field in contract.fields:
-            if str(field.get("local_name")) == column:
-                return str(field.get("db_type") or "str")
-        return "str"
-
-    @staticmethod
-    def _is_text_db_type(db_type: str) -> bool:
-        """判断数据库字段类型是否属于文本类型。
-
-        Args:
-            db_type: 固定 schema 中声明的数据库字段类型。
-
-        Returns:
-            True 表示字段入库目标类型为文本，False 表示非文本类型。
-        """
-        return db_type.strip().lower() in {
-            "str",
-            "text",
-            "varchar",
-            "character varying",
-        }
-
-    @staticmethod
-    def _column_input_format_categories(series: pd.Series) -> set[str]:
-        """返回非空字段值中出现的输入格式类别集合。
-
-        Args:
-            series: 已过滤空值后的字段值序列。
-
-        Returns:
-            字段值中出现的输入格式类别集合。
-        """
-        if is_bool_dtype(series):
-            return {"bool:native"}
-        if is_numeric_dtype(series):
-            return {"number:native"}
-        if is_datetime64_any_dtype(series):
-            return {"datetime:native"}
-
-        categories: set[str] = set()
-        for value in series:
-            categories.add(ConfigInputDataQualityChecker._value_input_format_category(value))
-        return categories
-
-    @staticmethod
-    def _value_input_format_category(value: Any) -> str:
-        """根据原生类型或可解析字符串格式识别单元格输入类别。
-
-        Args:
-            value: 单个单元格值。
-
-        Returns:
-            输入格式类别编码，例如 ``number:native`` 或 ``datetime:string``。
-        """
-        if isinstance(value, bool):
-            return "bool:native"
-        if isinstance(value, numbers.Number):
-            return "number:native"
-        if isinstance(value, (pd.Timestamp, datetime, date)):
-            return "datetime:native"
-
-        text = str(value).strip()
-        lower = text.lower()
-        if lower in {"true", "false", "y", "n", "yes", "no", "t", "f"}:
-            return "bool:string"
-        if re.fullmatch(r"[+-]?\d+(\.\d+)?", text):
-            return "number:string"
-        if re.fullmatch(r"\d{4}-\d{1,2}-\d{1,2}([ tT].*)?", text):
-            return "datetime:string:yyyy-mm-dd"
-        if re.fullmatch(r"\d{4}/\d{1,2}/\d{1,2}([ tT].*)?", text):
-            return "datetime:string:yyyy/mm/dd"
-        if re.fullmatch(r"\d{4}\.\d{1,2}\.\d{1,2}([ tT].*)?", text):
-            return "datetime:string:yyyy.mm.dd"
-        if re.fullmatch(r"\d{1,2}/\d{1,2}/\d{4}([ tT].*)?", text):
-            return "datetime:string:mm/dd/yyyy"
-        parsed = pd.to_datetime(text, errors="coerce")
-        if pd.notna(parsed):
-            return "datetime:string:parseable"
-        return "string"
+    def _is_datetime_db_type(db_type: str) -> bool:
+        """判断 db_type 是否属于日期时间类型"""
+        return "timestamp" in db_type or db_type == "date"
 
     @staticmethod
     def _missing_mask(series: pd.Series) -> pd.Series:
-        """识别字段序列中的空值和空白字符串。
+        """识别字段序列中的空值和空白字符串（空值判定规则）
 
         Args:
-            series: 待识别空值的字段值序列。
+            series: 待识别空值的字段值序列
 
         Returns:
-            标识空值位置的布尔 Series。
+            标识空值位置的布尔 Series
         """
+        # 除 NaN/None 外，纯空白字符串同样按空值处理
+        # map 在 object 列上返回 object dtype，显式转 bool 以避免
+        # pandas 对 bool 与 object 间逻辑运算的弃用告警
         return series.isna() | series.map(
             lambda value: isinstance(value, str) and value.strip() == ""
-        )
+        ).astype(bool)
+
+    def __init__(self, schemas: dict[str, Any] | None = None) -> None:
+        """解析 schema 并构建逐表规则配置。
+
+        Args:
+            schemas: 测试或特殊场景注入的 schema；为空时读取
+                ``CONFIG_TABLE_SCHEMAS``，兼容带 ``tables`` 节点的完整映射
+        """
+        raw = get_config_table_schemas() if schemas is None else schemas
+        # 兼容get_config_table_mapping()风格的完整映射注入
+        if isinstance(raw.get("tables"), dict):
+            raw = raw["tables"]
+        self._tables: dict[str, dict[str, Any]] = {}
+        for key, table_cfg in raw.items():
+            sheet = str(table_cfg.get("local_sheet") or key)
+            self._tables[sheet] = self._parse_table(sheet, table_cfg)
+
+    @classmethod
+    def _parse_table(cls, sheet: str, table_cfg: dict[str, Any]) -> dict[str, Any]:
+        """解析单张配置表的 schema 定义为规则配置
+
+        Args:
+            sheet: 本地配置表Sheet名
+            table_cfg: 该表的schema定义
+
+        Returns:
+            包含 db_table、columns、primary_key、fields、date_pair的规则配置
+        """
+        fields: dict[str, dict[str, Any]] = {}
+        date_flags: dict[str, str] = {}
+        primary_key: list[str] = []
+
+        # 来源一：表级 primary_key 列表（保序去重）。
+        for column in table_cfg.get("primary_key") or []:
+            text = str(column).strip()
+            if text and text not in primary_key:
+                primary_key.append(text)
+
+        for field in table_cfg.get("fields") or ():
+            if not isinstance(field, dict):
+                continue
+            column = str(field.get("local_name"))
+            db_type = str(field.get("db_type") or "str").strip().lower()
+            rule: dict[str, Any] = {
+                "db_type": db_type,
+                "notnull": bool(field.get("notnull")),
+            }
+
+            # 来源二：字段级 primary_key 标记，补充表级未覆盖的主键字段。
+            if field.get("primary_key") is True and column not in primary_key:
+                primary_key.append(column)
+
+            # enumerate：须为非空列表/元组/集合，统一小写去空白后存为集合
+            allowed = field.get("enumerate")
+            if allowed is not None:
+                if isinstance(allowed, (list, tuple, set, frozenset)) and allowed:
+                    rule["enumerate"] = {str(v).strip().lower() for v in allowed}
+                else:
+                    logger.warning(
+                        "%s.%s: invalid enumerate %r ignored", sheet, column, allowed
+                    )
+
+            # range：须配数值 db_type，且为 (min, max) 二元组（None 表示无界）
+            value_range = field.get("range")
+            if value_range is not None:
+                if (
+                    db_type in cls._NUMERIC_DB_TYPES
+                    and isinstance(value_range, (list, tuple))
+                    and len(value_range) == 2
+                ):
+                    rule["range"] = (value_range[0], value_range[1])
+                else:
+                    logger.warning(
+                        "%s.%s: range %r requires a numeric db_type; ignored",
+                        sheet,
+                        column,
+                        value_range,
+                    )
+
+            # date_flag：须配日期 db_type，且取值为 start/end
+            date_flag = field.get("date_flag")
+            if date_flag is not None:
+                if cls._is_datetime_db_type(db_type) and str(date_flag) in {"start", "end"}:
+                    date_flags[column] = str(date_flag)
+                else:
+                    logger.warning(
+                        "%s.%s: date_flag %r requires a datetime db_type; ignored",
+                        sheet,
+                        column,
+                        date_flag,
+                    )
+
+            fields[column] = rule
+
+        # date_flag起止对：有且仅有一个start和一个end时才生效
+        starts = [col for col, flag in date_flags.items() if flag == "start"]
+        ends = [col for col, flag in date_flags.items() if flag == "end"]
+        date_pair: tuple[str, str] | None = None
+        if len(starts) == 1 and len(ends) == 1:
+            date_pair = (starts[0], ends[0])
+        elif date_flags:
+            logger.warning(
+                "%s: date_flag must form exactly one start/end pair; got %r",
+                sheet,
+                date_flags,
+            )
+
+        return {
+            "db_table": str(table_cfg.get("db_table") or sheet),
+            "columns": tuple(fields),
+            "primary_key": tuple(primary_key),
+            "fields": fields,
+            "date_pair": date_pair,
+        }
+
+    def sheet_names(self) -> list[str]:
+        """返回 schema 中声明的全部配置表Sheet名"""
+        return list(self._tables)
+
+    def has_sheet(self, sheet: str) -> bool:
+        """判断某个 Sheet 是否在 schema 中声明"""
+        return sheet in self._tables
+
+    def required_columns(self, sheet: str) -> list[str]:
+        """返回某张表 schema 声明的必需字段名列表"""
+        return list(self._tables[sheet]["columns"])
+
+    def primary_key(self, sheet: str) -> tuple[str, ...]:
+        """返回某张表的主键字段名元组"""
+        return self._tables[sheet]["primary_key"]
+
+    def db_table(self, sheet: str) -> str:
+        """返回某张表对应的物理数据库表名"""
+        return self._tables[sheet]["db_table"]
+
+    def validate_fields(
+        self,
+        sheet: str,
+        df: pd.DataFrame,
+    ) -> list[dict[str, Any]]:
+        """对单张表执行全部字段级规则
+
+        执行顺序固定为：非空检查、类型检查、枚举检查、范围检查、日期顺序检查
+        缺列问题由 ``check_4_columns`` 统一报告，本函数只校验已经存在
+        的字段值
+
+        Args:
+            sheet: 本地配置表Sheet名（用于查询该表的规则配置）
+            df: 已投影到 schema 声明列并去除填充空行的数据
+
+        Returns:
+            轻量命中明细列表；Sheet 未在 schema 声明时返回空列表。
+            问题归属（config_name/sheet/check）与标准记录格式由调用方
+            （Checker）补全，本类不依赖任何流程上下文。
+        """
+        # 获取当前 Sheet 的规则配置；未知 Sheet 不参与字段级检测
+        table = self._tables.get(sheet)
+        if table is None:
+            return []
+
+        # 准备问题收集器和主键集合，后续非空检查需要区分主键字段
+        issues: list[dict[str, Any]] = []
+        pk_columns = set(table["primary_key"])
+
+        # 按 schema 字段声明顺序逐列校验。
+        for column, rule in table["fields"].items():
+            # 缺失字段由 check_4 统一报告，避免同一缺列重复产生多类问题
+            if column not in df.columns:
+                continue
+
+            # 取出当前字段值，并复用同一份缺失掩码，保持各规则口径一致
+            series = df[column]
+            missing = self._missing_mask(series)
+
+            # 非空规则只在 schema 声明 notnull=True 时执行
+            if rule["notnull"]:
+                issues.extend(
+                    self.validate_notnull(
+                        column, series, missing,
+                        is_primary_key=column in pk_columns,
+                    )
+                )
+
+            # 类型规则按 db_type 解析非空值；空值留给非空规则处理
+            issues.extend(
+                self.validate_type(
+                    column, series, missing,
+                    db_type=rule["db_type"],
+                )
+            )
+
+            # 枚举规则只在 schema 声明 enumerate 时执行。
+            if "enumerate" in rule:
+                issues.extend(
+                    self.validate_enum(
+                        column, series, missing,
+                        allowed=rule["enumerate"],
+                    )
+                )
+
+            # 范围规则只在 schema 声明 range 时执行。
+            if "range" in rule:
+                issues.extend(
+                    self.validate_range(
+                        column, series, missing,
+                        min_value=rule["range"][0],
+                        max_value=rule["range"][1],
+                    )
+                )
+
+        # 表级日期起止字段成对存在时，额外校验 start <= end。
+        if table["date_pair"] is not None:
+            issues.extend(self.validate_date_order(sheet, df))
+        return issues
+
+    @staticmethod
+    def validate_notnull(
+        column: str,
+        series: pd.Series,
+        missing: pd.Series,
+        *,
+        is_primary_key: bool = False,
+    ) -> list[dict[str, Any]]:
+        """校验字段非空。
+
+        ``missing`` 由调用方统一计算，已把 ``NaN``、``None`` 和纯空白字符串
+        都视为缺失值。
+
+        Args:
+            column: 字段名。
+            series: 字段值序列。
+            missing: 空值掩码（由调用方统一计算复用）。
+            is_primary_key: 是否主键字段，主键空值使用独立规则 ID。
+
+        Returns:
+            轻量命中明细列表（最多 SAMPLE_LIMIT 条样例）；问题归属与
+            标准记录格式由调用方（Checker）补全。
+        """
+        # 初始化命中列表；本函数只返回当前字段的非空命中。
+        issues: list[dict[str, Any]] = []
+
+        # 提取命中缺失掩码的行索引，并限制样例数量。
+        for idx in list(series.index[missing])[:SAMPLE_LIMIT]:
+            # 构造轻量命中；主键字段使用更明确的规则 ID 和提示。
+            issues.append(
+                {
+                    "column": column,
+                    "row_index": idx,
+                    "issue_type": "null_value",
+                    "severity": "ERROR",
+                    "message": (
+                        f"Primary key field is empty: {column}"
+                        if is_primary_key
+                        else f"Mapped import field is empty: {column}"
+                    ),
+                    "original_value": series.loc[idx],
+                    "rule_id": (
+                        "primary_key.not_null" if is_primary_key else "field.not_null"
+                    ),
+                }
+            )
+        return issues
+
+    @classmethod
+    def validate_type(
+        cls,
+        column: str,
+        series: pd.Series,
+        missing: pd.Series,
+        *,
+        db_type: str,
+    ) -> list[dict[str, Any]]:
+        """按 db_type 解析字段值，并报告不可解析的非空值。
+
+        数值类型用 ``pd.to_numeric``（整数类型额外检查小数部分）、日期
+        类型用 ``pd.to_datetime``、布尔类型按常见真假值字面量识别；文本
+        及未识别类型不做检查。
+
+        Args:
+            column: 字段名。
+            series: 字段值序列。
+            missing: 空值掩码（空值由非空规则负责，类型规则跳过）。
+            db_type: schema 声明的数据库字段类型（已小写规整）。
+
+        Returns:
+            轻量命中明细列表（最多 SAMPLE_LIMIT 条样例）；问题归属与
+            标准记录格式由调用方（Checker）补全。
+        """
+        # 根据 db_type 选择解析策略，并生成 invalid 掩码。
+        if db_type in cls._NUMERIC_DB_TYPES:
+            # 数值类型：无法解析为数字的非空值判定为类型错误。
+            numeric = pd.to_numeric(series, errors="coerce")
+            invalid = (~missing) & numeric.isna()
+
+            # 整数类型：在可解析为数字的基础上，额外要求没有小数部分。
+            if db_type in cls._INTEGER_DB_TYPES:
+                invalid |= (~missing) & numeric.notna() & ((numeric % 1) != 0)
+            message = f"{column} must be {db_type} compatible"
+        elif cls._is_datetime_db_type(db_type):
+            # 日期/时间类型：无法被 pandas 解析成日期的非空值判定为错误。
+            parsed = pd.to_datetime(series, errors="coerce")
+            invalid = (~missing) & parsed.isna()
+            message = f"{column} must be parseable as a date"
+        elif db_type in cls._BOOL_DB_TYPES:
+            # 布尔类型：允许原生 bool，以及配置导入中常见的真假字符串。
+            invalid = (~missing) & ~series.map(
+                lambda value: isinstance(value, bool)
+                or str(value).strip().lower()
+                in (cls._BOOL_TRUTHY | cls._BOOL_FALSY)
+            ).astype(bool)
+            message = f"{column} must be a boolean literal"
+        else:
+            # 文本及未识别类型不做格式解析，避免误报自由文本字段。
+            return []
+
+        # 把 invalid 掩码转换为轻量命中明细，并限制样例数量。
+        issues: list[dict[str, Any]] = []
+        for idx in list(series.index[invalid])[:SAMPLE_LIMIT]:
+            issues.append(
+                {
+                    "column": column,
+                    "row_index": idx,
+                    "issue_type": "type_mismatch",
+                    "severity": "ERROR",
+                    "message": message,
+                    "original_value": series.loc[idx],
+                    "rule_id": "field.type_mismatch",
+                }
+            )
+        return issues
+
+    @staticmethod
+    def validate_enum(
+        column: str,
+        series: pd.Series,
+        missing: pd.Series,
+        *,
+        allowed: set[str],
+    ) -> list[dict[str, Any]]:
+        """校验字段值是否属于schema声明的枚举集合。
+        校验时会忽略大小写和首尾空白；空值由非空规则处理，枚举规则跳过。
+        Args:
+            column: 字段名。
+            series: 字段值序列。
+            missing: 空值掩码（空值由非空规则负责，枚举规则跳过）。
+            allowed: 允许值集合（已小写规整）。
+        Returns:
+            轻量命中明细列表（最多 SAMPLE_LIMIT 条样例）；问题归属与
+            标准记录格式由调用方（Checker）补全。
+        """
+        # 将非空值标准化为小写去空白文本，再与允许值集合比较。
+        invalid = (~missing) & ~series.map(
+            lambda value: str(value).strip().lower() in allowed
+        ).astype(bool)
+
+        # 把非法枚举值转换为轻量命中明细，并限制样例数量。
+        issues: list[dict[str, Any]] = []
+        for idx in list(series.index[invalid])[:SAMPLE_LIMIT]:
+            issues.append(
+                {
+                    "column": column,
+                    "row_index": idx,
+                    "issue_type": "invalid_enum",
+                    "severity": "ERROR",
+                    "message": f"{column} must be one of {sorted(allowed)}",
+                    "original_value": series.loc[idx],
+                    "rule_id": "field.enum",
+                }
+            )
+        return issues
+
+    @staticmethod
+    def validate_range(
+        column: str,
+        series: pd.Series,
+        missing: pd.Series,
+        *,
+        min_value: float | None,
+        max_value: float | None,
+    ) -> list[dict[str, Any]]:
+        """校验数值字段是否落在 schema 声明的闭区间范围内。
+        ``None`` 表示对应一侧无边界。无法解析为数值的内容由类型规则报告，
+        本函数只检查已经能够解析为数值的非空值。
+
+        Args:
+            column: 字段名。
+            series: 字段值序列。
+            missing: 空值掩码；范围判断只针对能解析为数值的有效值。
+            min_value: 允许的最小值；为 None 时不校验下界。
+            max_value: 允许的最大值；为 None 时不校验上界。
+
+        Returns:
+            轻量命中明细列表（最多 SAMPLE_LIMIT 条样例）；问题归属与
+            标准记录格式由调用方（Checker）补全。
+        """
+        # 先尝试解析为数值；不可解析值不在本函数重复报错。
+        numeric = pd.to_numeric(series, errors="coerce")
+
+        # 仅保留非空且可解析为数值的行作为范围检查对象。
+        valid = (~missing) & numeric.notna()
+
+        # 初始化越界掩码，再分别叠加下界和上界条件。
+        invalid = pd.Series(False, index=series.index)
+        if min_value is not None:
+            invalid |= valid & (numeric < min_value)
+        if max_value is not None:
+            invalid |= valid & (numeric > max_value)
+
+        # 根据上下界配置生成清晰的操作员提示。
+        if min_value is not None and max_value is not None:
+            message = f"{column} must be between {min_value} and {max_value}"
+        elif min_value is not None:
+            message = f"{column} must be >= {min_value}"
+        else:
+            message = f"{column} must be <= {max_value}"
+
+        # 把越界样例转换为轻量命中明细。
+        issues: list[dict[str, Any]] = []
+        for idx in list(series.index[invalid])[:SAMPLE_LIMIT]:
+            issues.append(
+                {
+                    "column": column,
+                    "row_index": idx,
+                    "issue_type": "out_of_range",
+                    "severity": "ERROR",
+                    "message": message,
+                    "original_value": series.loc[idx],
+                    "rule_id": "field.range",
+                }
+            )
+        return issues
+
+    def validate_date_order(
+        self,
+        sheet: str,
+        df: pd.DataFrame,
+    ) -> list[dict[str, Any]]:
+        """校验 date_flag 标记的起止字段满足 ``start <= end``。
+
+        空值和日期格式问题分别由非空规则、类型规则报告；本函数只负责在
+        两端都能解析为日期时比较先后顺序。
+
+        Args:
+            sheet: 本地配置表 Sheet 名（用于查询起止字段规则配置）。
+            df: 已投影的配置表数据。
+
+        Returns:
+            轻量命中明细列表（最多 SAMPLE_LIMIT 条样例）；问题归属与
+            标准记录格式由调用方（Checker）补全。
+        """
+        # 读取当前表的 date_flag 起止字段配置；未配置则无需检查。
+        table = self._tables.get(sheet)
+        if table is None or table["date_pair"] is None:
+            return []
+
+        # 拆出 start/end 字段名。
+        start_column, end_column = table["date_pair"]
+
+        # 任一端缺列时无法比较，缺列问题交由 check_4 报告。
+        if start_column not in df.columns or end_column not in df.columns:
+            return []
+
+        # 分别计算起止字段的缺失掩码。
+        start_missing = self._missing_mask(df[start_column])
+        end_missing = self._missing_mask(df[end_column])
+
+        # 尝试解析起止日期；解析失败的行由类型规则负责。
+        start = pd.to_datetime(df[start_column], errors="coerce")
+        end = pd.to_datetime(df[end_column], errors="coerce")
+
+        # 只比较两端均非空且均可解析为日期的行。
+        valid = (~start_missing) & (~end_missing) & start.notna() & end.notna()
+
+        # 结束日期早于开始日期即为非法日期范围。
+        invalid = valid & (end < start)
+
+        # 把非法日期范围样例转换为轻量命中明细（表级命中不带 column）。
+        issues: list[dict[str, Any]] = []
+        for idx in list(df.index[invalid])[:SAMPLE_LIMIT]:
+            issues.append(
+                {
+                    "row_index": idx,
+                    "issue_type": "invalid_date_range",
+                    "severity": "ERROR",
+                    "message": (
+                        f"{end_column} must be greater than or equal to {start_column}"
+                    ),
+                    "original_value": {
+                        start_column: df.at[idx, start_column],
+                        end_column: df.at[idx, end_column],
+                    },
+                    "rule_id": "field.date_order",
+                }
+            )
+        return issues
+
+
+class ConfigInputDataQualityChecker:
+    """配置表输入数据质量检测器（六步检测，只记录问题不阻断）。
+    实例属性只有 ``issues``（问题明细列表）和 ``result``（检测结果汇总）；
+    规则配置、逐表开关等均在 ``validate`` 内部按需构建，不落为实例状态。
+    """
+
+    def __init__(self) -> None:
+        self.issues: list[dict[str, Any]] = []
+        self.result: dict[str, Any] = {}
+
+    #  流程与记录工具方法（静态，无实例状态；标准 issue 由 Checker 统一构造）
 
     @staticmethod
     def _stringify(value: Any) -> str:
-        """将报告字段值转换为空值安全的字符串。
-
+        """将问题明细字段值转换为空值安全的字符串。
         Args:
             value: 待转换的任意字段值。
-
         Returns:
             字符串化后的字段值；None 和 NaN 返回空字符串。
         """
+        # None 与浮点 NaN 统一展示为空字符串，避免出现 "nan" 字样。
         if value is None:
             return ""
         if isinstance(value, float) and pd.isna(value):
@@ -1034,15 +624,14 @@ class ConfigInputDataQualityChecker:
         return str(value)
 
     @staticmethod
+    def _normalize_row_index(idx: Any) -> int | str:
+        """将 DataFrame 行索引规范化为问题明细可用的整数或字符串。"""
+        # 非整数索引（如字符串索引）统一转字符串，保证可序列化。
+        return int(idx) if isinstance(idx, int) else str(idx)
+
+    @staticmethod
     def _join_unique(series: pd.Series | None) -> str:
-        """使用报告分隔符合并去重后的非空文本值。
-
-        Args:
-            series: 待合并的字段值序列；为空时返回空字符串。
-
-        Returns:
-            使用中文分号连接的去重非空文本。
-        """
+        """使用中文分号合并去重后的非空文本值，保持首次出现顺序。"""
         if series is None:
             return ""
         values: list[str] = []
@@ -1055,1029 +644,615 @@ class ConfigInputDataQualityChecker:
             values.append(text)
         return "；".join(values)
 
-    def table_name_for_sheet(self, sheet_name: str) -> str:
-        """根据本地 Sheet 名返回物理数据库表名。
+    @staticmethod
+    def _coerce_bool(value: Any) -> bool:
+        """将配置值转换为布尔值，支持 bool、数值和常见字符串表示。"""
+        if isinstance(value, bool):
+            return value
+        if value is None:
+            return False
+        if isinstance(value, (int, float)):
+            return bool(value)
+        return str(value).strip().lower() in {"true", "1", "yes", "y", "on", "是"}
 
-        Args:
-            sheet_name: 本地配置表 Sheet 名。
+    @staticmethod
+    def _load_quality_check_enabled() -> dict[str, bool]:
+        """读取 defaults.yaml#data_quality 中的逐表质量检测开关。
+        Returns:
+            Sheet 名到开关布尔值的映射；defaults 不可用时返回空映射
+            （未声明的表默认开启检测）。
+        """
+        try:
+            from src.utils.defaults import data_quality_config
+        except ImportError:
+            logger.warning(
+                "defaults module unavailable; quality check enabled for all sheets"
+            )
+            return {}
+        cfg = dict(data_quality_config or {})
+        raw = (cfg.get("config_tables") or {}).get("quality_check_enabled") or {}
+        return {
+            str(sheet): ConfigInputDataQualityChecker._coerce_bool(enabled)
+            for sheet, enabled in raw.items()
+        }
+
+    @staticmethod
+    def _load_optional_sheets() -> set[str]:
+        """读取 defaults.yaml#data_quality 的可选表清单（optional_import）。
+
+        可选表在输入中存在时才执行检测；缺失时不做任何检测、不记缺表
+        问题。未列入该清单的 schema 表一律按必需表处理（缺失记 ERROR），
+        防止清单遗漏导致漏检。defaults 不可用时返回空集合。
 
         Returns:
-            对应的 cfg_* 物理表名。
+            可选配置表 Sheet 名集合。
         """
-        return self._contracts_by_sheet[sheet_name].db_table
+        try:
+            from src.utils.defaults import data_quality_config
+        except ImportError:
+            logger.warning(
+                "defaults module unavailable; all sheets treated as required"
+            )
+            return set()
+        cfg = dict(data_quality_config or {})
+        raw = (cfg.get("config_tables") or {}).get("optional_import") or ()
+        return {str(sheet) for sheet in raw}
 
-    def db_key_for_sheet(self, sheet_name: str) -> str:
-        """根据本地 Sheet 名返回去除 cfg_ 前缀的数据库表 key。
+    @staticmethod
+    def _drop_empty_rows(
+        df: pd.DataFrame, rules: ConfigTableQualityRules
+    ) -> pd.DataFrame:
+        """移除所有列均为空的电子表格填充行（仅用于检测口径）。
+
+        空值判定复用规则实例的 ``_missing_mask``，保证检测口径与字段级
+        规则的空值定义一致；本方法只构造检测视图，不修改调用方数据。
+        """
+        if df.empty or len(df.columns) == 0:
+            return df
+        missing = pd.DataFrame(
+            {column: rules._missing_mask(df[column]) for column in df.columns},
+            index=df.index,
+        )
+        return df.loc[~missing.all(axis=1)].copy()
+
+    # pylint: disable=too-many-arguments
+    @staticmethod
+    def _build_issue(
+        *,
+        config_name: str | None,
+        sheet: str,
+        check: str,
+        issue_type: str,
+        severity: str,
+        message: str,
+        column: str | None = None,
+        row_index: Any = None,
+        original_value: Any = None,
+        rule_id: str = "",
+    ) -> dict[str, Any]:
+        """构造各检测规则统一使用的内存问题明细记录。
 
         Args:
-            sheet_name: 本地配置表 Sheet 名。
+            config_name: 当前配置名，用于问题归属和报告输出。
+            sheet: 问题所属的配置表 Sheet 名。
+            check: 命中问题的检测步骤标识，与检测方法名一致
+                （见 ``_CHECK_IDS``：check_0_prepare ~ check_6_pkeys）。
+            issue_type: 问题类型编码（见 ``_ISSUE_TYPE_LABELS_ZH``）。
+            severity: 严重级别（INFO/WARNING/ERROR）。
+            message: 问题说明。
+            column: 问题字段名；表级问题可不带。
+            row_index: 问题行索引，接受原始 DataFrame 索引值并在此统一
+                规范化；表级问题可不带。
+            original_value: 原始取值快照。
+            rule_id: 命中的规则 ID。
 
         Returns:
-            去除 ``cfg_`` 前缀后的数据库表 key。
+            标准化内存问题明细字典。
         """
-        return self._contracts_by_sheet[sheet_name].db_key
+        return {
+            "config_name": config_name or "",
+            "sheet": sheet,
+            "column": column or "",
+            # 行索引在此统一规范化，规则层只需透传原始索引值。
+            "row_index": (
+                ""
+                if row_index is None
+                else ConfigInputDataQualityChecker._normalize_row_index(row_index)
+            ),
+            "check": check,
+            "issue_type": issue_type,
+            "severity": severity,
+            "message": message,
+            "original_value": ConfigInputDataQualityChecker._stringify(original_value),
+            "rule_id": rule_id,
+        }
 
     def validate(
         self,
         tables: dict[str, pd.DataFrame],
         *,
         config_name: str | None = None,
-        sub_node: str = "input_pre",
-        write_reports: bool = False,
-        output_dir: str | Path | None = None,
+        report_dir: str | Path | None = None,
     ) -> dict[str, Any]:
-        """对输入配置表执行校验、字段投影和入库类型转换。
+        """对输入配置表执行完整的数据质量检测流程。
+
+        只有 ``defaults.yaml#data_quality.config_tables.quality_check_enabled``
+        中为 true（或未声明）的表才参与检测；检测不修改调用方数据，也不
+        阻断后续流程。
 
         Args:
             tables: 从 Excel/CSV 读取出的配置表数据，key 为 Sheet 名。
-            config_name: 当前配置名，用于问题归属、报告输出和入库字段追加。
-            sub_node: 当前检测节点标识，用于内部问题追踪。
-            write_reports: 是否写出 ``input_quality.xlsx`` 质量报告。
-            output_dir: 本次质量报告输出目录；为空时使用实例默认目录。
+            config_name: 当前配置名，用于问题归属和报告输出。
+            report_dir: 质量报告输出目录；为空时不写报告。
 
         Returns:
-            包含检测结果、问题明细、清洗后表、待入库表和摘要统计的字典。
+            检测结果字典：``{"passed": 无 ERROR 即 True, "issues": [...],
+            "summary": {...}}``，同时存于 ``self.result``。
         """
-        if self.mode == "off":
-            return self._build_empty_result(tables)
+        # 重置本次检测状态，避免复用实例时混入上一次结果。
+        self.issues = []
+        self.result = {}
 
-        outcome = self._validate_all_contracts(
-            tables, config_name=config_name, sub_node=sub_node,
+        # 加载 schema 规则；字段、主键、枚举、范围等检测依据均来自这里。
+        rules = ConfigTableQualityRules()
+
+        # 读取逐表检测开关；未配置的 Sheet 默认启用检测。
+        enabled = self._load_quality_check_enabled()
+
+        # 生成本次实际参与检测的 Sheet 列表；关闭的表整体跳过。
+        enabled_sheets = [
+            sheet for sheet in rules.sheet_names() if enabled.get(sheet, True)
+        ]
+
+        # 可选表清单（optional_import）：存在时才检测，缺失时不报缺表问题。
+        optional_sheets = self._load_optional_sheets()
+
+        # 识别输入中存在、但 schema 未声明的 Sheet；这类 Sheet 不参与检测。
+        undeclared = sorted(set(tables) - set(rules.sheet_names()))
+        if undeclared:
+            logger.info("Sheets not declared in schema are ignored: %s", undeclared)
+
+        # 准备检测口径数据。
+        # - 只保留 schema 声明且输入实际存在的列。
+        # - 删除电子表格常见的全空填充行。
+        # - 不修改调用方传入的原始 DataFrame。
+        prepared: dict[str, pd.DataFrame] = {}
+        for sheet in enabled_sheets:
+            df = tables.get(sheet)
+
+            # 缺失 Sheet 由 check_1 统一报告，这里只准备已存在的 Sheet。
+            if df is None:
+                continue
+            try:
+                # 投影到已存在的 schema 列，避免字段级检测处理无关列。
+                present = [c for c in rules.required_columns(sheet) if c in df.columns]
+
+                # 去掉全空行，避免 Excel/CSV 末尾填充行被误判为数据问题。
+                prepared[sheet] = self._drop_empty_rows(
+                    df.loc[:, present].copy(), rules
+                )
+            except Exception as exc:  # noqa: BLE001
+                # 单表准备失败时记录内部异常，并继续处理其他 Sheet。
+                logger.exception("Data quality preparation failed for sheet %s", sheet)
+                self.issues.append(
+                    self._internal_error_issue(
+                        config_name=config_name,
+                        sheet=sheet,
+                        check="check_0_prepare",
+                        exc=exc,
+                    )
+                )
+
+        # 声明六个检测项的固定执行顺序。
+        # 每个检测项只负责一种问题类型，便于报告定位和后续扩展。
+        steps: tuple[tuple[str, Callable[[], None]], ...] = (
+            # 检查 schema 声明且已启用的 Sheet 是否存在于输入数据中。
+            (
+                "check_1_sheets",
+                lambda: self.check_1_sheets(
+                    tables,
+                    rules,
+                    enabled_sheets=enabled_sheets,
+                    optional_sheets=optional_sheets,
+                    config_name=config_name,
+                ),
+            ),
+            # 检查完成字段投影和空行过滤后的 Sheet 是否没有有效数据。
+            (
+                "check_2_empty",
+                lambda: self.check_2_empty(prepared, rules, config_name=config_name),
+            ),
+            # 检查同一 Sheet 内是否存在全字段完全相同的重复数据行。
+            (
+                "check_3_duplicates",
+                lambda: self.check_3_duplicates(
+                    prepared, rules, config_name=config_name
+                ),
+            ),
+            # 检查原始输入 Sheet 是否缺少 schema 声明的必需字段。
+            (
+                "check_4_columns",
+                lambda: self.check_4_columns(
+                    tables, rules, enabled_sheets=enabled_sheets, config_name=config_name
+                ),
+            ),
+            # 检查字段级规则，包括非空、类型、枚举、范围和日期顺序。
+            (
+                "check_5_fields",
+                lambda: self.check_5_fields(prepared, rules, config_name=config_name),
+            ),
+            # 检查 schema 主键字段组合是否在同一 Sheet 内重复。
+            (
+                "check_6_pkeys",
+                lambda: self.check_6_pkeys(
+                    prepared, rules, config_name=config_name
+                ),
+            ),
         )
 
-        self._table_rules.validate_all(
-            outcome.cleaned_tables,
-            [contract for contract in self._contracts if contract.data_quality_enabled],
-            outcome.issues,
-            config_name=config_name,
-            sub_node=sub_node,
-        )
+        # 按顺序执行所有检测项。
+        # 任一检测项异常都会转成 checker_exception 问题，不影响后续检测项。
+        for check_name, run_check in steps:
+            try:
+                run_check()
+            except Exception as exc:  # noqa: BLE001
+                logger.exception(
+                    "Data quality %s crashed; continue with next check", check_name
+                )
+                self.issues.append(
+                    self._internal_error_issue(
+                        config_name=config_name,
+                        sheet="",
+                        check=check_name,
+                        exc=exc,
+                    )
+                )
 
-        summary = self._summarize(
-            outcome.issues,
-            outcome.ignored_sheets,
-            outcome.ignored_columns,
-            outcome.missing_sheets,
-        )
-        blocked = self._should_block(summary)
-        result = {
-            "passed": not blocked,
-            "blocked": blocked,
-            "issues": outcome.issues,
-            "cleaned_tables": outcome.cleaned_tables,
-            "db_ready_tables": outcome.db_ready_tables,
-            "db_ready_by_db_key": outcome.db_ready_by_db_key,
-            "missing_sheets": outcome.missing_sheets,
-            "ignored_sheets": outcome.ignored_sheets,
-            "ignored_columns": outcome.ignored_columns,
-            "summary": summary,
-        }
+        # 汇总问题明细，生成 passed 标记和按维度统计的 summary。
+        self.result = self._build_result()
 
-        report_target = Path(output_dir) if output_dir is not None else self.report_dir
-        if write_reports and report_target is not None:
-            self.write_reports(result, report_target)
+        # 按需写出操作员报告；报告写出失败只记日志，不影响返回结果。
+        if report_dir is not None:
+            try:
+                self.write_report(report_dir)
+            except Exception:  # noqa: BLE001
+                logger.exception(
+                    "Failed to write data quality report to %s", report_dir
+                )
 
-        return result
+        # 检测完成后统一记录错误摘要，便于日志侧快速感知质量状态。
+        self._report_errors_at_end()
 
-    def validate_or_raise(
+        # 返回本次检测结果，调用方可继续读取 self.result。
+        return self.result
+
+    def check_1_sheets(
         self,
         tables: dict[str, pd.DataFrame],
+        rules: ConfigTableQualityRules,
         *,
+        enabled_sheets: list[str] | None = None,
+        optional_sheets: set[str] | None = None,
         config_name: str | None = None,
-        sub_node: str = "input_pre",
-        write_reports: bool = False,
-        output_dir: str | Path | None = None,
-    ) -> dict[str, Any]:
-        """执行质量检测，并在出现阻断问题时抛出异常。
-
-        Args:
-            tables: 从 Excel/CSV 读取出的配置表数据，key 为 Sheet 名。
-            config_name: 当前配置名，用于问题归属、报告输出和入库字段追加。
-            sub_node: 当前检测节点标识，用于内部问题追踪。
-            write_reports: 是否写出 ``input_quality.xlsx`` 质量报告。
-            output_dir: 本次质量报告输出目录；为空时使用实例默认目录。
-
-        Returns:
-            ``validate`` 返回的检测结果字典。
-
-        Raises:
-            DataQualityError: 当检测结果需要阻断后续流程时抛出。
-        """
-        result = self.validate(
-            tables,
-            config_name=config_name,
-            sub_node=sub_node,
-            write_reports=write_reports,
-            output_dir=output_dir,
-        )
-        if result["blocked"]:
-            raise DataQualityError(
-                "Input configuration data quality check failed; "
-                f"errors={result['summary'].get('errors', 0)}"
-            )
-        return result
-
-    def write_reports(self, result: dict[str, Any], output_dir: str | Path) -> None:
-        """写出面向操作员的数据质量检测报告工作簿。
-
-        Args:
-            result: ``validate`` 返回的检测结果字典。
-            output_dir: 报告输出目录。
-        """
-        output_path = Path(output_dir)
-        output_path.mkdir(parents=True, exist_ok=True)
-
-        # 清理旧的 CSV 格式报告，仅保留 xlsx 格式。
-        _COLUMN_WIDTH_PAD = 2
-        _COLUMN_WIDTH_MIN = 10
-        _COLUMN_WIDTH_MAX = 60
-        for legacy in output_path.glob("input_quality_*.csv"):
-            legacy.unlink()
-
-        workbook_path = output_path / "input_quality.xlsx"
-        issues_df = self._build_report_issues_frame(result["issues"])
-        sheets = {"issues": issues_df}
-        with pd.ExcelWriter(workbook_path, engine="openpyxl") as writer:
-            for sheet_name, df in sheets.items():
-                df.to_excel(writer, sheet_name=sheet_name, index=False)
-
-                worksheet = writer.sheets[sheet_name]
-                worksheet.freeze_panes = "A2"
-                if df.shape[1] > 0:
-                    worksheet.auto_filter.ref = worksheet.dimensions
-                for column_cells in worksheet.columns:
-                    max_len = max(
-                        len(str(cell.value)) if cell.value is not None else 0
-                        for cell in column_cells
-                    )
-                    width = min(
-                        max(max_len + _COLUMN_WIDTH_PAD, _COLUMN_WIDTH_MIN),
-                        _COLUMN_WIDTH_MAX,
-                    )
-                    worksheet.column_dimensions[column_cells[0].column_letter].width = width
-
-    def _load_schema_mapping(self) -> dict[str, Any]:
-        """加载固定 schema 映射；测试场景可通过参数注入覆盖配置。
-
-        Returns:
-            包含 ``tables`` 节点的 schema 映射。
-
-        Raises:
-            ValueError: 当 schema 缺少合法的 ``tables`` 映射时抛出。
-        """
-        loaded = self._schema_config_override or get_config_table_mapping()
-        if not isinstance(loaded.get("tables"), dict):
-            raise ValueError(
-                "Config table schema must contain a tables mapping"
-            )
-        return loaded
-
-    def _load_contracts(self) -> list[_TableContract]:
-        """将原始 schema 定义规范化为表级入库契约。
-
-        质量检测开关的唯一来源是 ``defaults.yaml#data_quality.config_tables.
-        quality_check_enabled``（经 ``TableImportPolicy`` 注入）；schema 只
-        承载表结构契约，未在策略中声明的表默认开启检测。
-
-        Returns:
-            按固定 schema 解析得到的配置表契约列表。
-        """
-        contracts: list[_TableContract] = []
-        for key, table_cfg in self._schema_mapping.get("tables", {}).items():
-            fields = tuple(table_cfg.get("fields") or ())
-            local_sheet = str(table_cfg.get("local_sheet") or key)
-            contracts.append(
-                _TableContract(
-                    key=str(key),
-                    local_sheet=local_sheet,
-                    db_table=str(table_cfg.get("db_table") or key),
-                    import_enabled=bool(table_cfg.get("import_enabled", True)),
-                    data_quality_enabled=self.quality_check_enabled.get(local_sheet, True),
-                    primary_key=self._primary_key_columns_from_config(table_cfg),
-                    fields=fields,
-                )
-            )
-        return contracts
-
-    def _validate_all_contracts(
-        self,
-        tables: dict[str, pd.DataFrame],
-        *,
-        config_name: str | None,
-        sub_node: str,
-    ) -> _ContractValidationOutcome:
-        """遍历所有表契约，收集缺失 Sheet、执行字段投影与类型转换。"""
-        outcome = _ContractValidationOutcome()
-
-        mapped_sheets = {
-            c.local_sheet for c in self._contracts
-            if c.import_enabled or c.data_quality_enabled
-        }
-        for sheet_name in sorted(set(tables) - mapped_sheets):
-            outcome.ignored_sheets.append(
-                {"sheet": sheet_name, "reason": "not_declared_in_fixed_schema", "action": "ignore"}
-            )
-
-        for contract in self._contracts:
-            if not (contract.import_enabled or contract.data_quality_enabled):
-                continue
-
-            if contract.local_sheet not in tables:
-                if not contract.data_quality_enabled:
-                    continue
-                self._record_missing_sheet(
-                    contract,
-                    outcome.issues,
-                    outcome.missing_sheets,
-                    config_name=config_name,
-                    sub_node=sub_node,
-                )
-                continue
-
-            source_df = tables.get(contract.local_sheet)
-            if source_df is None:
-                source_df = pd.DataFrame()
-            projected, table_issues, table_ignored = self._validate_table(
-                contract, source_df,
-                config_name=config_name, sub_node=sub_node,
-                run_quality_checks=contract.data_quality_enabled,
-            )
-            outcome.issues.extend(table_issues)
-            outcome.ignored_columns.extend(table_ignored)
-            outcome.cleaned_tables[contract.local_sheet] = projected
-
-            db_ready = self._build_db_ready_table(
-                contract, projected, outcome.issues,
-                config_name=config_name, sub_node=sub_node,
-                record_conversion_issues=False,
-            )
-            outcome.db_ready_tables[contract.local_sheet] = db_ready
-            outcome.db_ready_by_db_key[contract.db_key] = db_ready
-
-        return outcome
-
-    def _record_missing_sheet(
-        self,
-        contract: _TableContract,
-        issues: list[dict[str, Any]],
-        missing_sheets: list[dict[str, Any]],
-        *,
-        config_name: str | None,
-        sub_node: str,
     ) -> None:
-        """记录 schema 声明但输入中缺失的配置表。"""
-        severity, action = self._missing_sheet_policy(contract.local_sheet)
-        missing_sheets.append(
-            {
-                "sheet": contract.local_sheet,
-                "db_table": contract.db_table,
-                "reason": "mapped_sheet_missing",
-                "severity": severity,
-                "action": action,
-            }
-        )
-        issues.append(
-            self._build_issue(
-                _IssueRecord(
+        """检测 1：schema 声明且检测开启的必需表在输入中是否存在。
+
+        ``optional_sheets``（defaults.yaml#optional_import）中的可选表
+        存在时才进行后续检测；缺失时不做任何检测、不记缺表问题。
+        """
+        # 确定本次需要检查的 Sheet 范围；默认使用 schema 全量 Sheet。
+        sheets = rules.sheet_names() if enabled_sheets is None else enabled_sheets
+
+        # 逐一确认必需 Sheet 是否出现在输入 tables 中。
+        for sheet in sheets:
+            if sheet in tables:
+                continue
+
+            # 可选表缺失：不做任何检测、不记缺表问题，仅日志留痕。
+            if optional_sheets and sheet in optional_sheets:
+                logger.info("Optional sheet is absent; all checks skipped: %s", sheet)
+                continue
+
+            # 必需表缺失记录为 ERROR，后续检测项会自动跳过该表。
+            self.issues.append(
+                self._build_issue(
                     config_name=config_name,
-                    sub_node=sub_node,
-                    sheet=contract.local_sheet,
+                    sheet=sheet,
+                    check="check_1_sheets",
                     issue_type="missing_sheet",
-                    severity=severity,
-                    action=action,
-                    message=f"Mapped sheet is missing: {contract.local_sheet}",
+                    severity="ERROR",
+                    message=f"Mapped sheet is missing: {sheet}",
                     rule_id="sheet.missing_mapped",
                 )
             )
-        )
 
-    def _missing_sheet_policy(self, sheet_name: str) -> tuple[str, str]:
-        """返回缺失必需/可选配置表时对应的严重级别和处理动作。
-
-        Args:
-            sheet_name: 缺失的本地配置表 Sheet 名。
-
-        Returns:
-            ``(severity, action)`` 元组。
-        """
-        if sheet_name in self.optional_import_tables:
-            return "WARNING", "warn_keep"
-        return "ERROR", "block_on_enforce"
-
-    def _validate_table(
+    def check_2_empty(
         self,
-        contract: _TableContract,
-        df: pd.DataFrame,
+        prepared: dict[str, pd.DataFrame],
+        rules: ConfigTableQualityRules,
         *,
-        config_name: str | None,
-        sub_node: str,
-        run_quality_checks: bool = True,
-    ) -> tuple[pd.DataFrame, list[dict[str, Any]], list[dict[str, Any]]]:
-        """按流程图顺序校验单张配置表并返回投影后的入库字段数据。
-
-        Args:
-            contract: 当前配置表的固定入库契约。
-            df: 原始 Sheet 数据。
-            config_name: 当前配置名，用于问题归属和报告输出。
-            sub_node: 当前检测节点标识，用于内部问题追踪。
-            run_quality_checks: 是否执行质量检测；关闭时仍执行字段投影。
-
-        Returns:
-            ``(projected, issues, ignored_columns)`` 三元组，其中 projected
-            是只包含入库字段的数据，issues 是本表问题明细，ignored_columns
-            是被忽略的非入库字段明细。
-
-        Notes:
-            单表内部检测顺序严格对应流程图：
-            1. 是否空表；
-            2. 数据结构校验；
-            3. 字段类型校验；
-            4. 数据全量去重；
-            5. 检查主键唯一性。
-        """
-        issues: list[dict[str, Any]] = []
-        ignored_columns: list[dict[str, Any]] = []
-        expected_fields = contract.local_fields
-
-        # 仅固定 schema 字段进入检测与入库链路；多余列记录为 ignored。
-        for col in df.columns:
-            if str(col) not in expected_fields:
-                ignored_columns.append(
-                    {
-                        "sheet": contract.local_sheet,
-                        "column": str(col),
-                        "reason": "not_declared_in_fixed_schema",
-                        "action": "ignore",
-                    }
-                )
-
-        present_fields = [name for name in expected_fields if name in df.columns]
-        projected = df.loc[:, present_fields].copy()
-        projected = self._drop_empty_mapped_rows(projected)
-
-        if run_quality_checks:
-            self._validate_empty_table(contract, projected, issues, config_name, sub_node)
-            self._validate_missing_import_columns(
-                contract, df, issues, config_name, sub_node
-            )
-            self._validate_all_field_nulls(contract, projected, issues, config_name, sub_node)
-            self._validate_mixed_column_types(contract, projected, issues, config_name, sub_node)
-            self._validate_db_type_conversion(contract, projected, issues, config_name, sub_node)
-            projected = self._deduplicate_full_rows(
-                contract, projected, issues, config_name, sub_node
-            )
-            self._validate_primary_key_nulls(contract, projected, issues, config_name, sub_node)
-            self._validate_primary_key_duplicates(
-                contract, projected, issues, config_name, sub_node
-            )
-        return projected, issues, ignored_columns
-
-    def _validate_missing_import_columns(
-        self,
-        contract: _TableContract,
-        df: pd.DataFrame,
-        issues: list[dict[str, Any]],
-        config_name: str | None,
-        sub_node: str,
+        config_name: str | None = None,
     ) -> None:
-        """按固定 schema 检查当前表缺失的入库字段。
+        """检测 2：投影并去掉填充空行后是否为空表。"""
+        del rules  # 接口统一保留参数；空表判断无需规则配置。
 
-        Args:
-            contract: 当前配置表的固定入库契约。
-            df: 原始 Sheet 数据。
-            issues: 质量问题明细列表；缺失入库字段时追加阻断问题。
-            config_name: 当前配置名，用于问题归属和报告输出。
-            sub_node: 当前检测节点标识，用于内部问题追踪。
-        """
-        for field_name in contract.local_fields:
-            if field_name not in df.columns:
-                issues.append(
-                    self._build_issue(
-                        _IssueRecord(
-                            config_name=config_name,
-                            sub_node=sub_node,
-                            sheet=contract.local_sheet,
-                            column=field_name,
-                            issue_type="missing_import_column",
-                            severity="ERROR",
-                            action="block",
-                            message=f"Mapped field is missing: {field_name}",
-                            rule_id="field.missing_mapped",
-                        )
-                    )
-                )
+        # 只检查已完成检测口径准备的 Sheet。
+        for sheet, df in prepared.items():
+            if not df.empty:
+                continue
 
-    def _drop_empty_mapped_rows(self, projected: pd.DataFrame) -> pd.DataFrame:
-        """移除所有入库字段均为空的电子表格填充行。
-
-        Args:
-            projected: 已按固定 schema 投影后的入库字段数据。
-
-        Returns:
-            删除填充空行后的 DataFrame。
-        """
-        if projected.empty or len(projected.columns) == 0:
-            return projected
-        missing = pd.DataFrame(
-            {column: self._missing_mask(projected[column]) for column in projected.columns},
-            index=projected.index,
-        )
-        has_any_mapped_value = ~missing.all(axis=1)
-        return projected.loc[has_any_mapped_value].copy()
-
-    def _deduplicate_full_rows(
-        self,
-        contract: _TableContract,
-        df: pd.DataFrame,
-        issues: list[dict[str, Any]],
-        config_name: str | None,
-        sub_node: str,
-    ) -> pd.DataFrame:
-        """记录非阻断问题后删除完全重复的入库字段行。
-
-        Args:
-            contract: 当前配置表的固定入库契约。
-            df: 已投影并去除填充空行后的配置表数据。
-            issues: 质量问题明细列表；完全重复行会追加 INFO 级问题。
-            config_name: 当前配置名，用于问题归属和报告输出。
-            sub_node: 当前检测节点标识，用于内部问题追踪。
-
-        Returns:
-            删除完全重复行后的 DataFrame。
-        """
-        if df.empty or len(df.columns) == 0:
-            return df
-        duplicate_mask = df.duplicated(keep="first")
-        if not duplicate_mask.any():
-            return df
-        for idx in list(df.index[duplicate_mask])[: self.sample_limit]:
-            issues.append(
+            # 准备后无有效数据行的 Sheet 记录为空表问题。
+            self.issues.append(
                 self._build_issue(
-                    _IssueRecord(
+                    config_name=config_name,
+                    sheet=sheet,
+                    check="check_2_empty",
+                    issue_type="empty_table",
+                    severity="ERROR",
+                    message=f"Mapped import table is empty: {sheet}",
+                    rule_id="table.not_empty",
+                )
+            )
+
+    def check_3_duplicates(
+        self,
+        prepared: dict[str, pd.DataFrame],
+        rules: ConfigTableQualityRules,
+        *,
+        config_name: str | None = None,
+    ) -> None:
+        """检测 3：全列完全重复的数据行（只检测不删除）。"""
+        del rules  # 接口统一保留参数；全行重复判断无需规则配置。
+
+        # 逐表检查全行重复；空表和无列 DataFrame 无需处理。
+        for sheet, df in prepared.items():
+            if df.empty or len(df.columns) == 0:
+                continue
+
+            # keep=False 会标记每个重复组内的所有冲突行。
+            duplicate_mask = df.duplicated(keep=False)
+
+            # 将重复行样例写入标准问题明细，不修改原始数据。
+            for idx in list(df.index[duplicate_mask])[:SAMPLE_LIMIT]:
+                self.issues.append(
+                    self._build_issue(
                         config_name=config_name,
-                        sub_node=sub_node,
-                        sheet=contract.local_sheet,
-                        row_index=int(idx) if isinstance(idx, int) else str(idx),
+                        sheet=sheet,
+                        row_index=idx,
+                        check="check_3_duplicates",
                         issue_type="duplicate_value",
-                        severity="INFO",
-                        action="warn_deduplicate",
-                        message="Full duplicate row is removed before primary key check",
+                        severity="ERROR",
+                        message="Row is a full duplicate of another row",
                         original_value={
-                            column: df.at[idx, column]
-                            for column in df.columns
+                            column: df.at[idx, column] for column in df.columns
                         },
                         rule_id="row.full_duplicate",
                     )
                 )
-            )
-        return df.loc[~duplicate_mask].copy()
 
-    def _validate_db_type_conversion(
+    def check_4_columns(
         self,
-        contract: _TableContract,
-        df: pd.DataFrame,
-        issues: list[dict[str, Any]],
-        config_name: str | None,
-        sub_node: str,
-    ) -> None:
-        """按固定 db_type 提前执行字段类型转换校验。
-
-        Args:
-            contract: 当前配置表的固定入库契约。
-            df: 已投影并去除填充空行后的配置表数据。
-            issues: 质量问题明细列表；类型转换失败时追加阻断问题。
-            config_name: 当前配置名，用于问题归属和报告输出。
-            sub_node: 当前检测节点标识，用于内部问题追踪。
-        """
-        for field in self._ordered_fields(contract):
-            local_name = str(field.get("local_name"))
-            if local_name not in df.columns:
-                continue
-            self._convert_series_to_db_type(
-                df[local_name],
-                str(field.get("db_type") or "str"),
-                _ConversionContext(
-                    sheet=contract.local_sheet,
-                    column=local_name,
-                    issues=issues,
-                    config_name=config_name,
-                    sub_node=sub_node,
-                ),
-            )
-
-    def _build_db_ready_table(
-        self,
-        contract: _TableContract,
-        projected: pd.DataFrame,
-        issues: list[dict[str, Any]],
+        tables: dict[str, pd.DataFrame],
+        rules: ConfigTableQualityRules,
         *,
-        config_name: str | None,
-        sub_node: str,
-        record_conversion_issues: bool = True,
-    ) -> pd.DataFrame:
-        """按 schema 定义的字段顺序和类型构造待入库 DataFrame。
-
-        Args:
-            contract: 当前配置表的固定入库契约。
-            projected: 已按入库字段投影后的配置表数据。
-            issues: 质量问题明细列表；类型转换失败会追加问题。
-            config_name: 当前配置名，用于问题归属和报告输出。
-            sub_node: 当前检测节点标识，用于内部问题追踪。
-            record_conversion_issues: 是否记录类型转换失败问题。
-
-        Returns:
-            字段名、顺序和类型均符合数据库表契约的 DataFrame。
-        """
-        db_ready = pd.DataFrame(index=projected.index)
-        for field in self._ordered_fields(contract):
-            local_name = str(field.get("local_name"))
-            db_name = str(field.get("db_name") or local_name)
-            if local_name not in projected.columns:
-                db_ready[db_name] = pd.Series(dtype="object")
-                continue
-            db_ready[db_name] = self._convert_series_to_db_type(
-                projected[local_name],
-                str(field.get("db_type") or "str"),
-                _ConversionContext(
-                    sheet=contract.local_sheet,
-                    column=local_name,
-                    issues=issues,
-                    config_name=config_name,
-                    sub_node=sub_node,
-                    record_issues=record_conversion_issues,
-                ),
-            )
-        return db_ready.reset_index(drop=True)
-
-    def _convert_series_to_db_type(
-        self,
-        series: pd.Series,
-        db_type: str,
-        context: _ConversionContext,
-    ) -> pd.Series:
-        """按 schema 的 db_type 转换字段值，并记录不可转换数据。
-
-        Args:
-            series: 待转换的字段值序列。
-            db_type: 固定 schema 中声明的数据库字段类型。
-            context: 字段类型转换时共享的问题记录上下文。
-
-        Returns:
-            转换为目标数据库类型语义后的 pandas Series。
-        """
-        normalized_type = db_type.strip().lower()
-        missing = self._missing_mask(series)
-
-        if normalized_type in {"str", "text", "varchar", "character varying"}:
-            converted = series.astype("object").copy()
-            converted[missing] = None
-            converted[~missing] = converted[~missing].map(
-                lambda value: self._normalize_text_value(context.column, value)
-            )
-            return converted
-
-        if normalized_type in {"bigint", "int", "integer"}:
-            numeric = pd.to_numeric(series, errors="coerce")
-            invalid = (~missing) & numeric.isna()
-            fractional = (~missing) & numeric.notna() & ((numeric % 1) != 0)
-            self._record_conversion_errors(
-                series,
-                invalid | fractional,
-                context,
-            )
-            numeric[invalid | fractional] = pd.NA
-            return numeric.astype("Int64")
-
-        if normalized_type in {"double precision", "float", "float64", "numeric", "real"}:
-            numeric = pd.to_numeric(series, errors="coerce")
-            invalid = (~missing) & numeric.isna()
-            self._record_conversion_errors(
-                series,
-                invalid,
-                context,
-            )
-            return numeric.astype("float64")
-
-        if normalized_type in {"bool", "boolean"}:
-            return self._convert_bool_series(
-                series,
-                missing,
-                context,
-            )
-
-        if "timestamp" in normalized_type or normalized_type == "date":
-            converted = pd.to_datetime(series, errors="coerce")
-            invalid = (~missing) & converted.isna()
-            self._record_conversion_errors(
-                series,
-                invalid,
-                context,
-            )
-            return converted
-
-        converted = series.astype("object").copy()
-        converted[missing] = None
-        return converted
-
-    def _convert_bool_series(
-        self,
-        series: pd.Series,
-        missing: pd.Series,
-        context: _ConversionContext,
-    ) -> pd.Series:
-        """将常见布尔输入表示规范化为 pandas 可空布尔类型。
-
-        Args:
-            series: 待转换的字段值序列。
-            missing: 标识空值或空白字符串的布尔掩码。
-            context: 字段类型转换时共享的问题记录上下文。
-
-        Returns:
-            pandas 可空布尔类型 Series。
-        """
-        truthy = {"true", "1", "y", "yes", "t"}
-        falsy = {"false", "0", "n", "no", "f"}
-        result = pd.Series(pd.NA, index=series.index, dtype="boolean")
-        invalid = pd.Series(False, index=series.index)
-        for idx, value in series.items():
-            if missing.at[idx]:
-                continue
-            if isinstance(value, bool):
-                result.at[idx] = value
-                continue
-            token = str(value).strip().lower()
-            if token in truthy:
-                result.at[idx] = True
-            elif token in falsy:
-                result.at[idx] = False
-            else:
-                invalid.at[idx] = True
-        self._record_conversion_errors(
-            series,
-            invalid,
-            context,
-        )
-        return result
-
-    def _record_conversion_errors(
-        self,
-        series: pd.Series,
-        mask: pd.Series,
-        context: _ConversionContext,
+        enabled_sheets: list[str] | None = None,
+        config_name: str | None = None,
     ) -> None:
-        """在启用问题记录时追加字段类型转换失败明细。
+        """检测 4：schema 声明的必需字段是否在原始 Sheet 列中缺失。"""
+        # 确定需要检查字段完整性的 Sheet 范围。
+        sheets = rules.sheet_names() if enabled_sheets is None else enabled_sheets
 
-        Args:
-            series: 原始字段值序列。
-            mask: 标识转换失败位置的布尔掩码。
-            context: 字段类型转换时共享的问题记录上下文。
-        """
-        if not context.record_issues:
-            return
-        for idx in list(series.index[mask])[: self.sample_limit]:
-            context.issues.append(
-                self._build_issue(
-                    _IssueRecord(
-                        config_name=context.config_name,
-                        sub_node=context.sub_node,
-                        sheet=context.sheet,
-                        column=context.column,
-                        row_index=int(idx) if isinstance(idx, int) else str(idx),
-                        issue_type="type_mismatch",
-                        severity="ERROR",
-                        action="block",
-                        message=(
-                            f"Value cannot be converted to mapped db_type: "
-                            f"{series.loc[idx]!r}"
-                        ),
-                        original_value=series.loc[idx],
-                        rule_id="field.type_mismatch",
-                    )
-                )
-            )
+        # 字段缺失必须基于原始输入表检查，不能基于已投影 prepared 表。
+        for sheet in sheets:
+            df = tables.get(sheet)
 
-    def _validate_empty_table(
-        self,
-        contract: _TableContract,
-        df: pd.DataFrame,
-        issues: list[dict[str, Any]],
-        config_name: str | None,
-        sub_node: str,
-    ) -> None:
-        """当投影后的入库表无有效数据行时记录阻断问题。
-
-        Args:
-            contract: 当前配置表的固定入库契约。
-            df: 已投影并去除填充空行后的配置表数据。
-            issues: 质量问题明细列表；空表时追加阻断问题。
-            config_name: 当前配置名，用于问题归属和报告输出。
-            sub_node: 当前检测节点标识，用于内部问题追踪。
-        """
-        if not df.empty:
-            return
-        issues.append(
-            self._build_issue(
-                _IssueRecord(
-                    config_name=config_name,
-                    sub_node=sub_node,
-                    sheet=contract.local_sheet,
-                    issue_type="empty_table",
-                    severity="ERROR",
-                    action="block",
-                    message=f"Mapped import table is empty: {contract.local_sheet}",
-                    rule_id="table.not_empty",
-                )
-            )
-        )
-
-    def _validate_all_field_nulls(
-        self,
-        contract: _TableContract,
-        df: pd.DataFrame,
-        issues: list[dict[str, Any]],
-        config_name: str | None,
-        sub_node: str,
-    ) -> None:
-        """对所有入库字段中的空值或空白字符串记录阻断问题。
-
-        Args:
-            contract: 当前配置表的固定入库契约。
-            df: 已投影并去除填充空行后的配置表数据。
-            issues: 质量问题明细列表；空值命中时追加阻断问题。
-            config_name: 当前配置名，用于问题归属和报告输出。
-            sub_node: 当前检测节点标识，用于内部问题追踪。
-        """
-        for column in contract.local_fields:
-            if column not in df.columns:
+            # 缺表由 check_1 负责报告，此处只处理已存在 Sheet 的缺列问题。
+            if df is None:
                 continue
-            mask = self._missing_mask(df[column])
-            for idx in list(df.index[mask])[: self.sample_limit]:
-                issues.append(
+
+            # 逐个 schema 必需字段确认是否存在于原始导入列中。
+            for column in rules.required_columns(sheet):
+                if column in df.columns:
+                    continue
+
+                # 缺失字段记录为 ERROR，字段级规则不会再重复报告该列。
+                self.issues.append(
                     self._build_issue(
-                        _IssueRecord(
-                            config_name=config_name,
-                            sub_node=sub_node,
-                            sheet=contract.local_sheet,
-                            column=column,
-                            row_index=int(idx) if isinstance(idx, int) else str(idx),
-                            issue_type="null_value",
-                            severity="ERROR",
-                            action="block",
-                            message=f"Mapped import field is empty: {column}",
-                            original_value=df.at[idx, column],
-                            rule_id="field.not_null",
-                        )
-                    )
-                )
-
-    def _validate_mixed_column_types(
-        self,
-        contract: _TableContract,
-        df: pd.DataFrame,
-        issues: list[dict[str, Any]],
-        config_name: str | None,
-        sub_node: str,
-    ) -> None:
-        """检测同一入库字段内是否存在多种输入格式类别。
-
-        Args:
-            contract: 当前配置表的固定入库契约。
-            df: 已投影并去除填充空行后的配置表数据。
-            issues: 质量问题明细列表；多格式命中时追加阻断问题。
-            config_name: 当前配置名，用于问题归属和报告输出。
-            sub_node: 当前检测节点标识，用于内部问题追踪。
-        """
-        for column in contract.local_fields:
-            if column not in df.columns:
-                continue
-            if self._is_text_db_type(self._field_db_type(contract, column)):
-                continue
-            series = df[column]
-            non_missing = series[~self._missing_mask(series)]
-            if non_missing.empty:
-                continue
-            categories = self._column_input_format_categories(non_missing)
-            if len(categories) <= 1:
-                continue
-            issues.append(
-                self._build_issue(
-                    _IssueRecord(
                         config_name=config_name,
-                        sub_node=sub_node,
-                        sheet=contract.local_sheet,
+                        sheet=sheet,
                         column=column,
-                        issue_type="mixed_column_type",
+                        check="check_4_columns",
+                        issue_type="missing_import_column",
                         severity="ERROR",
-                        action="block",
-                        message=(
-                            f"Mapped import field has mixed input formats: {column}; "
-                            f"formats={sorted(categories)}"
-                        ),
-                        original_value=[
-                            self._stringify(value)
-                            for value in non_missing.head(self.sample_limit).tolist()
-                        ],
-                        rule_id="field.single_type",
+                        message=f"Mapped field is missing: {column}",
+                        rule_id="field.missing_mapped",
                     )
                 )
-            )
 
-    def _validate_primary_key_nulls(
+    def check_5_fields(
         self,
-        contract: _TableContract,
-        df: pd.DataFrame,
-        issues: list[dict[str, Any]],
-        config_name: str | None,
-        sub_node: str,
+        prepared: dict[str, pd.DataFrame],
+        rules: ConfigTableQualityRules,
+        *,
+        config_name: str | None = None,
     ) -> None:
-        """对配置为主键的字段空值记录阻断问题。
-
-        Args:
-            contract: 当前配置表的固定入库契约。
-            df: 已投影并去除填充空行后的配置表数据。
-            issues: 质量问题明细列表；主键空值命中时追加阻断问题。
-            config_name: 当前配置名，用于问题归属和报告输出。
-            sub_node: 当前检测节点标识，用于内部问题追踪。
-        """
-        for key_col in contract.primary_key:
-            if key_col not in df.columns:
-                continue
-            mask = self._missing_mask(df[key_col])
-            for idx in list(df.index[mask])[: self.sample_limit]:
-                issues.append(
+        """检测 5：字段级规则（非空/类型/枚举/范围/日期顺序）。"""
+        # 逐表委托给 ConfigTableQualityRules，保持字段规则集中管理。
+        # 规则层只返回轻量命中（不含流程上下文），此处补全问题归属
+        # （config_name/sheet/check）后落为标准问题记录。
+        for sheet, df in prepared.items():
+            for hit in rules.validate_fields(sheet, df):
+                self.issues.append(
                     self._build_issue(
-                        _IssueRecord(
-                            config_name=config_name,
-                            sub_node=sub_node,
-                            sheet=contract.local_sheet,
-                            column=key_col,
-                            row_index=int(idx) if isinstance(idx, int) else str(idx),
-                            issue_type="null_value",
-                            severity="ERROR",
-                            action="block",
-                            message=f"Primary key field is empty: {key_col}",
-                            original_value=df.at[idx, key_col],
-                            rule_id="primary_key.not_null",
-                        )
+                        config_name=config_name,
+                        sheet=sheet,
+                        check="check_5_fields",
+                        **hit,
                     )
                 )
 
-    def _validate_primary_key_duplicates(
+    def check_6_pkeys(
         self,
-        contract: _TableContract,
-        df: pd.DataFrame,
-        issues: list[dict[str, Any]],
-        config_name: str | None,
-        sub_node: str,
+        prepared: dict[str, pd.DataFrame],
+        rules: ConfigTableQualityRules,
+        *,
+        config_name: str | None = None,
     ) -> None:
-        """对主键组合重复的数据行记录阻断问题。
+        """检测 6：主键字段组合分组下是否存在重复行。"""
+        # 逐表检查主键组合唯一性。
+        for sheet, df in prepared.items():
+            # 只用实际存在的主键字段做判断；缺失主键列由 check_4 报告。
+            keys = [col for col in rules.primary_key(sheet) if col in df.columns]
+            if not keys or df.empty:
+                continue
 
-        Args:
-            contract: 当前配置表的固定入库契约。
-            df: 已投影并去除填充空行、完全重复行后的配置表数据。
-            issues: 质量问题明细列表；主键重复命中时追加阻断问题。
-            config_name: 当前配置名，用于问题归属和报告输出。
-            sub_node: 当前检测节点标识，用于内部问题追踪。
-        """
-        keys = [col for col in contract.primary_key if col in df.columns]
-        if not keys or df.empty:
-            return
-        dup_mask = df.duplicated(subset=keys, keep=False)
-        for idx in list(df.index[dup_mask])[: self.sample_limit]:
-            key_values = {col: df.at[idx, col] for col in keys}
-            issues.append(
-                self._build_issue(
-                    _IssueRecord(
+            # keep=False 标记所有主键重复行，便于报告完整呈现冲突。
+            duplicate_mask = df.duplicated(subset=keys, keep=False)
+
+            # 记录重复主键样例，并把主键取值作为 original_value。
+            for idx in list(df.index[duplicate_mask])[:SAMPLE_LIMIT]:
+                key_values = {col: df.at[idx, col] for col in keys}
+                self.issues.append(
+                    self._build_issue(
                         config_name=config_name,
-                        sub_node=sub_node,
-                        sheet=contract.local_sheet,
-                        row_index=int(idx) if isinstance(idx, int) else str(idx),
+                        sheet=sheet,
+                        row_index=idx,
+                        check="check_6_pkeys",
                         issue_type="duplicate_value",
                         severity="ERROR",
-                        action="block",
                         message=f"Duplicate primary key: {key_values}",
                         original_value=key_values,
                         rule_id="primary_key.unique",
                     )
                 )
-            )
 
-    def _build_issue(self, record: _IssueRecord) -> dict[str, Any]:
-        """构造各检测规则统一使用的内存问题明细记录。
-
-        Args:
-            record: 质量问题明细记录的构造参数。
-
-        Returns:
-            标准化内存问题明细字典。
-
-        Notes:
-            非必需配置表（``optional_import``）的问题在此统一降级：
-            错误级别降为 WARNING、阻断动作降为 warn_keep，与缺失非必需表
-            的处理策略一致，保证非必需表只记录问题类型而不阻断流程。
-        """
-        severity = record.severity
-        action = record.action
-        if record.sheet in self.optional_import_tables:
-            if severity in {"ERROR", "CRITICAL"}:
-                severity = "WARNING"
-            if action in {"block", "block_on_enforce"}:
-                action = "warn_keep"
-        return {
-            "run_id": record.config_name or "",
-            "sub_node": record.sub_node,
-            "config_name": record.config_name or "",
-            "sheet": record.sheet,
-            "column": record.column or "",
-            "row_index": "" if record.row_index is None else record.row_index,
-            "issue_type": record.issue_type,
-            "severity": severity,
-            "action": action,
-            "message": record.message,
-            "original_value": self._stringify(record.original_value),
-            "converted_value": self._stringify(record.converted_value),
-            "rule_id": record.rule_id,
-        }
-
-    def _summarize(
-        self,
-        issues: list[dict[str, Any]],
-        ignored_sheets: list[dict[str, Any]],
-        ignored_columns: list[dict[str, Any]],
-        missing_sheets: list[dict[str, Any]],
-    ) -> dict[str, Any]:
-        """汇总报告输出和阻断判断所需的问题数量指标。
-
-        Args:
-            issues: 质量问题明细列表。
-            ignored_sheets: 被忽略的非 schema Sheet 明细列表。
-            ignored_columns: 被忽略的非入库字段明细列表。
-            missing_sheets: 缺失的 schema Sheet 明细列表。
-
-        Returns:
-            包含错误、告警、提示、阻断和忽略项数量的摘要字典。
-        """
-        errors = sum(1 for issue in issues if issue.get("severity") in {"ERROR", "CRITICAL"})
-        warnings = sum(1 for issue in issues if issue.get("severity") == "WARNING")
-        infos = sum(1 for issue in issues if issue.get("severity") == "INFO")
-        hard_blocks = sum(1 for issue in issues if issue.get("action") == "block")
-        return {
-            "mode": self.mode,
-            "fail_on_error": self.fail_on_error,
-            "issues": len(issues),
+    def _build_result(self) -> dict[str, Any]:
+        """汇总问题明细为检测结果字典（无 ERROR 即视为通过）。"""
+        errors = sum(
+            1 for issue in self.issues if issue["severity"] in {"ERROR", "CRITICAL"}
+        )
+        warnings = sum(1 for issue in self.issues if issue["severity"] == "WARNING")
+        infos = sum(1 for issue in self.issues if issue["severity"] == "INFO")
+        summary = {
+            "issues": len(self.issues),
             "errors": errors,
             "warnings": warnings,
             "infos": infos,
-            "hard_blocks": hard_blocks,
-            "missing_sheets": len(missing_sheets),
-            "ignored_sheets": len(ignored_sheets),
-            "ignored_columns": len(ignored_columns),
+            "by_check": dict(Counter(issue["check"] for issue in self.issues)),
+            "by_issue_type": dict(
+                Counter(issue["issue_type"] for issue in self.issues)
+            ),
+            "by_sheet": dict(Counter(issue["sheet"] for issue in self.issues)),
         }
+        return {"passed": errors == 0, "issues": list(self.issues), "summary": summary}
 
-    def _should_block(self, summary: dict[str, Any]) -> bool:
-        """根据执行模式和问题级别判断是否阻断后续流程。
+    @staticmethod
+    def _internal_error_issue(
+        *,
+        config_name: str | None,
+        sheet: str,
+        check: str,
+        exc: Exception,
+    ) -> dict[str, Any]:
+        """构造检测器内部异常的问题明细（保证检测流程不中断）。
 
         Args:
-            summary: ``_summarize`` 生成的问题摘要。
+            config_name: 当前配置名。
+            sheet: 出错时正在处理的 Sheet；步骤级异常可为空字符串。
+            check: 出错的检测步骤标识（prepare 或 check_1 ~ check_6）。
+            exc: 捕获到的异常对象。
 
         Returns:
-            True 表示需要阻断后续流程，False 表示允许继续。
+            issue_type 为 ``checker_exception`` 的标准问题明细字典。
         """
-        has_errors = int(summary.get("errors") or 0) > 0
-        has_hard_blocks = int(summary.get("hard_blocks") or 0) > 0
-        return has_hard_blocks or (
-            has_errors and (self.fail_on_error or self.mode == "enforce")
+        return ConfigInputDataQualityChecker._build_issue(
+            config_name=config_name,
+            sheet=sheet,
+            check=check,
+            issue_type="checker_exception",
+            severity="ERROR",
+            message=f"{check} crashed and was skipped: {exc!r}",
+            rule_id="checker.internal_error",
         )
 
-    def _build_report_issues_frame(self, issues: list[dict[str, Any]]) -> pd.DataFrame:
-        """构造每张配置表一行的问题汇总 DataFrame。
+    def _report_errors_at_end(self) -> None:
+        """全部检测完成后统一上报错误汇总（只记日志，不抛异常）。"""
+        summary = self.result.get("summary", {})
+        errors = int(summary.get("errors") or 0)
+        if errors == 0:
+            return
+        logger.error(
+            "[DQ] 输入数据质量检测完成：共 %s 个问题（errors=%s, warnings=%s）；"
+            "按检测项：%s；按 Sheet：%s；明细见 result['issues'] 与 input_quality.xlsx",
+            summary.get("issues"),
+            errors,
+            summary.get("warnings"),
+            summary.get("by_check"),
+            summary.get("by_sheet"),
+        )
+
+    def write_report(self, output_dir: str | Path) -> None:
+        """写出面向操作员的数据质量检测报告工作簿（input_quality.xlsx）。
 
         Args:
-            issues: 内存质量问题明细列表。
-
-        Returns:
-            面向操作员的 issues 工作表 DataFrame。
+            output_dir: 报告输出目录，不存在时自动创建。
         """
-        raw = pd.DataFrame(issues)
+        output_path = Path(output_dir)
+        output_path.mkdir(parents=True, exist_ok=True)
+
+        # 报告列宽自适应参数：内容长度加 PAD，再夹在 MIN/MAX 之间。
+        _COLUMN_WIDTH_PAD = 2
+        _COLUMN_WIDTH_MIN = 10
+        _COLUMN_WIDTH_MAX = 60
+
+        workbook_path = output_path / "input_quality.xlsx"
+        issues_df = self._build_report_issues_frame()
+        with pd.ExcelWriter(workbook_path, engine="openpyxl") as writer:
+            issues_df.to_excel(writer, sheet_name="issues", index=False)
+
+            # 冻结表头并开启自动筛选，方便操作员浏览与过滤。
+            worksheet = writer.sheets["issues"]
+            worksheet.freeze_panes = "A2"
+            if issues_df.shape[1] > 0:
+                worksheet.auto_filter.ref = worksheet.dimensions
+            # 按内容最大长度自适应列宽，并限制在最小/最大宽度之间。
+            for column_cells in worksheet.columns:
+                max_len = max(
+                    len(str(cell.value)) if cell.value is not None else 0
+                    for cell in column_cells
+                )
+                width = min(
+                    max(max_len + _COLUMN_WIDTH_PAD, _COLUMN_WIDTH_MIN),
+                    _COLUMN_WIDTH_MAX,
+                )
+                worksheet.column_dimensions[column_cells[0].column_letter].width = width
+
+    def _build_report_issues_frame(self) -> pd.DataFrame:
+        """构造每张配置表一行的问题汇总 DataFrame。"""
+        # 无问题时仍输出带固定表头的空表，保证报告结构稳定。
+        raw = pd.DataFrame(self.issues)
         if raw.empty:
             return pd.DataFrame(columns=_ISSUE_COLUMNS)
 
+        # 将问题类型编码翻译为中文标签，未收录的编码原样保留。
         raw["问题类型"] = raw["issue_type"].map(
             lambda value: _ISSUE_TYPE_LABELS_ZH.get(str(value), str(value))
         )
-
+        # 按"配置名 + Sheet"聚合为一行，每列合并组内去重后的取值。
         rows: list[dict[str, Any]] = []
-        for (config_name, sheet), group in raw.groupby(["config_name", "sheet"], dropna=False):
+        for (config_name, sheet), group in raw.groupby(
+            ["config_name", "sheet"], dropna=False
+        ):
             rows.append(
                 {
                     "配置名": config_name,
                     "配置表Sheet": sheet,
                     "字段名": self._join_unique(group.get("column")),
+                    # 检测项直接展示英文标识（与检测方法名一致）。
+                    "检测项": self._join_unique(group.get("check")),
                     "问题类型": self._join_unique(group.get("问题类型")),
                     "问题代码": self._join_unique(group.get("issue_type")),
                     "严重级别": self._join_unique(group.get("severity")),
-                    "处理动作": self._join_unique(group.get("action")),
-                    "转换后值": self._join_unique(group.get("converted_value")),
                 }
             )
         return pd.DataFrame(rows, columns=_ISSUE_COLUMNS)

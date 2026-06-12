@@ -145,7 +145,7 @@ data_quality:
       M4_ProductionReliability: true
       M5_PushPullModel: true
       M5_DeployConfig: true
-      M6_TruckReleaseCon: true
+      M6_TruckReleaseCon:  true
       M6_MaterialMD: true
       M6_DeliveryDelayDistribution: true
       M6_MDQBypassRules: true

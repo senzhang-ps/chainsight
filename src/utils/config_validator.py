@@ -791,13 +791,13 @@ def run_pre_simulation_validation(config_path: str, output_dir: str) -> tuple:
         from ..core.run.config_dir import ConfigDir
         cfg_dir = ConfigDir.from_excel_path(config_path)
         raw_config = load_configuration(cfg_dir)
-        dq_result = validate_input_quality(
+        # 检测只出报告不阻断，配置继续使用原始读取数据。
+        validate_input_quality(
             raw_config,
             config_name=cfg_dir.excel_path.stem,
-            sub_node="input_pre.config_validator",
             report_dir=Path(output_dir) / "input_quality",
         )
-        config_dict = prepare_configuration(dq_result["cleaned_tables"])
+        config_dict = prepare_configuration(raw_config)
     except Exception as e:
         validation_manager.add_error("ConfigLoader", "LoadError", f"Failed to load config file: {str(e)}")
         report_path = validation_manager.write_report()

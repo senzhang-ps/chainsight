@@ -47,7 +47,7 @@ def run_integrated_simulation(
         end_date=end_date,
         config_path=config_path,
         output_path=output_base_dir,
-        engine='polars',skip_dq=True
+        engine='polars',skip_dq=False
     )
     ctx = StateContext(simulation_date=start_date, orch=orch)
     ctx.initialize(orch.all_config)

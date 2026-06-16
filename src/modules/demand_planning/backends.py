@@ -193,7 +193,7 @@ class _PandasBackend:
         if not dps_sc_config.empty:
             demand_forecast_total_sc = pd.merge(
                 demand_forecast_split_by_dps, dps_sc_config,
-                on=["week", "material", "quantity"], how="left",
+                on=["week", "material", "location"], how="left",
             )
             demand_forecast_total_sc["quantity_total"] = (
                 demand_forecast_total_sc["quantity_percentage"]
@@ -1012,7 +1012,7 @@ class _PolarsBackend:
         # Supply choice 版本
         if not dps_sc_config.is_empty():
             demand_forecast_total_sc = demand_forecast_split_by_dps.join(
-                dps_sc_config, on=["week", "material", "quantity"], how="left",
+                dps_sc_config, on=["week", "material", "location"], how="left",
             ).with_columns(
                 (pl.col("quantity_percentage") + pl.col("adjust_quantity").fill_null(0)).alias("quantity_total"),
             )

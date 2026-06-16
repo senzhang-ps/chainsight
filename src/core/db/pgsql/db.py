@@ -171,21 +171,52 @@ class DB:
 
         调用方应确保元数据列（run_id / sim_date / config_name / db_write_time）
         已在传入前注入完毕。
+
+        列对齐策略（以库表为权威）：
+        - 列名统一 strip + 小写，避免大小写/空格导致的 COPY 失败。
+        - 表已存在：与库表真实列求交集，df 多余列丢弃（warning），交集为空跳过；
+          并按库表列类型做类型转换（数值/日期/文本），让 psycopg 以原生类型写入，
+          避免 ``bigint`` 列收到 ``"42.0"`` 之类的字符串导致类型错。
+        - 表不存在（动态输出表）：按 df 当前列 CREATE TABLE IF NOT EXISTS 全 TEXT，
+          值按文本写入。
         """
+        # 统一小写 + 去空白
+        df = df.copy()
+        df.columns = [str(c).strip().lower() for c in df.columns]
         columns = list(df.columns)
         conn = self.connect()
 
         with conn.transaction():
             with conn.cursor() as cursor:
-                # 确保表存在
-                col_list = sql.SQL(', ').join(sql.Identifier(c) for c in columns)
-                placeholder = sql.SQL(', ').join(sql.SQL('%s') for _ in columns)
-                create_cols = []
-                for c in columns:
-                    create_cols.append(sql.SQL('{} TEXT').format(sql.Identifier(c)))
-                cursor.execute(sql.SQL(
-                    'CREATE TABLE IF NOT EXISTS {} ({})'
-                ).format(sql.Identifier(table_name), sql.SQL(', ').join(create_cols)))
+                rows = None
+                if self.table_exists(table_name):
+                    # 已存在表：按真实列求交集，丢弃多余列
+                    col_types = self._get_table_columns(cursor, table_name)
+                    keep = [c for c in columns if c in col_types]
+                    dropped = [c for c in columns if c not in col_types]
+                    if dropped:
+                        logger.warning(
+                            f"write_df {table_name}: 丢弃 df 中库表不存在的列 {dropped}"
+                        )
+                    if not keep:
+                        logger.warning(
+                            f"write_df {table_name}: 无可写列（df 与库表列无交集），跳过"
+                        )
+                        return
+                    rows, columns = self._prepare_typed_rows(
+                        df[keep], {c: col_types[c] for c in keep}
+                    )
+                    if not rows:
+                        logger.info(f"写入 {table_name}: 0 行")
+                        return
+                else:
+                    # 动态建表（输出表），用 df 当前列（已小写）
+                    create_cols = [
+                        sql.SQL('{} TEXT').format(sql.Identifier(c)) for c in columns
+                    ]
+                    cursor.execute(sql.SQL(
+                        'CREATE TABLE IF NOT EXISTS {} ({})'
+                    ).format(sql.Identifier(table_name), sql.SQL(', ').join(create_cols)))
 
                 # COPY 批量写入
                 copy_sql = sql.SQL("COPY {} ({}) FROM STDIN").format(
@@ -193,12 +224,117 @@ class DB:
                     sql.SQL(', ').join(sql.Identifier(c) for c in columns),
                 )
                 with cursor.copy(copy_sql) as copy:
-                    for row in df.itertuples(index=False, name=None):
-                        copy.write_row([str(v) if v is not None else None for v in row])
+                    if rows is not None:
+                        # 已按库表类型转换：原生值，COPY 直接写
+                        for row in rows:
+                            copy.write_row(list(row))
+                    else:
+                        # 动态 TEXT 表：按文本写入
+                        for row in df.itertuples(index=False, name=None):
+                            copy.write_row(
+                                [str(v) if v is not None else None for v in row]
+                            )
 
         logger.info(f"写入 {table_name}: {len(df)} 行")
 
+    def _get_table_columns(self, cursor, table_name: str) -> dict[str, str]:
+        """查询库表真实列名 → data_type 映射（列名小写）。调用方需在事务游标内执行。"""
+        cursor.execute(
+            "SELECT column_name, data_type FROM information_schema.columns "
+            "WHERE table_schema = 'public' AND table_name = %s",
+            (table_name,),
+        )
+        return {row[0].lower(): (row[1] or "").lower() for row in cursor.fetchall()}
+
+    # db data_type → 归类集合，供 _prepare_typed_rows 选择转换方式
+    _INT_DB_TYPES = {"bigint", "integer", "smallint", "serial", "bigserial"}
+    _FLOAT_DB_TYPES = {
+        "double precision", "real", "numeric", "decimal", "money",
+    }
+    _DATETIME_DB_TYPES = {
+        "timestamp without time zone", "timestamp with time zone",
+        "timestamp", "date",
+    }
+
+    def _prepare_typed_rows(
+        self, df: pd.DataFrame, col_types: dict[str, str]
+    ) -> tuple[list[tuple], list[str]]:
+        """按库表列 data_type 把 df 各列转为原生 Python 值，空值规整为 None。
+
+        使 COPY 以原生类型（int/float/datetime/str）写入，规避 ``str()`` 把数值
+        变成 ``"42.0"`` 写 ``bigint`` 失败的问题。
+
+        Args:
+            df: 仅含库表存在列的 DataFrame。
+            col_types: ``{列名: data_type}``。
+
+        Returns:
+            ``(rows, columns)``：rows 为按列类型转换后的 Python 原生值元组列表
+            （空值统一为 None）；columns 为列顺序。
+        """
+        columns = list(col_types.keys())
+        col_values: list[list] = []
+        for c in columns:
+            dtype = col_types[c]
+            series = df[c]
+            if dtype in self._INT_DB_TYPES:
+                s = pd.to_numeric(series, errors="coerce").astype("Int64")
+                col_values.append(
+                    [None if pd.isna(v) else int(v) for v in s.tolist()]
+                )
+            elif dtype in self._FLOAT_DB_TYPES:
+                s = pd.to_numeric(series, errors="coerce")
+                col_values.append(
+                    [None if pd.isna(v) else float(v) for v in s.tolist()]
+                )
+            elif dtype in self._DATETIME_DB_TYPES:
+                s = pd.to_datetime(series, errors="coerce")
+                col_values.append(
+                    [None if pd.isna(v) else v.to_pydatetime() for v in s.tolist()]
+                )
+            else:
+                # 文本/布尔等：保持字符串（与 TEXT 列一致）
+                col_values.append(
+                    [None if pd.isna(v) else str(v) for v in series.tolist()]
+                )
+        # 列 → 行
+        n = len(df)
+        rows = [tuple(col_values[j][i] for j in range(len(columns)))
+                for i in range(n)]
+        return rows, columns
+
     # ── 通用 SQL ──────────────────────────────
+
+    def delete_where(
+        self, table_name: str, conditions: dict, *, safe: bool = True,
+    ) -> int:
+        """从指定表删除满足条件的行。
+
+        Args:
+            table_name: 目标表名。
+            conditions: ``{列名: 值}`` 字典，多列之间用 AND 连接。
+            safe: 为 True 时，表不存在则静默返回 0 而非报错。
+
+        Returns:
+            被删除的行数。
+        """
+        if safe and not self.table_exists(table_name):
+            return 0
+        clauses = []
+        params = []
+        for col, val in conditions.items():
+            if val is None:
+                clauses.append(sql.SQL("{} IS NULL").format(sql.Identifier(col)))
+            else:
+                clauses.append(sql.SQL("{} = %s").format(sql.Identifier(col)))
+                params.append(val)
+        stmt = sql.SQL("DELETE FROM {} WHERE {}").format(
+            sql.Identifier(table_name),
+            sql.SQL(" AND ").join(clauses),
+        )
+        with self.get_cursor() as cursor:
+            cursor.execute(stmt, tuple(params))
+            return cursor.rowcount
 
     def execute(self, query: str, params: tuple = None):
         """执行任意 SQL。"""

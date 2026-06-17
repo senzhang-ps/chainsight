@@ -15,7 +15,6 @@ import pandas as pd
 from src.core.orchestrator import Orch
 from src.modules import module1
 from src.modules.state_context import StateContext
-from src.utils.normalization import normalize_identifiers
 
 logger = logging.getLogger("SupplyChainSimulation")
 
@@ -74,7 +73,7 @@ def run_integrated_simulation(
 
         m1_shipments = m1_result.get('shipment_df', pd.DataFrame())
         if not m1_shipments.empty:
-            ctx.apply_shipments(normalize_identifiers(m1_shipments), date_str)
+            ctx.apply_shipments(m1_shipments, date_str)
 
         m1_result['simulation_date'] = current_date
         all_results['module1'].append(m1_result)
@@ -82,6 +81,12 @@ def run_integrated_simulation(
         ctx.day_end(date_str)
         orch.save_module_output(m1, date_str)
         orch.save_daily_state(ctx, date_str)
+        # 显式推进当日断点 progress_date（原埋在 save_daily_state 末尾，
+        # 现提到调用链上，让「写数据」与「推进断点」分离）
+        orch.save_checkpoint(orch.run_id, current_date=date_str)
+
+    # ── 标记完成 ──
+    orch.finish()
 
     # ── 完成报告 ──
     total_seconds = time.time() - simulation_start_time

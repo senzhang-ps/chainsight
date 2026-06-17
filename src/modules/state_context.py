@@ -105,7 +105,18 @@ class StateContext(Module):
         """从配置字典初始化状态。
 
         来源: Orchestrator.initialize_inventory + set_space_capacity
+
+        续跑：orch 已注入快照（_resuming）时，从 ViewContext views 恢复 ctx 状态，
+        跳过从配置重算（库存/在途/调拨等从 viewcontext_* 表读取还原）。
         """
+        orch = self.orchestrator
+        if getattr(orch, '_resuming', False) and getattr(orch, '_restore_date', None):
+            # 从上一完成周期（progress_date - 1）的 viewcontext 恢复 ctx；
+            # 断点当天 progress_date 的 view 尚未落库，故不能用 _resume_date。
+            orch.persistence.restore_state_from_views(self, orch.run_id, orch._restore_date)
+            logger.info("🔁 StateContext 已从 ViewContext 恢复，跳过 initialize 重算")
+            return
+
         if 'M1_InitialInventory' in config_dict and not config_dict['M1_InitialInventory'].empty:
             self._init_inventory(config_dict['M1_InitialInventory'])
         else:

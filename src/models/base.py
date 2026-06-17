@@ -50,6 +50,10 @@ class ModuleBase:
     """
 
 
+class ResumeBase:
+    """Marker mixin — 标识断点续跑快照表（resume_*）。不是 SA mapped class。"""
+
+
 # ── db_type → SA 类型映射 ──────────────────────────────────────────────────
 
 _DB_TYPE_MAP: dict[str, Any] = {
@@ -86,5 +90,6 @@ __all__ = [
     "CfgBase",
     "OrchBase",
     "ModuleBase",
+    "ResumeBase",
     "map_db_type",
 ]

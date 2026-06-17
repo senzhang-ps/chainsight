@@ -167,6 +167,20 @@ class ModuleOne(Module):
     # ------------------------------------------------------------------
 
     def prepare(self):
+        # 续跑：从快照装载 4 属性，跳过计算
+        orch = self.orchestrator  # self.orchestrator = orch（super().__init__ 存的）
+        if getattr(orch, '_resuming', False) and getattr(orch, '_resume_date', None):
+            # m1 快照在首次 prepare 时按 self.simulation_date（= start_date）存一次，
+            # 续跑 prepare 用同一 key 读回，与存时一致（不随断点日期变化）。
+            snap_ds = str(self.simulation_date)
+            snap = orch.persistence.load_m1_snapshot(orch.run_id, snap_ds)
+            if snap is not None:
+                for attr in ('order_df', 'daily_detail', 'daily_detail_sc', 'order_cal'):
+                    if attr in snap:
+                        setattr(self, attr, snap[attr])
+                logger.info("🔁 ModuleOne.prepare 已从快照恢复 4 属性")
+                return
+
         # 0) 数据加载
         if self.orchestrator is not None:
             self.orchestrator.load_datas(self)
@@ -193,6 +207,13 @@ class ModuleOne(Module):
         self.daily_detail = daily_order
         self.daily_detail_sc = daily_detail_sc
         self.order_cal = self.order_calendar
+
+        # prepare 完成后存一次快照（续跑时读）
+        orch = self.orchestrator
+        if getattr(orch, 'db', None) is not None:
+            sim_date_str = str(self.simulation_date) if hasattr(self, 'simulation_date') else ''
+            orch.persistence.save_m1_snapshot(self, sim_date_str)
+            logger.info("📦 m1 prepare 快照已保存")
 
     def run(self):
         logger.info("1️⃣ 运行 Module1 - 订单生成")
@@ -245,6 +266,23 @@ class ModuleOne(Module):
             import traceback
             traceback.print_exc()
             self._empty_result()
+
+    # ------------------------------------------------------------------
+    # 输出
+    # ------------------------------------------------------------------
+
+    def output(self):
+        """返回 run() 产出的结果字典。
+
+        对外契约：``shipment_df`` 出口处统一规整（material/location 归一），
+        调用方（如 StateContext.apply_shipments）可直接消费，无需再 normalize。
+        backend 产出时虽已规整过，这里兜底一次，保证口径稳定、防 backend 重构漏网。
+        """
+        result = self._result
+        shipments = result.get('shipment_df')
+        if shipments is not None and not shipments.empty:
+            result['shipment_df'] = normalize_identifiers(shipments)
+        return result
 
     # ------------------------------------------------------------------
     # 转换辅助

@@ -41,6 +41,34 @@ class Orchestrator:
 
         # ── 配置加载 + 持久化（委托 ConfigManager） ──
         self.config.bootstrap()
+
+        # ── 续跑检测（在 load 之前，以便复用 run_id + 短路 DQ）──
+        # config_name 预置（DB 模式可由调用方显式赋值；config_path 模式取 stem）
+        if self._config_name is None and config_path is not None:
+            self._config_name = Path(config_path).stem
+        self._resume_date = None      # 断点日期（progress_date）：iter_dates 从此日起重跑
+        self._restore_date = None     # 上一完成周期（progress_date - 1）：ctx/m1 快照从此日恢复
+        self._resuming = False
+        self._total_days = None
+        if self.db is not None and self._config_name:
+            pending = self.persistence.find_unfinished(self._config_name)
+            if pending is not None:
+                self._run_id = pending['run_id']            # 复用，绕过惰性生成
+                self._resume_date = pending['current_date']  # 断点日期
+                self._total_days = pending.get('total_days')
+                # progress_date 在每日 day_end(save_daily_state) 与每日迭代起点(save_checkpoint)
+                # 都会写，故中断时 progress_date=被中断当天，而该天的 viewcontext/快照尚未落库。
+                # 续跑恢复 ctx/m1 应读上一完成周期 = progress_date - 1。
+                if self._resume_date is not None:
+                    self._restore_date = (
+                        pd.Timestamp(self._resume_date) - pd.Timedelta(days=1)
+                    ).strftime('%Y-%m-%d')
+                self._resuming = True
+                logger.info(
+                    f"🔁 检测到未完成运行 {pending['run_id']}，"
+                    f"从 {self._resume_date} 续跑（恢复快照取 {self._restore_date}）"
+                )
+
         try:
             dq_result, needs_write = self.config.load(
                 config_path, config_dict, skip_dq=skip_dq,
@@ -117,6 +145,21 @@ class Orchestrator:
             logger.info(f"run_id 已生成: {self._run_id}")
         return self._run_id
 
+    @property
+    def total_days(self) -> int:
+        """仿真总天数（iter_dates 分母）。
+
+        续跑时优先用 orch_run_event 记录的值（首次运行写入）；
+        否则按 start_date→end_date 实时计算。
+        """
+        if self._total_days:
+            return self._total_days
+        return len(pd.date_range(self.start_date, self.end_date, freq='D'))
+
+    def finish(self):
+        """整个流程真正结束后调用：标 status='finished' + 写 finished_at。"""
+        self.persistence.mark_finished(self.run_id)
+
     # ══════════════════════════════════════════
     # 模块配置分发
     # ══════════════════════════════════════════
@@ -147,16 +190,52 @@ class Orchestrator:
     # 调度
     # ══════════════════════════════════════════
 
-    def iter_dates(self, actual_start_date=None):
-        """日期迭代器。"""
-        sim_start = actual_start_date or self.start_date
-        sim_dates = pd.date_range(sim_start, self.end_date, freq='D')
-        self.sim_dates = sim_dates
-        logger.info(f"仿真日期范围: {len(sim_dates)} 天")
-        pbar = tqdm(enumerate(sim_dates, 1), total=len(sim_dates),
-                     desc='仿真进度', unit='天', ncols=80, leave=True)
+    def iter_dates(self, actual_start_date=None, resume_date=None):
+        """日期迭代器。
+
+        actual_start_date : 重新设定仿真起点（保留原义，total 随之变化 → 1/96 语义）。
+        resume_date       : 续跑断点 —— total 仍按完整范围（首次记录的 total_days），
+                            序号从断点位置开始，进度显示 (n/100)。
+        两者不可同时指定。orch 续跑检测设过 _resume_date 时，resume_date 可省略自动复用。
+        """
+        if actual_start_date is not None and resume_date is not None:
+            raise ValueError("actual_start_date 与 resume_date 不可同时指定")
+        if resume_date is None:
+            resume_date = self._resume_date
+
+        full_dates = pd.date_range(self.start_date, self.end_date, freq='D')
+        # total_days：续跑用表记录值（首次写入），否则实时算
+        total = self._total_days or len(full_dates)
+
+        if resume_date is not None:
+            # ── 续跑：分母=完整范围，序号=断点位置，initial=断点前已完天数 ──
+            self.sim_dates = full_dates
+            rts = pd.Timestamp(resume_date)
+            mask = full_dates >= rts
+            start_idx = int(mask.argmax()) if mask.any() else len(full_dates)
+            iterate_dates = full_dates[start_idx:]
+            start_count, initial_done = start_idx + 1, start_idx
+            logger.info(
+                f"续跑：从第 {start_count}/{total} 天 ({rts:%Y-%m-%d}) 恢复"
+            )
+        else:
+            # ── 全新运行（actual_start_date 保留原义）──
+            sim_start = actual_start_date or self.start_date
+            iterate_dates = pd.date_range(sim_start, self.end_date, freq='D')
+            self.sim_dates = iterate_dates
+            start_count, initial_done = 1, 0
+            logger.info(f"仿真日期范围: {len(iterate_dates)} 天 (total={total})")
+
+        pbar = tqdm(enumerate(iterate_dates, start_count),
+                    total=total, initial=initial_done,   # ← 显示 (5/100) 的关键
+                    desc='仿真进度', unit='天', ncols=80, leave=True)
         for i, current_date in pbar:
-            progress_info = f"第 {i}/{len(sim_dates)} 天"
+            # 记录断点：每进入新一天即更新 current_date（status 保持 running）
+            try:
+                self.save_checkpoint(self.run_id, current_date=current_date)
+            except Exception:
+                logger.warning("current_date 断点记录失败", exc_info=True)
+            progress_info = f"第 {i}/{total} 天"
             pbar.write(f"{'=' * 20} {progress_info}: {current_date.strftime('%Y-%m-%d')} {'=' * 20}")
             pbar.set_postfix(date=current_date.strftime('%Y-%m-%d'), day=progress_info)
             yield i, current_date
@@ -188,12 +267,13 @@ class Orchestrator:
         self.persistence.save_module_output(module, sim_date)
 
     def restore_state(self, ctx, run_id: str, sim_date: str):
-        """委托到 PersistenceManager 从快照恢复状态。"""
-        self.persistence.restore_state(ctx, run_id, sim_date)
+        """委托到 PersistenceManager 从 ViewContext 表恢复状态。"""
+        self.persistence.restore_state_from_views(ctx, run_id, sim_date)
 
-    def save_checkpoint(self, run_id: str, status: str = 'running'):
-        """委托到 PersistenceManager 保存/更新运行元信息。"""
-        self.persistence.save_checkpoint(run_id, status)
+    def save_checkpoint(self, run_id: str, status: str = 'running',
+                        current_date=None):
+        """委托到 PersistenceManager 更新 orch 执行态（写 orch_run_event）。"""
+        self.persistence.save_checkpoint(run_id, status, current_date=current_date)
 
     def load_checkpoint(self, run_id: str) -> dict | None:
         """委托到 PersistenceManager 加载运行元信息。"""

@@ -152,6 +152,15 @@ class ConfigManager:
 
         self._orch.config_name = Path(config_path).stem
 
+        # ── 续跑短路：从 DB cfg_* 读已校验配置（DQ 已通过、配置已写入），跳过 DQ + run 事件 ──
+        if getattr(self._orch, '_resuming', False) and self._db is not None:
+            logger.info(
+                f"ConfigManager: 续跑 {self._orch.config_name}，"
+                f"从 DB cfg_* 读已校验配置，跳过 DQ + run 事件"
+            )
+            self._all_config = self._load_calc_datas()
+            return None, False
+
         # 1. 从 Excel 加载配置（通过 ConfigReader）
         from ...io.reader import ConfigReader
         logger.info(f"ConfigManager: 从配置文件加载: {config_path}")
@@ -174,7 +183,10 @@ class ConfigManager:
         # 2. 计算 hash + 插入 run 事件（触发生成 run_id）
         config_hash = self._compute_config_hash(self._all_config)
         run_id = self._orch.run_id
-        self._orch.persistence.start_run_event(run_id, self._orch.config_name, config_hash)
+        self._orch.persistence.start_run_event(
+            run_id, self._orch.config_name, config_hash,
+            total_days=self._orch.total_days,
+        )
 
         # 3. 检查 hash 缓存（排除当前 runid，找历史 passed + 同 hash）
         if self._is_dq_cached(self._orch.config_name, config_hash, run_id):

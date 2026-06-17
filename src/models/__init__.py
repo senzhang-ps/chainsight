@@ -39,6 +39,7 @@ def migrate(db: "DB") -> None:
     # 导入具体模型以触发 metadata 注册
     from . import cfg as _cfg  # noqa: F401
     from . import orch as _orch  # noqa: F401
+    from . import resume as _resume  # noqa: F401
 
     dialect = postgresql.dialect()
 
@@ -59,12 +60,37 @@ def migrate(db: "DB") -> None:
         except Exception as e:
             logger.warning(f"migrate: 建表 {table.name} 失败: {e}")
 
+    # ── 表结构演进（幂等 ALTER；CREATE TABLE IF NOT EXISTS 不会改已存在的表）──
+    _evolve_orch_run_event(db)
+
     # 保留清理：drop 旧 cfg_dq_check_result
     try:
         db.execute("DROP TABLE IF EXISTS cfg_dq_check_result")
         logger.debug("migrate: 已清理旧表 cfg_dq_check_result")
     except Exception as e:
         logger.warning(f"migrate: 清理旧表失败: {e}")
+
+
+def _evolve_orch_run_event(db: "DB") -> None:
+    """orch_run_event 列演进（幂等）。
+
+    新增 status / current_date / total_days；删除 errors / warnings / hard_blocks。
+    CREATE TABLE IF NOT EXISTS 不会改已存在的表，故用 ALTER 兜底旧库。
+    """
+    if not db.table_exists("orch_run_event"):
+        return
+    for ddl in (
+        "ALTER TABLE orch_run_event ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'running'",
+        "ALTER TABLE orch_run_event ADD COLUMN IF NOT EXISTS progress_date TEXT",
+        "ALTER TABLE orch_run_event ADD COLUMN IF NOT EXISTS total_days INTEGER",
+        "ALTER TABLE orch_run_event DROP COLUMN IF EXISTS errors",
+        "ALTER TABLE orch_run_event DROP COLUMN IF EXISTS warnings",
+        "ALTER TABLE orch_run_event DROP COLUMN IF EXISTS hard_blocks",
+    ):
+        try:
+            db.execute(ddl)
+        except Exception as e:
+            logger.warning(f"migrate: orch_run_event 演进失败 ({ddl}): {e}")
 
 
 __all__ = [

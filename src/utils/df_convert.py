@@ -1,0 +1,37 @@
+"""DataFrame 引擎互转工具。
+
+pandas ↔ polars 的统一转换入口，列级 numpy 转换、不依赖 pyarrow。
+
+抽取自 ``_PolarsBackend._to_pl``，供后端与持久化读取边界共用，
+避免在各处重复实现"pandas → polars"逻辑。
+"""
+
+import pandas as pd
+import polars as pl
+
+
+def pandas_to_polars(df: pd.DataFrame) -> pl.DataFrame:
+    """pandas DataFrame → polars DataFrame（列级 numpy，无需 pyarrow）。
+
+    将 nullable / extension dtypes 转为 numpy-backed dtypes，避免
+    ``pl.from_pandas`` 的 pyarrow 依赖；空表（无列）返回空 polars DataFrame。
+
+    Args:
+        df: pandas DataFrame（``None`` 也允许）。
+
+    Returns:
+        等价的 polars DataFrame。
+    """
+    if df is None or len(df.columns) == 0:
+        return pl.DataFrame()
+    converted = {}
+    for col in df.columns:
+        s = df[col]
+        try:
+            # 先尝试直接转 numpy
+            arr = s.to_numpy()
+            converted[col] = arr
+        except Exception:
+            # 降级为 str
+            converted[col] = s.astype(str).to_numpy()
+    return pl.DataFrame(converted)

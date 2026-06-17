@@ -14,8 +14,6 @@ import pandas as pd
 import psycopg
 from psycopg import sql
 
-from .snapshot import Snapshot
-
 logger = logging.getLogger(__name__)
 
 
@@ -30,7 +28,6 @@ class DB:
         self.user = user
         self.password = password
         self._connection = None
-        self.snapshot = Snapshot(self)
 
     # ── 连接管理 ──────────────────────────────
 

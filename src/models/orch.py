@@ -14,15 +14,20 @@ migrate() 会从 Base.metadata 编译 CREATE TABLE IF NOT EXISTS 并建表，
 """
 from __future__ import annotations
 
-from sqlalchemy import Column, PrimaryKeyConstraint, Text
+from sqlalchemy import Column, Integer, PrimaryKeyConstraint, Text
 
 from .base import Base, OrchBase
 
 
 class OrchRunEvent(Base, OrchBase):
-    """每次 orch 运行的元数据注册（dq_status 状态机）。
+    """每次 orch 运行的元数据注册。
 
-    状态机：running → cached / passed / blocked / skipped
+    两套独立状态：
+    - ``dq_status``：DQ 检测状态机 running → cached / passed / blocked / skipped
+    - ``status``：orch 任务执行状态 running / finished（用于断点续跑判断）
+
+    续跑三件套：``status``（是否完成）+ ``progress_date``（断点日期）+ ``total_days``（首次记录的分母）。
+    ``finished_at`` 仅在 ``status='finished'``（orch 真正结束）时写入，DQ 完成不写。
     """
     __tablename__ = "orch_run_event"
 
@@ -30,9 +35,9 @@ class OrchRunEvent(Base, OrchBase):
     config_name = Column(Text)
     config_hash = Column(Text)
     dq_status = Column(Text, nullable=False, server_default="running")
-    errors = Column(Text)
-    warnings = Column(Text)
-    hard_blocks = Column(Text)
+    status = Column(Text, nullable=False, server_default="running")
+    progress_date = Column(Text)
+    total_days = Column(Integer)
     started_at = Column(Text)
     finished_at = Column(Text)
     db_write_time = Column(Text)

@@ -11,6 +11,7 @@ import pandas as pd
 import polars as pl
 
 from ...utils.defaults import M1_FUTURE_CUTOFF_DAYS, DEFAULT_MAX_ADVANCE_DAYS
+from ...utils.df_convert import pandas_to_polars
 from .io_utils import load_previous_orders
 
 logger = logging.getLogger("SupplyChainSimulation")
@@ -194,6 +195,10 @@ class _PandasBackend:
             demand_forecast_total_sc = pd.merge(
                 demand_forecast_split_by_dps, dps_sc_config,
                 on=["week", "material", "location"], how="left",
+            )
+            # 将 adjust_quantity 中的 NaN 替换为 0
+            demand_forecast_total_sc["adjust_quantity"] = (
+                demand_forecast_total_sc["adjust_quantity"].fillna(0)
             )
             demand_forecast_total_sc["quantity_total"] = (
                 demand_forecast_total_sc["quantity_percentage"]
@@ -676,21 +681,8 @@ class _PolarsBackend:
             return pl.DataFrame()
         if isinstance(df, pl.DataFrame):
             return df
-        # 空 DataFrame 也走 numpy 转换，以保留 dtype
-        # 将 nullable / extension dtypes 转为 numpy-backed dtypes，
-        # 避免 pl.from_pandas 要求 pyarrow 依赖。
-        converted = {}
-        for col in df.columns:
-            s = df[col]
-            try:
-                # 先尝试直接转 numpy
-                arr = s.to_numpy()
-                # 如果已经是纯 numpy dtype（非 object 中的混合类型），直接用
-                converted[col] = arr
-            except Exception:
-                # 降级为 str
-                converted[col] = s.astype(str).to_numpy()
-        return pl.DataFrame(converted)
+        # pandas → polars（列级 numpy，无 pyarrow 依赖），逻辑抽到 utils.df_convert
+        return pandas_to_polars(df)
 
     @property
     def demand_forecast(self):

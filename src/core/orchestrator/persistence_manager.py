@@ -3,8 +3,8 @@
 职责：将 StateContext 和 Module 的输出数据写入数据库。
 
 迁移版改动：
-- __init__ 内创建 DBWriter，所有 self.db.write_df → self._writer.write
-- save_config 中 self.db.delete_where → self._writer.delete
+- __init__ 内创建 DBWriter，所有 self.db.write_df → self.writer.write
+- save_config 中 self.db.delete_where → self.writer.delete
 - _sheet_to_cfg_table() 改为 Django 风格：从 CONFIG_TABLE_REGISTRY 读 Model.__tablename__
 - 建表统一由 Orchestrator._init_db 启动时 migrate() 完成，本类不再 _ensure_run_tables
 - OUTPUT_TABLE_MAPPING 从 module/viewcontext 注册表派生（不依赖 table_mapping.py）
@@ -27,14 +27,21 @@ logger = logging.getLogger(__name__)
 class PersistenceManager:
     """持久化总管：只写数据库。
 
-    表映射统一使用 table_mapping.py 的 OUTPUT_TABLE_MAPPING，不硬编码。
+    表映射使用 module / viewcontext 注册表派生。
+    DBWriter 延迟创建（首次写入时才初始化），确保 db 连接已建立。
     """
 
     def __init__(self, orch):
         self._orch = orch
-        # ── Writer ──
-        from ...io.writer import DBWriter
-        self._writer = DBWriter(self.db)
+        self._writer = None  # 延迟创建，等 db 连接建立后
+
+    @property
+    def writer(self):
+        """延迟初始化 DBWriter，确保 db 连接已建立。"""
+        if self._writer is None and self.db is not None:
+            from ...io.writer import DBWriter
+            self._writer = DBWriter(self.db)
+        return self._writer
 
     @property
     def db(self):
@@ -78,7 +85,7 @@ class PersistenceManager:
                 continue
             df = normalize_identifiers(df.copy())
             df = self._inject_meta(df, run_id, sim_date, now)
-            self._writer.write(table_name, df)
+            self._write_idempotent(table_name, df, run_id, sim_date)
 
         # 2) 写 inventory_change_log
         if hasattr(ctx, 'generate_inventory_change_log'):
@@ -90,7 +97,7 @@ class PersistenceManager:
                     'inventory_change_log',
                     'viewcontext_inventory_change_log',
                 )
-                self._writer.write(tbl, inv_log)
+                self._write_idempotent(tbl, inv_log, run_id, sim_date)
 
         # 3) 写 daily_logs（写入后清空，避免历史日志重复写入）
         if hasattr(ctx, 'daily_logs') and ctx.daily_logs:
@@ -99,7 +106,7 @@ class PersistenceManager:
             tbl = view_table_map.get(
                 'daily_logs', 'viewcontext_daily_logs',
             )
-            self._writer.write(tbl, logs_df)
+            self._write_idempotent(tbl, logs_df, run_id, sim_date)
             ctx.daily_logs.clear()
 
         # 4) 写 cleanup_audit
@@ -112,9 +119,13 @@ class PersistenceManager:
                     'open_deployment_pastdue_cleanup',
                     'viewcontext_open_deployment_pastdue_cleanup',
                 )
-                self._writer.write(tbl, audit)
+                self._write_idempotent(tbl, audit, run_id, sim_date)
 
         logger.info(f"🗄️ 已写入 {date_str} 每日状态到数据库")
+
+        # 注：progress_date 断点推进已移出本方法，由调用方（主循环）显式调用
+        # orch.save_checkpoint(current_date=...) 完成——让「写数据」与「推进断点」
+        # 在调用链上分离，save_daily_state 只负责写数据。
 
         # 统计信息
         if hasattr(ctx, 'get_summary_statistics'):
@@ -185,7 +196,7 @@ class PersistenceManager:
 
             df = normalize_identifiers(df.copy())
             df = self._inject_meta(df, run_id, sim_date_str, now)
-            self._writer.write(table_name, df)
+            self._write_idempotent(table_name, df, run_id, sim_date_str)
             written += 1
 
         if written:
@@ -228,9 +239,9 @@ class PersistenceManager:
                 continue
             try:
                 # 删除该 config_name 的旧数据再写入（表不存在时安全跳过）
-                self._writer.delete(cfg_table, {"config_name": config_name})
+                self.writer.delete(cfg_table, {"config_name": config_name})
                 write_df = self._inject_config_meta(df.copy(), config_name, now)
-                self._writer.write(cfg_table, write_df)
+                self.writer.write(cfg_table, write_df)
                 written += 1
             except Exception as e:
                 logger.warning(f"写回配置表 {cfg_table} 失败: {e}")
@@ -242,17 +253,20 @@ class PersistenceManager:
     # 运行事件 + DQ 明细（生命周期）
     # ════════════════════════════════════════
     #
-    # run 事件状态机：
-    #   start_run_event       → dq_status='running'
-    #   mark_run_event_cached → dq_status='cached'   （hash 命中缓存）
-    #   finalize_run_event    → dq_status='passed'/'blocked'/'skipped'
+    # 两套独立状态：
+    #   dq_status（DQ 检测）：running → cached / passed / blocked / skipped
+    #   status（orch 执行）：running → finished（续跑判断依据）
+    #
+    # finished_at 只在 status='finished'（mark_finished）时写；DQ 完成（finalize）不写。
+    # total_days 首次运行记录（iter_dates 分母），current_date 每日推进（断点）。
 
     def start_run_event(
-        self, run_id: str, config_name: str, config_hash: str
+        self, run_id: str, config_name: str, config_hash: str,
+        total_days: int | None = None,
     ) -> None:
-        """orch 启动时插入一条 run 事件（``dq_status='running'``）。
+        """orch 启动时插入一条 run 事件（``dq_status='running'``, ``status='running'``）。
 
-        同一 runid 重复进入时通过 ON CONFLICT 重置为 running。
+        ``total_days`` 首次写入后不再覆盖（ON CONFLICT 时保留旧值，供续跑读分母）。
         """
         if self.db is None:
             return
@@ -260,34 +274,41 @@ class PersistenceManager:
         from psycopg import sql
         stmt = sql.SQL(
             "INSERT INTO {tbl} "
-            "(runid, config_name, config_hash, dq_status, started_at, db_write_time) "
-            "VALUES (%s, %s, %s, 'running', %s, %s) "
+            "(runid, config_name, config_hash, dq_status, status, "
+            " total_days, started_at, db_write_time) "
+            "VALUES (%s, %s, %s, 'running', 'running', %s, %s, %s) "
             "ON CONFLICT (runid) DO UPDATE SET "
             "config_name = EXCLUDED.config_name, "
             "config_hash = EXCLUDED.config_hash, "
             "dq_status = 'running', "
-            "started_at = EXCLUDED.started_at, "
+            "status = 'running', "
             "finished_at = NULL, "
-            "errors = NULL, warnings = NULL, hard_blocks = NULL, "
+            "progress_date = NULL, "
+            "total_days = COALESCE(orch_run_event.total_days, EXCLUDED.total_days), "
             "db_write_time = EXCLUDED.db_write_time"
         ).format(tbl=sql.Identifier("orch_run_event"))
         try:
-            self.db.execute(stmt, (run_id, config_name, config_hash, now, now))
+            self.db.execute(stmt, (run_id, config_name, config_hash,
+                                   total_days, now, now))
         except Exception as e:
             logger.warning(f"start_run_event 失败: {e}")
 
     def mark_run_event_cached(self, run_id: str) -> None:
-        """hash 命中缓存，将当前 run 事件标记为 ``cached``。"""
+        """hash 命中缓存，将当前 run 事件标记为 ``dq_status='cached'``。
+
+        缓存命中 = 直接复用已校验配置 = 该 run 的 DQ 生命周期结束；
+        但 ``status`` 不在此处置 finished（仿真仍待跑），仅 DQ 侧收尾。
+        """
         if self.db is None:
             return
         now = datetime.now()
         from psycopg import sql
         stmt = sql.SQL(
-            "UPDATE {tbl} SET dq_status = 'cached', finished_at = %s, "
+            "UPDATE {tbl} SET dq_status = 'cached', "
             "db_write_time = %s WHERE runid = %s"
         ).format(tbl=sql.Identifier("orch_run_event"))
         try:
-            self.db.execute(stmt, (now, now, run_id))
+            self.db.execute(stmt, (now, run_id))
         except Exception as e:
             logger.warning(f"mark_run_event_cached 失败: {e}")
 
@@ -299,14 +320,10 @@ class PersistenceManager:
         *,
         status: str | None = None,
     ) -> None:
-        """跑完 DQ 后，**同一事务内**写明细 + 更新 run 事件结论。
+        """跑完 DQ 后，**同一事务内**写明细 + 更新 dq_status。
 
-        Args:
-            run_id: 运行标识。
-            config_name: 配置名。
-            dq_result: DQ 结果；``None`` 表示 skip_dq（标 ``skipped``）。
-            status: 显式状态覆盖；默认按 ``dq_result.passed`` 推导
-                passed/blocked（dq_result 为 None → skipped）。
+        注意：此处 **不写 finished_at**（DQ 完成 ≠ orch 跑完）；
+        finished_at 仅在 ``mark_finished``（orch 真正结束）时写。
         """
         if self.db is None:
             return
@@ -321,7 +338,6 @@ class PersistenceManager:
         detail_rows = self._build_dq_detail_rows(
             run_id, config_name, dq_result, now, status
         )
-        totals = self._summarize_dq(dq_result)
 
         try:
             with self.db.get_cursor(commit=True) as cur:
@@ -330,26 +346,113 @@ class PersistenceManager:
                     "DELETE FROM orch_dq_detail WHERE runid = %s", (run_id,)
                 )
                 self._copy_dq_detail(cur, detail_rows)
+                # 仅落 DQ 结论；不碰 finished_at / status（orch 执行态）
                 cur.execute(
-                    "UPDATE orch_run_event SET dq_status = %s, errors = %s, "
-                    "warnings = %s, hard_blocks = %s, finished_at = %s, "
+                    "UPDATE orch_run_event SET dq_status = %s, "
                     "db_write_time = %s WHERE runid = %s",
-                    (
-                        status,
-                        totals["errors"],
-                        totals["warnings"],
-                        totals["hard_blocks"],
-                        now,
-                        now,
-                        run_id,
-                    ),
+                    (status, now, run_id),
                 )
             logger.info(
-                f"DQ run 事件已落定: runid={run_id} status={status} "
+                f"DQ run 事件已落定: runid={run_id} dq_status={status} "
                 f"明细 {len(detail_rows)} 行"
             )
         except Exception as e:
             logger.warning(f"finalize_run_event 失败: {e}")
+
+    # ── orch 执行态（status / current_date / finished_at）──────────────
+
+    def mark_finished(self, run_id: str) -> None:
+        """orch 整个流程真正结束后调用：置 status='finished' 并写 finished_at。"""
+        if self.db is None:
+            return
+        now = datetime.now()
+        from psycopg import sql
+        stmt = sql.SQL(
+            "UPDATE {tbl} SET status = 'finished', finished_at = %s, "
+            "db_write_time = %s WHERE runid = %s"
+        ).format(tbl=sql.Identifier("orch_run_event"))
+        try:
+            self.db.execute(stmt, (now, now, run_id))
+            logger.info(f"orch run 已结束: runid={run_id} status=finished")
+        except Exception as e:
+            logger.warning(f"mark_finished 失败: {e}")
+
+        # 重跑完成后清 m1 快照表（数据已无用，避免残留）
+        self._cleanup_m1_snapshot(run_id)
+
+    def _cleanup_m1_snapshot(self, run_id: str):
+        """清空该 run_id 的 m1 快照数据（重跑完成后调用）。"""
+        if self.db is None:
+            return
+        from src.models.resume import M1_SNAPSHOT_REGISTRY
+        for table_name in M1_SNAPSHOT_REGISTRY.values():
+            try:
+                self.db.execute(
+                    f"DELETE FROM {table_name} WHERE run_id = %s", (run_id,)
+                )
+            except Exception:
+                pass  # 表可能不存在（首次运行无快照）
+
+    def update_orch_status(
+        self, run_id: str, current_date=None, status: str | None = None,
+    ) -> None:
+        """更新 orch 执行态：progress_date（断点日期）和/或 status。
+
+        ``current_date`` 每日推进时调用；``status='running'`` 默认不变。
+        DB 列名为 ``progress_date``（避免与 PG 内置 ``current_date`` 冲突）。
+        """
+        if self.db is None:
+            return
+        sets, params = [], []
+        if current_date is not None:
+            sets.append("progress_date = %s")
+            params.append(str(pd.Timestamp(current_date).strftime('%Y-%m-%d')))
+        if status is not None:
+            sets.append("status = %s")
+            params.append(status)
+        if not sets:
+            return
+        sets.append("db_write_time = %s")
+        params.append(datetime.now())
+        params.append(run_id)
+        from psycopg import sql
+        stmt = sql.SQL(
+            "UPDATE {tbl} SET " + ", ".join(sets) + " WHERE runid = %s"
+        ).format(tbl=sql.Identifier("orch_run_event"))
+        try:
+            self.db.execute(stmt, tuple(params))
+        except Exception as e:
+            logger.warning(f"update_orch_status 失败: {e}")
+
+    def find_unfinished(self, config_name: str | None) -> dict | None:
+        """按 config_name 查最近一条可续跑的 run（DQ 已过、orch 未完成、确实跑过至少一天）。
+
+        返回 ``{run_id, current_date, total_days}`` 或 None。
+        仅当 progress_date 不为 NULL 时才续跑（progress_date=NULL 说明刚 start 还没跑任何一天，
+        是当前正在跑的全新运行，不应误续跑）。
+        """
+        if self.db is None or not config_name:
+            return None
+        try:
+            rows = self.db.execute_query(
+                "SELECT runid, progress_date, total_days FROM orch_run_event "
+                "WHERE config_name = %s AND status <> 'finished' "
+                "AND dq_status IN ('passed', 'cached') "
+                "AND progress_date IS NOT NULL "
+                "ORDER BY started_at DESC NULLS LAST LIMIT 1",
+                (config_name,),
+            )
+            if not rows:
+                return None
+            runid, cur_date, total_days = rows[0]
+            return {
+                'run_id': runid,
+                'current_date': str(cur_date) if cur_date is not None else None,
+                'total_days': int(total_days) if total_days is not None else None,
+            }
+        except Exception as e:
+            logger.warning(f"find_unfinished 失败（视为全新运行）: {e}")
+            return None
 
     @staticmethod
     def _build_dq_detail_rows(
@@ -493,29 +596,231 @@ class PersistenceManager:
             df.insert(3, 'db_write_time', now)
         return df
 
+    def _write_idempotent(self, table_name: str, df: pd.DataFrame,
+                          run_id: str, sim_date: str) -> None:
+        """先删当天该表旧行（WHERE run_id, sim_date）再写，保证重跑幂等。
+
+        表不存在时 writer.delete 走 db.delete_where(safe=True) 静默返回 0，
+        首写由 write_df 自动建表；重跑时先清当天残行再 COPY，不会翻倍。
+        与 save_m1_snapshot 的「先 DELETE 再写」一致。
+        """
+        self.writer.delete(table_name, {'run_id': run_id, 'sim_date': sim_date})
+        self.writer.write(table_name, df)
+
     # ════════════════════════════════════════
-    # 快照恢复 / checkpoint（从 Orchestrator 收敛至此）
+    # 快照恢复（从 ViewContext 表读取，不依赖 sim_state_*）
     # ════════════════════════════════════════
 
-    def restore_state(self, ctx, run_id: str, sim_date: str):
-        """从快照表恢复状态到 StateContext。"""
+    def restore_state_from_views(self, ctx, run_id: str, sim_date: str):
+        """从 viewcontext_* 表恢复 ctx 状态（续跑用）。
+
+        读取指定 sim_date（或最近前一天）的 ViewContext views，
+        将 DataFrame 还原为 ctx 的内部 dict/list 格式。
+        不依赖 sim_state_* 表（那些表已废弃，ctx 状态由 ViewContext 持久化）。
+        """
         if self.db is None:
             return
-        self.db.snapshot.restore(run_id, sim_date, ctx)
+        from src.models.viewcontext import VIEWCONTEXT_REGISTRY
+        from ...utils.normalization import normalize_identifiers
 
-    def save_checkpoint(self, run_id: str, status: str = 'running'):
-        """保存/更新运行元信息（checkpoint）。"""
+        def _read_view(view_key: str) -> "pd.DataFrame | None":
+            """按 view_key 读对应 viewcontext 表；表不存在则返回 None（续跑早期阶段表可能尚未建）。"""
+            tbl = VIEWCONTEXT_REGISTRY.get(view_key)
+            if not tbl:
+                return None
+            if not self.db.table_exists(tbl):
+                logger.debug(f"⏭️ viewcontext 表 {tbl} 尚不存在，跳过恢复 {view_key}")
+                return None
+            try:
+                df = self.db.read(tbl, run_id=run_id, sim_date=sim_date)
+            except Exception as e:
+                logger.warning(f"读取 viewcontext 表 {tbl} 失败（跳过 {view_key}）: {e}")
+                return None
+            if df is None or df.empty:
+                logger.debug(f"viewcontext {tbl} sim_date={sim_date} 无数据")
+                return None
+            logger.debug(
+                f"viewcontext {tbl} sim_date={sim_date} 读到 {len(df)} 行，列={df.columns.tolist()}"
+            )
+            return df
+
+        restored = []
+
+        # 注：normalize_identifiers 是 DataFrame 级（入参 df，默认处理 material/
+        # location/sending/receiving 等列），不可对单个标量调用。每张表先整体规范化一次。
+
+        # 1) unrestricted_inventory → ctx.unrestricted_inventory {(material, location): qty}
+        df = _read_view('unrestricted_inventory')
+        if df is not None and not df.empty:
+            df = normalize_identifiers(df)
+            qty = pd.to_numeric(df['quantity'], errors='coerce').fillna(0).astype(int)
+            ctx.unrestricted_inventory = dict(zip(zip(df['material'], df['location']), qty))
+            restored.append(f"unrestricted_inventory({len(ctx.unrestricted_inventory)})")
+
+        # 2) open_deployment → ctx.open_deployment {uid: record}
+        df = _read_view('open_deployment')
+        if df is not None and not df.empty:
+            df = normalize_identifiers(df)
+            df['deployed_qty'] = pd.to_numeric(df['deployed_qty'], errors='coerce').fillna(0.0)
+            recs = df.to_dict('records')
+            ctx.open_deployment = {
+                str(r.get('ori_deployment_uid', '')): {
+                    'material': r.get('material', ''),
+                    'sending': r.get('sending', ''),
+                    'receiving': r.get('receiving', ''),
+                    'planned_deployment_date': str(r.get('planned_deployment_date', '')),
+                    'deployed_qty': float(r['deployed_qty']),
+                    'demand_element': str(r.get('demand_element', '')),
+                }
+                for r in recs
+            }
+            restored.append(f"open_deployment({len(ctx.open_deployment)})")
+
+        # 3) planning_intransit → ctx.in_transit {uid: record}
+        df = _read_view('planning_intransit')
+        if df is not None and not df.empty:
+            df = normalize_identifiers(df)
+            df['quantity'] = pd.to_numeric(df['quantity'], errors='coerce').fillna(0.0)
+            recs = df.to_dict('records')
+            ctx.in_transit = {
+                str(r.get('transit_uid', '')): {
+                    'material': r.get('material', ''),
+                    'sending': r.get('sending', ''),
+                    'receiving': r.get('receiving', ''),
+                    'actual_ship_date': str(r.get('actual_ship_date', '')),
+                    'actual_delivery_date': str(r.get('actual_delivery_date', '')),
+                    'quantity': float(r['quantity']),
+                    'ori_deployment_uid': str(r.get('ori_deployment_uid', '')),
+                    'vehicle_uid': str(r.get('vehicle_uid', '')),
+                }
+                for r in recs
+            }
+            restored.append(f"in_transit({len(ctx.in_transit)})")
+
+        # 4) production_plan_backlog → ctx.production_plan_backlog [record...]
+        df = _read_view('production_plan_backlog')
+        if df is not None and not df.empty:
+            df = normalize_identifiers(df)
+            if 'available_date' in df.columns:
+                df['available_date'] = pd.to_datetime(df['available_date'], errors='coerce')
+            if 'quantity' in df.columns:
+                df['quantity'] = pd.to_numeric(df['quantity'], errors='coerce').fillna(0)
+            cols = ['material', 'location', 'available_date', 'quantity']
+            ctx.production_plan_backlog = df[cols].to_dict('records')
+            restored.append(f"production_plan_backlog({len(ctx.production_plan_backlog)})")
+
+        if restored:
+            logger.info(
+                f"🔄 ctx 状态已从 ViewContext 恢复: run_id={run_id}, sim_date={sim_date} "
+                f"→ {', '.join(restored)}"
+            )
+        else:
+            logger.info(
+                f"🔄 ctx 无可恢复 ViewContext 状态（表尚未落库）: "
+                f"run_id={run_id}, sim_date={sim_date}"
+            )
+
+    def save_m1_snapshot(self, m1, date_str: str):
+        """写 m1.prepare 后 4 属性到各自独立表（由 write_df 动态建表）。"""
         if self.db is None:
             return
-        self.db.snapshot.save_checkpoint(
-            run_id=run_id,
-            config_name=self.config_name,
-            last_batch_end=str(self._orch.start_date),
-            status=status,
-        )
+        from src.models.resume import M1_SNAPSHOT_REGISTRY
+        run_id = self._run_id
+        for attr, table_name in M1_SNAPSHOT_REGISTRY.items():
+            df = getattr(m1, attr, None)
+            if df is None or (isinstance(df, pd.DataFrame) and df.empty):
+                continue
+            # polars → pandas
+            try:
+                import polars as pl
+                if isinstance(df, pl.DataFrame):
+                    df = df.to_pandas()
+            except ImportError:
+                pass
+            if not isinstance(df, pd.DataFrame):
+                continue
+            # 先删旧数据再写（幂等）；表不存在则跳过 DELETE，让 write_df 自动建表
+            if self.db.table_exists(table_name):
+                self.db.execute(
+                    f"DELETE FROM {table_name} WHERE run_id = %s AND sim_date = %s",
+                    (run_id, date_str),
+                )
+            # 注入元数据列 + 写入
+            out = df.copy()
+            out.insert(0, 'run_id', run_id)
+            out.insert(1, 'sim_date', date_str)
+            # 日期列转字符串（write_df 全 TEXT 写入）
+            for col in out.columns:
+                if pd.api.types.is_datetime64_any_dtype(out[col]):
+                    out[col] = out[col].astype(str)
+            self.db.write_df(table_name, out)
 
-    def load_checkpoint(self, run_id: str) -> dict | None:
-        """加载运行元信息（checkpoint）。"""
+    def load_m1_snapshot(self, run_id: str, sim_date: str) -> dict | None:
+        """读 m1 4 属性快照，返回 {attr: DataFrame} 或 None。"""
         if self.db is None:
             return None
-        return self.db.snapshot.load_checkpoint(run_id)
+        from src.models.resume import M1_SNAPSHOT_REGISTRY
+        result = {}
+        for attr, table_name in M1_SNAPSHOT_REGISTRY.items():
+            # 表可能尚未建（首次运行无快照，或续跑发生在快照写入之前）
+            if not self.db.table_exists(table_name):
+                continue
+            try:
+                df = self.db.read(table_name, run_id=run_id, sim_date=sim_date)
+            except Exception as e:
+                logger.warning(f"读取 m1 快照表 {table_name} 失败（跳过 {attr}）: {e}")
+                continue
+            if df is None or df.empty:
+                continue
+            # 剥离元数据列
+            meta_cols = {'run_id', 'sim_date', 'config_name', 'db_write_time'}
+            keep = [c for c in df.columns if c not in meta_cols]
+            df = df[keep].copy()
+            # 恢复日期列类型
+            for col in ('date', 'available_date', 'simulation_date',
+                         'order_date', 'delivery_date', 'ship_date', 'created_date'):
+                if col in df.columns:
+                    df[col] = pd.to_datetime(df[col], errors='coerce')
+            # 读边界适配：polars 引擎下转成 polars，喂给 _PolarsBackend
+            # （db.read 恒返回 pandas；这 4 属性由 polars 后端消费，pandas 会让
+            #   merge_with_history 等处的 is_empty()/pl.col() 崩）。
+            if getattr(self._orch, 'engine', 'pandas') == 'polars':
+                from ...utils.df_convert import pandas_to_polars
+                df = pandas_to_polars(df)
+            result[attr] = df
+        return result or None
+
+    def save_checkpoint(self, run_id: str, status: str = 'running',
+                        current_date=None):
+        """更新 orch 执行态（写 orch_run_event）。
+
+        续跑执行态统一落 orch_run_event（status/current_date/finished_at）；
+        sim_checkpoint 表不再作为执行态源。
+        """
+        if self.db is None:
+            return
+        self.update_orch_status(run_id, status=status, current_date=current_date)
+
+    def load_checkpoint(self, run_id: str) -> dict | None:
+        """加载运行元信息（orch_run_event）。"""
+        if self.db is None:
+            return None
+        try:
+            rows = self.db.execute_query(
+                "SELECT runid, status, progress_date, total_days, dq_status "
+                "FROM orch_run_event WHERE runid = %s",
+                (run_id,),
+            )
+            if not rows:
+                return None
+            r = rows[0]
+            return {
+                'run_id': r[0],
+                'status': r[1],
+                'current_date': str(r[2]) if r[2] is not None else None,
+                'total_days': int(r[3]) if r[3] is not None else None,
+                'dq_status': r[4],
+            }
+        except Exception as e:
+            logger.warning(f"load_checkpoint 失败: {e}")
+            return None

@@ -45,9 +45,17 @@ class OrchBase:
 
 
 class ModuleBase:
-    """Marker mixin — 标识输出表（module*_output_* / viewcontext_* / summary_*）。
+    """Marker mixin — 标识输出表（module*_output_*）。
     不是 SA mapped class。输出表无固定列，通常不声明为 SA 类。
     """
+
+
+class ViewContextBase:
+    """Marker mixin — 标识 viewcontext 输出表（viewcontext_*）。不是 SA mapped class。"""
+
+
+class ModuleOutputBase:
+    """Marker mixin — 标识模块输出表（module*_output_*），有固定列的 SA 模型。不是 SA mapped class。"""
 
 
 class ResumeBase:
@@ -90,6 +98,8 @@ __all__ = [
     "CfgBase",
     "OrchBase",
     "ModuleBase",
+    "ViewContextBase",
+    "ModuleOutputBase",
     "ResumeBase",
     "map_db_type",
 ]

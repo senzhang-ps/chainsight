@@ -40,6 +40,8 @@ def migrate(db: "DB") -> None:
     from . import cfg as _cfg  # noqa: F401
     from . import orch as _orch  # noqa: F401
     from . import resume as _resume  # noqa: F401
+    from . import viewcontext as _viewcontext  # noqa: F401
+    from . import module as _module  # noqa: F401
 
     dialect = postgresql.dialect()
 

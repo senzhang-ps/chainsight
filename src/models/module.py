@@ -3,6 +3,9 @@
 输出表无固定列（运行时按 DataFrame 动态建表全 TEXT），故只注册表名；
 migrate() 自动跳过无列的表，输出表仍由 write_df 运行时建——完全保留现有行为。
 
+已提供 DDL 的 5 张 module1 输出表有 SA declarative 声明（ModuleOutputBase），
+migrate() 会统一建表；其余表仍走 write_df 动态建。
+
 注册表用法（Django 风格）：
 
     from src.models.module import OUTPUT_REGISTRY, get_output_table_name
@@ -10,9 +13,132 @@ migrate() 自动跳过无列的表，输出表仍由 write_df 运行时建——
 """
 from __future__ import annotations
 
-from sqlalchemy import Table, Column, Text as SAText, MetaData
+from sqlalchemy import Column, DateTime, Float, Integer, Text
 
-from .base import ModuleBase
+from .base import Base, ModuleOutputBase
+
+
+# ════════════════════════════════════════════════════════════════════
+# SA declarative 模型（有固定列的表 — module1）
+# ════════════════════════════════════════════════════════════════════
+
+class Module1OutputOrderlog(Base, ModuleOutputBase):
+    """module1 订单日志。"""
+    __tablename__ = "module1_output_orderlog"
+
+    run_id = Column(Text)
+    sim_date = Column(Text)
+    week = Column(Integer)
+    material = Column(Text)
+    location = Column(Text)
+    week_start = Column(Text)
+    month = Column(Integer)
+    dps_percent = Column(Text)
+    quantity_percentage = Column(Float)
+    quantity_total = Column(Float)
+    demand_type = Column(Text)
+    ao_percent = Column(Float)
+    split_quantity = Column(Float)
+    error_std_percent = Column(Float)
+    abs_std = Column(Float)
+    cov_quantity_raw = Column(Float)
+    rescue_rate = Column(Float)
+    cov_quantity = Column(Float)
+    simulation_date = Column(Text)
+    date = Column(Text)
+    order_day_flag = Column(Integer)
+    flag_count = Column(Integer)
+    quantity = Column(Float)
+    remainder = Column(Integer)
+    advance_days = Column(Integer)
+    percent = Column(Float)
+    config_name = Column(Text)
+    db_write_time = Column(DateTime)
+
+    __mapper_args__ = {
+        "primary_key": [run_id, sim_date, material, location, date, demand_type]
+    }
+
+
+class Module1OutputShipmentlog(Base, ModuleOutputBase):
+    """module1 发货日志。"""
+    __tablename__ = "module1_output_shipmentlog"
+
+    run_id = Column(Text)
+    sim_date = Column(Text)
+    config_name = Column(Text)
+    db_write_time = Column(DateTime)
+    date = Column(Text)
+    material = Column(Text)
+    location = Column(Text)
+    quantity = Column(Float)
+    demand_type = Column(Text)
+    order_id = Column(Text)
+
+    __mapper_args__ = {
+        "primary_key": [run_id, sim_date, material, location, date, order_id]
+    }
+
+
+class Module1OutputCutlog(Base, ModuleOutputBase):
+    """module1 截单日志。"""
+    __tablename__ = "module1_output_cutlog"
+
+    run_id = Column(Text)
+    sim_date = Column(Text)
+    config_name = Column(Text)
+    db_write_time = Column(DateTime)
+    date = Column(Text)
+    material = Column(Text)
+    location = Column(Text)
+    quantity = Column(Float)
+
+    __mapper_args__ = {
+        "primary_key": [run_id, sim_date, material, location, date]
+    }
+
+
+class Module1OutputSupplydemandlog(Base, ModuleOutputBase):
+    """module1 供需日志。"""
+    __tablename__ = "module1_output_supplydemandlog"
+
+    run_id = Column(Text)
+    sim_date = Column(Text)
+    config_name = Column(Text)
+    db_write_time = Column(DateTime)
+    date = Column(Text)
+    material = Column(Text)
+    location = Column(Text)
+    quantity = Column(Float)
+    demand_element = Column(Text)
+
+    __mapper_args__ = {
+        "primary_key": [run_id, sim_date, material, location, date, demand_element]
+    }
+
+
+class Module1OutputSummary(Base, ModuleOutputBase):
+    """module1 汇总。"""
+    __tablename__ = "module1_output_summary"
+
+    run_id = Column(Text)
+    sim_date = Column(Text)
+    config_name = Column(Text)
+    db_write_time = Column(DateTime)
+    total_orders = Column(Float)
+    total_shipments = Column(Float)
+    total_cuts = Column(Float)
+    total_supplydemand = Column(Float)
+    date = Column(Text)
+
+    __mapper_args__ = {
+        "primary_key": [run_id, sim_date, date]
+    }
+
+
+# ════════════════════════════════════════════════════════════════════
+# 注册表（保留向后兼容）
+# ════════════════════════════════════════════════════════════════════
 
 # ── module1 输出表 ──────────────────────────────────────────────────────
 
@@ -87,4 +213,9 @@ __all__ = [
     "OUTPUT_REGISTRY",
     "get_output_table_name",
     "get_all_output_tables",
+    "Module1OutputOrderlog",
+    "Module1OutputShipmentlog",
+    "Module1OutputCutlog",
+    "Module1OutputSupplydemandlog",
+    "Module1OutputSummary",
 ]

@@ -3,11 +3,105 @@
 与 module.py 同理：输出表无固定列，只注册表名；migrate() 自动跳过无列的表，
 输出表仍由 write_df 运行时建——完全保留现有行为。
 
+已提供 DDL 的 3 张 viewcontext 表有 SA declarative 声明（ViewContextBase），
+migrate() 会统一建表；其余表仍走 write_df 动态建。
+
 注册表用法（Django 风格）：
 
     from src.models.viewcontext import VIEWCONTEXT_REGISTRY, SUMMARY_REGISTRY
 """
 from __future__ import annotations
+
+from sqlalchemy import Column, DateTime, Float, Integer, Text
+
+from .base import Base, ViewContextBase
+
+
+# ════════════════════════════════════════════════════════════════════
+# SA declarative 模型（有固定列的表）
+# ════════════════════════════════════════════════════════════════════
+
+class ViewContextDailyLogs(Base, ViewContextBase):
+    """viewcontext 每日日志。"""
+    __tablename__ = "viewcontext_daily_logs"
+
+    run_id = Column(Text)
+    sim_date = Column(Text)
+    config_name = Column(Text)
+    db_write_time = Column(DateTime)
+    timestamp = Column(DateTime)
+    date = Column(Text)
+    event_type = Column(Text)
+    message = Column(Text)
+
+    __mapper_args__ = {
+        "primary_key": [run_id, sim_date, timestamp, event_type]
+    }
+
+
+class ViewContextInventoryChangeLog(Base, ViewContextBase):
+    """viewcontext 库存变更日志。"""
+    __tablename__ = "viewcontext_inventory_change_log"
+
+    run_id = Column(Text)
+    sim_date = Column(Text)
+    config_name = Column(Text)
+    db_write_time = Column(DateTime)
+    date = Column(Text)
+    material = Column(Text)
+    location = Column(Text)
+    beginning_inventory = Column(Float)
+    production_gr = Column(Float)
+    delivery_gr = Column(Float)
+    shipment = Column(Float)
+    delivery_ship = Column(Float)
+    ending_inventory = Column(Float)
+    calculated_ending = Column(Float)
+    balance_diff = Column(Float)
+
+    __mapper_args__ = {
+        "primary_key": [run_id, sim_date, material, location, date]
+    }
+
+
+class ViewContextUnrestrictedInventory(Base, ViewContextBase):
+    """viewcontext 非限制库存。"""
+    __tablename__ = "viewcontext_unrestricted_inventory"
+
+    run_id = Column(Text)
+    sim_date = Column(Text)
+    config_name = Column(Text)
+    db_write_time = Column(DateTime)
+    date = Column(Text)
+    material = Column(Text)
+    location = Column(Text)
+    quantity = Column(Float)
+
+    __mapper_args__ = {
+        "primary_key": [run_id, sim_date, material, location, date]
+    }
+
+
+class ViewContextSpaceQuota(Base, ViewContextBase):
+    """viewcontext 空间配额。"""
+    __tablename__ = "viewcontext_space_quota"
+
+    run_id = Column(Text)
+    sim_date = Column(Text)
+    config_name = Column(Text)
+    db_write_time = Column(DateTime)
+    receiving = Column(Text)
+    date = Column(Text)
+    max_qty = Column(Float)
+
+    __mapper_args__ = {
+        "primary_key": [run_id, sim_date, receiving, date]
+    }
+
+
+# ════════════════════════════════════════════════════════════════════
+# 注册表（保留向后兼容）
+# ════════════════════════════════════════════════════════════════════
 
 
 # ── viewcontext 输出表 ──────────────────────────────────────────────────
@@ -56,4 +150,8 @@ __all__ = [
     "SUMMARY_REGISTRY",
     "get_viewcontext_tables",
     "get_summary_tables",
+    "ViewContextDailyLogs",
+    "ViewContextInventoryChangeLog",
+    "ViewContextUnrestrictedInventory",
+    "ViewContextSpaceQuota",
 ]

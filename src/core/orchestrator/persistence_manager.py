@@ -12,6 +12,7 @@
 
 import json
 import logging
+from contextlib import contextmanager
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
@@ -54,6 +55,44 @@ class PersistenceManager:
     @property
     def config_name(self):
         return self._orch.config_name or ''
+
+    # ════════════════════════════════════════
+    # 批量事务（写入优化）
+    # ════════════════════════════════════════
+
+    @contextmanager
+    def batch_transaction(self):
+        """将上下文内所有写入合并为一个事务，减少 fsync 次数。
+
+        psycopg3 的 ``conn.transaction()`` 在 autocommit=False 时创建 SAVEPOINT，
+        而非独立事务。因此只需将 autocommit 临时关掉，内部各个 write_df 的
+        ``conn.transaction()`` 就会自动退化为 savepoint，最终由外层 ``commit()``
+        一次性落盘。
+
+        用法：
+            with persistence.batch_transaction():
+                persistence.save_daily_state(ctx, date_str)
+                persistence.save_module_output(m1, date_str)
+                persistence.save_checkpoint(run_id, current_date=date_str)
+                # 所有写入在一个事务中，从 N 次 fsync 降为 1 次
+        """
+        if self.db is None:
+            yield
+            return
+
+        conn = self.db.connect()
+        was_autocommit = conn.autocommit
+        conn.autocommit = False
+        try:
+            yield
+            conn.commit()
+            logger.debug("batch_transaction: 已提交批量事务")
+        except Exception:
+            conn.rollback()
+            logger.warning("batch_transaction: 已回滚批量事务")
+            raise
+        finally:
+            conn.autocommit = was_autocommit
 
     # ════════════════════════════════════════
     # 每日状态保存

@@ -233,6 +233,7 @@ class DailyProductionPlanner:
             ['material', 'location', 'delegate_line']
         )['prd_rate']
         rate_map.index.set_names(['material', 'location', 'line'], inplace=True)
+        rate_map = rate_map.sort_index()  # 对MultiIndex排序以避免性能告警
 
         return centralized_capacity_allocation_with_changeover(
             uncon_plan, cap_df, rate_map, co_mat, co_def, mlcfg,
@@ -531,6 +532,7 @@ def _run_legacy_mode(args) -> None:
         ['material', 'location', 'delegate_line']
     )['prd_rate']
     rate_map.index.set_names(['material', 'location', 'line'], inplace=True)
+    rate_map = rate_map.sort_index()  # 对MultiIndex排序以避免性能告警
 
     uncon = pd.DataFrame(columns=[
         'material', 'location', 'line', 'planned_date',

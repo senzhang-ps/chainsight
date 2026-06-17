@@ -680,9 +680,9 @@ class ConfigInputDataQualityChecker:
     def _load_optional_sheets() -> set[str]:
         """读取 defaults.yaml#data_quality 的可选表清单（optional_import）。
 
-        可选表在输入中存在时才执行检测；缺失时不做任何检测、不记缺表
-        问题。未列入该清单的 schema 表一律按必需表处理（缺失记 ERROR），
-        防止清单遗漏导致漏检。defaults 不可用时返回空集合。
+        可选表缺失或为空时不做任何检测、不记缺表/空表问题；存在且有
+        数据时才执行检测。未列入该清单的 schema 表一律按必需表处理
+        （缺失记 ERROR），防止清单遗漏导致漏检。defaults 不可用时返回空集合。
 
         Returns:
             可选配置表 Sheet 名集合。
@@ -777,8 +777,9 @@ class ConfigInputDataQualityChecker:
         """对输入配置表执行完整的数据质量检测流程。
 
         只有 ``defaults.yaml#data_quality.config_tables.quality_check_enabled``
-        中为 true（或未声明）的表才参与检测；检测不修改调用方数据，也不
-        阻断后续流程。
+        中为 true（或未声明）的表才参与检测；可选表（``optional_import``）
+        缺失或为空时跳过全部检测，存在且有数据时才执行检测。
+        检测不修改调用方数据，也不阻断后续流程。
 
         Args:
             tables: 从 Excel/CSV 读取出的配置表数据，key 为 Sheet 名。
@@ -805,6 +806,7 @@ class ConfigInputDataQualityChecker:
         ]
 
         # 可选表清单（optional_import）：存在时才检测，缺失时不报缺表问题。
+        # 可选表清单（optional_import）：缺失或为空时跳过全部检测，不报缺表/空表问题。
         optional_sheets = self._load_optional_sheets()
 
         # 识别输入中存在、但 schema 未声明的 Sheet；这类 Sheet 不参与检测。
@@ -815,7 +817,12 @@ class ConfigInputDataQualityChecker:
         # 准备检测口径数据。
         # - 只保留 schema 声明且输入实际存在的列。
         # - 删除电子表格常见的全空填充行。
+        # - 可选表存在但为空时排除，不参与后续任何检测。
         # - 不修改调用方传入的原始 DataFrame。
+
+        # 可选表存在但为空时，排除所有后续质量检测，仅日志留痕。
+        empty_optional_sheets: set[str] = set()
+
         prepared: dict[str, pd.DataFrame] = {}
         for sheet in enabled_sheets:
             df = tables.get(sheet)
@@ -828,9 +835,21 @@ class ConfigInputDataQualityChecker:
                 present = [c for c in rules.required_columns(sheet) if c in df.columns]
 
                 # 去掉全空行，避免 Excel/CSV 末尾填充行被误判为数据问题。
-                prepared[sheet] = self._drop_empty_rows(
+                prepared_df = self._drop_empty_rows(
                     df.loc[:, present].copy(), rules
                 )
+
+                # 可选表存在但准备后为空：排除所有后续质量检测，仅日志留痕。
+                if sheet in optional_sheets and prepared_df.empty:
+                    empty_optional_sheets.add(sheet)
+                    logger.info(
+                        "Optional sheet is present but empty; "
+                        "all quality checks skipped: %s",
+                        sheet,
+                    )
+                    continue
+
+                prepared[sheet] = prepared_df
             except Exception as exc:  # noqa: BLE001
                 # 单表准备失败时记录内部异常，并继续处理其他 Sheet。
                 logger.exception("Data quality preparation failed for sheet %s", sheet)
@@ -873,7 +892,10 @@ class ConfigInputDataQualityChecker:
             (
                 "check_4_columns",
                 lambda: self.check_4_columns(
-                    tables, rules, enabled_sheets=enabled_sheets, config_name=config_name
+                    tables, rules,
+                    enabled_sheets=enabled_sheets,
+                    empty_optional_sheets=empty_optional_sheets,
+                    config_name=config_name,
                 ),
             ),
             # 检查字段级规则，包括非空、类型、枚举、范围和日期顺序。
@@ -938,7 +960,8 @@ class ConfigInputDataQualityChecker:
         """检测 1：schema 声明且检测开启的必需表在输入中是否存在。
 
         ``optional_sheets``（defaults.yaml#optional_import）中的可选表
-        存在时才进行后续检测；缺失时不做任何检测、不记缺表问题。
+        缺失时不做任何检测、不记缺表问题；存在但为空时同样跳过全部
+        检测（由 prepare 阶段识别并排除）。
         """
         # 确定本次需要检查的 Sheet 范围；默认使用 schema 全量 Sheet。
         sheets = rules.sheet_names() if enabled_sheets is None else enabled_sheets
@@ -1036,14 +1059,22 @@ class ConfigInputDataQualityChecker:
         rules: ConfigTableQualityRules,
         *,
         enabled_sheets: list[str] | None = None,
+        empty_optional_sheets: set[str] | None = None,
         config_name: str | None = None,
     ) -> None:
-        """检测 4：schema 声明的必需字段是否在原始 Sheet 列中缺失。"""
+        """检测 4：schema 声明的必需字段是否在原始 Sheet 列中缺失。
+
+        可选表存在但为空时跳过列缺失检测，与整体"空则免检"策略一致。
+        """
         # 确定需要检查字段完整性的 Sheet 范围。
         sheets = rules.sheet_names() if enabled_sheets is None else enabled_sheets
 
         # 字段缺失必须基于原始输入表检查，不能基于已投影 prepared 表。
         for sheet in sheets:
+            # 可选表存在但为空：跳过列缺失检测，与整体"空则免检"策略一致。
+            if empty_optional_sheets and sheet in empty_optional_sheets:
+                continue
+
             df = tables.get(sheet)
 
             # 缺表由 check_1 负责报告，此处只处理已存在 Sheet 的缺列问题。

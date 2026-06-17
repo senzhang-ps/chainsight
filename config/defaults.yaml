@@ -99,7 +99,6 @@ data_quality:
     required_import:
       - Global_seed
       - Global_Network
-      - Global_SpaceCapacity
       - Global_LeadTime
       - Global_DemandPriority
       - M1_InitialInventory
@@ -124,6 +123,7 @@ data_quality:
       - M1_AOConfig
       - M1_DPSConfig
       - M1_SupplyChoiceConfig
+      - Global_SpaceCapacity
     quality_check_enabled:
       Global_seed: true
       Global_Network: true

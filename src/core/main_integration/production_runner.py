@@ -150,6 +150,7 @@ def run_daily_production_planning_integrated(
             ['material', 'location', 'delegate_line']
         )['prd_rate']
         rate_map.index.set_names(['material', 'location', 'line'], inplace=True)
+        rate_map = rate_map.sort_index()  # 对MultiIndex排序以避免性能告警
         
         # 加载前一天产线状态用于跨天转产连续性
         if previous_line_states_override is not None:

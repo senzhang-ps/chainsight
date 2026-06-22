@@ -82,3 +82,4 @@ archive/ChainSight_Dev/**/run_*/
 # 业务输入数据（input/）：仅保留 input 目录，目录内文件不入仓
 input/*
 !input/.gitkeep
+.vscode/*

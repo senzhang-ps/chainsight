@@ -58,6 +58,13 @@ class DB:
             except (psycopg.OperationalError, psycopg.errors.ConnectionTimeout) as e:
                 last_err = e
                 self._connection = None
+                error_text = str(e).lower()
+                if 'does not exist' in error_text and attempt == 0:
+                    try:
+                        self.create_database_if_not_exists()
+                        continue
+                    except Exception:
+                        pass
                 if attempt < 2:
                     time.sleep(5 * (2 ** attempt))
         raise last_err
@@ -66,6 +73,56 @@ class DB:
         if self._connection and not self._connection.closed:
             self._connection.close()
             self._connection = None
+
+    def database_exists(self) -> bool:
+        """检查目标数据库是否存在。"""
+        temp_conn = None
+        try:
+            temp_conn = psycopg.connect(
+                host=self.host,
+                port=self.port,
+                dbname='postgres',
+                user=self.user,
+                password=self.password,
+                client_encoding='UTF8',
+                connect_timeout=30,
+            )
+            with temp_conn.cursor() as cursor:
+                cursor.execute(
+                    "SELECT 1 FROM pg_database WHERE datname = %s",
+                    (self.database,),
+                )
+                return cursor.fetchone() is not None
+        finally:
+            if temp_conn and not temp_conn.closed:
+                temp_conn.close()
+
+    def create_database_if_not_exists(self) -> bool:
+        """如果目标数据库不存在，则创建它。"""
+        if self.database_exists():
+            return True
+        temp_conn = None
+        try:
+            temp_conn = psycopg.connect(
+                host=self.host,
+                port=self.port,
+                dbname='postgres',
+                user=self.user,
+                password=self.password,
+                client_encoding='UTF8',
+                autocommit=True,
+                connect_timeout=30,
+            )
+            with temp_conn.cursor() as cursor:
+                cursor.execute(
+                    sql.SQL("CREATE DATABASE {} ").format(
+                        sql.Identifier(self.database)
+                    )
+                )
+            return True
+        finally:
+            if temp_conn and not temp_conn.closed:
+                temp_conn.close()
 
     @contextmanager
     def get_cursor(self, commit: bool = True):

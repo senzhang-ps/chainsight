@@ -275,7 +275,7 @@ class M6Truckreleasecon(Base, CfgBase):
     wfr = Column(Float, comment='重量装载率阈值', info={ "local_name": 'WFR', "comment_source": 'manual_mapping_completion', "db_field_exists": '是' })
     vfr = Column(Float, comment='体积装载率阈值', info={ "local_name": 'VFR', "comment_source": 'manual_mapping_completion', "db_field_exists": '是' })
     # mdp需要废弃
-    mdq = Column(Float, comment='最小发运数量阈值', info={ "local_name": 'MDQ', "comment_source": 'manual_mapping_completion', "db_field_exists": '是', "range": (0, None) })
+    # mdq = Column(Float, comment='最小发运数量阈值', info={ "local_name": 'MDQ', "comment_source": 'manual_mapping_completion', "db_field_exists": '是', "range": (0, None) })
     config_name = Column(Text, comment='配置名', info={ "comment_source": 'remark', "db_field_exists": '是' })
     db_write_time = Column(DateTime, comment='写库时间', info={ "comment_source": 'remark', "db_field_exists": '是' })
 

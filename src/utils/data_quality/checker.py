@@ -13,7 +13,7 @@ from typing import Any
 
 import pandas as pd
 
-from pgsql_db.config_table_schema import get_config_table_schemas
+from src.models.cfg import build_schema_compat_dict
 
 logger = logging.getLogger(__name__)
 
@@ -107,7 +107,7 @@ class ConfigTableQualityRules:
             schemas: 测试或特殊场景注入的 schema；为空时读取
                 ``CONFIG_TABLE_SCHEMAS``，兼容带 ``tables`` 节点的完整映射
         """
-        raw = get_config_table_schemas() if schemas is None else schemas
+        raw = build_schema_compat_dict() if schemas is None else schemas
         # 兼容get_config_table_mapping()风格的完整映射注入
         if isinstance(raw.get("tables"), dict):
             raw = raw["tables"]
@@ -140,7 +140,7 @@ class ConfigTableQualityRules:
         for field in table_cfg.get("fields") or ():
             if not isinstance(field, dict):
                 continue
-            column = str(field.get("local_name"))
+            column = str(field.get("db_name"))
             db_type = str(field.get("db_type") or "str").strip().lower()
             rule: dict[str, Any] = {
                 "db_type": db_type,

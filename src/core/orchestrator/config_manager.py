@@ -17,6 +17,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pandas as pd
+import psycopg
+
+from ..db.pgsql.db import DB
 
 if TYPE_CHECKING:
     from .new_orchestrator import Orchestrator
@@ -89,7 +92,8 @@ class ConfigManager:
         """从 yaml 建 DB 连接 + 设 sys_config + migrate 建表。
 
         读取 ``config/defaults.yaml`` 的 database 节，创建 DB 实例并 migrate；
-        连接失败则 ``_db=None``（文件模式），不抛异常。
+        如果数据库不存在，会尝试自动建库并重试连接；
+        其他连接异常将直接抛出，避免回退到文件模式。
         """
         sys_cfg = self._load_sys_config()
         if not sys_cfg:
@@ -100,25 +104,35 @@ class ConfigManager:
         if not db_cfg:
             return
 
-        try:
-            from ..db.pgsql.db import DB
-            self._db = DB(
-                host=db_cfg.get('host', 'localhost'),
-                port=int(db_cfg.get('port', 5432)),
-                database=db_cfg.get('database', 'test_db'),
-                user=db_cfg.get('user', 'postgres'),
-                password=str(db_cfg.get('password', '')),
-            )
-            self._db.connect()
-            logger.info("🗄️ 数据库连接已建立")
+        self._db = DB(
+            host=db_cfg.get('host', 'localhost'),
+            port=int(db_cfg.get('port', 5432)),
+            database=db_cfg.get('database', 'test_db'),
+            user=db_cfg.get('user', 'postgres'),
+            password=str(db_cfg.get('password', '')),
+        )
 
-            # ── migrate: Django 风格统一建表 ──
-            from src.models import migrate
-            migrate(self._db)
-            logger.info("🗄️ 数据库表已迁移")
+        try:
+            self._db.connect()
+        except (psycopg.errors.InvalidCatalogName, psycopg.OperationalError) as e:
+            error_text = str(e).lower()
+            if isinstance(e, psycopg.errors.InvalidCatalogName) or 'does not exist' in error_text:
+                logger.info(
+                    f"🗄️ 数据库 {self._db.database!r} 不存在，尝试创建后重连"
+                )
+                self._db.create_database_if_not_exists()
+                self._db.connect()
+            else:
+                raise RuntimeError(f"数据库连接失败: {e}") from e
         except Exception as e:
-            logger.warning(f"🗄️ 数据库连接失败（将使用文件模式）: {e}")
-            self._db = None
+            raise RuntimeError(f"数据库连接失败: {e}") from e
+
+        logger.info("🗄️ 数据库连接已建立")
+
+        # ── migrate: Django 风格统一建表 ──
+        from src.models import migrate
+        migrate(self._db)
+        logger.info("🗄️ 数据库表已迁移")
 
     # ══════════════════════════════════════════
     # 配置加载

@@ -26,8 +26,8 @@
             "program": "${workspaceFolder}/test/test_run_refactor.py",
             "console": "integratedTerminal",
             "args": [
-                "--config", "D:\\chainsight\\input\\OC\\OC_Paste_S1_20251224_extension\\OC_Paste_S1_20251224_extension.xlsx",
-                "--start-date", "2025-12-15",
+                "--config", "D:\\chainsight\\input\\OC\\OC_Paste_S1_20251224_extension\\OC_Paste_S1_20251224_repare.xlsx",
+                "--start-date", "2025-12-16",
                 "--end-date", "2026-03-15"
             ],
             "justMyCode": true,
@@ -52,3 +52,4 @@
         }
     ]
 }
+ 

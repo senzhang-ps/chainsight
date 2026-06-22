@@ -17,6 +17,10 @@ XlsxWriter==3.2.9
 # Database mode
 psycopg[binary]==3.3.3
 
+SQLAlchemy>=2.0
+pytest
+pytest-cov
+
 # Runtime/config helpers
 PyYAML==6.0.3
 tqdm==4.67.3

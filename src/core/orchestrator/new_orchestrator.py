@@ -40,7 +40,7 @@ class Orchestrator:
         self.persistence = PersistenceManager(self)
 
         # ── 配置加载 + 持久化（委托 ConfigManager） ──
-        self.config.bootstrap()
+        self.config.bootstrap(config_path=config_path)
 
         # ── 续跑检测（在 load 之前，以便复用 run_id + 短路 DQ）──
         # config_name 预置（DB 模式可由调用方显式赋值；config_path 模式取 stem）

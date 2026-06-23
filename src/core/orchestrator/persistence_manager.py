@@ -325,7 +325,7 @@ class PersistenceManager:
             "progress_date = NULL, "
             "total_days = COALESCE(orch_run_event.total_days, EXCLUDED.total_days), "
             "db_write_time = EXCLUDED.db_write_time"
-        ).format(tbl=sql.Identifier("orch_run_event"))
+        ).format(tbl=self.db._qualified("orch_run_event"))
         try:
             self.db.execute(stmt, (run_id, config_name, config_hash,
                                    total_days, now, now))
@@ -345,7 +345,7 @@ class PersistenceManager:
         stmt = sql.SQL(
             "UPDATE {tbl} SET dq_status = 'cached', "
             "db_write_time = %s WHERE runid = %s"
-        ).format(tbl=sql.Identifier("orch_run_event"))
+        ).format(tbl=self.db._qualified("orch_run_event"))
         try:
             self.db.execute(stmt, (now, run_id))
         except Exception as e:
@@ -382,12 +382,14 @@ class PersistenceManager:
             with self.db.get_cursor(commit=True) as cur:
                 # 先删后写，保证同一 runid 幂等
                 cur.execute(
-                    "DELETE FROM orch_dq_detail WHERE runid = %s", (run_id,)
+                    f"DELETE FROM {self.db.qualified_name('orch_dq_detail')} "
+                    "WHERE runid = %s", (run_id,)
                 )
                 self._copy_dq_detail(cur, detail_rows)
                 # 仅落 DQ 结论；不碰 finished_at / status（orch 执行态）
+                _evt = self.db.qualified_name("orch_run_event")
                 cur.execute(
-                    "UPDATE orch_run_event SET dq_status = %s, "
+                    f"UPDATE {_evt} SET dq_status = %s, "
                     "db_write_time = %s WHERE runid = %s",
                     (status, now, run_id),
                 )
@@ -409,7 +411,7 @@ class PersistenceManager:
         stmt = sql.SQL(
             "UPDATE {tbl} SET status = 'finished', finished_at = %s, "
             "db_write_time = %s WHERE runid = %s"
-        ).format(tbl=sql.Identifier("orch_run_event"))
+        ).format(tbl=self.db._qualified("orch_run_event"))
         try:
             self.db.execute(stmt, (now, now, run_id))
             logger.info(f"orch run 已结束: runid={run_id} status=finished")
@@ -427,7 +429,8 @@ class PersistenceManager:
         for table_name in M1_SNAPSHOT_REGISTRY.values():
             try:
                 self.db.execute(
-                    f"DELETE FROM {table_name} WHERE run_id = %s", (run_id,)
+                    f"DELETE FROM {self.db.qualified_name(table_name)} WHERE run_id = %s",
+                    (run_id,)
                 )
             except Exception:
                 pass  # 表可能不存在（首次运行无快照）
@@ -457,7 +460,7 @@ class PersistenceManager:
         from psycopg import sql
         stmt = sql.SQL(
             "UPDATE {tbl} SET " + ", ".join(sets) + " WHERE runid = %s"
-        ).format(tbl=sql.Identifier("orch_run_event"))
+        ).format(tbl=self.db._qualified("orch_run_event"))
         try:
             self.db.execute(stmt, tuple(params))
         except Exception as e:
@@ -473,8 +476,9 @@ class PersistenceManager:
         if self.db is None or not config_name:
             return None
         try:
+            _evt = self.db.qualified_name("orch_run_event")
             rows = self.db.execute_query(
-                "SELECT runid, progress_date, total_days FROM orch_run_event "
+                f"SELECT runid, progress_date, total_days FROM {_evt} "
                 "WHERE config_name = %s AND status <> 'finished' "
                 "AND dq_status IN ('passed', 'cached') "
                 "AND progress_date IS NOT NULL "
@@ -567,7 +571,9 @@ class PersistenceManager:
         df = pd.DataFrame(rows)
         columns = list(df.columns)
         col_list = sql.SQL(', ').join(sql.Identifier(c) for c in columns)
-        copy_sql = sql.SQL("COPY orch_dq_detail ({}) FROM STDIN").format(col_list)
+        copy_sql = sql.SQL("COPY {} ({}) FROM STDIN").format(
+            self.db._qualified("orch_dq_detail"), col_list
+        )
         with cursor.copy(copy_sql) as copy:
             for row in df.itertuples(index=False, name=None):
                 copy.write_row([str(v) if v is not None else None for v in row])
@@ -781,7 +787,8 @@ class PersistenceManager:
             # 先删旧数据再写（幂等）；表不存在则跳过 DELETE，让 write_df 自动建表
             if self.db.table_exists(table_name):
                 self.db.execute(
-                    f"DELETE FROM {table_name} WHERE run_id = %s AND sim_date = %s",
+                    f"DELETE FROM {self.db.qualified_name(table_name)} "
+                    "WHERE run_id = %s AND sim_date = %s",
                     (run_id, date_str),
                 )
             # 注入元数据列 + 写入
@@ -845,9 +852,10 @@ class PersistenceManager:
         if self.db is None:
             return None
         try:
+            _evt = self.db.qualified_name("orch_run_event")
             rows = self.db.execute_query(
                 "SELECT runid, status, progress_date, total_days, dq_status "
-                "FROM orch_run_event WHERE runid = %s",
+                f"FROM {_evt} WHERE runid = %s",
                 (run_id,),
             )
             if not rows:

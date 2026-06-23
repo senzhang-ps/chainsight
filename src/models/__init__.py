@@ -46,6 +46,9 @@ def migrate(db: "DB") -> None:
     dialect = postgresql.dialect()
 
     for table in Base.metadata.sorted_tables:
+        # P1 schema 隔离：编译前把每张表限定到 db.schema，使 SA 发出
+        # ``CREATE TABLE IF NOT EXISTS "schema"."table"``（不依赖 search_path）。
+        table.schema = db.schema
         if not table.columns:
             logger.debug(f"migrate: 跳过无列表 {table.name}")
             continue
@@ -67,7 +70,7 @@ def migrate(db: "DB") -> None:
 
     # 保留清理：drop 旧 cfg_dq_check_result
     try:
-        db.execute("DROP TABLE IF EXISTS cfg_dq_check_result")
+        db.execute(f"DROP TABLE IF EXISTS {db.qualified_name('cfg_dq_check_result')}")
         logger.debug("migrate: 已清理旧表 cfg_dq_check_result")
     except Exception as e:
         logger.warning(f"migrate: 清理旧表失败: {e}")
@@ -81,13 +84,14 @@ def _evolve_orch_run_event(db: "DB") -> None:
     """
     if not db.table_exists("orch_run_event"):
         return
+    tbl = db.qualified_name("orch_run_event")
     for ddl in (
-        "ALTER TABLE orch_run_event ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'running'",
-        "ALTER TABLE orch_run_event ADD COLUMN IF NOT EXISTS progress_date TEXT",
-        "ALTER TABLE orch_run_event ADD COLUMN IF NOT EXISTS total_days INTEGER",
-        "ALTER TABLE orch_run_event DROP COLUMN IF EXISTS errors",
-        "ALTER TABLE orch_run_event DROP COLUMN IF EXISTS warnings",
-        "ALTER TABLE orch_run_event DROP COLUMN IF EXISTS hard_blocks",
+        f"ALTER TABLE {tbl} ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'running'",
+        f"ALTER TABLE {tbl} ADD COLUMN IF NOT EXISTS progress_date TEXT",
+        f"ALTER TABLE {tbl} ADD COLUMN IF NOT EXISTS total_days INTEGER",
+        f"ALTER TABLE {tbl} DROP COLUMN IF EXISTS errors",
+        f"ALTER TABLE {tbl} DROP COLUMN IF EXISTS warnings",
+        f"ALTER TABLE {tbl} DROP COLUMN IF EXISTS hard_blocks",
     ):
         try:
             db.execute(ddl)

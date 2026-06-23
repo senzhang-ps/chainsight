@@ -22,13 +22,19 @@ class DB:
     """纯粹的数据库读写。"""
 
     def __init__(self, host: str, port: int, database: str,
-                 user: str, password: str):
+                 user: str, password: str, *,
+                 schema: str = "public",
+                 auto_create_schema: bool = True):
         self.host = host
         self.port = port
         self.database = database
         self.user = user
         self.password = password
+        # P1 schema 隔离：所有表落到 self.schema（默认 public，向后兼容旧调用方）。
+        self.schema = schema
+        self.auto_create_schema = auto_create_schema
         self._connection = None
+        self._schema_ensured = False
         self._col_type_cache: dict[str, dict[str, str]] = {}
 
     # ── 连接管理 ──────────────────────────────
@@ -54,6 +60,9 @@ class DB:
                     autocommit=True,
                     connect_timeout=30,
                 )
+                # 新连接需重新 ensure schema（CREATE SCHEMA IF NOT EXISTS）。
+                self._schema_ensured = False
+                self._ensure_schema_ready()
                 return self._connection
             except (psycopg.OperationalError, psycopg.errors.ConnectionTimeout) as e:
                 last_err = e
@@ -73,6 +82,46 @@ class DB:
         if self._connection and not self._connection.closed:
             self._connection.close()
             self._connection = None
+
+    # ── schema 隔离 ──────────────────────────
+
+    def _ensure_schema_ready(self) -> None:
+        """在当前连接上 ``CREATE SCHEMA IF NOT EXISTS``，仅执行一次（每条新连接重置）。
+
+        - 仅当 ``auto_create_schema=True`` 时创建。
+        - 用 ``sql.Identifier`` 引用 schema 名，兼容 ``bc-dev`` 这类含 ``-`` 的名字。
+        - 不依赖 ``search_path``：表 SQL 一律使用 schema-qualified identifier。
+        """
+        if self._schema_ensured or not self.auto_create_schema:
+            return
+        try:
+            with self._connection.cursor() as cur:
+                cur.execute(
+                    sql.SQL("CREATE SCHEMA IF NOT EXISTS {}").format(
+                        sql.Identifier(self.schema)
+                    )
+                )
+            self._schema_ensured = True
+        except Exception as e:
+            logger.warning(
+                f"[schema] CREATE SCHEMA IF NOT EXISTS {self.schema!r} 失败：{e}"
+            )
+            # 不抛出：后续 SQL 若 schema 真缺失，会以更明确的错误暴露。
+
+    def _qualified(self, table_name: str) -> sql.Composed:
+        """返回 schema-qualified 的 ``sql.Identifier``，供 ``sql.SQL().format()`` 拼接。
+
+        当 schema 含 ``-`` 等需 quoting 的字符时，``sql.Identifier`` 会自动加引号。
+        """
+        return sql.Identifier(self.schema, table_name)
+
+    def qualified_name(self, table_name: str) -> str:
+        """返回 ``"schema"."table"`` 形式字符串，供 raw-SQL 调用方拼接。
+
+        要求 ``table_name`` 为代码可控的可信标识符（同旧层 ``db_connection`` 契约）；
+        schema 已由 ``resolve_project_schema`` 校验为 ``[a-z0-9_-]+``。
+        """
+        return f'"{self.schema}"."{table_name}"'
 
     def database_exists(self) -> bool:
         """检查目标数据库是否存在。"""
@@ -172,10 +221,10 @@ class DB:
                     conditions.append(sql.SQL("{} = %s").format(sql.Identifier(col)))
                     params_list.append(val)
 
-        query = sql.SQL("SELECT * FROM {}").format(sql.Identifier(table))
+        query = sql.SQL("SELECT * FROM {}").format(self._qualified(table))
         if conditions:
             query = sql.SQL("SELECT * FROM {} WHERE {}").format(
-                sql.Identifier(table),
+                self._qualified(table),
                 sql.SQL(" AND ").join(conditions),
             )
 
@@ -289,13 +338,13 @@ class DB:
             ]
             cursor.execute(sql.SQL(
                 'CREATE TABLE IF NOT EXISTS {} ({})'
-            ).format(sql.Identifier(table_name), sql.SQL(', ').join(create_cols)))
+            ).format(self._qualified(table_name), sql.SQL(', ').join(create_cols)))
             # 清除缓存（新表列类型由 CREATE TABLE 决定）
             self._col_type_cache.pop(table_name, None)
 
         # COPY 批量写入
         copy_sql = sql.SQL("COPY {} ({}) FROM STDIN").format(
-            sql.Identifier(table_name),
+            self._qualified(table_name),
             sql.SQL(', ').join(sql.Identifier(c) for c in columns),
         )
         with cursor.copy(copy_sql) as copy:
@@ -319,8 +368,8 @@ class DB:
             return self._col_type_cache[table_name]
         cursor.execute(
             "SELECT column_name, data_type FROM information_schema.columns "
-            "WHERE table_schema = 'public' AND table_name = %s",
-            (table_name,),
+            "WHERE table_schema = %s AND table_name = %s",
+            (self.schema, table_name),
         )
         result = {row[0].lower(): (row[1] or "").lower() for row in cursor.fetchall()}
         self._col_type_cache[table_name] = result
@@ -416,7 +465,7 @@ class DB:
                 clauses.append(sql.SQL("{} = %s").format(sql.Identifier(col)))
                 params.append(val)
         stmt = sql.SQL("DELETE FROM {} WHERE {}").format(
-            sql.Identifier(table_name),
+            self._qualified(table_name),
             sql.SQL(" AND ").join(clauses),
         )
         with self.get_cursor() as cursor:
@@ -442,22 +491,23 @@ class DB:
             return pd.DataFrame(cursor.fetchall(), columns=columns)
 
     def table_exists(self, table_name: str) -> bool:
-        """检查表是否存在。"""
+        """检查表是否存在（限定到 ``self.schema``）。"""
         with self.get_cursor(commit=False) as cursor:
             cursor.execute(
-                "SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = %s)",
-                (table_name,)
+                "SELECT EXISTS (SELECT 1 FROM information_schema.tables "
+                "WHERE table_schema = %s AND table_name = %s)",
+                (self.schema, table_name)
             )
             return cursor.fetchone()[0]
 
     def get_all_tables(self) -> list[str]:
-        """获取当前数据库中所有用户表名。"""
+        """获取当前 schema 中所有用户表名。"""
         with self.get_cursor(commit=False) as cursor:
-            cursor.execute("""
-                SELECT table_name FROM information_schema.tables
-                WHERE table_schema = 'public'
-                ORDER BY table_name
-            """)
+            cursor.execute(
+                "SELECT table_name FROM information_schema.tables "
+                "WHERE table_schema = %s ORDER BY table_name",
+                (self.schema,),
+            )
             return [row[0] for row in cursor.fetchall()]
 
     # ── 向后兼容 ──────────────────────────────

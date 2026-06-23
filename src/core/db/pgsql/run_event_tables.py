@@ -37,4 +37,4 @@ def ensure_run_event_tables(db: "DB") -> None:
 
 def drop_legacy_dq_table(db: "DB") -> None:
     """删除旧版 cfg_dq_check_result 表（显式调用一次即可）。"""
-    db.execute("DROP TABLE IF EXISTS cfg_dq_check_result;")
+    db.execute(f"DROP TABLE IF EXISTS {db.qualified_name('cfg_dq_check_result')}")

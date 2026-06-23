@@ -88,12 +88,16 @@ class ConfigManager:
         logger.info(f"系统配置已加载: {list(sys_cfg.keys())}")
         return sys_cfg
 
-    def bootstrap(self) -> None:
+    def bootstrap(self, config_path: str | None = None) -> None:
         """从 yaml 建 DB 连接 + 设 sys_config + migrate 建表。
 
         读取 ``config/defaults.yaml`` 的 database 节，创建 DB 实例并 migrate；
         如果数据库不存在，会尝试自动建库并重试连接；
         其他连接异常将直接抛出，避免回退到文件模式。
+
+        schema 隔离：从 ``config_path`` 经 ``ConfigDir.project`` →
+        ``resolve_project_schema`` 解析目标 schema（复用 run 层逻辑，不在 db.py
+        内重写）；解析失败优雅回退到 ``default_schema`` / ``public``，不阻断 orchestrator。
         """
         sys_cfg = self._load_sys_config()
         if not sys_cfg:
@@ -104,12 +108,31 @@ class ConfigManager:
         if not db_cfg:
             return
 
+        # path → project → schema（纯 --config / config_dict 无路径时回退 default_schema）
+        from ..run.schema_resolver import resolve_project_schema
+        from ..run.config_dir import ConfigDir
+        project = None
+        if config_path:
+            try:
+                project = ConfigDir.from_excel_path(config_path).project
+            except (ValueError, FileNotFoundError) as e:
+                logger.warning(f"无法从配置路径解析 project，回退 default_schema：{e}")
+        try:
+            schema = resolve_project_schema(
+                project, default_schema=db_cfg.get('default_schema')
+            )
+        except ValueError as e:
+            logger.warning(f"schema 解析失败，回退 public：{e}")
+            schema = "public"
+
         self._db = DB(
             host=db_cfg.get('host', 'localhost'),
             port=int(db_cfg.get('port', 5432)),
             database=db_cfg.get('database', 'test_db'),
             user=db_cfg.get('user', 'postgres'),
             password=str(db_cfg.get('password', '')),
+            schema=schema,
+            auto_create_schema=db_cfg.get('auto_create_schema', True),
         )
 
         try:
@@ -327,8 +350,9 @@ class ConfigManager:
         if self._db is None or not config_name:
             return False
         try:
+            tbl = self._db.qualified_name('orch_run_event')
             rows = self._db.execute_query(
-                "SELECT config_hash FROM orch_run_event "
+                f"SELECT config_hash FROM {tbl} "
                 "WHERE config_name = %s AND dq_status = 'passed' "
                 "AND runid <> %s "
                 "ORDER BY started_at DESC LIMIT 1",

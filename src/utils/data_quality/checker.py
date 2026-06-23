@@ -1,8 +1,8 @@
-"""配置表输入数据质量检测模块。
-本模块只负责“发现并记录问题”，不负责数据转换、数据清洗或流程阻断
-检测规则由 ``pgsql_db.config_table_schema.CONFIG_TABLE_SCHEMAS`` 中的字段属性
+'''配置表输入数据质量检测模块。
+本模块只负责”发现并记录问题”，不负责数据转换、数据清洗或流程阻断
+检测规则由 ``src.models.cfg`` 中的 SA 模型 Column.info / __table_args__[“info”]
 驱动，包括 ``notnull``、``enumerate``、``range`` 和 ``date_flag``
-"""
+'''
 from __future__ import annotations
 
 import logging

@@ -17,6 +17,8 @@ XlsxWriter==3.2.9
 # Database mode
 psycopg[binary]==3.3.3
 
+# Schema declarations + declarative table models (Phase 1: src/models/)
+pydantic>=2
 SQLAlchemy>=2.0
 pytest
 pytest-cov

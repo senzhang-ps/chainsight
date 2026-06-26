@@ -9,14 +9,56 @@
 
 import logging
 import time
+from pathlib import Path
 
 import pandas as pd
 
 from src.core.orchestrator import Orch
 from src.modules import module1
+from src.modules.production_planning.integration_refactor import ModuleFour
+from src.modules.mrp_planning.integration_refactor import ModuleThree
 from src.modules.state_context import StateContext
 
 logger = logging.getLogger("SupplyChainSimulation")
+
+
+def _seed_m3_to_db(db, run_id: str, m3_csv_path, sim_dates):
+    """把历史 M3 snapshot 平移成整个区间写入 module3_output_netdemand。
+
+    lag 语义（与旧链路一致）：M4 产出日 d 消费 sim_date=d-1 的 M3，
+    build_unconstrained_plan 过滤 requirement_date==d，故种子满足
+    ``requirement_date = sim_date + 1``：每个仿真日 d 写一行 sim_date=d-1、req=d。
+    无 DB / CSV 不存在 → 跳过（ModuleThree.run 逐日返回空，M4 逐日空产）。
+    """
+    if db is None:
+        return
+    m3_csv = Path(m3_csv_path)
+    if not m3_csv.exists():
+        return
+    base_m3 = pd.read_csv(m3_csv, index_col=0)
+    if base_m3.empty:
+        return
+    base = base_m3.copy()
+    base['requirement_date'] = pd.to_datetime(base['requirement_date'])
+    base_req = base['requirement_date'].iloc[0]
+    try:
+        db.execute(
+            f"DELETE FROM {db._qualified('module3_output_netdemand')} WHERE run_id = %s",
+            (run_id,),
+        )
+    except Exception:
+        pass
+    chunks = []
+    for d in sim_dates:
+        d = pd.Timestamp(d)
+        offset = (d - base_req).days
+        df = base.copy()
+        df['requirement_date'] = base['requirement_date'] + pd.Timedelta(days=offset)
+        df['sim_date'] = (d - pd.Timedelta(days=1)).strftime('%Y-%m-%d')
+        df['run_id'] = run_id
+        chunks.append(df)
+    seed = pd.concat(chunks, ignore_index=True)
+    db.write_df('module3_output_netdemand', seed)
 
 
 def run_integrated_simulation(
@@ -58,8 +100,31 @@ def run_integrated_simulation(
     )
     m1.prepare()
 
+    # ── ModuleFour（生产计划）──
+    m4 = ModuleFour(
+        simulation_date=str(start_date),
+        simulation_start_date=start_date,
+        orchestrator=ctx,
+        orch=orch
+    )
+    m4.prepare()  # 一次性：load_datas + 标识符归一 + 分配器静态 maps
+
+    # ── ModuleThree（历史回放占位：从 DB 读 module3_output_netdemand）──
+    M3_HISTORICAL_RUNID = 'db_OC_Paste_S1_20251224_repare_20260623_102205'  # 后续接真实 MRP 后可废弃
+    m3 = ModuleThree(
+        simulation_date=str(start_date),
+        simulation_start_date=start_date,
+        orchestrator=ctx,
+        orch=orch,
+        output_dir=str(Path(output_base_dir) / 'module3'),
+        skip_file_output=True,
+        m3_run_id=M3_HISTORICAL_RUNID,
+    )
+    m3.prepare()
+
+
     # ── 仿真循环 ──
-    all_results = {'module1': []}
+    all_results = {'module1': [], 'module4': []}
     simulation_start_time = time.time()
 
     for i, current_date in orch.iter_dates():
@@ -77,6 +142,28 @@ def run_integrated_simulation(
 
         m1_result['simulation_date'] = current_date
         all_results['module1'].append(m1_result)
+
+        # ---- M3 → M4（1 天 lag：M4 先消费上一轮 M3，M3 再产出当日并存回）----
+        m3.simulation_date = current_date
+        m4.simulation_date = current_date
+        # 跨天状态注入：前一日产线状态 + 历史已分配产能
+        m4.previous_line_states_override = ctx.get_previous_line_state(date_str)
+        m4.allocated_capacity_override = ctx.get_all_previous_allocated_capacity(date_str)
+        m4.run()                          # 消费上一轮 module3_result（首日 None → 空产）
+        m3.run()                          # 从 DB 读当日净需求
+        m4.module3_result = m3.output()   # 存回供下一轮
+        m4_result = m4.output()
+
+        # 跨天结转：当日产线状态 + 已分配产能写回 ctx
+        ctx.apply_line_state(m4_result.get('current_line_states', {}), date_str)
+        ctx.apply_allocated_capacity(m4_result.get('current_allocated_capacity', {}), date_str)
+
+        all_results['module4'].append({
+            'date': date_str,
+            'n_production': len(m4_result.get('production_df', pd.DataFrame())),
+            'm4_result': m4_result,
+        })
+        orch.save_module_output(m4, date_str)
 
         ctx.day_end(date_str)
         orch.save_module_output(m1, date_str)
@@ -99,7 +186,11 @@ def run_integrated_simulation(
     else:
         runtime_str = f"{seconds:.2f}秒"
 
-    logger.info("🎉 集成仿真完成! 共 %d 天, 耗时 %s", len(orch.sim_dates), runtime_str)
+    n_m4_prod = sum(1 for r in all_results['module4'] if r['n_production'] > 0)
+    logger.info(
+        "🎉 集成仿真完成! 共 %d 天 (M4 %d 天产出), 耗时 %s",
+        len(orch.sim_dates), n_m4_prod, runtime_str,
+    )
 
     return {
         'simulation_completed': True,

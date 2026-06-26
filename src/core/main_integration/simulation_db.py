@@ -268,7 +268,6 @@ def run_integrated_simulation_from_dict(
     # 实例化M1
     m1 = module1.ModuleOne(
         simulation_date=str(start_date),
-        output_dir=orch_new.get_output('module1'),
         orchestrator=orch,
         orch=orch_new,
     )

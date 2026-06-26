@@ -86,7 +86,6 @@ class Orchestrator:
         set_module_seeds(self.all_config)
 
         # ── 输出目录 ──
-        self.build_output_folder()
         self.all_results = {}
         self.sim_dates = []
 

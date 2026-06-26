@@ -68,6 +68,10 @@ class StateContext(Module):
         self.production_plan_backlog: List[Dict] = []
         self.space_capacity: pd.DataFrame = pd.DataFrame()
 
+        # M4 跨天状态（按日期字符串索引，与 RuntimeState 数据结构对齐）
+        self.m4_line_states: Dict[str, dict] = {}           # {date_str: {line: state_dict}}
+        self.m4_allocated_capacity: Dict[str, dict] = {}    # {date_str: {key: hours}}
+
         # 按日期索引（O(1) 查询）
         self.production_gr_by_date: Dict[str, List[Dict]] = {}
         self.delivery_gr_by_date: Dict[str, List[Dict]] = {}
@@ -976,6 +980,56 @@ class StateContext(Module):
             self.unrestricted_inventory.copy()
         )
         logger.info("📋 %s 当日处理完成", date_str)
+
+    # ══════════════════════════════════════════
+    # M4 跨天状态托管（产线状态 + 已分配产能）
+    # ══════════════════════════════════════════
+
+    def apply_line_state(self, line_states: dict, date_str: str):
+        """存储当日 M4 产线状态（换产连续性）。
+
+        驱动循环在 m4.run() 后调用此方法，将 current_line_states 写入 ctx。
+        外部 persistence_manager 在 save_daily_state 时落盘。
+        """
+        if line_states:
+            self.m4_line_states[date_str] = line_states
+
+    def apply_allocated_capacity(self, allocated_capacity: dict, date_str: str):
+        """存储当日 M4 已分配产能（防重复分配）。
+
+        驱动循环在 m4.run() 后调用此方法，将 current_allocated_capacity 写入 ctx。
+        """
+        if allocated_capacity:
+            self.m4_allocated_capacity[date_str] = allocated_capacity
+
+    def get_previous_line_state(self, date_str: str) -> dict:
+        """返回前一日 M4 产线状态（date_str - 1 day），不存在则 {}。
+
+        驱动循环在每日 m4.prepare() 前调用此方法，将结果注入
+        m4.previous_line_states_override。
+        """
+        prev_date = (pd.Timestamp(date_str) - pd.Timedelta(days=1)).strftime('%Y-%m-%d')
+        return self.m4_line_states.get(prev_date, {})
+
+    def get_all_previous_allocated_capacity(self, date_str: str) -> dict:
+        """返回 date_str 之前所有日期的已分配产能汇总。
+
+        逻辑同 RuntimeState.load_all_previous_capacity，但数据来源是
+        内存中的 ctx.m4_allocated_capacity（而非文件）。
+        重跑恢复后数据来自 DB viewcontext_m4_allocated_capacity 表。
+
+        驱动循环在每日 m4.prepare() 前调用此方法，将结果注入
+        m4.allocated_capacity_override。
+        """
+        consolidated = {}
+        target = pd.Timestamp(date_str)
+        for d_str, daily_cap in self.m4_allocated_capacity.items():
+            if pd.Timestamp(d_str) < target:
+                for key, value in daily_cap.items():
+                    if key not in consolidated:
+                        consolidated[key] = 0
+                    consolidated[key] += value
+        return consolidated
 
     # ══════════════════════════════════════════
     # 向后兼容的旧接口方法

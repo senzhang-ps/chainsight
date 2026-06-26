@@ -160,6 +160,40 @@ class PersistenceManager:
                 )
                 self._write_idempotent(tbl, audit, run_id, sim_date)
 
+        # 5) 写 M4 跨天状态（产线换产连续性 + 已分配产能防重复分配）
+        m4_line_states = getattr(ctx, 'm4_line_states', None)
+        if m4_line_states and date_str in m4_line_states:
+            ls = m4_line_states[date_str]
+            if ls:
+                rows = []
+                for line_name, st in ls.items():
+                    ci = st.get('changeover_info') or {}
+                    rows.append({
+                        'line': line_name,
+                        'last_material': st.get('last_material'),
+                        'last_location': st.get('last_location'),
+                        'last_activity': st.get('last_activity'),
+                        'remaining_time': ci.get('remaining_time'),
+                        'changeover_id': ci.get('changeover_id'),
+                        'to_material': ci.get('to_material'),
+                    })
+                ls_df = pd.DataFrame(rows)
+                ls_df = self._inject_meta(ls_df, run_id, sim_date, now)
+                tbl = view_table_map.get('m4_line_states')
+                self._write_idempotent(tbl, ls_df, run_id, sim_date)
+
+        m4_allocated = getattr(ctx, 'm4_allocated_capacity', None)
+        if m4_allocated and date_str in m4_allocated:
+            ac = m4_allocated[date_str]
+            if ac:
+                ac_df = pd.DataFrame([
+                    {'capacity_key': k, 'allocated_hours': v}
+                    for k, v in ac.items()
+                ])
+                ac_df = self._inject_meta(ac_df, run_id, sim_date, now)
+                tbl = view_table_map.get('m4_allocated_capacity')
+                self._write_idempotent(tbl, ac_df, run_id, sim_date)
+
         logger.info(f"🗄️ 已写入 {date_str} 每日状态到数据库")
 
         # 注：progress_date 断点推进已移出本方法，由调用方（主循环）显式调用
@@ -562,8 +596,7 @@ class PersistenceManager:
             "hard_blocks": summary.get("hard_blocks", 0),
         }
 
-    @staticmethod
-    def _copy_dq_detail(cursor, rows: list[dict]) -> None:
+    def _copy_dq_detail(self, cursor, rows: list[dict]) -> None:
         """在给定事务游标内 COPY 明细行（不自行提交）。"""
         if not rows:
             return
@@ -753,6 +786,40 @@ class PersistenceManager:
             cols = ['material', 'location', 'available_date', 'quantity']
             ctx.production_plan_backlog = df[cols].to_dict('records')
             restored.append(f"production_plan_backlog({len(ctx.production_plan_backlog)})")
+
+        # 5) M4 line_states（展平列 → 嵌套 dict）
+        df = _read_view('m4_line_states')
+        if df is not None and not df.empty:
+            for sim_d, group in df.groupby('sim_date'):
+                d_str = str(sim_d) if hasattr(sim_d, 'strftime') else str(sim_d)
+                ctx.m4_line_states[d_str] = {}
+                for row in group.to_dict('records'):
+                    remaining = row.get('remaining_time')
+                    ci = None
+                    if remaining is not None and pd.notna(remaining) and float(remaining) > 0:
+                        ci = {
+                            'remaining_time': float(remaining),
+                            'changeover_id': row.get('changeover_id'),
+                            'to_material': row.get('to_material'),
+                        }
+                    ctx.m4_line_states[d_str][row['line']] = {
+                        'last_material': row.get('last_material'),
+                        'last_location': row.get('last_location'),
+                        'last_activity': row.get('last_activity'),
+                        'changeover_info': ci,
+                    }
+            restored.append(f"m4_line_states({len(ctx.m4_line_states)} days)")
+
+        # 6) M4 allocated_capacity（key-value → dict）
+        df = _read_view('m4_allocated_capacity')
+        if df is not None and not df.empty:
+            for sim_d, group in df.groupby('sim_date'):
+                d_str = str(sim_d) if hasattr(sim_d, 'strftime') else str(sim_d)
+                ctx.m4_allocated_capacity[d_str] = {
+                    row['capacity_key']: float(row['allocated_hours'])
+                    for row in group.to_dict('records')
+                }
+            restored.append(f"m4_allocated_capacity({len(ctx.m4_allocated_capacity)} days)")
 
         if restored:
             logger.info(

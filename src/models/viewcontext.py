@@ -99,6 +99,43 @@ class ViewContextSpaceQuota(Base, ViewContextBase):
     }
 
 
+class ViewContextM4LineStates(Base, ViewContextBase):
+    """viewcontext M4 产线状态（换产连续性）。"""
+    __tablename__ = "viewcontext_m4_line_states"
+
+    run_id = Column(Text)
+    sim_date = Column(Text)
+    config_name = Column(Text)
+    db_write_time = Column(DateTime)
+    line = Column(Text)
+    last_material = Column(Text)
+    last_location = Column(Text)
+    last_activity = Column(Text)
+    remaining_time = Column(Float)
+    changeover_id = Column(Text)
+    to_material = Column(Text)
+
+    __mapper_args__ = {
+        "primary_key": [run_id, sim_date, line]
+    }
+
+
+class ViewContextM4AllocatedCapacity(Base, ViewContextBase):
+    """viewcontext M4 已分配产能（防重复分配）。"""
+    __tablename__ = "viewcontext_m4_allocated_capacity"
+
+    run_id = Column(Text)
+    sim_date = Column(Text)
+    config_name = Column(Text)
+    db_write_time = Column(DateTime)
+    capacity_key = Column(Text)
+    allocated_hours = Column(Float)
+
+    __mapper_args__ = {
+        "primary_key": [run_id, sim_date, capacity_key]
+    }
+
+
 # ════════════════════════════════════════════════════════════════════
 # 注册表（保留向后兼容）
 # ════════════════════════════════════════════════════════════════════
@@ -119,6 +156,8 @@ VIEWCONTEXT_REGISTRY: dict[str, str] = {
     "inventory_change_log": "viewcontext_inventory_change_log",
     "daily_logs": "viewcontext_daily_logs",
     "open_deployment_pastdue_cleanup": "viewcontext_open_deployment_pastdue_cleanup",
+    "m4_line_states": "viewcontext_m4_line_states",
+    "m4_allocated_capacity": "viewcontext_m4_allocated_capacity",
 }
 
 # ── summary 输出表 ──────────────────────────────────────────────────────
@@ -154,4 +193,6 @@ __all__ = [
     "ViewContextInventoryChangeLog",
     "ViewContextUnrestrictedInventory",
     "ViewContextSpaceQuota",
+    "ViewContextM4LineStates",
+    "ViewContextM4AllocatedCapacity",
 ]

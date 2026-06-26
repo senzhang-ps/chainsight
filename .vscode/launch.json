@@ -9,9 +9,9 @@
             "program": "${workspaceFolder}/run.py",
             "console": "integratedTerminal",
             "args": [
-                "--config", "D:\\chainsight\\input\\PDS2\\PDS2\\PDS2.xlsx",
-                "--start-date", "2026-06-29",
-                "--end-date", "2026-11-29",
+                "--config", "D:\\chainsight\\input\\OC\\OC_Paste_S1_20251224_extension\\OC_Paste_S1_20251224_repare.xlsx",
+                "--start-date", "2025-12-15",
+                "--end-date", "2025-12-19",
                 "--use-db"
             ],
             "justMyCode": true,
@@ -39,12 +39,12 @@
             "type": "python",
             "request": "launch",
             "python": "C:\\Users\\lenovo\\miniforge3\\envs\\work\\python.exe",
-            "program": "${workspaceFolder}/test/test_run.py",
+            "program": "${workspaceFolder}/tests/test_m4_refactor_integration.py",
             "console": "integratedTerminal",
             "args": [
-                "--config", "D:\\chainsight\\input\\OC\\OC_Paste_S1_20251224_extension\\OC_Paste_S1_20251224_extension.xlsx",
-                "--start-date", "2025-12-15",
-                "--end-date", "2026-03-15"
+                "--config", "D:\\chainsight\\input\\OC\\OC_Paste_S1_20251224_extension\\OC_Paste_S1_20251224_repare.xlsx",
+                "--start", "2025-12-15",
+                "--end", "2025-12-19"
             ],
             "justMyCode": true,
             "env": {},

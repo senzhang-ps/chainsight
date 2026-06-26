@@ -13,7 +13,7 @@ migrate() 会统一建表；其余表仍走 write_df 动态建。
 """
 from __future__ import annotations
 
-from sqlalchemy import Column, DateTime, Float, Integer, Text
+from sqlalchemy import BigInteger, Column, DateTime, Float, Integer, Text
 
 from .base import Base, ModuleOutputBase
 
@@ -137,6 +137,36 @@ class Module1OutputSummary(Base, ModuleOutputBase):
 
 
 # ════════════════════════════════════════════════════════════════════
+# module3 输出表（净需求 — 历史回放源）
+# ════════════════════════════════════════════════════════════════════
+
+class Module3OutputNetdemand(Base, ModuleOutputBase):
+    """module3 净需求输出（module3_output_netdemand）。
+
+    历史回放源：旧链路每日末尾产出的净需求落库于此，次日 M4 消费。
+    列与 DB DDL 对齐（layer/horizon_days=int8, quantity=float8, 三日期=timestamp）。
+    """
+    __tablename__ = "module3_output_netdemand"
+
+    run_id = Column(Text)
+    sim_date = Column(Text)
+    config_name = Column(Text)
+    db_write_time = Column(DateTime)
+    material = Column(Text)
+    location = Column(Text)
+    requirement_date = Column(DateTime)
+    demand_element = Column(Text)
+    layer = Column(BigInteger)
+    quantity = Column(Float)
+    simulation_date = Column(DateTime)
+    horizon_days = Column(BigInteger)
+
+    __mapper_args__ = {
+        "primary_key": [run_id, sim_date, material, location, requirement_date, demand_element]
+    }
+
+
+# ════════════════════════════════════════════════════════════════════
 # 注册表（保留向后兼容）
 # ════════════════════════════════════════════════════════════════════
 
@@ -218,4 +248,5 @@ __all__ = [
     "Module1OutputCutlog",
     "Module1OutputSupplydemandlog",
     "Module1OutputSummary",
+    "Module3OutputNetdemand",
 ]

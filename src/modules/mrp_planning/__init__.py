@@ -38,6 +38,7 @@ from .layer_assignment import assign_location_layers
 from .net_demand import calculate_daily_net_demand
 from .mrp_simulation import run_mrp_layered_simulation_daily
 from .integration import run_integrated_mode
+from .integration_refactor import ModuleThree
 
 __all__ = [
     # 常量
@@ -65,4 +66,6 @@ __all__ = [
     'calculate_daily_net_demand',
     'run_mrp_layered_simulation_daily',
     'run_integrated_mode',
+    # OO 集成入口（历史回放占位）
+    'ModuleThree',
 ]

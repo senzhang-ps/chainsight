@@ -83,3 +83,6 @@ archive/ChainSight_Dev/**/run_*/
 input/*
 !input/.gitkeep
 .vscode/*
+
+*.xlsx
+analyze/*

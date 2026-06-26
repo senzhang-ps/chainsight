@@ -57,13 +57,11 @@ class ModuleOne(Module):
     }
 
     def __init__(self, simulation_date, output_dir='',
-                 orchestrator=None, orch=None,
-                 skip_file_output=False, previous_orders_df=None,
+                 orchestrator=None, orch=None, previous_orders_df=None,
                  verbose=False, config=None):
         super().__init__(simulation_date, orch, 'M1', verbose, config=config)
         self.legacy_orchestrator = orchestrator
-        self.output_dir = orch.get_output('module1')
-        self.skip_file_output = skip_file_output
+        # self.output_dir = orch.get_output('module1')
         self.previous_orders_df = previous_orders_df
         self.order_df = None
 

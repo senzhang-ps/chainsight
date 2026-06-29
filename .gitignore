@@ -56,9 +56,6 @@ Thumbs.db
 *.log
 
 # Temporary files
-*.tmp
-.temp/
-temp/
 .env
 
 # Outputs (generated reports, not tracked)

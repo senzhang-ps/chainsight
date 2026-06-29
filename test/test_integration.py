@@ -22,45 +22,6 @@ from src.modules.state_context import StateContext
 logger = logging.getLogger("SupplyChainSimulation")
 
 
-def _seed_m3_to_db(db, run_id: str, m3_csv_path, sim_dates):
-    """把历史 M3 snapshot 平移成整个区间写入 module3_output_netdemand。
-
-    lag 语义（与旧链路一致）：M4 产出日 d 消费 sim_date=d-1 的 M3，
-    build_unconstrained_plan 过滤 requirement_date==d，故种子满足
-    ``requirement_date = sim_date + 1``：每个仿真日 d 写一行 sim_date=d-1、req=d。
-    无 DB / CSV 不存在 → 跳过（ModuleThree.run 逐日返回空，M4 逐日空产）。
-    """
-    if db is None:
-        return
-    m3_csv = Path(m3_csv_path)
-    if not m3_csv.exists():
-        return
-    base_m3 = pd.read_csv(m3_csv, index_col=0)
-    if base_m3.empty:
-        return
-    base = base_m3.copy()
-    base['requirement_date'] = pd.to_datetime(base['requirement_date'])
-    base_req = base['requirement_date'].iloc[0]
-    try:
-        db.execute(
-            f"DELETE FROM {db._qualified('module3_output_netdemand')} WHERE run_id = %s",
-            (run_id,),
-        )
-    except Exception:
-        pass
-    chunks = []
-    for d in sim_dates:
-        d = pd.Timestamp(d)
-        offset = (d - base_req).days
-        df = base.copy()
-        df['requirement_date'] = base['requirement_date'] + pd.Timedelta(days=offset)
-        df['sim_date'] = (d - pd.Timedelta(days=1)).strftime('%Y-%m-%d')
-        df['run_id'] = run_id
-        chunks.append(df)
-    seed = pd.concat(chunks, ignore_index=True)
-    db.write_df('module3_output_netdemand', seed)
-
-
 def run_integrated_simulation(
     config_path: str,
     start_date: str,

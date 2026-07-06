@@ -1,0 +1,45 @@
+project: south-space-rccp-jason26
+scenario: production-cycle
+title: Production Cycle
+time_window:
+  start_date: 2026-06-29
+  end_date: 2026-11-29
+network_scope:
+  anchor_location: C816
+  coverage: national_network_through_c816
+  include_node_types:
+    - in_house
+    - ESS
+    - upstream
+    - downstream
+  focus_locations:
+    - C816
+    - C810
+    - D873
+    - C866
+    - C867
+business_scope:
+  objective: south_space_rccp_under_current_system_parameters_with_production_cycle_view
+  primary_kpi: space_rccp
+  supporting_kpis:
+    - inventory_qty
+    - flow_pressure
+material_scope:
+  status: TBD
+baseline:
+  scenario_mode: baseline_only
+  parameter_basis: current_system_parameters
+parameter_changes:
+  baseline_run: no_changes_confirmed
+modeling_focus:
+  production_cycle: true
+config_inputs:
+  imported_workbook: scenarios/production-cycle/config/PDS2.xlsx
+  imported_supporting_files:
+    - scenarios/production-cycle/config/M3_SafetyStock.csv
+status:
+  scope_confirmed: true
+  material_scope_confirmed: false
+  config_generated: pending_import
+  validation_passed: false
+  simulation_run: false

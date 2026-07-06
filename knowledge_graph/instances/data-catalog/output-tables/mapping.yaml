@@ -1,0 +1,411 @@
+# ChainSight Output Table — Simulation Result Catalog
+# Ground truth = live xq_vmr baseline DB (queried 2026-06-07), reconciled with
+# pgsql_db/table_mapping.py (OUTPUT_TABLE_MAPPING) and schema/chainsight.jsonld.
+#
+# WHY THIS FILE EXISTS
+# The ontology (chainsight.jsonld) describes simulation-output ENTITIES, but its
+# cs:source_table points to real-world Databricks grounding tables and its
+# cs:source_config is a logical label — NEITHER is the actual PostgreSQL result
+# table. This catalog is the missing bridge: it pins each real PG output table to
+# its ontology class and records all naming layers, because the names DIFFER
+# across layers:
+#
+#   ontology source_config (logical) : M1_OrderLog
+#   code dataframe key (table_mapping): orders_df
+#   PG result table (this DB)         : module1_output_orderlog   <-- identity here
+#   databricks grounding (validation) : ps_psc_customer_order_delivery
+#
+# Each entry:
+#   db_table        : real PostgreSQL table name in xq_vmr (authoritative identity)
+#   module          : producing module / orchestrator / summary
+#   category        : simulation_output | orchestrator_state | log | validation | summary
+#   ontology_class  : linked cs: class (null if the table has no ontology entity)
+#   source_config   : ontology cs:source_config logical name (null if none)
+#   source_df       : code-side key in pgsql_db/table_mapping.py OUTPUT_TABLE_MAPPING
+#   key_columns     : business columns (the 4 common columns below are omitted)
+#   description     : one-line business meaning
+
+version: '1.0'
+database: xq_vmr            # baseline reference DB used to verify table names + columns
+common_columns: [run_id, sim_date, config_name, db_write_time]
+notes: |
+  Every output/orchestrator/summary table carries the 4 common_columns.
+  Filter a single simulation run by run_id (configs are filtered by config_name).
+  Total in xq_vmr baseline: 20 module + 12 orchestrator + 8 summary = 40 result tables.
+  Internal system tables (sim_checkpoint, sim_m4_state) are NOT result outputs and
+  are intentionally excluded.
+  NAMING DIVERGENCE: table_mapping.py OUTPUT_TABLE_MAPPING['summary'] lists names
+  like summary_full_production_plan_report that DO NOT EXIST in the DB; the real
+  tables use the summary_output_full* form below. That code block is stale/unused —
+  the live DB names here are authoritative.
+
+outputs:
+
+# ───────────────────────── Module 1 — Demand Planning (5) ─────────────────────────
+- db_table: module1_output_orderlog
+  module: module1
+  category: simulation_output
+  ontology_class: cs:CustomerOrder
+  source_config: M1_OrderLog
+  source_df: orders_df
+  key_columns: [date, material, location, demand_type, simulation_date, advance_days, quantity]
+  description: 客户订单日志 — M1 每日生成的需求订单（normal / AO 提前单）。
+
+- db_table: module1_output_shipmentlog
+  module: module1
+  category: simulation_output
+  ontology_class: cs:CustomerShipment
+  source_config: M1_ShipmentLog
+  source_df: shipment_df
+  key_columns: [date, material, location, quantity, demand_type, order_id]
+  description: 发运日志 — 实际从 DC 发给客户的数量（可能小于订单量，部分满足）。
+
+- db_table: module1_output_cutlog
+  module: module1
+  category: log
+  ontology_class: null
+  source_config: null
+  source_df: cut_df
+  key_columns: [date, material, location, quantity]
+  description: 砍单/缺口日志 — 因库存不足未满足的订单量。
+
+- db_table: module1_output_supplydemandlog
+  module: module1
+  category: log
+  ontology_class: null
+  source_config: null
+  source_df: supply_demand_df
+  key_columns: [date, material, location, quantity, demand_element]
+  description: 供需明细日志 — 按 demand_element 拆分的供需流水。
+
+- db_table: module1_output_summary
+  module: module1
+  category: summary
+  ontology_class: null
+  source_config: null
+  source_df: summary_df
+  key_columns: [total_orders, total_shipments, total_cuts, total_supplydemand, date]
+  description: M1 模块级汇总统计（订单/发运/砍单/供需总量）。
+
+# ───────────────────────── Module 3 — MRP Planning (1) ─────────────────────────
+- db_table: module3_output_netdemand
+  module: module3
+  category: simulation_output
+  ontology_class: null
+  source_config: null
+  source_df: net_demand_df
+  key_columns: [material, location, requirement_date, demand_element, layer, quantity, simulation_date, horizon_days]
+  description: 净需求 — MRP 展开后按层级(layer)汇总的净需求，驱动 M4 生产计划。
+
+# ───────────────────────── Module 4 — Production Planning (4) ─────────────────────────
+- db_table: module4_output_productionplan
+  module: module4
+  category: simulation_output
+  ontology_class: cs:ProductionPlan
+  source_config: M4_ProductionPlan
+  source_df: production_df
+  key_columns: [material, location, line, simulation_date, production_plan_date, available_date, uncon_planned_qty, con_planned_qty, produced_qty, changeover_id, changeover_time, changeover_time_remaining, is_first_changeover_day]
+  description: 生产计划 — 三层产量：uncon_planned(理想)/con_planned(产能受限)/produced(可靠性后实际)。
+
+- db_table: module4_output_capacityexceed
+  module: module4
+  category: log
+  ontology_class: null
+  source_config: null
+  source_df: exceed_log
+  key_columns: [material, location, line, simulation_date, exceed_type, exceed_qty]
+  description: 产能超限日志 — 需求超出产线产能的部分。
+
+- db_table: module4_output_changeoverlog
+  module: module4
+  category: log
+  ontology_class: null
+  source_config: null
+  source_df: changeover_log
+  key_columns: [date, location, line, changeover_type, count, time, cost, mu_loss]
+  description: 换型日志 — 产线换型次数、耗时、成本与 MU 损失。
+
+- db_table: module4_output_validation
+  module: module4
+  category: validation
+  ontology_class: null
+  source_config: null
+  source_df: issues_df
+  key_columns: [sheet, row, issue]
+  description: M4 配置校验问题清单。
+
+# ───────────────────────── Module 5 — Deployment Planning (4) ─────────────────────────
+- db_table: module5_output_deploymentplan
+  module: module5
+  category: simulation_output
+  ontology_class: cs:DeploymentPlan
+  source_config: M5_DeploymentPlan
+  source_df: deployment_plan
+  key_columns: [date, material, sending, receiving, demand_qty, demand_element, planned_qty, deployed_qty_invcon, deploy_qty_with_plan_order, deploy_from_in_transit, deploy_from_open_deployment_inbound, deploy_from_future_production, planned_delivery_date, orig_location, leadtime, is_cross_node, deployed_qty, quota, deployed_qty_invcon_push]
+  description: 部署/调拨计划 — M5 决定各物料在网络节点间的调拨量与来源拆分。
+
+- db_table: module5_output_stockonhandlog
+  module: module5
+  category: log
+  ontology_class: null
+  source_config: null
+  source_df: stock_on_hand_log
+  key_columns: [material, location, date, beginning_soh, production, in_transit, delivery_gr, today_shipment, deployed_qty, ending_soh]
+  description: 在手库存日志 — M5 视角的每日库存平衡明细。
+
+- db_table: module5_output_unfulfilledlog
+  module: module5
+  category: log
+  ontology_class: null
+  source_config: null
+  source_df: unfulfilled_log
+  key_columns: [date, sending, receiving, demand_qty, demand_element, unfulfilled_qty, reason]
+  description: 未满足需求日志 — 部署阶段无法满足的需求及原因。
+
+- db_table: module5_output_validation
+  module: module5
+  category: validation
+  ontology_class: null
+  source_config: null
+  source_df: validation_log
+  key_columns: [no, issue]
+  description: M5 配置/数据校验问题清单。
+
+# ───────────────────────── Module 6 — Logistics Execution (6) ─────────────────────────
+- db_table: module6_output_deliveryplan
+  module: module6
+  category: simulation_output
+  ontology_class: cs:IntersiteDelivery
+  source_config: M6_DeliveryPlan
+  source_df: delivery_plan
+  key_columns: [vehicle_uid, ori_deployment_uid, material, sending, receiving, planned_deployment_date, actual_ship_date, actual_delivery_date, delivery_qty, truck_type, truck_load_pct, wfr, vfr]
+  description: 交付/运输计划 — M6 按卡车装载执行的跨节点配送（含装载率 WFR/VFR）。
+
+- db_table: module6_output_vehiclelog
+  module: module6
+  category: log
+  ontology_class: null
+  source_config: null
+  source_df: vehicle_log
+  key_columns: [date, sending, receiving, truck_type, vehicle_no, vehicle_uid, total_units, total_weight, total_volume, wfr, vfr, trigger]
+  description: 车辆装载日志 — 每辆车的装载量、重量、体积与触发原因。
+
+- db_table: module6_output_truckusagelog
+  module: module6
+  category: log
+  ontology_class: null
+  source_config: null
+  source_df: truck_usage
+  key_columns: [date, sending, receiving, truck_type, truck_used]
+  description: 卡车使用日志 — 各线路按卡车类型的用车数量。
+
+- db_table: module6_output_unsatisfiedmdqlog
+  module: module6
+  category: log
+  ontology_class: null
+  source_config: null
+  source_df: unsatisfied_log
+  key_columns: []
+  description: 未满足 MDQ 日志 — 未达最小发运量(MDQ)的部署记录（仅含公共列时为空表）。
+
+- db_table: module6_output_validationlog
+  module: module6
+  category: validation
+  ontology_class: null
+  source_config: null
+  source_df: validation_log
+  key_columns: []
+  description: M6 校验日志。
+
+- db_table: module6_output_bypassrulehitlog
+  module: module6
+  category: log
+  ontology_class: null
+  source_config: null
+  source_df: bypass_log
+  key_columns: [ori_deployment_uid, rule_id, simulation_date, context_snapshot, vehicle_uid]
+  description: MDQ 绕过规则命中日志 — 记录哪些部署命中了 M6_MDQBypassRules 规则。
+
+# ───────────────────────── Orchestrator — Daily State (12) ─────────────────────────
+- db_table: orchestrator_unrestricted_inventory
+  module: orchestrator
+  category: orchestrator_state
+  ontology_class: cs:UnrestrictedInventory
+  source_config: Orchestrator_unrestricted_inventory
+  source_df: unrestricted_inventory_*.csv
+  key_columns: [date, material, location, quantity, file_date]
+  description: 非限制库存 — 每日日终可用库存快照（编排器核心库存状态）。
+
+- db_table: orchestrator_open_deployment
+  module: orchestrator
+  category: orchestrator_state
+  ontology_class: cs:OpenDeployment
+  source_config: Orchestrator_open_deployment
+  source_df: open_deployment_*.csv
+  key_columns: [material, sending, receiving, planned_deployment_date, deployed_qty, demand_element, ori_deployment_uid, file_date]
+  description: 未结部署 — 已计划待 M6 放行发运的部署，发运后递减。
+
+- db_table: orchestrator_planning_intransit
+  module: orchestrator
+  category: orchestrator_state
+  ontology_class: cs:InTransit
+  source_config: Orchestrator_in_transit
+  source_df: planning_intransit_*.csv
+  key_columns: [transit_uid, date, material, sending, receiving, actual_ship_date, actual_delivery_date, quantity, ori_deployment_uid, vehicle_uid, file_date]
+  description: 在途库存 — 已发运未到货的货物，到货后转为 delivery_gr。
+
+- db_table: orchestrator_delivery_gr
+  module: orchestrator
+  category: orchestrator_state
+  ontology_class: cs:DeliveryGR
+  source_config: Orchestrator_delivery_gr
+  source_df: delivery_gr_*.csv
+  key_columns: [date, material, receiving, quantity, ori_deployment_uid, vehicle_uid, actual_ship_date, file_date]
+  description: 交付收货(GR) — 在途货物到达收货地，增加收货地库存。
+
+- db_table: orchestrator_production_gr
+  module: orchestrator
+  category: orchestrator_state
+  ontology_class: cs:ProductionGR
+  source_config: Orchestrator_production_gr
+  source_df: production_gr_*.csv
+  key_columns: [date, material, location, quantity, file_date]
+  description: 生产收货(GR) — 生产完成可用(available_date 到达)，增加生产地库存。
+
+- db_table: orchestrator_space_quota
+  module: orchestrator
+  category: orchestrator_state
+  ontology_class: null
+  source_config: null
+  source_df: space_quota_*.csv
+  key_columns: []
+  description: 空间配额 — 仓储空间配额状态（仅含公共列时为空表）。
+
+- db_table: orchestrator_shipment_log
+  module: orchestrator
+  category: log
+  ontology_class: null
+  source_config: null
+  source_df: shipment_log_*.csv
+  key_columns: [date, material, location, quantity, type, file_date]
+  description: 发运日志(编排器层) — 汇总客户发运与跨节点发运。
+
+- db_table: orchestrator_delivery_shipment_log
+  module: orchestrator
+  category: log
+  ontology_class: null
+  source_config: null
+  source_df: delivery_shipment_log_*.csv
+  key_columns: [date, material, sending, receiving, quantity, ori_deployment_uid, actual_ship_date, actual_delivery_date, type, file_date]
+  description: 交付发运日志 — 跨节点发运的发出/到达明细。
+
+- db_table: orchestrator_inventory_change_log
+  module: orchestrator
+  category: log
+  ontology_class: null
+  source_config: null
+  source_df: inventory_change_log_*.csv
+  key_columns: [date, material, location, beginning_inventory, production_gr, delivery_gr, shipment, delivery_ship, ending_inventory, calculated_ending, balance_diff, file_date]
+  description: 库存变动日志 — 每日库存平衡核对(含 balance_diff 用于一致性校验)。
+
+- db_table: orchestrator_daily_logs
+  module: orchestrator
+  category: log
+  ontology_class: null
+  source_config: null
+  source_df: daily_logs_*.csv
+  key_columns: [timestamp, date, event_type, message, file_date]
+  description: 每日事件日志 — 编排器运行过程的事件流水。
+
+- db_table: orchestrator_open_deployment_pastdue_cleanup
+  module: orchestrator
+  category: orchestrator_state
+  ontology_class: null
+  source_config: null
+  source_df: null   # present in DB, NOT in table_mapping.py OUTPUT_TABLE_MAPPING
+  key_columns: []
+  description: 过期未结部署清理 — 清理超期未发运的 open_deployment 记录。
+
+- db_table: orchestrator_production_plan_backlog
+  module: orchestrator
+  category: orchestrator_state
+  ontology_class: null
+  source_config: null
+  source_df: null   # present in DB, NOT in table_mapping.py OUTPUT_TABLE_MAPPING
+  key_columns: [material, location, available_date, quantity, file_date]
+  description: 生产计划积压 — 已计划但尚未转为生产收货的待产量。
+
+# ───────────────────────── Summary — Full-Horizon Aggregations (8) ─────────────────────────
+# NOTE: real DB names are summary_output_full* (NOT the summary_full_*_report names
+# in table_mapping.py, which are stale/unused). Each aggregates its per-day counterpart.
+- db_table: summary_historical_inventory_record
+  module: summary
+  category: summary
+  ontology_class: null
+  source_config: null
+  source_df: historical_inventory_record.csv
+  key_columns: []
+  description: 历史库存记录汇总。
+
+- db_table: summary_output_ordershipmentcutsummary
+  module: summary
+  category: summary
+  ontology_class: null
+  source_config: null
+  source_df: full_order_shipment_cut_report.xlsx
+  key_columns: [simulation_date, date, material, location, order_qty, shipment_qty, cut_qty]
+  description: 订单/发运/砍单全周期汇总(服务水平分析基础)。
+
+- db_table: summary_output_fullproductionplan
+  module: summary
+  category: summary
+  ontology_class: cs:ProductionPlan
+  source_config: null
+  source_df: full_production_plan_report.xlsx
+  key_columns: [material, location, line, simulation_date, production_plan_date, available_date, uncon_planned_qty, con_planned_qty, produced_qty, changeover_id, changeover_time, changeover_time_remaining, is_first_changeover_day]
+  description: 全周期生产计划汇总(module4_output_productionplan 的全 horizon 聚合)。
+
+- db_table: summary_output_fullchangeoverlog
+  module: summary
+  category: summary
+  ontology_class: null
+  source_config: null
+  source_df: full_changeover_report.xlsx
+  key_columns: [date, location, line, changeover_type, count, time, cost, mu_loss]
+  description: 全周期换型汇总。
+
+- db_table: summary_output_fulldeploymentplan
+  module: summary
+  category: summary
+  ontology_class: cs:DeploymentPlan
+  source_config: null
+  source_df: full_deployment_plan_report.xlsx
+  key_columns: [date, material, sending, receiving, demand_qty, demand_element, planned_qty, deployed_qty_invcon, deploy_qty_with_plan_order, deploy_from_in_transit, deploy_from_open_deployment_inbound, deploy_from_future_production, planned_delivery_date, orig_location, leadtime, is_cross_node, deployed_qty, quota, deployed_qty_invcon_push]
+  description: 全周期部署计划汇总(module5_output_deploymentplan 的全 horizon 聚合)。
+
+- db_table: summary_output_fulldeliveryplan
+  module: summary
+  category: summary
+  ontology_class: cs:IntersiteDelivery
+  source_config: null
+  source_df: full_delivery_plan_report.xlsx
+  key_columns: [vehicle_uid, ori_deployment_uid, material, sending, receiving, planned_deployment_date, actual_ship_date, actual_delivery_date, delivery_qty, truck_type, truck_load_pct, wfr, vfr]
+  description: 全周期交付计划汇总(module6_output_deliveryplan 的全 horizon 聚合)。
+
+- db_table: summary_output_fulltruckusage
+  module: summary
+  category: summary
+  ontology_class: null
+  source_config: null
+  source_df: full_truck_usage_report.xlsx
+  key_columns: [date, sending, receiving, truck_type, truck_used]
+  description: 全周期卡车使用汇总。
+
+- db_table: summary_output_fullcapacityexceed
+  module: summary
+  category: summary
+  ontology_class: null
+  source_config: null
+  source_df: full_exceed_capacity_report.xlsx
+  key_columns: [material, location, line, simulation_date, exceed_type, exceed_qty]
+  description: 全周期产能超限汇总。

@@ -1,0 +1,6 @@
+id: R2
+description: Only one BOP forecast exists per month; all other weekly forecasts are LBE
+condition: fcst_type = 'BOP' and multiple weekly versions exist for the same month
+action: Return only the single BOP-designated version for that month
+applies_to: ps_psc_bop_lbe_fcst
+status: active

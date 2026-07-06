@@ -1,0 +1,31 @@
+# Workspace project registry
+# Each project represents one user engagement / analysis task.
+# Status: active | archived
+projects:
+  - slug: line-myc-network-supply-choice-whatif-202605
+    title: "Line M/Y/C Sourcing Network — Supply Choice & Safety Stock What-If"
+    created: 2026-05-09
+    status: active
+    brief: line-myc-network-supply-choice-whatif-202605/brief.md
+    scenarios:
+      - slug: wf1-produce-hs-order-5050-current-ss
+        title: "What-if 1: produce to high-side, order as 50/50 forecast x current safety"
+        scope_ref: scenarios/wf1-produce-hs-order-5050-current-ss/scope.yaml
+      - slug: wf2-produce-5050-order-hs-current-ss
+        title: "What-if 2: produce to 50/50, order as high-side x current safety"
+        scope_ref: scenarios/wf2-produce-5050-order-hs-current-ss/scope.yaml
+      - slug: wf3-produce-hs-order-5050-reduced-ss
+        title: "What-if 3: produce to high-side, order as 50/50 forecast x reduced safety"
+        scope_ref: scenarios/wf3-produce-hs-order-5050-reduced-ss/scope.yaml
+      - slug: wf4-produce-5050-order-hs-reduced-ss
+        title: "What-if 4: produce to 50/50, order as high-side x reduced safety"
+        scope_ref: scenarios/wf4-produce-5050-order-hs-reduced-ss/scope.yaml
+  - slug: sdc-space-rccp-simulation-202605
+    title: "SDC Space RCCP — Baseline Simulation"
+    created: 2026-05-10
+    status: active
+    brief: sdc-space-rccp-simulation-202605/brief.md
+    scenarios:
+      - slug: baseline-current-params-should-be-rccp
+        title: "Baseline: current params should-be Space RCCP"
+        scope_ref: scenarios/baseline-current-params-should-be-rccp/scope.yaml

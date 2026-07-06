@@ -1,0 +1,43 @@
+project: fem-cs-test
+scenario: baseline-fem-hpfd-network-0386
+title: Baseline FEM HPFD Network 0386
+time_window:
+  start_date: 2026-02-02
+  end_date: 2026-05-03
+network_scope:
+  anchor_entity: hpfd_line
+  network_id: "0386"
+  coverage: full_sourcing_network
+  category: FEM
+  production_line: HPFD
+  location_identity:
+    node_list: tbd
+    source_definition: full_network_linked_to_0386_hpfd_line_sourcing
+baseline:
+  scenario_mode: baseline_only
+  parameter_basis: current_settings
+  comparison_target: current_actual_operations
+  validation_purpose:
+    - consistency_check
+    - robustness_check
+  primary_kpis:
+    - CFR
+    - DFC
+    - CU
+    - changeover_count_by_type
+    - changeover_percentage_by_type
+assumptions:
+  no_parameter_change: true
+  fem_is_category_name: true
+  hpfd_is_line_identifier: true
+  exact_kpi_list: confirmed
+  acceptance_threshold: tbd
+  runner_command: user_not_provided
+parameter_changes:
+  baseline_run: no_changes
+status:
+  scope_confirmed: true
+  data_reconciliation_required: true
+  config_generated: false
+  validation_passed: false
+  simulation_run: false

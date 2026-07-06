@@ -1,0 +1,9 @@
+id: R1
+description: CFR denominator must filter on is_order_sum_flag='Y' to avoid double-counting confirmed quantity from material
+  conversion splits
+condition: Calculating CFR from ps_psc_customer_order_delivery where material conversion creates multiple delivery rows per
+  SO item
+action: Apply WHERE is_order_sum_flag='Y' to confirm_qty (denominator); do NOT filter delivery_qty (numerator) as each row
+  is an independent physical shipment
+applies_to: ps_psc_customer_order_delivery
+status: active

@@ -1,0 +1,27 @@
+project: xq-vmr-to-production-202606
+scenario: baseline
+intent: baseline_reference_for_future_ao_ratio_and_advance_leadtime_whatifs
+time_window:
+  start: 2026-06-29
+  end: 2026-11-01
+network_scope:
+  anchor_plant:
+    code: "1864"
+    name: XQ
+  categories:
+    - HC
+    - PCC
+  process_scope: VMR_to_production
+material_scope:
+  mode: TBD_user_provided_config
+  materials: []
+parameter_changes:
+  type: baseline
+  changes: []
+focus_metrics:
+  - MOE
+  - national_inventory
+  - service
+config_status:
+  source: user_direct_provided
+  readiness: pending_user_config

@@ -1,0 +1,59 @@
+project: fem-cs-test
+scenario: s1-fem-hpfd-network-0386
+title: Scenario S1 FEM HPFD Network 0386
+time_window:
+  start_date: 2026-02-02
+  end_date: 2026-05-03
+network_scope:
+  anchor_entity: hpfd_line
+  network_id: "0386"
+  coverage: full_sourcing_network
+  category: FEM
+  production_line: HPFD
+  location_identity:
+    node_list: tbd
+    source_definition: full_network_linked_to_0386_hpfd_line_sourcing
+scenario_design:
+  scenario_mode: what_if
+  parameter_basis: baseline_with_overrides
+  comparison_target: baseline-fem-hpfd-network-0386
+  parameter_changes: M4_MaterialLocationLineCfg.lsk increased (review frequency)
+  validation_purpose:
+    - what_if_evaluation
+    - compare_against_baseline
+  primary_kpis:
+    - CFR
+    - DFC
+    - CU
+    - changeover_count_by_type
+    - changeover_percentage_by_type
+assumptions:
+  fem_is_category_name: true
+  hpfd_is_line_identifier: true
+  inherits_baseline_scope: true
+  exact_kpi_list: confirmed
+  acceptance_threshold: tbd
+  runner_command: user_not_provided
+parameter_changes:
+  scenario_run:
+    sheet: M4_MaterialLocationLineCfg
+    field: lsk
+    meaning: lot_size_key_review_frequency_interval
+    description: lengthen replenishment review frequency vs baseline
+    transitions:
+      - from: 30
+        to: 45
+        rows: 19
+      - from: 60
+        to: 90
+        rows: 7
+    unchanged:
+      - lsk: 90
+        rows: 3
+    other_sheets: identical_to_baseline
+status:
+  scope_confirmed: false
+  data_reconciliation_required: true
+  config_generated: true
+  validation_passed: false
+  simulation_run: false

@@ -1,0 +1,14 @@
+id: "csmeta:chainsight-simulation-run"
+type: "csmeta:Skill"
+name: ChainSight Simulation Run (WSL)
+description: "Execute a ChainSight what-if simulation scenario when the agent runs in a WSL terminal while the simulation codebase runs on Windows."
+skill_file: .agents/skills/chainsight-simulation-run/SKILL.md
+covers_classes:
+  - Plan
+  - Metric
+used_by_agents: []
+derived_from:
+  decisions: []
+  design_section: "simulation"
+tags: [simulation, run, scenario, wsl]
+status: active

@@ -1,0 +1,14 @@
+id: "csmeta:chainsight-db-connection"
+type: "csmeta:Skill"
+name: ChainSight DB Connection (WSL)
+description: "Connect to the ChainSight simulation-result PostgreSQL database and run queries when the agent runs in a WSL terminal (bridges WSL to the Windows-hosted DB)."
+skill_file: .agents/skills/chainsight-db-connection/SKILL.md
+covers_classes:
+  - Metric
+  - Plan
+used_by_agents: []
+derived_from:
+  decisions: []
+  design_section: "data-access"
+tags: [postgresql, results, wsl, connection]
+status: active

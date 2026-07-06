@@ -1,0 +1,627 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI ChainSight — 自进化供应链仿真智能体</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#F8FAFC;--white:#FFF;--text:#1E293B;--ts:#475569;--tm:#94A3B8;
+  --a:#2563EB;--al:#DBEAFE;--ad:#1D4ED8;--bd:#E2E8F0;--bs:#CBD5E1;
+  --g:#059669;--gb:#ECFDF5;--am:#D97706;--ab:#FFFBEB;
+  --p:#7C3AED;--pb:#F5F3FF;--r:#DC2626;--rb:#FEF2F2;
+  --ro:#E11D48;--rob:#FFF1F2;--cy:#0891B2;--cyb:#ECFEFF;
+  --rd:8px;--sh:0 1px 3px rgba(0,0,0,.06);--shm:0 4px 12px rgba(0,0,0,.07);
+}
+html{scroll-behavior:smooth}
+body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7;font-size:15px;-webkit-font-smoothing:antialiased}
+@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+code{font-family:'IBM Plex Mono',monospace;font-size:.82em;background:var(--bg);padding:.12em .4em;border-radius:3px;color:var(--ad);-webkit-font-smoothing:auto}
+.w{max-width:1020px;margin:0 auto;padding:0 1.5rem}
+section{padding:3.5rem 0}
+.dv{border:none;border-top:1px solid var(--bd);margin:0}
+
+/* Nav */
+nav{position:sticky;top:0;z-index:50;background:rgba(248,250,252,.92);backdrop-filter:blur(12px);border-bottom:1px solid var(--bd)}
+nav .i{max-width:1020px;margin:0 auto;padding:.6rem 1.5rem;display:flex;align-items:center;gap:1.5rem}
+nav .lo{font-weight:800;font-size:1rem;color:var(--text);letter-spacing:-.03em}
+nav .lo span{color:var(--a)}
+nav .lk{display:flex;gap:1.2rem;margin-left:auto;flex-wrap:wrap}
+nav .lk a{color:var(--ts);text-decoration:none;font-size:.8rem;font-weight:500;transition:color .15s;cursor:pointer}
+nav .lk a:hover{color:var(--a)}
+nav .lk a:focus-visible{outline:2px solid var(--a);outline-offset:2px;border-radius:3px}
+
+/* Hero */
+.hero{padding:4.5rem 0 2rem;text-align:center}
+.hero h1{font-size:2.6rem;font-weight:800;letter-spacing:-.04em;color:var(--text);margin-bottom:.6rem}
+.hero .sub{font-size:1.05rem;color:var(--ts);max-width:660px;margin:0 auto;line-height:1.8}
+
+/* Section chrome */
+.sn{font-size:.72rem;font-weight:700;color:var(--a);text-transform:uppercase;letter-spacing:.08em;margin-bottom:.3rem}
+h2{font-size:1.6rem;font-weight:700;letter-spacing:-.02em;color:var(--text);margin-bottom:.35rem}
+.sd{color:var(--ts);font-size:.92rem;margin-bottom:1.75rem;line-height:1.75;max-width:780px}
+h3{font-size:1.05rem;font-weight:600;color:var(--text);margin:2rem 0 .6rem}
+h4{font-size:.92rem;font-weight:600;color:var(--text);margin-bottom:.35rem}
+
+/* Cards */
+.cg{display:grid;gap:1rem}
+.c2{grid-template-columns:repeat(auto-fit,minmax(280px,1fr))}
+.c3{grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}
+.cd{background:var(--white);border:1px solid var(--bd);border-radius:var(--rd);padding:1.2rem;box-shadow:var(--sh);transition:box-shadow .2s,border-color .2s}
+.cd:hover{box-shadow:var(--shm);border-color:var(--bs)}
+.cd p{font-size:.83rem;color:var(--ts);line-height:1.65}
+.ic{width:34px;height:34px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:.85rem;font-weight:700;margin-bottom:.65rem;flex-shrink:0}
+
+/* Tables */
+.tb{width:100%;border-collapse:collapse;font-size:.84rem;background:var(--white);border:1px solid var(--bd);border-radius:var(--rd);overflow:hidden}
+.tb thead{background:var(--bg)}
+.tb th{text-align:left;padding:.6rem 1rem;font-weight:600;font-size:.73rem;text-transform:uppercase;letter-spacing:.04em;color:var(--ts);border-bottom:2px solid var(--bd)}
+.tb td{padding:.55rem 1rem;border-bottom:1px solid var(--bd);vertical-align:top}
+.tb tr:last-child td{border-bottom:none}
+.tb tr:hover td{background:rgba(37,99,235,.02)}
+.badge{display:inline-block;font-size:.67rem;padding:.18rem .5rem;border-radius:4px;font-weight:600}
+.bb{background:var(--al);color:var(--ad)}
+.bg{background:var(--gb);color:var(--g)}
+.bm{background:#F1F5F9;color:var(--tm)}
+.by{background:var(--ab);color:var(--am)}
+.bp{background:var(--pb);color:var(--p)}
+
+/* Layers */
+.layers{display:flex;flex-direction:column;gap:.6rem}
+.layer{background:var(--white);border:1px solid var(--bd);border-radius:var(--rd);padding:1rem 1.2rem;display:flex;align-items:flex-start;gap:1rem;box-shadow:var(--sh)}
+.layer:hover{box-shadow:var(--shm)}
+.lbl{flex-shrink:0;width:110px;font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;padding:.3rem 0;text-align:center;border-radius:4px}
+.tags{display:flex;flex-wrap:wrap;gap:.4rem;align-items:center}
+.tag{font-size:.78rem;padding:.22rem .6rem;border-radius:4px;background:var(--bg);border:1px solid var(--bd);color:var(--ts);font-weight:500;white-space:nowrap}
+.tag.cs{background:var(--al);border-color:transparent;color:var(--ad);font-weight:600}
+.tag.oh{background:#F1F5F9;border-color:var(--bd);color:var(--ts)}
+.ad{text-align:center;color:var(--tm);font-size:.85rem;line-height:1}
+
+/* Two-col */
+.two{display:grid;grid-template-columns:1fr 1fr;gap:1rem}
+@media(max-width:640px){.two{grid-template-columns:1fr}}
+.box{background:var(--white);border:1px solid var(--bd);border-radius:var(--rd);padding:1.2rem;box-shadow:var(--sh)}
+.box ul{padding-left:1.1rem;font-size:.84rem;color:var(--ts);line-height:1.85}
+.box ul li strong{color:var(--text);font-weight:600}
+
+/* Ideal flow — structured visual */
+.ideal{display:flex;flex-direction:column;gap:0;margin:1.5rem 0}
+.ideal-row{display:flex;align-items:stretch;gap:0}
+.ideal-node{flex:1;position:relative;padding:1rem 1.2rem;background:var(--white);border:1px solid var(--bd);text-align:center;min-height:90px;display:flex;flex-direction:column;justify-content:center}
+.ideal-node h4{font-size:.88rem;margin-bottom:.2rem}
+.ideal-node p{font-size:.76rem;color:var(--tm);line-height:1.45}
+.ideal-node .role{position:absolute;top:.4rem;right:.5rem;font-size:.6rem;font-weight:700;padding:.1rem .4rem;border-radius:3px}
+.role-human{background:var(--ab);color:var(--am)}
+.role-agent{background:var(--al);color:var(--ad)}
+.ideal-arr-h{width:32px;display:flex;align-items:center;justify-content:center;flex-shrink:0;background:var(--bg)}
+.ideal-arr-h svg{width:20px;height:20px;color:var(--bs)}
+.ideal-vconn{display:flex;justify-content:center;padding:.25rem 0}
+.ideal-vconn svg{width:20px;height:20px;color:var(--bs)}
+.ideal-loop{border:2px dashed var(--bd);border-radius:12px;padding:.6rem;margin:1rem 0;position:relative}
+.ideal-loop::before{content:attr(data-label);position:absolute;top:-.55rem;left:1rem;background:var(--bg);padding:0 .5rem;font-size:.65rem;font-weight:700;color:var(--p);text-transform:uppercase;letter-spacing:.06em}
+
+/* Evolution flow (structured) */
+.evo-flow{display:flex;flex-direction:column;gap:0;margin:1.5rem 0;border:1px solid var(--bd);border-radius:12px;overflow:hidden;background:var(--white);box-shadow:var(--sh)}
+.evo-stage{display:flex;align-items:stretch;border-bottom:1px solid var(--bd)}
+.evo-stage:last-child{border-bottom:none}
+.evo-label{width:140px;flex-shrink:0;padding:.85rem 1rem;display:flex;align-items:center;gap:.5rem;font-size:.8rem;font-weight:600;border-right:1px solid var(--bd)}
+.evo-label .dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
+.evo-content{flex:1;padding:.85rem 1rem}
+.evo-content p{font-size:.82rem;color:var(--ts);line-height:1.6}
+.evo-content strong{color:var(--text)}
+.evo-arr{display:flex;justify-content:center;padding:0;background:var(--bg);border-bottom:1px solid var(--bd)}
+.evo-arr svg{width:16px;height:16px;color:var(--bs)}
+
+/* Pipeline */
+.pw{overflow-x:auto;padding:.5rem 0}
+.pp{display:flex;align-items:center;gap:0;min-width:max-content}
+.ps{background:var(--white);border:1px solid var(--bd);border-radius:var(--rd);padding:.5rem .8rem;text-align:center;min-width:92px;transition:border-color .15s;cursor:default}
+.ps:hover{border-color:var(--a)}
+.ps .n{font-size:.58rem;font-weight:700;color:var(--a);text-transform:uppercase;letter-spacing:.04em;display:block}
+.ps .l{font-size:.76rem;font-weight:500;color:var(--text)}
+.pc{width:20px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.pc svg{width:14px;height:14px;color:var(--tm)}
+
+/* Dashboard mock */
+.dash{background:#1a1f2e;color:#cbd5e1;border-radius:12px;padding:1.75rem;font-family:'IBM Plex Mono',monospace;font-size:.8rem;line-height:1.7;overflow-x:auto;box-shadow:var(--shm);border:1px solid #334155}
+.dash .h{color:#60a5fa}.dash .w{color:#fbbf24}.dash .g{color:#34d399}.dash .d{color:#475569}
+
+/* Admin workflow */
+.admin-steps{counter-reset:adminstep}
+.admin-step{display:flex;gap:1rem;margin-bottom:1rem;align-items:flex-start}
+.admin-step::before{counter-increment:adminstep;content:counter(adminstep);width:28px;height:28px;border-radius:50%;background:var(--al);color:var(--ad);display:flex;align-items:center;justify-content:center;font-size:.75rem;font-weight:700;flex-shrink:0;margin-top:.15rem}
+.admin-step div{flex:1}
+.admin-step h4{font-size:.88rem;margin-bottom:.15rem}
+.admin-step p{font-size:.82rem;color:var(--ts);line-height:1.6}
+
+footer{text-align:center;padding:2.5rem 1rem;color:var(--tm);font-size:.76rem;border-top:1px solid var(--bd);margin-top:1rem}
+footer strong{color:var(--ts)}
+
+@media(max-width:640px){
+  .hero h1{font-size:1.8rem}
+  .c3,.c2{grid-template-columns:1fr}
+  .lbl{width:85px;font-size:.62rem}
+  .ideal-row{flex-direction:column}
+  .ideal-arr-h{width:auto;height:24px;flex-direction:row}
+  .ideal-arr-h svg{transform:rotate(90deg)}
+  .evo-label{width:100px}
+}
+</style>
+</head>
+<body>
+
+<nav><div class="i">
+  <div class="lo"><span>Chain</span>Sight</div>
+  <div class="lk">
+    <a href="#s1">设计哲学</a>
+    <a href="#s2">Agent 层</a>
+    <a href="#s3">自进化</a>
+    <a href="#s4">Admin</a>
+    <a href="#s5">仿真全流程</a>
+  </div>
+</div></nav>
+
+<div class="w">
+
+<!-- Hero -->
+<div class="hero">
+  <h1>AI ChainSight</h1>
+  <p class="sub">LLM-Native 供应链仿真智能体——以本体知识图谱与因果 DAG 为骨架，自主记忆、自主进化、自主推理。人只做目标设定和最终批准，其余全部由系统自主完成。</p>
+</div>
+
+<hr class="dv">
+
+<!-- ═══════════════ §1 Philosophy ═══════════════ -->
+<section id="s1">
+  <div class="sn">Section 1</div>
+  <h2>自进化框架的设计哲学</h2>
+  <p class="sd">ChainSight 追求一个理想的仿真闭环：人只需要<strong>设定目标</strong>和<strong>批准方案</strong>，中间的感知、推理、构建、验证、提案全部由系统自主完成，且每一轮执行的经验都能写回系统，让下一轮做得更好。</p>
+
+  <h3>理想仿真闭环 (Ideal Simulation Flow)</h3>
+
+  <!-- Row 1: Human sets goal -->
+  <div class="ideal">
+    <div class="ideal-row">
+      <div class="ideal-node" style="border-radius:12px 0 0 0;border-top:3px solid var(--am);flex:0 0 200px">
+        <span class="role role-human">Human</span>
+        <h4>设定目标</h4>
+        <p>业务 KPI 目标<br>期望改善幅度</p>
+      </div>
+      <div class="ideal-arr-h"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 8h10M10 5l3 3-3 3"/></svg></div>
+      <div class="ideal-node" style="border-top:3px solid var(--a)">
+        <span class="role role-agent">Agent</span>
+        <h4>感知现状与 Gap</h4>
+        <p>拉取 Baseline 数据<br>诊断 KPI 差距<br>记忆召回历史经验</p>
+      </div>
+      <div class="ideal-arr-h"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 8h10M10 5l3 3-3 3"/></svg></div>
+      <div class="ideal-node" style="border-top:3px solid var(--p)">
+        <span class="role role-agent">Agent</span>
+        <h4>推理可行路径</h4>
+        <p>因果 DAG 遍历<br>参数杠杆筛选<br>本体可行性约束</p>
+      </div>
+    </div>
+
+    <div class="ideal-vconn"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 3v10M5 10l3 3 3-3"/></svg></div>
+
+    <!-- Row 2: Agent loop -->
+    <div class="ideal-loop" data-label="Agent 自主闭环 — 可迭代">
+      <div class="ideal-row">
+        <div class="ideal-node" style="border-left:3px solid var(--g)">
+          <span class="role role-agent">Agent</span>
+          <h4>构建仿真 & 参数寻优</h4>
+          <p>Scope 解析 → 配置生成<br>5 层校验 → 仿真执行<br>多场景对比 & DOE</p>
+        </div>
+        <div class="ideal-arr-h"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 8h10M10 5l3 3-3 3"/></svg></div>
+        <div class="ideal-node" style="border-left:3px solid var(--cy)">
+          <span class="role role-agent">Agent</span>
+          <h4>生成提案</h4>
+          <p>结果分析 & 解读<br>参数推荐方案<br>证据标记 (DAG / 业务)</p>
+        </div>
+        <div class="ideal-arr-h"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 8h10M10 5l3 3-3 3"/></svg></div>
+        <div class="ideal-node" style="border-left:3px solid var(--ro);border-right:3px solid var(--ro)">
+          <span class="role role-agent">Agent</span>
+          <h4>写回系统</h4>
+          <p>经验 → 记忆沉淀<br>偏差 → DAG 修正提案<br>方法 → 技能学习</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="ideal-vconn"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 3v10M5 10l3 3 3-3"/></svg></div>
+
+    <!-- Row 3: Human approves -->
+    <div class="ideal-row">
+      <div class="ideal-node" style="border-radius:0 0 12px 12px;border-bottom:3px solid var(--am);margin:0 auto;flex:0 0 320px">
+        <span class="role role-human">Human</span>
+        <h4>审批方案</h4>
+        <p>审阅推荐 → 批准/驳回 → 高风险知识变更审批</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="cd" style="margin-top:1.5rem;background:var(--pb);border-color:rgba(124,58,237,.15)">
+    <p style="color:var(--p);font-weight:600;margin-bottom:.25rem">自进化的关键</p>
+    <p>每一轮仿真的经验（成功方法、失败教训、数据偏差）都自动写回认知存储。经过 10 阶段整合管线提炼后，这些经验升级为结构化知识、操作规则、甚至因果 DAG 修正——让系统在下一轮仿真中做出更好的判断。</p>
+  </div>
+</section>
+
+<hr class="dv">
+
+<!-- ═══════════════ §2 Agent Layer ═══════════════ -->
+<section id="s2">
+  <div class="sn">Section 2</div>
+  <h2>Agent 层设计</h2>
+  <p class="sd">ChainSight 以 OpenHarness MCP Plugin 形式运行。Main Agent 直接调用认知工具推理，将多步骤任务分派给 4 个专业 Worker。所有工具通过 MCP 协议暴露，辅以 9 个 Slash Commands 和 16 个 Skills。</p>
+
+  <h3>运行时架构</h3>
+  <div class="layers">
+    <div class="layer">
+      <div class="lbl" style="background:var(--pb);color:var(--p)">Harness</div>
+      <div>
+        <div class="tags">
+          <span class="tag oh">OpenHarness TUI</span>
+          <span class="tag oh">plugin.json</span>
+          <span class="tag oh">mcp.json</span>
+          <span class="tag oh">hooks.json</span>
+        </div>
+        <p style="font-size:.8rem;color:var(--tm);margin-top:.4rem">OpenHarness 提供 TUI 入口、会话管理、权限控制、子 Agent 调度。ChainSight 以标准 Plugin 挂载，零 monkey-patch。</p>
+      </div>
+    </div>
+    <div class="ad">↓</div>
+    <div class="layer">
+      <div class="lbl" style="background:var(--al);color:var(--a)">Agents</div>
+      <div>
+        <div class="tags">
+          <span class="tag cs">Main Agent (CLAUDE.md)</span>
+          <span class="tag cs">data-worker</span>
+          <span class="tag cs">dev-worker</span>
+          <span class="tag cs">qa-worker</span>
+          <span class="tag cs">presenter-worker</span>
+        </div>
+        <p style="font-size:.8rem;color:var(--tm);margin-top:.4rem">Main Agent 直接调用 kg_query / dag_traverse 推理。复杂任务分派 Worker，每个 Worker 有独立工具列表和上下文隔离。</p>
+      </div>
+    </div>
+    <div class="ad">↓</div>
+    <div class="layer">
+      <div class="lbl" style="background:var(--gb);color:var(--g)">Tools</div>
+      <div>
+        <p style="font-size:.78rem;color:var(--tm);margin-bottom:.4rem">
+          <span style="display:inline-block;width:10px;height:10px;border-radius:3px;background:var(--al);vertical-align:middle;margin-right:4px"></span>ChainSight 领域工具
+          <span style="margin-left:1rem;display:inline-block;width:10px;height:10px;border-radius:3px;background:#F1F5F9;vertical-align:middle;margin-right:4px"></span>OpenHarness 原生工具
+        </p>
+        <div class="tags">
+          <span class="tag cs">memory_write</span>
+          <span class="tag cs">memory_recall</span>
+          <span class="tag cs">kg_query</span>
+          <span class="tag cs">dag_traverse</span>
+          <span class="tag cs">fetch_table</span>
+          <span class="tag cs">run_sql</span>
+          <span class="tag cs">resolve_scope</span>
+          <span class="tag cs">validate_config</span>
+          <span class="tag cs">export_excel</span>
+          <span class="tag cs">consolidate</span>
+          <span class="tag cs">ping</span>
+          <span class="tag oh">bash</span>
+          <span class="tag oh">read_file</span>
+          <span class="tag oh">write_file</span>
+          <span class="tag oh">edit_file</span>
+          <span class="tag oh">glob</span>
+          <span class="tag oh">grep</span>
+          <span class="tag oh">web_fetch</span>
+          <span class="tag oh">web_search</span>
+          <span class="tag oh">agent</span>
+          <span class="tag oh">send_message</span>
+          <span class="tag oh">notebook_edit</span>
+          <span class="tag oh">lsp</span>
+        </div>
+      </div>
+    </div>
+    <div class="ad">↓</div>
+    <div class="layer">
+      <div class="lbl" style="background:var(--ab);color:var(--am)">Skills</div>
+      <div>
+        <div class="tags">
+          <span class="tag cs">simulationintake</span>
+          <span class="tag cs">scoperesolution</span>
+          <span class="tag cs">configvalidation</span>
+          <span class="tag cs">demandforecast</span>
+          <span class="tag cs">safetystock</span>
+          <span class="tag cs">productionconfig</span>
+          <span class="tag cs">networkextraction</span>
+          <span class="tag cs">ontologyauthoring</span>
+          <span class="tag cs">docmaintenance</span>
+          <span class="tag cs">presentation</span>
+          <span class="tag cs">uiuxpromax</span>
+          <span class="tag oh">commit</span>
+          <span class="tag oh">debug</span>
+          <span class="tag oh">plan</span>
+          <span class="tag oh">review</span>
+          <span class="tag oh">test</span>
+        </div>
+        <p style="font-size:.8rem;color:var(--tm);margin-top:.4rem">16 个声明式 Skill（Markdown 工作流模板），按关键词按需加载。9 个 Slash Commands 提供快捷操作入口。</p>
+      </div>
+    </div>
+    <div class="ad">↓</div>
+    <div class="layer">
+      <div class="lbl" style="background:#F1F5F9;color:var(--tm)">Runtime</div>
+      <div>
+        <div class="tags">
+          <span class="tag cs">FastMCP Server (stdio)</span>
+          <span class="tag cs">cognition.db (SQLite+FTS5)</span>
+          <span class="tag cs">local_kg (NetworkX)</span>
+          <span class="tag cs">Databricks Connector</span>
+          <span class="tag oh">OpenHarness Core</span>
+          <span class="tag oh">LLM Backend</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Hooks -->
+  <h3>生命周期 Hooks</h3>
+  <div class="cg c2">
+    <div class="cd">
+      <div class="ic" style="background:var(--gb);color:var(--g)">S</div>
+      <h4>session_start</h4>
+      <p>会话声明、catch-up 整合、注册 atexit 安全网。Admin 模式下可触发 Dashboard。</p>
+    </div>
+    <div class="cd">
+      <div class="ic" style="background:var(--ab);color:var(--am)">G</div>
+      <h4>pre_tool_guard</h4>
+      <p>工具调用前置守卫——参数校验、权限边界、安全过滤。</p>
+    </div>
+    <div class="cd">
+      <div class="ic" style="background:var(--al);color:var(--a)">P</div>
+      <h4>post_tool_use</h4>
+      <p>工具调用后自动捕获 observation / pitfall。提取本体锚点，连续失败触发 recall 提示。</p>
+    </div>
+    <div class="cd">
+      <div class="ic" style="background:var(--pb);color:var(--p)">E</div>
+      <h4>session_end</h4>
+      <p>会话结束触发增量整合管线，沉淀本轮经验到认知存储。</p>
+    </div>
+  </div>
+</section>
+
+<hr class="dv">
+
+<!-- ═══════════════ §3 Self-Evolution ═══════════════ -->
+<section id="s3">
+  <div class="sn">Section 3</div>
+  <h2>自进化系统设计</h2>
+  <p class="sd">经验 → 知识 → 行为的自主闭环。系统在日常使用中自动捕获经验，通过整合管线提炼为结构化知识，再以提案机制安全地反馈到知识图谱和技能中。</p>
+
+  <!-- Structured evolution flow -->
+  <h3>自主进化流程</h3>
+  <div class="evo-flow">
+    <div class="evo-stage">
+      <div class="evo-label"><div class="dot" style="background:var(--a)"></div> 捕获</div>
+      <div class="evo-content">
+        <p><strong>三条自动写入路径</strong>：工具调用结果 → observation/pitfall（post_tool_use hook）；用户对话 → feedback（user_prompt_submit hook）；Agent 显式 → memory_write。每条记忆携带结构化 context（物料/工厂/日期/场景）和本体锚点。</p>
+      </div>
+    </div>
+    <div class="evo-arr"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 3v10M5 10l3 3 3-3"/></svg></div>
+    <div class="evo-stage">
+      <div class="evo-label"><div class="dot" style="background:var(--g)"></div> 存储</div>
+      <div class="evo-content">
+        <p><strong>cognition.db</strong>（SQLite + FTS5）三层记忆：<strong>episodic</strong>（原始经验）→ <strong>semantic</strong>（结构化知识）→ <strong>procedural</strong>（可操作规则）。5 种类型：pitfall / method / observation / feedback / deviation。精确哈希去重，语义去重延迟到整合阶段。</p>
+      </div>
+    </div>
+    <div class="evo-arr"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 3v10M5 10l3 3 3-3"/></svg></div>
+    <div class="evo-stage">
+      <div class="evo-label"><div class="dot" style="background:var(--p)"></div> 召回</div>
+      <div class="evo-content">
+        <p><strong>三路联合检索</strong>，取每条记忆最佳命中：Path 1 精确 ref 匹配（最高精度）→ Path 2 一跳本体图扩展（覆盖邻近概念）→ Path 3 FTS5 关键词（兜底）。<strong>复合评分</strong> = 相关性 × 权重 + 重要性 + log(访问次数) + 时效衰减。命中条目自动更新 access_count（为后续整合提供 salience 信号）。</p>
+      </div>
+    </div>
+    <div class="evo-arr"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 3v10M5 10l3 3 3-3"/></svg></div>
+    <div class="evo-stage">
+      <div class="evo-label"><div class="dot" style="background:var(--am)"></div> 整合</div>
+      <div class="evo-content">
+        <p><strong>10 阶段管线</strong>：每次 session 结束自动触发。<strong>目的</strong>——将零散的 episodic 经验提炼、压缩、升级为可直接影响系统行为的结构化知识和知识图谱变更提案。确定性阶段（晋升/链接/追踪）无需 LLM；语义阶段（去重/发现/提炼）使用 LLM，缺失时优雅跳过。</p>
+      </div>
+    </div>
+    <div class="evo-arr"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 3v10M5 10l3 3 3-3"/></svg></div>
+    <div class="evo-stage">
+      <div class="evo-label"><div class="dot" style="background:var(--ro)"></div> 审批生效</div>
+      <div class="evo-content">
+        <p><strong>提案队列</strong>：低风险（update_meta / update_catalog / update_tool）自动批准，高风险（new_class / new_edge / new_rule 等 9 类）需人工审核。批准后 proposal_apply.py 写入知识图谱文件（JSON-LD / YAML），哈希守卫防冲突，可选同步 Neo4j 镜像。</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- 10-Stage Pipeline -->
+  <h3>10 阶段整合管线</h3>
+  <p style="font-size:.88rem;color:var(--ts);margin-bottom:.5rem"><strong>目标</strong>：将日常交互积累的大量零散 episodic 记忆，经过晋升、去重、概念发现、规则提炼、偏差修正等步骤，最终产出<strong>可直接修改知识图谱/本体/技能</strong>的结构化提案——让系统的知识基础随使用持续进化。</p>
+
+  <div class="pw">
+    <div class="pp">
+      <div class="ps"><span class="n">S1</span><span class="l">graduate</span></div>
+      <div class="pc"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 8h10M10 5l3 3-3 3"/></svg></div>
+      <div class="ps"><span class="n">S2</span><span class="l">dedup</span></div>
+      <div class="pc"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 8h10M10 5l3 3-3 3"/></svg></div>
+      <div class="ps"><span class="n">S3</span><span class="l">detect_new</span></div>
+      <div class="pc"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 8h10M10 5l3 3-3 3"/></svg></div>
+      <div class="ps"><span class="n">S4</span><span class="l">detect_meta</span></div>
+      <div class="pc"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 8h10M10 5l3 3-3 3"/></svg></div>
+      <div class="ps"><span class="n">S5</span><span class="l">extract_rules</span></div>
+    </div>
+  </div>
+  <div class="pw">
+    <div class="pp">
+      <div class="ps"><span class="n">S6</span><span class="l">link_source</span></div>
+      <div class="pc"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 8h10M10 5l3 3-3 3"/></svg></div>
+      <div class="ps"><span class="n">S7</span><span class="l">deviation</span></div>
+      <div class="pc"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 8h10M10 5l3 3-3 3"/></svg></div>
+      <div class="ps"><span class="n">S8</span><span class="l">track_cov.</span></div>
+      <div class="pc"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 8h10M10 5l3 3-3 3"/></svg></div>
+      <div class="ps"><span class="n">S9</span><span class="l">skill_learn</span></div>
+      <div class="pc"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 8h10M10 5l3 3-3 3"/></svg></div>
+      <div class="ps"><span class="n">S10</span><span class="l">distill</span></div>
+    </div>
+  </div>
+
+  <table class="tb" style="margin-top:1.25rem">
+    <thead><tr><th>阶段</th><th>LLM</th><th>做什么</th><th>产出</th></tr></thead>
+    <tbody>
+      <tr><td><strong>S1</strong> graduate</td><td><span class="badge bm">否</span></td><td>Jaccard 聚类重复的 episodic → 晋升为 semantic / procedural</td><td>层级变更</td></tr>
+      <tr><td><strong>S2</strong> dedup</td><td><span class="badge bb">是</span></td><td>LLM 判定语义重复的 episodic 条目并合并</td><td>条目精简</td></tr>
+      <tr><td><strong>S3</strong> detect_new</td><td><span class="badge bb">是</span></td><td>从经验中发现当前本体未覆盖的新概念</td><td>new_class 提案</td></tr>
+      <tr><td><strong>S4</strong> detect_meta</td><td><span class="badge bb">是</span></td><td>发现缺失/过时的本体元数据</td><td>update_meta 提案</td></tr>
+      <tr><td><strong>S5</strong> extract_rules</td><td><span class="badge bb">是</span></td><td>从 procedural 知识中提炼可操作规则</td><td>new/update_rule 提案</td></tr>
+      <tr><td><strong>S6</strong> link_source</td><td><span class="badge bm">否</span></td><td>将已知数据表 FQN 关联到本体引用</td><td>update_catalog 提案</td></tr>
+      <tr><td><strong>S7</strong> deviation</td><td><span class="badge by">可选</span></td><td>聚类偏差证据 → 修正因果 DAG</td><td>new_edge / refine_edge 提案</td></tr>
+      <tr><td><strong>S8</strong> track_coverage</td><td><span class="badge bm">否</span></td><td>注册新观测到的数据表到目录</td><td>update_catalog 提案</td></tr>
+      <tr><td><strong>S9</strong> skill_learn</td><td><span class="badge bm">否</span></td><td>将已晋升内容写入技能目录</td><td>LEARNED.md 追加</td></tr>
+      <tr><td><strong>S10</strong> distill</td><td><span class="badge bb">是</span></td><td>蒸馏 semantic 条目为元数据更新</td><td>元数据/目录提案</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<hr class="dv">
+
+<!-- ═══════════════ §4 Admin Dashboard ═══════════════ -->
+<section id="s4">
+  <div class="sn">Section 4</div>
+  <h2>Admin Dashboard 与运维</h2>
+  <p class="sd">运营人员通过 Admin 模式一屏掌握系统健康度，并通过 Slash Commands 完成记忆审查、提案审批和技能整合——确保系统进化始终在可控范围内。</p>
+
+  <div class="dash">
+<pre><span class="d">╔══════════════════════════════════════════════════════════════════════╗</span>
+<span class="d">║</span>  <span class="h">ChainSight Admin Dashboard</span>             session: <span class="g">a7f3c2d91e04</span>   <span class="d">║</span>
+<span class="d">╠══════════════════════════════════════════════════════════════════════╣</span>
+<span class="d">║</span>                                                                      <span class="d">║</span>
+<span class="d">║</span>  <span class="h">Memory</span>                              <span class="h">Knowledge Graph</span>                <span class="d">║</span>
+<span class="d">║</span>  ────────────────────────            ──────────────────────────     <span class="d">║</span>
+<span class="d">║</span>  episodic    <span class="h">127</span>   semantic   <span class="g">34</span>      ontology    <span class="h">48 classes</span>          <span class="d">║</span>
+<span class="d">║</span>  procedural  <span class="g"> 12</span>   archived   <span class="d">45</span>      DAG         <span class="h">23→17→26</span> (p→c→m)   <span class="d">║</span>
+<span class="d">║</span>  stale       <span class="w">  9</span>   frozen      <span class="d"> 3</span>      rules <span class="g">8</span>  skills <span class="g">6</span>  tables <span class="h">50</span>  <span class="d">║</span>
+<span class="d">║</span>                                                                      <span class="d">║</span>
+<span class="d">║</span>  <span class="w">Action Items</span>                                                       <span class="d">║</span>
+<span class="d">║</span>  ──────────────────────────────────────────────────────────────     <span class="d">║</span>
+<span class="d">║</span>  <span class="w">⚠ 5 pending proposals</span>   2×<span class="w">new_edge</span> 1×update_meta 1×<span class="w">new_rule</span>      <span class="d">║</span>
+<span class="d">║</span>  <span class="h">ℹ 2 skills with unmerged LEARNED.md</span>                                <span class="d">║</span>
+<span class="d">║</span>  <span class="d">Last consolidation: 2 hours ago</span>                                    <span class="d">║</span>
+<span class="d">║</span>                                                                      <span class="d">║</span>
+<span class="d">║</span>  Quick: <span class="h">/proposal-review</span>  <span class="h">/memory-review</span>  <span class="h">/skill-integrate</span>          <span class="d">║</span>
+<span class="d">╚══════════════════════════════════════════════════════════════════════╝</span></pre>
+  </div>
+
+  <h3>Admin 工作流</h3>
+  <div class="admin-steps">
+    <div class="admin-step">
+      <div>
+        <h4>进入 Admin 模式</h4>
+        <p>启动命令 <code>CHAINSIGHT_ADMIN=1 openharness</code>，然后输入 <code>/admin-dashboard</code> 查看系统快照。面板展示记忆各层计数、知识图谱覆盖率、待处理行动项。</p>
+      </div>
+    </div>
+    <div class="admin-step">
+      <div>
+        <h4>审批提案 — /proposal-review</h4>
+        <p>列出所有 pending 提案及其类型、来源阶段和变更内容。逐条审阅后选择 approve（写入知识图谱）或 reject（标记为已驳回）。高风险类型（new_class / new_edge / new_rule 等）必须走此路径。</p>
+      </div>
+    </div>
+    <div class="admin-step">
+      <div>
+        <h4>审查记忆质量 — /memory-review</h4>
+        <p>检查 stale 条目（30 天零访问）、frozen 条目、低质量 episodic。可选择归档无价值记忆、冻结需保护的高质量条目、或手动触发整合。</p>
+      </div>
+    </div>
+    <div class="admin-step">
+      <div>
+        <h4>技能整合 — /skill-integrate</h4>
+        <p>当整合管线 S9 将学习内容写入技能目录的 LEARNED.md 后，Admin 审阅这些新学到的经验，决定是否正式合并到 Skill 定义中，让下次对话直接受益。</p>
+      </div>
+    </div>
+    <div class="admin-step">
+      <div>
+        <h4>知识图谱审查 — /kg-review & /kg-sync</h4>
+        <p><code>/kg-review</code> 检查本体一致性和 DAG 连通性。<code>/kg-sync</code> 将本地知识图谱变更推送到 Neo4j 维护镜像（可选，通过 <code>CHAINSIGHT_SKIP_SYNC=1</code> 关闭）。</p>
+      </div>
+    </div>
+    <div class="admin-step">
+      <div>
+        <h4>手动整合 — /memory-consolidate</h4>
+        <p>当 Dashboard 显示大量未整合 episodic 记忆时，手动触发 10 阶段整合管线。等价于 <code>python -m chainsight.consolidate</code>，返回每阶段处理结果摘要。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<hr class="dv">
+
+<!-- ═══════════════ §5 Full Cycle Simulation ═══════════════ -->
+<section id="s5">
+  <div class="sn">Section 5</div>
+  <h2>仿真全流程设计</h2>
+  <p class="sd">从业务目标到仿真结论的端到端工作流。每个阶段都由本体 / DAG / 记忆三重 grounding 驱动，确保推荐可追溯、可验证。流程对应 §1 理想仿真闭环的具体实现。</p>
+
+  <div class="cg c2">
+    <div class="cd" style="border-left:3px solid var(--a)">
+      <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.4rem">
+        <div class="ic" style="background:var(--al);color:var(--a);margin:0">1</div>
+        <h4 style="margin:0">目标识别 (Goal & Debrief)</h4>
+      </div>
+      <p>通过 <code>simulationintake</code> skill 引导用户明确 KPI 目标和业务差距。<code>kg_query</code> 确认目标 KPI 的本体语义，<code>memory_recall</code> 检索历史类似场景的经验教训。</p>
+    </div>
+    <div class="cd" style="border-left:3px solid var(--cy)">
+      <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.4rem">
+        <div class="ic" style="background:var(--cyb);color:var(--cy);margin:0">2</div>
+        <h4 style="margin:0">Baseline 分析</h4>
+      </div>
+      <p>拉取基线数据（<code>fetch_table</code> / <code>run_sql</code>），诊断现状。向用户展示 baseline 并确认分析粒度。这一步必须在提出参数变更之前完成 (D46)。</p>
+    </div>
+    <div class="cd" style="border-left:3px solid var(--p)">
+      <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.4rem">
+        <div class="ic" style="background:var(--pb);color:var(--p);margin:0">3</div>
+        <h4 style="margin:0">What-if 场景构建</h4>
+      </div>
+      <p><code>dag_traverse</code> 找到 KPI 上游可调参数，结合 <code>feasibility_horizon</code> 排序候选杠杆。每条推荐标记 dag_supported 或 business_reasoning 证据来源 (D18)。优先单变量场景。</p>
+    </div>
+    <div class="cd" style="border-left:3px solid var(--g)">
+      <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.4rem">
+        <div class="ic" style="background:var(--gb);color:var(--g);margin:0">4</div>
+        <h4 style="margin:0">数据准备</h4>
+      </div>
+      <p><code>resolve_scope</code> 将参数变更映射到受影响配置表和物料/工厂范围。data-worker 拉取数据、生成配置。<code>validate_config</code> 5 层校验后 <code>export_excel</code> 导出。</p>
+    </div>
+    <div class="cd" style="border-left:3px solid var(--am)">
+      <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.4rem">
+        <div class="ic" style="background:var(--ab);color:var(--am);margin:0">5</div>
+        <h4 style="margin:0">仿真执行</h4>
+      </div>
+      <p>将校验通过的配置输入 ChainSight 仿真引擎。支持多场景对比（baseline vs. what-if）。结果写入 workspace 的 scenarios/results/ 目录。未来：Ax/BoTorch 驱动的参数寻优 (D43)。</p>
+    </div>
+    <div class="cd" style="border-left:3px solid var(--ro)">
+      <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.4rem">
+        <div class="ic" style="background:var(--rob);color:var(--ro);margin:0">6</div>
+        <h4 style="margin:0">分析、提案与审批</h4>
+      </div>
+      <p>presenter-worker 生成对比报告和推荐。偏差以 deviation 写入记忆，S7 可自动修正 DAG。确认的有效方法晋升为 method 永久记忆。<strong>人审批最终方案</strong>。</p>
+    </div>
+  </div>
+
+  <h3>工作区产出物</h3>
+  <table class="tb" style="margin-top:.5rem">
+    <thead><tr><th>产出物</th><th>路径</th><th>阶段</th></tr></thead>
+    <tbody>
+      <tr><td>项目简报</td><td><code>workspace/&lt;project&gt;/brief.md</code></td><td>Phase 1</td></tr>
+      <tr><td>场景设计</td><td><code>workspace/&lt;project&gt;/scenarios/&lt;name&gt;/design.md</code></td><td>Phase 3</td></tr>
+      <tr><td>Scope 定义</td><td><code>workspace/&lt;project&gt;/scenarios/&lt;name&gt;/scope.yaml</code></td><td>Phase 4</td></tr>
+      <tr><td>配置文件</td><td><code>workspace/&lt;project&gt;/scenarios/&lt;name&gt;/config/</code></td><td>Phase 4</td></tr>
+      <tr><td>仿真结果</td><td><code>workspace/&lt;project&gt;/scenarios/&lt;name&gt;/results/</code></td><td>Phase 5</td></tr>
+      <tr><td>交付报告</td><td><code>workspace/&lt;project&gt;/deliverables/</code></td><td>Phase 6</td></tr>
+    </tbody>
+  </table>
+</section>
+
+</div>
+
+<footer>
+  <strong>AI ChainSight</strong> · OpenHarness MCP Plugin · Generated 2026-04-27
+</footer>
+
+</body>
+</html>

@@ -302,8 +302,11 @@ def _get_open_deployment_inbound(
         return 0.0
 
     qty_col = _find_column(df, ['deployed_qty', 'quantity'])
-    required = ['receiving', 'date', 'material']
-    if not qty_col or not all(c in df.columns for c in required):
+    # 日期列名兼容 'date' 与 'planned_deployment_date'（与 DuckDB 路径
+    # _agg_open_deployment_in 保持一致；orchestrator 视图实际提供后者）
+    date_col = _find_column(df, ['date', 'planned_deployment_date'])
+    required = ['receiving', 'material']
+    if not qty_col or not date_col or not all(c in df.columns for c in required):
         return 0.0
 
     odf = df[
@@ -314,8 +317,8 @@ def _get_open_deployment_inbound(
     if odf.empty:
         return 0.0
 
-    odf['date'] = pd.to_datetime(odf['date'], errors='coerce')
-    future = odf[odf['date'] > date]
+    odf[date_col] = pd.to_datetime(odf[date_col], errors='coerce')
+    future = odf[odf[date_col] > date]
     return float(
         pd.to_numeric(future[qty_col], errors='coerce').fillna(0).sum()
     )

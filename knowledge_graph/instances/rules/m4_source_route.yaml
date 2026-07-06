@@ -1,0 +1,55 @@
+# M4 Production Config — Source Router
+# Determines which data source path to use for production parameters
+# per category × plant combination.
+#
+# Design Decision: D37 (2026-04-14)
+# See knowledge_graph/instances/data-catalog/tables/ps_psc_sip_recipe.md for details.
+#
+# Path definitions:
+#   A (OMP):      user provides config directly (no CDL table)
+#   B (Recipe):   CO loss folded into prd_rate; CO time = 0
+#   C (SAP Setup): CO separate from prd_rate; both from recipe table
+#
+# B and C both use ps_psc_sip_recipe as the sole CDL source.
+# The difference is whether setup time is treated as separate changeover (C) or folded into rate (B).
+#
+# Rule: same category × plant always uses the same path
+
+version: '1.1'
+
+# All non-OMP paths use a single CDL table
+common_source:
+  table: cdl_ps_hana_prd.sl.ps_psc_sip_recipe
+  fields:
+    setup_time: value_std_value1
+    setup_time_uom: uom_std_value1
+    run_time: value_std_value2
+    run_time_uom: uom_std_value2
+    output_qty: base_qty
+    output_uom: act_ops_uom
+  filters:
+    control_key_fpc: PI01   # 成品 (Finished Product)
+    control_key_semi: PG05  # 半品
+    row_filter: "base_qty > 1  # skip operation header rows"
+
+path_sources:
+  A:
+    prd_rate: user_provided
+    changeover_time: user_provided
+    notes: "OMP changeover type maps to ChainSight changeover_id. No CDL table."
+  B:
+    prd_rate: "base_qty / run_time (converted to hours)"
+    changeover_time: 0  # CO loss already in prd_rate — MUST be zero
+    notes: "ChangeoverMatrix/Definition still required (runtime check) but time=0"
+  C:
+    prd_rate: "base_qty / run_time (converted to hours)"
+    changeover_time: "setup_time (converted to hours)"
+    notes: "Setup and production are separate — no double-counting risk"
+
+# Category × Plant → Path mapping (manually maintained)
+# Format: "CATEGORY_PLANT" → path
+# Example entries (replace with actual mappings):
+routes: {}
+  # HC_Guangzhou: A
+  # BC_Tianjin: B
+  # BC_Huangpu: C

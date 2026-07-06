@@ -1,0 +1,18 @@
+# FCST_TYPE_CLARIFICATION
+# Approved from proposal prop_50502f9c5a (2026-04-25)
+#
+# When querying demand forecasts, clarify BOP vs LBE type since each
+# month has one BOP version and the remaining weekly versions are LBE.
+
+rule_id: FCST_TYPE_CLARIFICATION
+description: >
+  When querying demand forecasts, the system must clarify whether
+  the user wants BOP or LBE type, since each month has one BOP
+  version and the remaining weekly versions are LBE.
+condition: >
+  A demand forecast query is issued against ps_psc_bop_lbe_fcst
+  without a specified fcst_type.
+action: >
+  Prompt the user to specify fcst_type as either BOP or LBE
+  before returning results.
+applies_to: ps_psc_bop_lbe_fcst.fcst_type

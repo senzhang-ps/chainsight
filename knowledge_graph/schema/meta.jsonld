@@ -1,0 +1,51 @@
+{
+  "@context": "./context.jsonld",
+  "@graph": [
+    {
+      "@id": "csmeta:ChainSightMetaOntology",
+      "@type": "owl:Ontology",
+      "label": "ChainSight Meta-Ontology",
+      "comment": "Meta-ontology for AI ChainSight operational layer. Defines Agent, Skill, and Tool entities that operate on the core supply chain ontology (cs:). Enables traceability between design decisions, knowledge assets, and runtime behavior."
+    },
+
+    {"@id": "csmeta:knowledgeDomain", "@type": "owl:AnnotationProperty", "label": "knowledgeDomain", "comment": "Domain tags for the agent or skill (e.g., inventory, forecast, logistics)"},
+
+    {"@id": "csmeta:coversClass",  "@type": "owl:ObjectProperty", "label": "coversClass",  "domain": "csmeta:Skill",  "range": "owl:Class",       "comment": "Skill covers knowledge about this ontology class (cross-ontology link to cs:*)"},
+    {"@id": "csmeta:usedByAgent",  "@type": "owl:ObjectProperty", "label": "usedByAgent",  "domain": "csmeta:Skill",  "range": "csmeta:Agent",    "comment": "Skill is used by this agent"},
+    {"@id": "csmeta:hasSkill",     "@type": "owl:ObjectProperty", "label": "hasSkill",     "domain": "csmeta:Agent",  "range": "csmeta:Skill",    "comment": "Agent possesses this skill"},
+    {"@id": "csmeta:operatesOn",   "@type": "owl:ObjectProperty", "label": "operatesOn",   "domain": "csmeta:Agent",  "range": "owl:Class",       "comment": "Agent operates on this ontology class (cross-ontology link to cs:*)"},
+
+    {"@id": "csmeta:skillFile",    "@type": "owl:DatatypeProperty", "label": "skillFile",    "domain": "csmeta:Skill",              "range": "xsd:string", "comment": "Relative path to the SKILL.md file"},
+    {"@id": "csmeta:configFile",   "@type": "owl:DatatypeProperty", "label": "configFile",   "domain": "csmeta:OperationalEntity",  "range": "xsd:string", "comment": "Relative path to the config.yaml file"},
+    {"@id": "csmeta:derivedFrom",  "@type": "owl:DatatypeProperty", "label": "derivedFrom",  "domain": "csmeta:OperationalEntity",  "range": "xsd:string", "comment": "Traceability link to decision ID or memory ID"},
+    {"@id": "csmeta:status",       "@type": "owl:DatatypeProperty", "label": "status",       "domain": "csmeta:OperationalEntity",  "range": "xsd:string", "comment": "Lifecycle status: active | candidate | deprecated"},
+
+    {
+      "@id": "csmeta:OperationalEntity",
+      "@type": "owl:Class",
+      "label": "OperationalEntity",
+      "comment": "Abstract base class for all meta-ontology operational entities (Agent, Skill, Tool)."
+    },
+    {
+      "@id": "csmeta:Agent",
+      "@type": "owl:Class",
+      "label": "Agent",
+      "subClassOf": "csmeta:OperationalEntity",
+      "comment": "AI Agent definition — an autonomous or semi-autonomous actor in the ChainSight system."
+    },
+    {
+      "@id": "csmeta:Skill",
+      "@type": "owl:Class",
+      "label": "Skill",
+      "subClassOf": "csmeta:OperationalEntity",
+      "comment": "Reusable operational knowledge — a packaged domain expertise unit that can be shared across agents."
+    },
+    {
+      "@id": "csmeta:Tool",
+      "@type": "owl:Class",
+      "label": "Tool",
+      "subClassOf": "csmeta:OperationalEntity",
+      "comment": "Reserved: MCP/CLI tool registry entry — executable capability registered for agent use."
+    }
+  ]
+}

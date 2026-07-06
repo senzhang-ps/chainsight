@@ -1,0 +1,37 @@
+project: sdc-space-rccp-simulation-202605
+scenario: baseline-current-params-should-be-rccp
+title: Baseline Current Params Should-Be RCCP
+time_window:
+  start_date: 2026-06-29
+  end_date: 2027-01-03
+network_scope:
+  anchor_entity: sdc_node
+  coverage: sdc_plus_one_upstream_level
+  categories: all
+  location_identity:
+    system_codes: partial_available
+    offline_codes: incorporated_in_imported_workbook
+    reconciled_location_list: represented_in_workbook
+baseline:
+  scenario_mode: baseline_only
+  parameter_basis: current_settings
+  primary_kpi: space_rccp
+  imported_workbook: deliverables/baseline-current-params-should-be-rccp.xlsx
+  imported_supporting_files:
+    - scenarios/baseline-current-params-should-be-rccp/config/M3_SafetyStock.csv
+assumptions:
+  current_parameters_used_as_is: true
+  exact_sdc_code_list: encoded_in_imported_workbook
+  missing_space_capacity_records: resolved_in_offline_workbook
+  runner_command: user_not_provided
+parameter_changes:
+  baseline_run: no_changes
+status:
+  scope_confirmed: true
+  data_reconciliation_required: false
+  config_generated: true
+  validation_passed: true
+  validation_method: skill_package_validation
+  validation_status: pass_with_accepted_risk
+  validation_worker_reviewed: true
+  simulation_run: false

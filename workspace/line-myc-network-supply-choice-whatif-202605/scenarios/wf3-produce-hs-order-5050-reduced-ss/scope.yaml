@@ -1,0 +1,33 @@
+project: line-myc-network-supply-choice-whatif-202605
+scenario: wf3-produce-hs-order-5050-reduced-ss
+title: What-if 3
+time_window:
+  start_date: 2026-05-04
+  end_date: 2026-06-19
+network_scope:
+  line_codes:
+    - M
+    - Y
+    - C
+  entity: sourcing_sku_network
+  coverage: full_network
+baseline:
+  bop_version: 50/50 BOP
+  lbe_version_date: 2026-04-27
+  initial_inventory_basis: actual_inventory_plus_in_transit
+  initial_inventory_date: 2026-04-27
+assumptions:
+  high_side_delta_supply_choice: maintain
+  forecast_error_cov: ibpi
+  ao_percent: 0
+parameter_changes:
+  produce_policy: high_side
+  order_policy: 50_50_forecast_x_reduced_safety
+  safety_stock_policy:
+    dtc_days_from: 30
+    dtc_days_to: 15
+status:
+  scope_confirmed: true
+  config_generated: true
+  validation_passed: true
+  simulation_run: true

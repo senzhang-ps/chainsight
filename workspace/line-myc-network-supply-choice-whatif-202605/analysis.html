@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Line MYC Network Supply Choice What-If — Analysis Report</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<style>
+:root{--bg:#0b0e17;--card:rgba(15,23,42,.85);--blue:#38bdf8;--purple:#a78bfa;--amber:#fbbf24;--green:#34d399;--red:#f87171;--orange:#fb923c;--txt:#e0f2fe;--txt2:#94a3b8;--border:rgba(56,189,248,.15)}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',Inter,system-ui,sans-serif;background:var(--bg);color:var(--txt);line-height:1.6;background-image:linear-gradient(rgba(56,189,248,.03) 1px,transparent 1px),linear-gradient(90deg,rgba(56,189,248,.03) 1px,transparent 1px);background-size:40px 40px}
+.c{max-width:1440px;margin:0 auto;padding:24px 32px}
+.hdr{text-align:center;padding:48px 0 32px}
+.hdr h1{font-size:2rem;font-weight:700;background:linear-gradient(135deg,var(--blue),var(--purple));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.hdr .sub{font-size:1rem;color:var(--txt2);margin-top:8px}
+.hdr .meta{font-size:.8rem;color:var(--txt2);margin-top:4px;opacity:.7}
+nav{background:var(--card);backdrop-filter:blur(16px);border:1px solid var(--border);border-radius:12px;padding:20px 28px;margin-bottom:32px}
+nav h2{font-size:1rem;color:var(--blue);margin-bottom:12px}
+nav ol{padding-left:20px}nav li{margin:5px 0}
+nav a{color:var(--txt2);text-decoration:none;transition:color .2s}nav a:hover{color:var(--blue)}
+section{margin-bottom:40px}
+section>h2{font-size:1.4rem;font-weight:600;color:var(--blue);border-bottom:1px solid var(--border);padding-bottom:8px;margin-bottom:20px}
+h3{font-size:1.1rem;font-weight:600;color:var(--purple);margin:20px 0 12px}
+.card{background:var(--card);backdrop-filter:blur(16px);border:1px solid var(--border);border-radius:12px;padding:24px;margin-bottom:20px;transition:border-color .2s}
+.card:hover{border-color:rgba(56,189,248,.3)}
+.kpi-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;margin-bottom:24px}
+.kpi{background:var(--card);backdrop-filter:blur(16px);border:1px solid var(--border);border-radius:12px;padding:16px;text-align:center}
+.kpi .l{font-size:.7rem;color:var(--txt2);text-transform:uppercase;letter-spacing:1px}
+.kpi .v{font-size:1.6rem;font-weight:700;margin:6px 0 2px}
+.kpi .s{font-size:.72rem;color:var(--txt2)}
+.g{color:var(--green)}.w{color:var(--orange)}.b{color:var(--red)}.n{color:var(--blue)}
+table{width:100%;border-collapse:collapse;font-size:.85rem;margin:12px 0}
+thead th{background:rgba(56,189,248,.08);color:var(--blue);font-weight:600;text-align:left;padding:10px 12px;border-bottom:2px solid var(--border);position:sticky;top:0}
+td{padding:8px 12px;border-bottom:1px solid rgba(148,163,184,.1)}
+tr:hover{background:rgba(56,189,248,.04)}
+.cw{position:relative;height:340px;margin:16px 0}
+.cw.t{height:440px}
+.note{font-size:.82rem;color:var(--txt2);margin:12px 0;padding:12px 16px;border-left:3px solid var(--purple);background:rgba(167,139,250,.05);border-radius:0 8px 8px 0}
+ul.fi{list-style:none;padding:0}
+ul.fi li{position:relative;padding:8px 0 8px 24px}
+ul.fi li::before{content:'';position:absolute;left:0;top:14px;width:10px;height:10px;border-radius:50%;background:var(--blue)}
+.sc{overflow-x:auto}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+@media(max-width:900px){.two{grid-template-columns:1fr}}
+@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+.tag{display:inline-block;padding:2px 8px;border-radius:6px;font-size:.72rem;font-weight:600}
+.tg{background:rgba(52,211,153,.15);color:var(--green)}
+.tr{background:rgba(248,113,113,.15);color:var(--red)}
+.to{background:rgba(251,146,60,.15);color:var(--orange)}
+.best-row{background:rgba(52,211,153,.06)}
+</style>
+</head>
+<body>
+<div class="c">
+
+<div class="hdr">
+  <h1>Line MYC Network Supply Choice What-If — Analysis Report</h1>
+  <div class="sub">4-Scenario Comparison: Service × Inventory × Changeover × Lead Time</div>
+  <div class="meta">Period: 2026-05-04 → 2026-06-19 · 27 Network Locations · Generated 2026-05-13</div>
+</div>
+
+<nav>
+  <h2>Contents</h2>
+  <ol>
+    <li><a href="#exec">Executive Summary</a></li>
+    <li><a href="#bg">Background &amp; Context</a></li>
+    <li><a href="#scope">Analysis Scope</a></li>
+    <li><a href="#cfr">Service (CFR)</a></li>
+    <li><a href="#mei">Month End Inventory</a></li>
+    <li><a href="#co">Changeover</a></li>
+    <li><a href="#lt">Lane Lead Time</a></li>
+    <li><a href="#compare">Scenario Comparison</a></li>
+    <li><a href="#findings">Key Findings</a></li>
+    <li><a href="#reco">Recommendations</a></li>
+    <li><a href="#appendix">Appendix</a></li>
+  </ol>
+</nav>
+
+<!-- 1 EXEC -->
+<section id="exec">
+<h2>1. Executive Summary</h2>
+<div class="kpi-row">
+  <div class="kpi"><div class="l">Best Service</div><div class="v g">wf2</div><div class="s">99.46% Jun CFR</div></div>
+  <div class="kpi"><div class="l">Lowest Jun ME Inv</div><div class="v n">wf4</div><div class="s">119,703 cases network</div></div>
+  <div class="kpi"><div class="l">Best Balanced</div><div class="v n">wf3</div><div class="s">142,720 cases · 98.22% CFR</div></div>
+  <div class="kpi"><div class="l">Lowest Changeover</div><div class="v n">wf3/wf4</div><div class="s">11 May CO count</div></div>
+</div>
+<div class="card">
+  <p><strong>wf2</strong> (produce 50/50, order high-side, current SS) delivers the strongest service at both network and key-node level, with 100% CFR at C937 in June. <strong>wf3</strong> (produce HS, order 50/50, reduced SS) offers the best balance of inventory relief and halved changeover burden, at a moderate service trade-off. <strong>wf1</strong> is dominated by wf2 on every metric. <strong>wf4</strong> is dominated by wf3 — similar inventory benefit but worse service.</p>
+  <p style="margin-top:12px"><strong>Month End Inventory (case qty):</strong> Network ME inventory ranges from 119,703 cases (wf4 Jun) to 175,141 cases (wf1 May). Current-SS scenarios (wf1/wf2) hold 15–18% more end-of-period inventory than reduced-SS scenarios (wf3/wf4). The dominant inventory node is <code>0386</code> in all scenarios.</p>
+</div>
+</section>
+
+<!-- 2 BG -->
+<section id="bg">
+<h2>2. Background &amp; Context</h2>
+<div class="card">
+  <h3>Goal</h3>
+  <p>Evaluate four what-if scenarios combining supply choice policy and safety stock policy for Line M/Y/C SKUs to compare service and inventory implications.</p>
+  <h3>Scenario Definitions</h3>
+  <table>
+    <thead><tr><th>Scenario</th><th>Produce Policy</th><th>Order Policy</th><th>Safety Stock</th></tr></thead>
+    <tbody>
+      <tr><td>wf1</td><td>High-side</td><td>50/50 forecast</td><td>Current SS</td></tr>
+      <tr class="best-row"><td>wf2</td><td>50/50</td><td>High-side</td><td>Current SS</td></tr>
+      <tr><td>wf3</td><td>High-side</td><td>50/50 forecast</td><td>DTC 30d → 15d</td></tr>
+      <tr><td>wf4</td><td>50/50</td><td>High-side</td><td>DTC 30d → 15d</td></tr>
+    </tbody>
+  </table>
+  <h3>Assumptions</h3>
+  <ul style="padding-left:20px;color:var(--txt2)">
+    <li>Baseline: Apr 27 LBE 50/50 BOP</li>
+    <li>Initial inventory: Apr 27 actual (SOH + in-transit)</li>
+    <li>Forecast error CoV: follow iBPI</li>
+    <li>AO: 0%</li>
+  </ul>
+</div>
+</section>
+
+<!-- 3 SCOPE -->
+<section id="scope">
+<h2>3. Analysis Scope</h2>
+<div class="card">
+  <div class="two">
+    <div>
+      <table>
+        <tr><td style="color:var(--txt2)">Simulation Period</td><td>2026-05-04 → 2026-06-19</td></tr>
+        <tr><td style="color:var(--txt2)">Reporting Months</td><td>May, June (2 months)</td></tr>
+        <tr><td style="color:var(--txt2)">Network</td><td>Full Line M/Y/C, 27 locations</td></tr>
+        <tr><td style="color:var(--txt2)">Production Site</td><td>0386</td></tr>
+      </table>
+    </div>
+    <div>
+      <table>
+        <tr><td style="color:var(--txt2)">KPI #1</td><td>Service (CFR) by month × location</td></tr>
+        <tr><td style="color:var(--txt2)">KPI #2</td><td>Month End Inventory (cases) by month × location</td></tr>
+        <tr><td style="color:var(--txt2)">KPI #3</td><td>Changeover by month × line × type</td></tr>
+        <tr><td style="color:var(--txt2)">KPI #4</td><td>Lane Lead Time diagnostics</td></tr>
+      </table>
+    </div>
+  </div>
+</div>
+</section>
+
+<!-- 4 CFR -->
+<section id="cfr">
+<h2>4. Service (CFR)</h2>
+<h3>4.1 Network CFR by Month</h3>
+<div class="card">
+  <div class="cw"><canvas id="cfrMonth"></canvas></div>
+  <table>
+    <thead><tr><th>Scenario</th><th>May CFR</th><th>Jun CFR</th></tr></thead>
+    <tbody>
+      <tr><td>wf1</td><td><span class="g">98.81%</span></td><td><span class="g">98.93%</span></td></tr>
+      <tr class="best-row"><td>wf2</td><td><span class="g">99.15%</span></td><td><span class="g">99.46%</span></td></tr>
+      <tr><td>wf3</td><td><span class="w">97.29%</span></td><td><span class="g">98.22%</span></td></tr>
+      <tr><td>wf4</td><td><span class="w">96.04%</span></td><td><span class="w">97.02%</span></td></tr>
+    </tbody>
+  </table>
+</div>
+
+<h3>4.2 Key Node: C937</h3>
+<div class="card">
+  <div class="cw"><canvas id="cfrC937"></canvas></div>
+  <table>
+    <thead><tr><th>Scenario</th><th>C937 May</th><th>C937 Jun</th><th>Jun Order Qty</th></tr></thead>
+    <tbody>
+      <tr><td>wf1</td><td><span class="w">94.59%</span></td><td><span class="w">90.47%</span></td><td>787</td></tr>
+      <tr class="best-row"><td>wf2</td><td><span class="g">99.04%</span></td><td><span class="g">100.00%</span></td><td>819</td></tr>
+      <tr><td>wf3</td><td><span class="w">94.43%</span></td><td><span class="b">85.03%</span></td><td>862</td></tr>
+      <tr><td>wf4</td><td><span class="w">96.89%</span></td><td><span class="b">82.38%</span></td><td>993</td></tr>
+    </tbody>
+  </table>
+</div>
+</section>
+
+<!-- 5 MEI -->
+<section id="mei">
+<h2>5. Month End Inventory</h2>
+<h3>5.1 Network Month End Inventory (Cases)</h3>
+<div class="card">
+  <div class="cw"><canvas id="meiNet"></canvas></div>
+  <table>
+    <thead><tr><th>Scenario</th><th>May ME Date</th><th>May Inv (Cases)</th><th>Jun ME Date</th><th>Jun Inv (Cases)</th></tr></thead>
+    <tbody>
+      <tr><td>wf1</td><td>2026-05-31</td><td>175,141</td><td>2026-06-19</td><td>165,810</td></tr>
+      <tr><td>wf2</td><td>2026-05-31</td><td>152,415</td><td>2026-06-19</td><td>140,876</td></tr>
+      <tr><td>wf3</td><td>2026-05-31</td><td>160,528</td><td>2026-06-19</td><td>142,720</td></tr>
+      <tr><td>wf4</td><td>2026-05-31</td><td>136,418</td><td>2026-06-19</td><td>119,703</td></tr>
+    </tbody>
+  </table>
+  <div class="note">June ME date is 2026-06-19 (simulation end date) for all scenarios, not a calendar month end.</div>
+</div>
+
+<h3>5.2 Key Node: 0386 Month End Inventory (Cases)</h3>
+<div class="card">
+  <div class="cw"><canvas id="mei0386"></canvas></div>
+  <table>
+    <thead><tr><th>Scenario</th><th>0386 May (Cases)</th><th>0386 Jun (Cases)</th><th>Δ vs wf1 Jun</th></tr></thead>
+    <tbody>
+      <tr><td>wf1</td><td>30,411</td><td>39,835</td><td>—</td></tr>
+      <tr><td>wf2</td><td>29,899</td><td>34,403</td><td><span class="g">−13.6%</span></td></tr>
+      <tr><td>wf3</td><td>21,418</td><td>27,318</td><td><span class="g">−31.4%</span></td></tr>
+      <tr><td>wf4</td><td>18,787</td><td>28,458</td><td><span class="g">−28.6%</span></td></tr>
+    </tbody>
+  </table>
+</div>
+
+<h3>5.3 Network ME Inventory Composition by Scenario (Jun)</h3>
+<div class="card">
+  <div class="cw t"><canvas id="meiDcBar"></canvas></div>
+  <div class="note">Top 5 locations by case qty shown in stacked bar. Remaining locations grouped as "Other".</div>
+</div>
+</section>
+
+<!-- 6 CO -->
+<section id="co">
+<h2>6. Changeover</h2>
+<div class="card">
+  <div class="cw"><canvas id="coBar"></canvas></div>
+  <table>
+    <thead><tr><th>Scenario</th><th>May Count</th><th>May Time (hrs)</th><th>Jun Count</th><th>Jun Time (hrs)</th></tr></thead>
+    <tbody>
+      <tr><td>wf1</td><td>22</td><td>35.83</td><td>3</td><td>5.67</td></tr>
+      <tr><td>wf2</td><td>23</td><td>34.68</td><td>3</td><td>4.50</td></tr>
+      <tr class="best-row"><td>wf3</td><td>11</td><td>17.91</td><td>1</td><td>0.83</td></tr>
+      <tr><td>wf4</td><td>11</td><td>17.91</td><td>3</td><td>5.50</td></tr>
+    </tbody>
+  </table>
+  <div class="note">All changeover activity occurs at production site 0386. Dominant type is Washout_changeover across all lines.</div>
+</div>
+</section>
+
+<!-- 7 LT -->
+<section id="lt">
+<h2>7. Lane Lead Time Diagnostics</h2>
+<div class="card">
+  <h3>Key Lanes Summary</h3>
+  <div class="sc">
+  <table>
+    <thead><tr><th>Scenario</th><th>Lane</th><th>Mean Total LT</th><th>P90 Total LT</th><th>Mean Wait MOQ</th><th>Mean OTD</th><th>Cfg Total LT</th></tr></thead>
+    <tbody>
+      <tr><td>wf1</td><td>C816 → C937</td><td>7.69</td><td>9.8</td><td>1.57</td><td>6.12</td><td>8.0</td></tr>
+      <tr class="best-row"><td>wf2</td><td>C816 → C937</td><td>7.03</td><td>8.0</td><td>0.89</td><td>6.13</td><td>8.0</td></tr>
+      <tr><td>wf3</td><td>C816 → C937</td><td>7.35</td><td>9.0</td><td>1.23</td><td>6.12</td><td>8.0</td></tr>
+      <tr><td>wf4</td><td>C816 → C937</td><td>7.18</td><td>8.0</td><td>1.06</td><td>6.12</td><td>8.0</td></tr>
+      <tr><td>wf1</td><td>C810 → A673</td><td>7.49</td><td>9.0</td><td>1.38</td><td>6.11</td><td>8.0</td></tr>
+      <tr><td>wf2</td><td>C810 → A673</td><td>7.62</td><td>9.0</td><td>1.48</td><td>6.14</td><td>8.0</td></tr>
+      <tr><td>wf3</td><td>C810 → A673</td><td>7.32</td><td>8.0</td><td>1.19</td><td>6.13</td><td>8.0</td></tr>
+      <tr><td>wf4</td><td>C810 → A673</td><td>7.38</td><td>9.0</td><td>1.25</td><td>6.12</td><td>8.0</td></tr>
+      <tr><td>wf1</td><td>0386 → D594</td><td>4.91</td><td>6.0</td><td>0.79</td><td>4.12</td><td>6.0</td></tr>
+      <tr><td>wf2</td><td>0386 → D594</td><td>4.88</td><td>6.0</td><td>0.79</td><td>4.08</td><td>6.0</td></tr>
+      <tr><td>wf3</td><td>0386 → D594</td><td>5.08</td><td>6.0</td><td>0.96</td><td>4.13</td><td>6.0</td></tr>
+      <tr><td>wf4</td><td>0386 → D594</td><td>5.08</td><td>6.0</td><td>0.95</td><td>4.12</td><td>6.0</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <div class="note">Full lane diagnostics (mean/median/p90 for waiting MOQ, OTD, PTD) available in the Excel workbook <code>lane_lt_diag</code> sheet.</div>
+</div>
+</section>
+
+<!-- 8 COMPARE -->
+<section id="compare">
+<h2>8. Scenario Comparison</h2>
+<div class="card">
+  <div class="sc">
+  <table>
+    <thead><tr>
+      <th>Scenario</th><th>May CFR</th><th>Jun CFR</th><th>C937 Jun</th>
+      <th>Net Jun ME Inv (Cases)</th><th>0386 Jun ME Inv (Cases)</th>
+      <th>May CO Count</th><th>Role</th>
+    </tr></thead>
+    <tbody>
+      <tr><td>wf1</td><td><span class="g">98.81%</span></td><td><span class="g">98.93%</span></td><td><span class="w">90.47%</span></td><td>165,810</td><td>39,835</td><td>22</td><td><span class="tag tr">dominated by wf2</span></td></tr>
+      <tr class="best-row"><td>wf2</td><td><span class="g">99.15%</span></td><td><span class="g">99.46%</span></td><td><span class="g">100.00%</span></td><td>140,876</td><td>34,403</td><td>23</td><td><span class="tag tg">service-first</span></td></tr>
+      <tr><td>wf3</td><td><span class="w">97.29%</span></td><td><span class="g">98.22%</span></td><td><span class="b">85.03%</span></td><td>142,720</td><td>27,318</td><td>11</td><td><span class="tag tg">balanced inventory-relief</span></td></tr>
+      <tr><td>wf4</td><td><span class="w">96.04%</span></td><td><span class="w">97.02%</span></td><td><span class="b">82.38%</span></td><td>119,703</td><td>28,458</td><td>11</td><td><span class="tag tr">dominated by wf3</span></td></tr>
+    </tbody>
+  </table>
+  </div>
+</div>
+</section>
+
+<!-- 9 FINDINGS -->
+<section id="findings">
+<h2>9. Key Findings</h2>
+<div class="card">
+  <ul class="fi">
+    <li><strong>wf2 is the best service scenario</strong> at both network-month and key-node (C937) level, achieving 100% CFR at C937 in June with moderate inventory.</li>
+    <li><strong>wf1 is dominated by wf2</strong> on every metric — lower service, higher ME inventory, and similar changeover. There is no dimension where wf1 wins.</li>
+    <li><strong>wf3 and wf4 deliver nearly identical inventory relief</strong>, but wf3 is consistently safer on service. wf4 is dominated by wf3.</li>
+    <li><strong>Month End Inventory:</strong> reduced-SS scenarios (wf3/wf4) carry 14–28% less end-of-period inventory than current-SS scenarios (wf1/wf2). The highest absolute inventory is at <code>0386</code> in all scenarios.</li>
+    <li><strong>wf4 has the lowest absolute inventory</strong> (119,703 cases network at sim end), but this comes at a service penalty (82.4% at C937).</li>
+    <li><strong>Changeover burden is halved</strong> in reduced-SS scenarios (wf3/wf4: 11 May counts) vs current-SS (wf1/wf2: 22–23 May counts). The dominant type is washout-related at 0386.</li>
+    <li><strong>Lane lead times are under control</strong> on average, but tail risk (P90 > cfg total LT) persists on C816→C937 in wf1 and wf3.</li>
+  </ul>
+</div>
+</section>
+
+<!-- 10 RECO -->
+<section id="reco">
+<h2>10. Recommendations</h2>
+<div class="card">
+  <ol style="padding-left:20px">
+    <li style="margin:12px 0"><strong>If the decision priority is service protection, choose wf2.</strong> It dominates wf1 and has the cleanest C937 service profile.</li>
+    <li style="margin:12px 0"><strong>If the decision priority is balanced inventory relief, choose wf3.</strong> It offers −31% ME inventory at 0386, and half the changeover burden, at a moderate service trade-off.</li>
+    <li style="margin:12px 0"><strong>Do not select wf1.</strong> wf2 is strictly better on all measured KPIs.</li>
+    <li style="margin:12px 0"><strong>Do not select wf4 over wf3.</strong> wf4 has slightly lower absolute inventory but worse service, especially at C937 (82.4% vs 85.0%).</li>
+    <li style="margin:12px 0"><strong>Monitor C816→C937 lane execution risk</strong> using the P90 total LT and P90 waiting MOQ from the workbook if either wf1 or wf3 is selected.</li>
+  </ol>
+</div>
+</section>
+
+<!-- 11 APPENDIX -->
+<section id="appendix">
+<h2>11. Appendix</h2>
+<div class="card">
+  <h3>Data Sources</h3>
+  <table>
+    <tr><td style="color:var(--txt2)">Service</td><td>module1_output_orderlog (deduped) + module1_output_shipmentlog</td></tr>
+    <tr><td style="color:var(--txt2)">Month End Inv</td><td>orchestrator_unrestricted_inventory at last date per month (case qty)</td></tr>
+    <tr><td style="color:var(--txt2)">Changeover</td><td>module4_output_changeoverlog</td></tr>
+    <tr><td style="color:var(--txt2)">Lane LT</td><td>module6_output_deliveryplan + cfg_global_leadtime</td></tr>
+  </table>
+  <h3>Calculation Notes</h3>
+  <ul style="padding-left:20px;color:var(--txt2)">
+    <li>CFR = shipment_qty / order_qty</li>
+    <li>Month End Inventory = inventory at the last available date in each month, measured in case qty (Jun uses sim end 2026-06-19)</li>
+    <li>Changeover percent = type count / total line-month count</li>
+    <li>Lane LT: cfg_total_lt = pdt + gr</li>
+  </ul>
+  <h3>Run IDs</h3>
+  <table>
+    <tr><td>wf1</td><td><code>db_wf1-produce-hs-order-5050-current-ss_20260512_230651</code></td></tr>
+    <tr><td>wf2</td><td><code>db_wf2-produce-5050-order-hs-current-ss_20260512_230707</code></td></tr>
+    <tr><td>wf3</td><td><code>db_wf3-produce-hs-order-5050-reduced-ss_20260512_230717</code></td></tr>
+    <tr><td>wf4</td><td><code>db_wf4-produce-5050-order-hs-reduced-ss_20260512_230848</code></td></tr>
+  </table>
+</div>
+</section>
+
+</div>
+
+<script>
+Chart.defaults.color='#94a3b8';
+Chart.defaults.borderColor='rgba(56,189,248,.1)';
+Chart.defaults.font.family="'Segoe UI',Inter,system-ui";
+const S=['wf1','wf2','wf3','wf4'];
+const SC=['#38bdf8','#34d399','#a78bfa','#fbbf24'];
+const M=['May','Jun'];
+
+// CFR by Month
+new Chart(document.getElementById('cfrMonth'),{type:'bar',data:{labels:M,datasets:S.map((s,i)=>({
+  label:s,data:[[98.81,98.93],[99.15,99.46],[97.29,98.22],[96.04,97.02]][i],
+  backgroundColor:SC[i]+'80',borderColor:SC[i],borderWidth:1,borderRadius:6
+}))},options:{responsive:true,maintainAspectRatio:false,scales:{y:{min:94,max:100,ticks:{callback:v=>v+'%'}}},
+plugins:{tooltip:{callbacks:{label:c=>c.dataset.label+': '+c.parsed.y.toFixed(2)+'%'}}}}});
+
+// CFR at C937
+new Chart(document.getElementById('cfrC937'),{type:'bar',data:{labels:M,datasets:S.map((s,i)=>({
+  label:s,data:[[94.59,90.47],[99.04,100.00],[94.43,85.03],[96.89,82.38]][i],
+  backgroundColor:SC[i]+'80',borderColor:SC[i],borderWidth:1,borderRadius:6
+}))},options:{responsive:true,maintainAspectRatio:false,scales:{y:{min:78,max:102,ticks:{callback:v=>v+'%'}}},
+plugins:{tooltip:{callbacks:{label:c=>c.dataset.label+': '+c.parsed.y.toFixed(2)+'%'}}}}});
+
+// MEI Network (Cases)
+new Chart(document.getElementById('meiNet'),{type:'bar',data:{labels:M,datasets:S.map((s,i)=>({
+  label:s,data:[[175141,165810],[152415,140876],[160528,142720],[136418,119703]][i],
+  backgroundColor:SC[i]+'80',borderColor:SC[i],borderWidth:1,borderRadius:6
+}))},options:{responsive:true,maintainAspectRatio:false,scales:{y:{beginAtZero:true,ticks:{callback:v=>(v/1000).toFixed(0)+'K cases'}}}}});
+
+// MEI at 0386 (Cases)
+new Chart(document.getElementById('mei0386'),{type:'bar',data:{labels:M,datasets:S.map((s,i)=>({
+  label:s,data:[[30411,39835],[29899,34403],[21418,27318],[18787,28458]][i],
+  backgroundColor:SC[i]+'80',borderColor:SC[i],borderWidth:1,borderRadius:6
+}))},options:{responsive:true,maintainAspectRatio:false,scales:{y:{beginAtZero:true,ticks:{callback:v=>(v/1000).toFixed(0)+'K cases'}}}}});
+
+// MEI by DC stacked bar (Jun only, top 5 + Other, in cases)
+const topLocs=['0386','E332','E094','E351','E355'];
+const topColors=['#38bdf8','#a78bfa','#34d399','#fbbf24','#f87171'];
+const junMeiByLoc={
+  wf1:{'0386':39835,'E332':14555,'E094':13571,'E351':12605,'E355':11596},
+  wf2:{'0386':34403,'E332':12192,'E094':10357,'E351':0,'E355':9937},
+  wf3:{'0386':27318,'E332':16903,'E094':0,'E351':15560,'E355':14518},
+  wf4:{'0386':28458,'E332':12502,'E094':0,'E351':12031,'E355':10751}
+};
+const junMeiTotal={wf1:165810,wf2:140876,wf3:142720,wf4:119703};
+const junMeiOther={};
+S.forEach(s=>{
+  let sum=0;topLocs.forEach(l=>{sum+=(junMeiByLoc[s][l]||0)});
+  junMeiOther[s]=junMeiTotal[s]-sum;
+});
+const dsLocs=topLocs.map((l,i)=>({
+  label:l,data:S.map(s=>(junMeiByLoc[s][l]||0)),
+  backgroundColor:topColors[i]+'80',borderColor:topColors[i],borderWidth:1
+}));
+dsLocs.push({label:'Other',data:S.map(s=>junMeiOther[s]),backgroundColor:'rgba(148,163,184,0.3)',borderColor:'#94a3b8',borderWidth:1});
+new Chart(document.getElementById('meiDcBar'),{type:'bar',data:{labels:S,datasets:dsLocs},
+options:{responsive:true,maintainAspectRatio:false,scales:{x:{stacked:true},y:{stacked:true,ticks:{callback:v=>(v/1000).toFixed(0)+'K cases'}}},
+plugins:{legend:{position:'right',labels:{boxWidth:12,font:{size:11}}}}}});
+
+// Changeover
+new Chart(document.getElementById('coBar'),{type:'bar',data:{labels:M,datasets:S.map((s,i)=>({
+  label:s,data:[[22,3],[23,3],[11,1],[11,3]][i],
+  backgroundColor:SC[i]+'80',borderColor:SC[i],borderWidth:1,borderRadius:6
+}))},options:{responsive:true,maintainAspectRatio:false,scales:{y:{beginAtZero:true,title:{display:true,text:'CO Count'}}}}});
+</script>
+</body>
+</html>

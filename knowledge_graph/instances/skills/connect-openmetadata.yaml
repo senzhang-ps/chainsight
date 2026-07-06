@@ -1,0 +1,12 @@
+id: "csmeta:connect-openmetadata"
+type: "csmeta:Skill"
+name: Connect OpenMetadata
+description: "Authenticate against OpenMetadata / Metadata Hub (metadatahub.pg.com.cn), obtain or rotate a Personal Access Token, and call the OM REST API."
+skill_file: .agents/skills/connect-openmetadata/SKILL.md
+covers_classes: []
+used_by_agents: []
+derived_from:
+  decisions: []
+  design_section: "metadata"
+tags: [openmetadata, auth, token, metadata]
+status: active

@@ -1,0 +1,14 @@
+id: "csmeta:chainsight-result-analysis"
+type: "csmeta:Skill"
+name: ChainSight Result Analysis
+description: "Analyzes completed ChainSight simulation outputs and produces evidence-based findings, insights, and recommendations."
+skill_file: .agents/skills/chainsight-result-analysis/SKILL.md
+covers_classes:
+  - Metric
+  - Plan
+used_by_agents: []
+derived_from:
+  decisions: []
+  design_section: "analysis"
+tags: [analysis, simulation, kpi, reporting, insights]
+status: active

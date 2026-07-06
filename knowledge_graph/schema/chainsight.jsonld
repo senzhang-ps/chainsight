@@ -1,0 +1,1335 @@
+{
+  "@context": "./context.jsonld",
+  "@graph": [
+    {
+      "@id": "cs:ChainSightOntology",
+      "@type": "owl:Ontology",
+      "label": "ChainSight Supply Chain Ontology",
+      "comment": "Ontology for the ChainSight supply chain simulation platform. Defines entities, relationships, and constraints for LLM-driven reasoning and what-if analysis."
+    },
+
+    {"@id": "cs:source_type",   "@type": "owl:AnnotationProperty", "label": "source_type",   "comment": "Data origin: config_input | simulation_output | derived"},
+    {"@id": "cs:source_config", "@type": "owl:AnnotationProperty", "label": "source_config", "comment": "Reference config table or module that produces this entity data"},
+    {"@id": "cs:properties",    "@type": "owl:AnnotationProperty", "label": "properties",    "comment": "LLM-readable per-class property summary with types, descriptions, and constraints"},
+    {"@id": "cs:feasibility_horizon", "@type": "owl:AnnotationProperty", "label": "feasibility_horizon", "comment": "Change feasibility time horizon: short_term (adjustable within weeks), medium_term (requires months), long_term (requires quarters+)"},
+    {"@id": "cs:product_tier", "@type": "owl:AnnotationProperty", "label": "product_tier", "comment": "General product tier classification/hierarchy (e.g., tier_1, tier_2, tier_3). A general-purpose categorization that can be used for differentiated business policies such as service targets, inventory strategies, or production prioritization — but is not exclusively tied to any single policy."},
+    {"@id": "cs:source_table", "@type": "owl:AnnotationProperty", "label": "source_table", "comment": "Databricks source table FQN(s) for this entity class. Array of 3-segment catalog.schema.table identifiers. See tables/*.md for column-level schema and usage notes."},
+
+    {"@id": "cs:material",  "@type": "owl:ObjectProperty", "label": "material",  "comment": "Associated material (product/SKU)", "range": "cs:Material"},
+    {"@id": "cs:location",  "@type": "owl:ObjectProperty", "label": "location",  "comment": "Associated location",               "range": "cs:Location"},
+    {"@id": "cs:sending",   "@type": "owl:ObjectProperty", "label": "sending",   "comment": "Origin location",                   "range": "cs:Location"},
+    {"@id": "cs:receiving", "@type": "owl:ObjectProperty", "label": "receiving", "comment": "Destination location",               "range": "cs:Location"},
+
+    {"@id": "cs:param_name",          "@type": "owl:DatatypeProperty", "label": "param_name",          "domain": "cs:TunableParameter", "range": "xsd:string",  "comment": "Parameter name matching config table field"},
+    {"@id": "cs:module",              "@type": "owl:DatatypeProperty", "label": "module",              "range": "xsd:string",                                   "comment": "Simulation module (M1–M6 / Orchestrator)"},
+    {"@id": "cs:controls",            "@type": "owl:DatatypeProperty", "label": "controls",            "domain": "cs:TunableParameter", "range": "xsd:string",  "comment": "What this parameter controls"},
+    {"@id": "cs:param_type",          "@type": "owl:DatatypeProperty", "label": "param_type",          "domain": "cs:TunableParameter", "range": "xsd:string",  "comment": "Data type (float, integer, enum, string)"},
+    {"@id": "cs:metric_name",         "@type": "owl:DatatypeProperty", "label": "metric_name",         "domain": "cs:Metric",           "range": "xsd:string",  "comment": "Metric identifier"},
+    {"@id": "cs:computation_source",  "@type": "owl:DatatypeProperty", "label": "computation_source",  "domain": "cs:Metric",           "range": "xsd:string",  "comment": "How the metric is computed"},
+    {"@id": "cs:unit",                "@type": "owl:DatatypeProperty", "label": "unit",                "domain": "cs:Metric",           "range": "xsd:string",  "comment": "Unit of measurement"},
+
+    {"@id": "cs:influences",      "@type": "owl:ObjectProperty", "label": "influences",      "domain": "cs:TunableParameter",  "range": "cs:Plan",            "comment": "Parameter affects plan generation/execution"},
+    {"@id": "cs:constrains",      "@type": "owl:ObjectProperty", "label": "constrains",      "domain": "cs:Resource",          "range": "cs:Plan",            "comment": "Resource capacity constrains plan execution"},
+    {"@id": "cs:measuredBy",      "@type": "owl:ObjectProperty", "label": "measuredBy",      "domain": "cs:Plan",              "range": "cs:Metric",          "comment": "Plan outputs measured by KPI metric"},
+    {"@id": "cs:triggers",        "@type": "owl:ObjectProperty", "label": "triggers",        "domain": "cs:Plan",              "range": "cs:Plan",            "comment": "Plan triggers downstream plan (ProductionPlan→DeploymentPlan→OpenDeployment→IntersiteDelivery)"},
+    {"@id": "cs:drivesNetDemand", "@type": "owl:ObjectProperty", "label": "drivesNetDemand", "domain": "cs:DemandForecast",    "range": "cs:ProductionPlan",  "comment": "Forecast + SafetyStock - UnrestrictedInventory = net demand, which drives production planning"},
+    {"@id": "cs:fulfills",        "@type": "owl:ObjectProperty", "label": "fulfills",        "domain": "cs:CustomerShipment",  "range": "cs:CustomerOrder",   "comment": "Shipment fulfills customer order from DC inventory"},
+
+    {"@id": "cs:forecasts",              "@type": "owl:ObjectProperty", "label": "forecasts",              "domain": "cs:DemandForecast",       "range": "cs:CustomerOrder",      "comment": "Forecast anticipates customer demand — M1 uses forecast to generate daily customer orders"},
+    {"@id": "cs:drivesDeployment",       "@type": "owl:ObjectProperty", "label": "drivesDeployment",       "domain": "cs:DemandForecast",       "range": "cs:DeploymentPlan",     "comment": "Net demand (forecast + SS − inventory) drives deployment planning in M5"},
+    {"@id": "cs:createsOpenDeployment",  "@type": "owl:ObjectProperty", "label": "createsOpenDeployment",  "domain": "cs:DeploymentPlan",       "range": "cs:OpenDeployment",     "comment": "Deployment plan creates pending open deployments awaiting truck release"},
+    {"@id": "cs:executesDelivery",       "@type": "owl:ObjectProperty", "label": "executesDelivery",       "domain": "cs:OpenDeployment",       "range": "cs:IntersiteDelivery", "comment": "M6 logistics execution converts open deployment into intersite delivery"},
+    {"@id": "cs:produces",              "@type": "owl:ObjectProperty", "label": "produces",              "domain": "cs:ProductionPlan",       "range": "cs:ProductionGR",       "comment": "Production plan execution creates goods receipt (available after MCT)"},
+    {"@id": "cs:transitsAs",            "@type": "owl:ObjectProperty", "label": "transitsAs",            "domain": "cs:IntersiteDelivery",    "range": "cs:InTransit",          "comment": "Intersite delivery creates in-transit inventory record"},
+    {"@id": "cs:receivedAs",            "@type": "owl:ObjectProperty", "label": "receivedAs",            "domain": "cs:InTransit",            "range": "cs:DeliveryGR",         "comment": "In-transit goods arrive and become delivery goods receipt"},
+    {"@id": "cs:constrainsProduction",   "@type": "owl:ObjectProperty", "label": "constrainsProduction",   "domain": "cs:ProductionLine",       "range": "cs:ProductionPlan",     "comment": "Production line capacity (hours/day) constrains achievable production quantity"},
+    {"@id": "cs:constrainsStorage",      "@type": "owl:ObjectProperty", "label": "constrainsStorage",      "domain": "cs:SpaceCapacity",        "range": "cs:DeploymentPlan",     "comment": "Storage capacity constrains deployment plan targets at receiving locations"},
+    {"@id": "cs:constrainsLogistics",    "@type": "owl:ObjectProperty", "label": "constrainsLogistics",    "domain": "cs:TruckCapacity",        "range": "cs:IntersiteDelivery", "comment": "Truck availability constrains daily logistics execution volume"},
+    {"@id": "cs:configuresProduction",   "@type": "owl:ObjectProperty", "label": "configuresProduction",   "domain": "cs:MaterialLocationLine", "range": "cs:ProductionPlan",     "comment": "Material-location-line configuration determines what can be produced (rate, batch, line assignment)"},
+
+    {
+      "@id": "cs:Network",
+      "@type": "owl:Class",
+      "label": "Network",
+      "comment": "Supply chain network topology entities — locations and arcs that form the physical structure."
+    },
+    {
+      "@id": "cs:Product",
+      "@type": "owl:Class",
+      "label": "Product",
+      "comment": "Product entities — materials flowing through the network and their production mappings."
+    },
+    {
+      "@id": "cs:Resource",
+      "@type": "owl:Class",
+      "label": "Resource",
+      "comment": "Execution capacity entities — production lines, storage space, vehicles."
+    },
+    {
+      "@id": "cs:Inventory",
+      "@type": "owl:Class",
+      "label": "Inventory",
+      "comment": "Inventory state entities — current stock positions across the network."
+    },
+    {
+      "@id": "cs:Plan",
+      "@type": "owl:Class",
+      "label": "Plan",
+      "comment": "Business transaction entities — orders, shipments, production plans, deployment plans."
+    },
+    {
+      "@id": "cs:Parameter",
+      "@type": "owl:Class",
+      "label": "Parameter",
+      "comment": "Tunable business parameters — the primary targets for what-if scenario analysis."
+    },
+    {
+      "@id": "cs:Metric",
+      "@type": "owl:Class",
+      "label": "Metric",
+      "comment": "KPI and performance metric entities — outputs measured by the simulation."
+    },
+
+
+    {
+      "@id": "cs:Location",
+      "@type": "owl:Class",
+      "subClassOf": "cs:Network",
+      "label": "Location",
+      "altLabel": ["site", "plant", "DC", "地点"],
+      "comment": "A physical node in the supply chain network. Each location is either a Plant (manufacturing site) or DC (distribution center). Location IDs are 4-digit zero-padded strings.",
+      "cs:properties": {
+        "location_id": {
+          "type": "xsd:string",
+          "description": "4-digit zero-padded location identifier (e.g. '0001', 'A888')",
+          "required": true
+        },
+        "location_type": {
+          "type": "xsd:string",
+          "description": "Type of location in the network",
+          "enum": ["Plant", "DC"],
+          "required": true
+        }
+      },
+      "cs:source_config": "Global_Network",
+      "cs:source_table": ["cdl_ps_hana_prd.sl.ps_psc_supply_network_design_master"],
+      "cs:source_type": "config_input"
+    },
+
+    {
+      "@id": "cs:TransportationLane",
+      "@type": "owl:Class",
+      "subClassOf": "cs:Network",
+      "label": "TransportationLane",
+      "altLabel": ["TLane", "lane", "运输线路"],
+      "comment": "A directed transportation lane between two locations defining lead time parameters for material flow. Each lane connects a sending location to a receiving location with time-based logistics constraints.",
+      "cs:properties": {
+        "sending": {
+          "type": "cs:Location",
+          "description": "Origin location of the lane",
+          "required": true
+        },
+        "receiving": {
+          "type": "cs:Location",
+          "description": "Destination location of the lane",
+          "required": true
+        },
+        "pdt": {
+          "type": "xsd:integer",
+          "description": "Planning Delivery Time — total days from deployment plan creation to planned arrival at receiving location, includes waiting for truck release and OTD",
+          "required": true
+        },
+        "otd": {
+          "type": "xsd:integer",
+          "description": "On-Time Delivery — planned in-transit time in days from actual truck departure to planned arrival at receiving location. A subset of PDT.",
+          "required": true,
+          "min_value": 0
+        },
+        "gr_days": {
+          "type": "xsd:integer",
+          "description": "Goods Receipt processing days — time to process received goods at destination (≥0)",
+          "required": true,
+          "min_value": 0
+        },
+        "mct": {
+          "type": "xsd:integer",
+          "description": "Microbiological Control Time — days during which produced goods are frozen inventory and cannot be shipped to customers. Applies at the sending (production) location.",
+          "required": true
+        }
+      },
+      "cs:source_config": "Global_LeadTime",
+      "cs:source_table": ["cdl_ps_hana_prd.sl.ps_psc_transportation_lanes_current_future", "cdl_ps_hana_prd.sl.ps_psc_transportation_lanes_history"],
+      "cs:source_type": "config_input"
+    },
+
+    {
+      "@id": "cs:MaterialLocation",
+      "@type": "owl:Class",
+      "subClassOf": "cs:Network",
+      "label": "MaterialLocation",
+      "comment": "The combination of a material and a location — a fundamental dimension in ChainSight. Many parameters (demand forecast, safety stock, inventory, etc.) are configured at this granularity. Represents that a specific material exists at or is managed by a specific location.",
+      "cs:properties": {
+        "material": {
+          "type": "cs:Material",
+          "description": "The material at this location",
+          "required": true
+        },
+        "location": {
+          "type": "cs:Location",
+          "description": "The location where the material is managed",
+          "required": true
+        }
+      },
+      "cs:source_config": "derived",
+      "cs:source_table": ["cdl_ps_hana_prd.dwd.tb_mdm_prod_material_plant_dim"],
+      "cs:source_type": "derived"
+    },
+
+    {
+      "@id": "cs:Material",
+      "@type": "owl:Class",
+      "subClassOf": "cs:Product",
+      "label": "Material",
+      "altLabel": ["SKU", "product", "物料"],
+      "comment": "A product/SKU that flows through the supply chain network. Material IDs are numeric strings (no .0 suffix). Physical conversion factors are used for truck loading (WFR/VFR) and warehouse capacity calculations.",
+      "cs:properties": {
+        "material_id": {
+          "type": "xsd:string",
+          "description": "Unique material identifier — numeric string with no .0 suffix (e.g. '80813644')",
+          "required": true
+        },
+        "demand_unit_to_weight": {
+          "type": "xsd:float",
+          "description": "Conversion factor from demand unit to weight unit (kg). Used for truck weight fill ratio (WFR) calculation and warehouse capacity estimation.",
+          "required": true
+        },
+        "demand_unit_to_volume": {
+          "type": "xsd:float",
+          "description": "Conversion factor from demand unit to volume unit (m³). Used for truck volume fill ratio (VFR) calculation and warehouse capacity estimation.",
+          "required": true
+        },
+        "product_tier": {
+          "type": "xsd:string",
+          "description": "Product tier classification/hierarchy for differentiated business policies",
+          "enum": ["tier_1", "tier_2", "tier_3"],
+          "required": false
+        }
+      },
+      "cs:source_config": "M6_MaterialMD",
+      "cs:source_table": ["cdl_ps_hana_prd.sl.ps_psc_sku_master", "cdl_ps_hana_prd.dwd.tb_mdm_prod_material_general_dim"],
+      "cs:source_type": "config_input"
+    },
+
+    {
+      "@id": "cs:MaterialLocationLine",
+      "@type": "owl:Class",
+      "subClassOf": "cs:Product",
+      "label": "MaterialLocationLine",
+      "comment": "Production capability configuration — maps which material is assigned to which production line at which plant location, along with production planning parameters. Each record defines the production setup for one material on one specific line.",
+      "cs:properties": {
+        "material": {
+          "type": "cs:Material",
+          "description": "The material being produced",
+          "required": true
+        },
+        "location": {
+          "type": "cs:Location",
+          "description": "The plant location where production occurs",
+          "required": true
+        },
+        "delegate_line": {
+          "type": "xsd:string",
+          "description": "The production line assigned to produce this material at this location",
+          "required": true
+        },
+        "prd_rate": {
+          "type": "xsd:float",
+          "description": "Production rate — units per day on this line",
+          "required": true,
+          "min_value_exclusive": 0
+        },
+        "min_batch": {
+          "type": "xsd:integer",
+          "description": "Minimum production batch size (units)",
+          "required": true,
+          "min_value_exclusive": 0
+        },
+        "rv": {
+          "type": "xsd:integer",
+          "description": "Rounding Value — production batch quantity rounding value for this material-line combination",
+          "required": true,
+          "min_value_exclusive": 0
+        },
+        "ptf": {
+          "type": "xsd:integer",
+          "description": "Planning Time Fence — days within which the production plan is frozen and cannot be changed (≥0)",
+          "required": true,
+          "min_value": 0
+        },
+        "lsk": {
+          "type": "xsd:integer",
+          "description": "Lot Size Key — defines the planning review frequency in days (e.g. lsk=30 means production plan is reviewed every 30 days)",
+          "required": true,
+          "min_value_exclusive": 0
+        },
+        "day": {
+          "type": "xsd:integer",
+          "description": "Review day within the lsk cycle — specifies which day within the lsk period to conduct the planning review (1 ≤ day ≤ lsk)",
+          "required": true,
+          "min_value": 1
+        },
+        "mct": {
+          "type": "xsd:integer",
+          "description": "Microbiological Control Time — days during which produced goods are frozen inventory and cannot be shipped. Applies to goods produced on this line.",
+          "required": true,
+          "min_value_exclusive": 0
+        }
+      },
+      "cs:source_config": "M4_MaterialLocationLineCfg",
+      "cs:source_table": ["cdl_ps_hana_prd.sl.ps_psc_sip_production_version"],
+      "cs:source_type": "config_input"
+    },
+
+
+    {
+      "@id": "cs:ProductionLine",
+      "@type": "owl:Class",
+      "subClassOf": "cs:Resource",
+      "label": "ProductionLine",
+      "comment": "A production line at a plant location with date-specific capacity. Capacity defines the available production hours on a given date. Multiply by MaterialLocationLine.prd_rate to get producible units. MaterialLocationLine.delegate_line references this line.",
+      "cs:properties": {
+        "location": {
+          "type": "cs:Location",
+          "description": "The plant location where this line operates",
+          "required": true
+        },
+        "line": {
+          "type": "xsd:string",
+          "description": "Production line identifier",
+          "required": true
+        },
+        "date": {
+          "type": "xsd:date",
+          "description": "Date for which capacity is defined (capacity varies daily)",
+          "required": true
+        },
+        "capacity": {
+          "type": "xsd:float",
+          "description": "Available production hours on this date (0–24). Multiply by MaterialLocationLine.prd_rate to get producible units.",
+          "required": true,
+          "min_value": 0,
+          "max_value": 24
+        }
+      },
+      "cs:source_config": "M4_LineCapacity",
+      "cs:source_table": ["cdl_ps_hana_prd.sl.ps_psc_sip_production_version", "cdl_ps_hana_prd.sl.ps_psc_sip_recipe"],
+      "cs:source_type": "config_input"
+    },
+
+    {
+      "@id": "cs:SpaceCapacity",
+      "@type": "owl:Class",
+      "subClassOf": "cs:Resource",
+      "label": "SpaceCapacity",
+      "comment": "Maximum storage capacity at a location for a given time period. Time-versioned: one location can have multiple records covering different date ranges (e.g. seasonal capacity changes). Used by Orchestrator for overflow checks and M5 deployment planning for receiving space constraints.",
+      "cs:properties": {
+        "location": {
+          "type": "cs:Location",
+          "description": "The location where storage capacity is defined",
+          "required": true
+        },
+        "eff_from": {
+          "type": "xsd:date",
+          "description": "Effective start date of this capacity record",
+          "required": true
+        },
+        "eff_to": {
+          "type": "xsd:date",
+          "description": "Effective end date of this capacity record (≥ eff_from)",
+          "required": true
+        },
+        "capacity": {
+          "type": "xsd:float",
+          "description": "Maximum storage capacity at this location (demand units, >0). Compared directly against inventory in demand units for overflow checks.",
+          "required": true,
+          "min_value_exclusive": 0
+        }
+      },
+      "cs:source_config": "Global_SpaceCapacity",
+      "cs:source_type": "config_input"
+    },
+
+    {
+      "@id": "cs:Vehicle",
+      "@type": "owl:Class",
+      "subClassOf": "cs:Resource",
+      "label": "Vehicle",
+      "comment": "A truck type used for transportation between locations. Defines loading capacity constraints used by M6 for weight fill ratio (WFR) and volume fill ratio (VFR) truck loading calculations.",
+      "cs:properties": {
+        "truck_type": {
+          "type": "xsd:string",
+          "description": "Unique truck type identifier (e.g. '20T_Flatbed')",
+          "required": true
+        },
+        "capacity_qty_in_weight": {
+          "type": "xsd:float",
+          "description": "Maximum weight capacity of the truck, in the same weight unit as Material.demand_unit_to_weight (>0)",
+          "required": true,
+          "min_value_exclusive": 0
+        },
+        "capacity_qty_in_volume": {
+          "type": "xsd:float",
+          "description": "Maximum volume capacity of the truck, in the same volume unit as Material.demand_unit_to_volume (>0)",
+          "required": true,
+          "min_value_exclusive": 0
+        }
+      },
+      "cs:source_config": "M6_TruckTypeSpecs",
+      "cs:source_type": "config_input"
+    },
+
+    {
+      "@id": "cs:TruckCapacity",
+      "@type": "owl:Class",
+      "subClassOf": "cs:Resource",
+      "label": "TruckCapacity",
+      "comment": "Number of trucks of a given type available on a route per day. Defines transportation capacity constraints for M6 logistics execution. Supports both daily (date) and date-range (eff_from/eff_to) formats; range records are expanded to daily internally.",
+      "cs:properties": {
+        "sending": {
+          "type": "cs:Location",
+          "description": "Origin location",
+          "required": true
+        },
+        "receiving": {
+          "type": "cs:Location",
+          "description": "Destination location",
+          "required": true
+        },
+        "truck_type": {
+          "type": "xsd:string",
+          "description": "Truck type identifier (references Vehicle.truck_type)",
+          "required": true
+        },
+        "truck_number": {
+          "type": "xsd:integer",
+          "description": "Number of trucks available (≥0)",
+          "required": true,
+          "min_value": 0
+        },
+        "date": {
+          "type": "xsd:date",
+          "description": "Date for which truck availability is defined (daily format)",
+          "required": false
+        },
+        "eff_from": {
+          "type": "xsd:date",
+          "description": "Effective start date (range format)",
+          "required": false
+        },
+        "eff_to": {
+          "type": "xsd:date",
+          "description": "Effective end date (range format)",
+          "required": false
+        }
+      },
+      "cs:source_config": "M6_TruckCapacityPlan",
+      "cs:source_type": "config_input"
+    },
+
+
+    {
+      "@id": "cs:InitialInventory",
+      "@type": "owl:Class",
+      "subClassOf": "cs:Inventory",
+      "label": "InitialInventory",
+      "altLabel": ["starting inventory", "初始库存"],
+      "comment": "Starting inventory at simulation initialization. Static point-in-time snapshot with no date dimension — represents day-0 stock positions.",
+      "cs:properties": {
+        "material": {
+          "type": "cs:Material",
+          "description": "The material held in stock",
+          "required": true
+        },
+        "location": {
+          "type": "cs:Location",
+          "description": "The location where inventory is held",
+          "required": true
+        },
+        "quantity": {
+          "type": "xsd:float",
+          "description": "Initial stock quantity in demand units (≥0)",
+          "required": true,
+          "min_value": 0
+        }
+      },
+      "cs:source_config": "M1_InitialInventory",
+      "cs:source_table": ["cdl_ps_hana_prd.dwd.vw_sc_inv_material_storage_location_batch_fact", "cdl_ps_hana_prd.ods.ewms_inventory_balance"],
+      "cs:source_type": "config_input"
+    },
+
+    {
+      "@id": "cs:UnrestrictedInventory",
+      "@type": "owl:Class",
+      "subClassOf": "cs:Inventory",
+      "label": "UnrestrictedInventory",
+      "comment": "Daily end-of-day unrestricted inventory snapshot per material-location. Computed by Orchestrator as: BOD inventory + production_gr + delivery_gr - customer_shipments - outbound_deployments.",
+      "cs:properties": {
+        "date": {
+          "type": "xsd:date",
+          "description": "Snapshot date (end of day)",
+          "required": true
+        },
+        "material": {
+          "type": "cs:Material",
+          "description": "The material",
+          "required": true
+        },
+        "location": {
+          "type": "cs:Location",
+          "description": "The location",
+          "required": true
+        },
+        "quantity": {
+          "type": "xsd:integer",
+          "description": "Unrestricted inventory quantity in demand units",
+          "required": true
+        }
+      },
+      "cs:source_config": "Orchestrator_unrestricted_inventory",
+      "cs:source_table": ["cdl_ps_hana_prd.ds.ps_psc_inventory_balance_daily_fact", "cdl_ps_hana_prd.dwd.vw_sc_inv_material_storage_location_fact"],
+      "cs:source_type": "simulation_output"
+    },
+
+    {
+      "@id": "cs:InTransit",
+      "@type": "owl:Class",
+      "subClassOf": "cs:Inventory",
+      "label": "InTransit",
+      "comment": "Goods currently in transit between locations on a given date. Records exist only while shipment is en route; removed upon arrival and converted to DeliveryGR.",
+      "cs:properties": {
+        "date": {
+          "type": "xsd:date",
+          "description": "Observation date (goods are in transit on this date)",
+          "required": true
+        },
+        "material": {
+          "type": "cs:Material",
+          "description": "The material being transported",
+          "required": true
+        },
+        "sending": {
+          "type": "cs:Location",
+          "description": "Origin location",
+          "required": true
+        },
+        "receiving": {
+          "type": "cs:Location",
+          "description": "Destination location",
+          "required": true
+        },
+        "quantity": {
+          "type": "xsd:integer",
+          "description": "Units in transit (>0)",
+          "required": true,
+          "min_value_exclusive": 0
+        }
+      },
+      "cs:source_config": "Orchestrator_in_transit",
+      "cs:source_table": ["cdl_ps_hana_prd.sl.ps_psc_po_sched_agreement_asn_shipno"],
+      "cs:source_type": "simulation_output"
+    },
+
+    {
+      "@id": "cs:ProductionGR",
+      "@type": "owl:Class",
+      "subClassOf": "cs:Inventory",
+      "label": "ProductionGR",
+      "comment": "Goods receipt from production. Created when produced goods become available (available_date == current_date). Adds inventory at the production location.",
+      "cs:properties": {
+        "date": {
+          "type": "xsd:date",
+          "description": "Receipt date",
+          "required": true
+        },
+        "material": {
+          "type": "cs:Material",
+          "description": "The material produced",
+          "required": true
+        },
+        "location": {
+          "type": "cs:Location",
+          "description": "Production location where goods are received into stock",
+          "required": true
+        },
+        "quantity": {
+          "type": "xsd:integer",
+          "description": "Produced quantity (>0)",
+          "required": true,
+          "min_value_exclusive": 0
+        }
+      },
+      "cs:source_config": "Orchestrator_production_gr",
+      "cs:source_type": "simulation_output"
+    },
+
+    {
+      "@id": "cs:DeliveryGR",
+      "@type": "owl:Class",
+      "subClassOf": "cs:Inventory",
+      "label": "DeliveryGR",
+      "comment": "Goods receipt from delivery. Created when an in-transit shipment arrives at the receiving location. Adds inventory at the receiving location.",
+      "cs:properties": {
+        "date": {
+          "type": "xsd:date",
+          "description": "Delivery arrival date",
+          "required": true
+        },
+        "material": {
+          "type": "cs:Material",
+          "description": "The material received",
+          "required": true
+        },
+        "receiving": {
+          "type": "cs:Location",
+          "description": "Receiving location",
+          "required": true
+        },
+        "quantity": {
+          "type": "xsd:integer",
+          "description": "Received quantity (>0)",
+          "required": true,
+          "min_value_exclusive": 0
+        }
+      },
+      "cs:source_config": "Orchestrator_delivery_gr",
+      "cs:source_table": ["cdl_ps_hana_prd.ds.ps_psc_purchase_receipt_notification_daily_fact"],
+      "cs:source_type": "simulation_output"
+    },
+
+    {
+      "@id": "cs:SafetyStock",
+      "@type": "owl:Class",
+      "subClassOf": "cs:Inventory",
+      "label": "SafetyStock",
+      "altLabel": ["SS", "安全库存", "safety"],
+      "comment": "Time-versioned safety stock target per material-location. Defines the buffer stock quantity below which replenishment is triggered. Used by M3 for safety stock planning and M5 for deployment decisions.",
+      "cs:properties": {
+        "material": {
+          "type": "cs:Material",
+          "description": "The material for which safety stock is defined",
+          "required": true
+        },
+        "location": {
+          "type": "cs:Location",
+          "description": "The location where safety stock applies",
+          "required": true
+        },
+        "date": {
+          "type": "xsd:date",
+          "description": "Date for which this safety stock target is effective",
+          "required": true
+        },
+        "safety_stock_qty": {
+          "type": "xsd:float",
+          "description": "Target safety stock quantity in demand units (≥0)",
+          "required": true,
+          "min_value": 0
+        }
+      },
+      "cs:source_config": "M3_SafetyStock",
+      "cs:source_table": ["cdl_ps_hana_prd.ds.ps_psc_safety_setting_daily_fact", "cdl_ps_hana_prd.ods.psdh_pdp_ibpi_ibp_sap_full_horizon_weekly_cn"],
+      "cs:source_type": "config_input"
+    },
+
+
+    {
+      "@id": "cs:DemandForecast",
+      "@type": "owl:Class",
+      "subClassOf": "cs:Plan",
+      "label": "DemandForecast",
+      "altLabel": ["FC", "FCST", "forecast", "需求预测"],
+      "comment": "Weekly demand forecast per material-location. Input to M1 demand planning — drives order generation and downstream production/deployment planning.",
+      "cs:properties": {
+        "material": {
+          "type": "cs:Material",
+          "description": "The material being forecasted",
+          "required": true
+        },
+        "location": {
+          "type": "cs:Location",
+          "description": "The demand location",
+          "required": true
+        },
+        "week": {
+          "type": "xsd:string",
+          "description": "Week period identifier",
+          "required": true
+        },
+        "quantity": {
+          "type": "xsd:float",
+          "description": "Forecasted demand quantity (>0)",
+          "required": true,
+          "min_value_exclusive": 0
+        }
+      },
+      "cs:source_config": "M1_DemandForecast",
+      "cs:source_table": ["cdl_ps_hana_prd.sl.ps_psc_bop_lbe_fcst"],
+      "cs:source_type": "config_input"
+    },
+
+    {
+      "@id": "cs:CustomerOrder",
+      "@type": "owl:Class",
+      "subClassOf": "cs:Plan",
+      "label": "CustomerOrder",
+      "altLabel": ["CO", "order", "客户订单"],
+      "comment": "Customer order generated by M1 demand planning. Represents daily demand that needs to be fulfilled from DC inventory.",
+      "cs:properties": {
+        "date": {
+          "type": "xsd:date",
+          "description": "Order date",
+          "required": true
+        },
+        "material": {
+          "type": "cs:Material",
+          "description": "The material ordered",
+          "required": true
+        },
+        "location": {
+          "type": "cs:Location",
+          "description": "The demand location (DC)",
+          "required": true
+        },
+        "demand_type": {
+          "type": "xsd:string",
+          "description": "normal = same-day allocation from current inventory; AO (Advance Order) = allocated after a lead time, longer lead time increases AO ratio and improves production/replenishment certainty",
+          "enum": ["normal", "AO"],
+          "required": true
+        },
+        "quantity": {
+          "type": "xsd:integer",
+          "description": "Order quantity (>0)",
+          "required": true,
+          "min_value_exclusive": 0
+        }
+      },
+      "cs:source_config": "M1_OrderLog",
+      "cs:source_table": ["cdl_ps_hana_prd.sl.ps_psc_customer_order_delivery"],
+      "cs:source_type": "simulation_output"
+    },
+
+    {
+      "@id": "cs:ProductionPlan",
+      "@type": "owl:Class",
+      "subClassOf": "cs:Plan",
+      "label": "ProductionPlan",
+      "altLabel": ["MRP", "prod plan", "生产计划"],
+      "comment": "Daily production plan output from M4. Three quantity tiers: uncon_planned_qty (ideal demand), con_planned_qty (capacity-constrained), produced_qty (actual after production reliability). Only con_planned_qty and produced_qty are modeled as core semantics.",
+      "cs:properties": {
+        "material": {
+          "type": "cs:Material",
+          "description": "The material to be produced",
+          "required": true
+        },
+        "location": {
+          "type": "cs:Location",
+          "description": "The plant location",
+          "required": true
+        },
+        "line": {
+          "type": "xsd:string",
+          "description": "Production line identifier",
+          "required": true
+        },
+        "production_plan_date": {
+          "type": "xsd:date",
+          "description": "Planned production date",
+          "required": true
+        },
+        "con_planned_qty": {
+          "type": "xsd:integer",
+          "description": "Capacity-constrained planned quantity (≥0)",
+          "required": true,
+          "min_value": 0
+        },
+        "produced_qty": {
+          "type": "xsd:integer",
+          "description": "Actual produced quantity after production reliability (≥0)",
+          "required": true,
+          "min_value": 0
+        }
+      },
+      "cs:source_config": "M4_ProductionPlan",
+      "cs:source_type": "simulation_output"
+    },
+
+    {
+      "@id": "cs:OpenDeployment",
+      "@type": "owl:Class",
+      "subClassOf": "cs:Plan",
+      "label": "OpenDeployment",
+      "comment": "Pending deployment awaiting truck release by M6. Created by M5 deployment planning, consumed by M6 logistics execution. Quantity decreases as shipments depart; record removed when fully shipped.",
+      "cs:properties": {
+        "material": {
+          "type": "cs:Material",
+          "description": "The material to be deployed",
+          "required": true
+        },
+        "sending": {
+          "type": "cs:Location",
+          "description": "Origin location (Plant or DC)",
+          "required": true
+        },
+        "receiving": {
+          "type": "cs:Location",
+          "description": "Destination location",
+          "required": true
+        },
+        "planned_deployment_date": {
+          "type": "xsd:date",
+          "description": "Planned deployment date",
+          "required": true
+        },
+        "deployed_qty": {
+          "type": "xsd:integer",
+          "description": "Remaining quantity to be shipped (>0)",
+          "required": true,
+          "min_value_exclusive": 0
+        }
+      },
+      "cs:source_config": "Orchestrator_open_deployment",
+      "cs:source_table": ["cdl_ps_hana_prd.ds.ps_psc_transfer_pool_order_interval_30min_fact"],
+      "cs:source_type": "simulation_output"
+    },
+
+    {
+      "@id": "cs:DeploymentPlan",
+      "@type": "owl:Class",
+      "subClassOf": "cs:Plan",
+      "label": "DeploymentPlan",
+      "altLabel": ["DRP", "deployment", "配送计划"],
+      "comment": "Deployment plan output from M5. Defines how much of each material to move between locations to satisfy downstream demand and maintain safety stock levels.",
+      "cs:properties": {
+        "date": {
+          "type": "xsd:date",
+          "description": "Deployment plan date",
+          "required": true
+        },
+        "material": {
+          "type": "cs:Material",
+          "description": "The material to be deployed",
+          "required": true
+        },
+        "sending": {
+          "type": "cs:Location",
+          "description": "Origin location",
+          "required": true
+        },
+        "receiving": {
+          "type": "cs:Location",
+          "description": "Destination location",
+          "required": true
+        },
+        "deployed_qty": {
+          "type": "xsd:integer",
+          "description": "Deployed quantity (≥0)",
+          "required": true,
+          "min_value": 0
+        }
+      },
+      "cs:source_config": "M5_DeploymentPlan",
+      "cs:source_type": "simulation_output"
+    },
+
+    {
+      "@id": "cs:CustomerShipment",
+      "@type": "owl:Class",
+      "subClassOf": "cs:Plan",
+      "label": "CustomerShipment",
+      "comment": "Customer shipment from DC to end customer. Generated by M1 when fulfilling customer orders from available inventory. Quantity shipped may be less than ordered (partial fill).",
+      "cs:properties": {
+        "date": {
+          "type": "xsd:date",
+          "description": "Shipment date",
+          "required": true
+        },
+        "material": {
+          "type": "cs:Material",
+          "description": "The material shipped",
+          "required": true
+        },
+        "location": {
+          "type": "cs:Location",
+          "description": "The shipping DC location",
+          "required": true
+        },
+        "quantity": {
+          "type": "xsd:integer",
+          "description": "Shipped quantity (>0)",
+          "required": true,
+          "min_value_exclusive": 0
+        }
+      },
+      "cs:source_config": "M1_ShipmentLog",
+      "cs:source_type": "simulation_output"
+    },
+
+    {
+      "@id": "cs:IntersiteDelivery",
+      "@type": "owl:Class",
+      "subClassOf": "cs:Plan",
+      "label": "IntersiteDelivery",
+      "comment": "Intersite replenishment delivery between network locations. Executed by M6 logistics based on open deployments from M5. Moves inventory from sending to receiving location via truck.",
+      "cs:properties": {
+        "date": {
+          "type": "xsd:date",
+          "description": "Shipment departure date",
+          "required": true
+        },
+        "material": {
+          "type": "cs:Material",
+          "description": "The material being transported",
+          "required": true
+        },
+        "sending": {
+          "type": "cs:Location",
+          "description": "Origin location",
+          "required": true
+        },
+        "receiving": {
+          "type": "cs:Location",
+          "description": "Destination location",
+          "required": true
+        },
+        "quantity": {
+          "type": "xsd:integer",
+          "description": "Transported quantity (>0)",
+          "required": true,
+          "min_value_exclusive": 0
+        }
+      },
+      "cs:source_config": "M6_DeliveryPlan",
+      "cs:source_type": "simulation_output"
+    },
+
+
+    {
+      "@id": "cs:Calendar",
+      "@type": "owl:Class",
+      "subClassOf": "cs:Network",
+      "label": "Calendar",
+      "altLabel": ["工厂日历", "factory calendar", "time dimension", "日历"],
+      "comment": "Factory/business calendar defining workdays and time periods. Used for order calendar generation and time-based conversions (week number to date).",
+      "cs:properties": {
+        "calendar_date": {"type": "xsd:date", "description": "Calendar date", "required": true},
+        "is_workday": {"type": "xsd:boolean", "description": "Whether this date is a working day", "required": true}
+      },
+      "cs:source_table": ["cdl_ps_hana_prd.sl.ps_psc_factory_calendar", "cdl_ps_hana_prd.ods.psdh_md_time_fdim"],
+      "cs:source_config": "M1_OrderCalendar",
+      "cs:source_type": "config_input"
+    },
+
+    {
+      "@id": "cs:MaterialValuation",
+      "@type": "owl:Class",
+      "subClassOf": "cs:Product",
+      "label": "MaterialValuation",
+      "altLabel": ["物料估价", "valuation", "成本"],
+      "comment": "Material valuation data — standard price, moving average price, price unit. Used for cost-related KPI computation.",
+      "cs:properties": {
+        "material": {"type": "cs:Material", "required": true},
+        "location": {"type": "cs:Location", "required": true},
+        "standard_price": {"type": "xsd:float", "description": "Standard cost per unit"},
+        "price_unit": {"type": "xsd:integer", "description": "Price unit (e.g. per 1/100/1000)"}
+      },
+      "cs:source_table": ["cdl_ps_hana_prd.dwd.tb_mdm_prod_material_valuation_dim"],
+      "cs:source_type": "config_input"
+    },
+
+    {
+      "@id": "cs:ProductionQuota",
+      "@type": "owl:Class",
+      "subClassOf": "cs:Resource",
+      "label": "ProductionQuota",
+      "altLabel": ["配额分配", "quota", "production quota"],
+      "comment": "Production quota arrangement — allocates production volume of a material across multiple lines or plants based on defined ratios.",
+      "cs:properties": {
+        "material": {"type": "cs:Material", "required": true},
+        "location": {"type": "cs:Location", "required": true},
+        "line": {"type": "xsd:string", "description": "Production line"},
+        "quota_pct": {"type": "xsd:float", "description": "Quota percentage (0-100)"}
+      },
+      "cs:source_table": ["cdl_ps_hana_prd.sl.ps_psc_sip_quota"],
+      "cs:source_type": "config_input"
+    },
+
+    {
+      "@id": "cs:AllocationPool",
+      "@type": "owl:Class",
+      "subClassOf": "cs:Inventory",
+      "label": "AllocationPool",
+      "altLabel": ["分配池", "allocation pool", "库存分配池"],
+      "comment": "Inventory allocation pool — pre-allocated inventory buckets by material and location. A subset of unrestricted inventory earmarked for specific demand channels.",
+      "cs:properties": {
+        "material": {"type": "cs:Material", "required": true},
+        "location": {"type": "cs:Location", "required": true},
+        "date": {"type": "xsd:date", "description": "Snapshot date"},
+        "quantity": {"type": "xsd:float", "description": "Pool quantity in demand units"}
+      },
+      "cs:source_table": ["cdl_ps_hana_prd.sl.ps_psc_allocation_pool_inventory", "cdl_ps_hana_prd.ds.ps_psc_allocation_pool_inventory_snapshot_daily_fact"],
+      "cs:source_type": "config_input"
+    },
+
+    {
+      "@id": "cs:Batch",
+      "@type": "owl:Class",
+      "subClassOf": "cs:Inventory",
+      "label": "Batch",
+      "altLabel": ["批次", "batch", "lot"],
+      "comment": "Batch-level inventory — stock tracked by production batch with shelf life and quality status. Used for FIFO/FEFO analysis and expiry management.",
+      "cs:properties": {
+        "material": {"type": "cs:Material", "required": true},
+        "location": {"type": "cs:Location", "required": true},
+        "batch_id": {"type": "xsd:string", "description": "Batch/lot identifier", "required": true},
+        "quantity": {"type": "xsd:float", "description": "Batch stock quantity"},
+        "production_date": {"type": "xsd:date", "description": "Manufacturing date"}
+      },
+      "cs:source_table": ["cdl_ps_hana_prd.dwd.tb_sc_wh_batches_daily_fact"],
+      "cs:source_type": "config_input"
+    },
+
+    {
+      "@id": "cs:Allocation",
+      "@type": "owl:Class",
+      "subClassOf": "cs:Plan",
+      "label": "Allocation",
+      "altLabel": ["配额", "sales allocation", "销售配额"],
+      "comment": "Sales allocation quota — limits how much of a material can be sold through a specific channel/customer within a time period. Distinct from AllocationPool (inventory bucket).",
+      "cs:properties": {
+        "material": {"type": "cs:Material", "required": true},
+        "location": {"type": "cs:Location", "required": true},
+        "date": {"type": "xsd:date", "description": "Allocation period"},
+        "allocated_qty": {"type": "xsd:float", "description": "Allocated quantity"}
+      },
+      "cs:source_table": ["cdl_ps_hana_prd.ods.sales_hub_allocation_inventory"],
+      "cs:source_type": "config_input"
+    },
+
+    {
+      "@id": "cs:DependentRequirement",
+      "@type": "owl:Class",
+      "subClassOf": "cs:Plan",
+      "label": "DependentRequirement",
+      "altLabel": ["相关需求", "dependent req", "BOM explosion"],
+      "comment": "Dependent requirement generated by MRP BOM explosion — component-level demand derived from finished goods production plans.",
+      "cs:properties": {
+        "material": {"type": "cs:Material", "required": true},
+        "location": {"type": "cs:Location", "required": true},
+        "date": {"type": "xsd:date", "description": "Requirement date", "required": true},
+        "quantity": {"type": "xsd:float", "description": "Required quantity"}
+      },
+      "cs:source_table": ["cdl_ps_hana_prd.sl.ps_psc_dependent_requirement"],
+      "cs:source_type": "config_input"
+    },
+
+    {
+      "@id": "cs:DailyForecast",
+      "@type": "owl:Class",
+      "subClassOf": "cs:Plan",
+      "label": "DailyForecast",
+      "altLabel": ["日度预测", "independent requirement", "PIR", "独立需求"],
+      "comment": "Daily-level forecast / planned independent requirement. More granular than weekly DemandForecast. Used for short-term analysis and production scheduling validation.",
+      "cs:properties": {
+        "material": {"type": "cs:Material", "required": true},
+        "location": {"type": "cs:Location", "required": true},
+        "date": {"type": "xsd:date", "description": "Forecast date", "required": true},
+        "quantity": {"type": "xsd:float", "description": "Forecasted daily quantity"}
+      },
+      "cs:source_table": ["cdl_ps_hana_prd.dwd.tb_sc_prod_independent_req_data_fact"],
+      "cs:source_type": "config_input"
+    },
+
+    {
+      "@id": "cs:PlannedOrder",
+      "@type": "owl:Class",
+      "subClassOf": "cs:Plan",
+      "label": "PlannedOrder",
+      "altLabel": ["计划订单", "planned order", "MRP output"],
+      "comment": "MRP-generated planned order — proposed production or procurement action not yet converted to a firm order. Shows what MRP thinks needs to happen.",
+      "cs:properties": {
+        "material": {"type": "cs:Material", "required": true},
+        "location": {"type": "cs:Location", "required": true},
+        "date": {"type": "xsd:date", "description": "Planned order date", "required": true},
+        "quantity": {"type": "xsd:float", "description": "Planned quantity"},
+        "order_type": {"type": "xsd:string", "description": "Production / procurement / transfer"}
+      },
+      "cs:source_table": ["cdl_ps_hana_prd.sl.ps_psc_planned_order"],
+      "cs:source_type": "config_input"
+    },
+
+    {
+      "@id": "cs:PurchaseRequisition",
+      "@type": "owl:Class",
+      "subClassOf": "cs:Plan",
+      "label": "PurchaseRequisition",
+      "altLabel": ["采购需求", "PR", "purchase req"],
+      "comment": "Purchase requisition — request to procure material from external supplier. Generated from planned orders or manual creation.",
+      "cs:properties": {
+        "material": {"type": "cs:Material", "required": true},
+        "location": {"type": "cs:Location", "required": true},
+        "date": {"type": "xsd:date", "description": "Requisition date", "required": true},
+        "quantity": {"type": "xsd:float", "description": "Requested quantity"}
+      },
+      "cs:source_table": ["cdl_ps_hana_prd.dwd.tb_sc_prod_purchase_requisition_daily_fact"],
+      "cs:source_type": "config_input"
+    },
+
+    {
+      "@id": "cs:SalesOrder",
+      "@type": "owl:Class",
+      "subClassOf": "cs:Plan",
+      "label": "SalesOrder",
+      "altLabel": ["销售订单", "SO", "sales order"],
+      "comment": "Sales order header — actual customer demand commitment. Distinct from CustomerOrder (simulation-generated); this is real SAP sales document data.",
+      "cs:properties": {
+        "date": {"type": "xsd:date", "description": "Order date", "required": true},
+        "material": {"type": "cs:Material", "required": true},
+        "location": {"type": "cs:Location", "description": "Shipping plant"},
+        "quantity": {"type": "xsd:float", "description": "Ordered quantity"},
+        "customer": {"type": "xsd:string", "description": "Sold-to customer"}
+      },
+      "cs:source_table": ["cdl_ps_hana_prd.dwd.tb_sc_co_sales_doc_header_fact"],
+      "cs:source_type": "config_input"
+    },
+
+    {
+      "@id": "cs:Shipment",
+      "@type": "owl:Class",
+      "subClassOf": "cs:Plan",
+      "label": "Shipment",
+      "altLabel": ["发运", "shipment", "delivery note"],
+      "comment": "Actual shipment record — goods dispatched from a location. Tracks delivery performance against planned dates.",
+      "cs:properties": {
+        "date": {"type": "xsd:date", "description": "Shipment date", "required": true},
+        "material": {"type": "cs:Material", "required": true},
+        "sending": {"type": "cs:Location", "description": "Shipping location"},
+        "receiving": {"type": "cs:Location", "description": "Receiving location"},
+        "quantity": {"type": "xsd:float", "description": "Shipped quantity"}
+      },
+      "cs:source_table": ["cdl_ps_hana_prd.dwd.tb_sc_spm_shipment_daily_fact"],
+      "cs:source_type": "config_input"
+    },
+
+    {
+      "@id": "cs:FloatingIncrement",
+      "@type": "owl:Class",
+      "subClassOf": "cs:Plan",
+      "label": "FloatingIncrement",
+      "altLabel": ["浮动增量", "floating inc", "增量调整"],
+      "comment": "Floating demand increment/decrement — short-term demand adjustment overlaid on the base forecast. Typically represents promotions, events, or manual corrections.",
+      "cs:properties": {
+        "material": {"type": "cs:Material", "required": true},
+        "location": {"type": "cs:Location", "required": true},
+        "date": {"type": "xsd:date", "description": "Increment effective date"},
+        "quantity": {"type": "xsd:float", "description": "Increment quantity (positive = uplift, negative = reduction)"}
+      },
+      "cs:source_table": ["cdl_ps_hana_prd.sl.ps_psc_floating_inc"],
+      "cs:source_type": "config_input"
+    },
+
+    {
+      "@id": "cs:Initiative",
+      "@type": "owl:Class",
+      "subClassOf": "cs:Plan",
+      "label": "Initiative",
+      "altLabel": ["IOPT", "方案", "initiative", "优化方案"],
+      "comment": "IOPT initiative — a supply chain optimization proposal (e.g. inventory reduction, new sourcing). Tracks task status, material-plant scope, and expected impact.",
+      "cs:properties": {
+        "initiative_name": {"type": "xsd:string", "required": true},
+        "material": {"type": "cs:Material"},
+        "location": {"type": "cs:Location"},
+        "status": {"type": "xsd:string", "description": "Task status (open, in-progress, closed)"}
+      },
+      "cs:source_table": ["cdl_ps_hana_prd.ods.psdh_ap_emdl_iopt_initiative_dimension", "cdl_ps_hana_prd.ods.psdh_ap_emdl_iopt_material_plant", "cdl_ps_hana_prd.ods.psdh_ap_emdl_iopt_task_status"],
+      "cs:source_type": "config_input"
+    },
+
+    {
+      "@id": "cs:OutOfStock",
+      "@type": "owl:Class",
+      "subClassOf": "cs:Metric",
+      "label": "OutOfStock",
+      "altLabel": ["断货", "OOS", "即将断货", "to-be-OOS"],
+      "comment": "Projected out-of-stock status — materials expected to run out at a location within a forecast horizon. An early warning metric.",
+      "cs:properties": {
+        "material": {"type": "cs:Material", "required": true},
+        "location": {"type": "cs:Location", "required": true},
+        "date": {"type": "xsd:date", "description": "Projected OOS date"}
+      },
+      "cs:source_table": ["cdl_ps_hana_prd.sl.ps_psc_to_be_oos"],
+      "cs:source_type": "derived"
+    },
+
+    {
+      "@id": "cs:DemandPriority",
+      "@type": "owl:Class",
+      "subClassOf": "cs:Parameter",
+      "label": "DemandPriority",
+      "altLabel": ["需求优先级", "demand priority", "fulfillment priority"],
+      "comment": "Demand fulfillment priority policy — assigns a priority rank to each demand element, controlling the order in which competing demands are allocated scarce inventory during M5 deployment.",
+      "cs:properties": {
+        "demand_element": {"type": "xsd:string", "description": "Demand element / channel identifier", "required": true},
+        "priority": {"type": "xsd:integer", "description": "Priority rank (lower number = higher priority)", "required": true, "min_value": 1}
+      },
+      "cs:source_config": "Global_DemandPriority",
+      "cs:source_type": "config_input"
+    },
+
+    {
+      "@id": "cs:ForecastError",
+      "@type": "owl:Class",
+      "subClassOf": "cs:Parameter",
+      "label": "ForecastError",
+      "altLabel": ["预测误差", "forecast error", "FC error"],
+      "comment": "Forecast error parameter — standard deviation (as a percent of demand) of forecast error per material-location and order type. Drives stochastic demand-noise injection in M1. The scalar knob is also exposed as cs:param_error_std_percent.",
+      "cs:properties": {
+        "material": {"type": "cs:Material", "required": true},
+        "location": {"type": "cs:Location", "required": true},
+        "order_type": {"type": "xsd:string", "description": "Order type the error applies to (e.g. normal / AO)", "required": true},
+        "error_std_percent": {"type": "xsd:float", "description": "Forecast error standard deviation as a percent of demand (≥0)", "required": true, "min_value": 0}
+      },
+      "cs:source_config": "M1_ForecastError",
+      "cs:source_type": "config_input"
+    },
+
+    {
+      "@id": "cs:ProductionReliability",
+      "@type": "owl:Class",
+      "subClassOf": "cs:Parameter",
+      "label": "ProductionReliability",
+      "altLabel": ["生产可靠性", "production reliability", "yield factor"],
+      "comment": "Production reliability factor per plant line — the fraction of capacity-constrained planned quantity actually produced. M4 multiplies con_planned_qty by pr to derive produced_qty.",
+      "cs:properties": {
+        "location": {"type": "cs:Location", "description": "Plant location", "required": true},
+        "line": {"type": "xsd:string", "description": "Production line identifier", "required": true},
+        "pr": {"type": "xsd:float", "description": "Production reliability ratio (0–1)", "required": true, "min_value": 0}
+      },
+      "cs:source_config": "M4_ProductionReliability",
+      "cs:source_type": "config_input"
+    },
+
+    {
+      "@id": "cs:TruckReleaseCon",
+      "@type": "owl:Class",
+      "subClassOf": "cs:Parameter",
+      "label": "TruckReleaseCon",
+      "altLabel": ["卡车放行条件", "truck release condition", "release threshold"],
+      "comment": "Truck release condition per lane and truck type — fill-rate thresholds (WFR/VFR) and minimum delivery quantity (MDQ) that must be met before M6 releases a truck. The scalar WFR/VFR knobs are also exposed as cs:param_wfr / cs:param_vfr.",
+      "cs:properties": {
+        "sending": {"type": "cs:Location", "required": true},
+        "receiving": {"type": "cs:Location", "required": true},
+        "truck_type": {"type": "xsd:string", "description": "Truck type (references Vehicle.truck_type)", "required": true},
+        "optimal_type": {"type": "xsd:string", "description": "Preferred/optimal truck type for this lane", "required": false},
+        "WFR": {"type": "xsd:float", "description": "Weight fill-rate threshold to trigger release (0–1)", "required": false, "min_value": 0},
+        "VFR": {"type": "xsd:float", "description": "Volume fill-rate threshold to trigger release (0–1)", "required": false, "min_value": 0},
+        "MDQ": {"type": "xsd:float", "description": "Minimum delivery quantity required to release a truck (≥0)", "required": false, "min_value": 0}
+      },
+      "cs:source_config": "M6_TruckReleaseCon",
+      "cs:source_type": "config_input"
+    },
+
+    {
+      "@id": "cs:DeliveryDelay",
+      "@type": "owl:Class",
+      "subClassOf": "cs:Parameter",
+      "label": "DeliveryDelay",
+      "altLabel": ["交付延迟", "delivery delay", "delay distribution"],
+      "comment": "Stochastic delivery-delay distribution per lane — probability of incurring a given number of extra transit-delay days. M6 samples from this to perturb planned delivery dates.",
+      "cs:properties": {
+        "date": {"type": "xsd:date", "description": "Effective date of the distribution", "required": false},
+        "sending": {"type": "cs:Location", "required": true},
+        "receiving": {"type": "cs:Location", "required": true},
+        "delay_days": {"type": "xsd:integer", "description": "Number of extra delay days (≥0)", "required": true, "min_value": 0},
+        "probability": {"type": "xsd:float", "description": "Probability of this delay outcome (0–1)", "required": true, "min_value": 0}
+      },
+      "cs:source_config": "M6_DeliveryDelayDistribution",
+      "cs:source_type": "config_input"
+    },
+
+    {
+      "@id": "cs:MDQBypass",
+      "@type": "owl:Class",
+      "subClassOf": "cs:Parameter",
+      "label": "MDQBypass",
+      "altLabel": ["MDQ绕过规则", "MDQ bypass", "bypass rule"],
+      "comment": "Minimum-delivery-quantity bypass rule — conditional logic that lets specific lane / truck-type / demand-element combinations skip the MDQ truck-release constraint. Each rule_id is referenced by M6 bypass-rule-hit logs (module6_output_bypassrulehitlog.rule_id).",
+      "cs:properties": {
+        "sending": {"type": "cs:Location", "required": true},
+        "receiving": {"type": "cs:Location", "required": true},
+        "truck_type": {"type": "xsd:string", "description": "Truck type the rule applies to", "required": false},
+        "demand_element": {"type": "xsd:string", "description": "Demand element the rule applies to", "required": false},
+        "condition_logic": {"type": "xsd:string", "description": "Boolean condition expression defining when the bypass applies", "required": true},
+        "rule_id": {"type": "xsd:string", "description": "Unique rule identifier (referenced by module6_output_bypassrulehitlog.rule_id)", "required": true}
+      },
+      "cs:source_config": "M6_MDQBypassRules",
+      "cs:source_type": "config_input"
+    },
+
+    {
+      "@id": "cs:TunableParameter",
+      "@type": "owl:Class",
+      "subClassOf": "cs:Parameter",
+      "label": "TunableParameter",
+      "altLabel": ["param", "parameter", "参数"],
+      "comment": "A tunable business parameter — primary target for what-if scenario analysis. Each instance represents one adjustable input in the simulation config.",
+      "cs:properties": {
+        "param_name": {
+          "type": "xsd:string",
+          "description": "Parameter name matching config table field",
+          "required": true
+        },
+        "module": {
+          "type": "xsd:string",
+          "description": "Simulation module (M1–M6 / Orchestrator)",
+          "required": true
+        },
+        "controls": {
+          "type": "xsd:string",
+          "description": "What this parameter controls",
+          "required": true
+        },
+        "param_type": {
+          "type": "xsd:string",
+          "description": "Data type (float, integer, enum, string)",
+          "required": true
+        }
+      },
+      "cs:source_type": "config_input"
+    },
+
+    {
+      "@id": "cs:CostMetric",
+      "@type": "owl:Class",
+      "subClassOf": "cs:Metric",
+      "label": "CostMetric",
+      "comment": "Cost-related KPIs — measures of operational cost efficiency.",
+      "cs:source_type": "derived"
+    },
+    {
+      "@id": "cs:CashMetric",
+      "@type": "owl:Class",
+      "subClassOf": "cs:Metric",
+      "label": "CashMetric",
+      "comment": "Cash-related KPIs — measures of working capital and inventory investment.",
+      "cs:source_type": "derived"
+    },
+    {
+      "@id": "cs:ServiceMetric",
+      "@type": "owl:Class",
+      "subClassOf": "cs:Metric",
+      "label": "ServiceMetric",
+      "comment": "Service-related KPIs — measures of customer fulfillment and delivery performance.",
+      "cs:source_type": "derived"
+    }
+  ]
+}

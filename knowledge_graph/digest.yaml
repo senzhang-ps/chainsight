@@ -1,0 +1,31 @@
+generated_at: '2026-06-07T18:59:57Z'
+generated_from: knowledge_graph git files (file-derived, no Neo4j)
+ontology:
+  classes: 54
+  subclass_edges: 47
+  classes_with_data_source: 43
+  classes_without_data_source: 11
+causal_dag:
+  nodes: 66
+  nodes_by_type:
+    metric: 13
+    parameter: 28
+    process: 25
+  edges: 87
+  edges_by_polarity:
+    +: 53
+    '-': 18
+    None: 16
+  chains: 0
+registrations:
+  skills: 8
+  skill_ids:
+  - chainsight-configure-validation
+  - chainsight-databricks-connection
+  - chainsight-db-connection
+  - chainsight-db-connection-windows
+  - chainsight-result-analysis
+  - chainsight-simulation-run
+  - chainsight-simulation-run-windows
+  - connect-openmetadata
+  data_tables: 8

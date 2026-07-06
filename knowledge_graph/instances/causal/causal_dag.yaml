@@ -1,0 +1,1037 @@
+# ChainSight Parameter-KPI Causal DAG
+# Defines causal relationships between tunable parameters,
+# intermediate process effects, and measurable KPI metrics.
+version: "1.0"
+description: "ChainSight Parameter-KPI Causal DAG"
+
+nodes:
+  # ============================================================
+  # Parameter Nodes (25) — from ontology TunableParameter instances
+  # ============================================================
+  - id: "param:safety_stock_qty"
+    type: parameter
+    label: "Safety Stock Quantity"
+    module: M3
+    source_config: "M3_SafetyStock"
+    description: "Buffer stock quantity at each material-location node"
+
+  - id: "param:min_batch"
+    type: parameter
+    label: "Minimum Batch Size"
+    module: M4
+    source_config: "M4_MaterialLocationLineCfg"
+    description: "Minimum production batch size"
+
+  - id: "param:rv"
+    type: parameter
+    label: "Rounding Value (Production)"
+    module: M4
+    source_config: "M4_MaterialLocationLineCfg"
+    description: "Rounding value for production quantities"
+
+  - id: "param:prd_rate"
+    type: parameter
+    label: "Production Rate"
+    module: M4
+    source_config: "M4_MaterialLocationLineCfg"
+    description: "Production rate (units/day)"
+
+  - id: "param:changeover_time"
+    type: parameter
+    label: "Changeover Time"
+    module: M4
+    source_config: "M4_ChangeoverDefinition"
+    description: "Time to switch production between materials (hours)"
+
+  - id: "param:line_capacity"
+    type: parameter
+    label: "Line Capacity"
+    module: M4
+    source_config: "M4_LineCapacity"
+    description: "Production line available hours per day per line (0-24)"
+
+  - id: "param:delegate_line"
+    type: parameter
+    label: "Delegate Line"
+    module: M4
+    source_config: "M4_MaterialLocationLineCfg"
+    description: "Production line assignment — which line produces each material at each plant"
+
+  - id: "param:pdt"
+    type: parameter
+    label: "Planning Delivery Time"
+    module: M3/M5/M6
+    source_config: "Global_LeadTime"
+    description: "Planning delivery time (days) — includes OTD component"
+
+  - id: "param:gr_days"
+    type: parameter
+    label: "GR Processing Days"
+    module: M3/M6
+    source_config: "Global_LeadTime"
+    description: "Goods receipt processing days"
+
+  - id: "param:dps_percent"
+    type: parameter
+    label: "DPS Percent"
+    module: M1
+    source_config: "M1_DPSConfig"
+    feasibility_horizon: long_term
+    description: "Direct Plant Shipment split percentage (long_term feasibility — requires 4 prerequisites: plant space capacity, refined inventory strategy, customer order structure alignment, internal DPS qualification criteria)"
+
+  - id: "param:ao_percent"
+    type: parameter
+    label: "AO Percent"
+    module: M1
+    source_config: "M1_DemandForecast"
+    description: "Advance Order percentage of daily demand"
+
+  - id: "param:advance_days"
+    type: parameter
+    label: "Advance Days"
+    module: M1
+    source_config: "M1_DemandForecast"
+    description: "Days ahead AO is placed before demand date"
+
+  - id: "param:order_calendar"
+    type: parameter
+    label: "Order Calendar"
+    module: M1
+    source_config: "M1_DemandForecast"
+    description: "Order generation dates — defines which days orders are placed"
+
+  - id: "param:error_std_percent"
+    type: parameter
+    label: "Forecast Error Std %"
+    module: M1
+    source_config: "M1_DemandForecast"
+    description: "Forecast error standard deviation percentage"
+
+  - id: "param:moq"
+    type: parameter
+    label: "Minimum Order Quantity"
+    module: M3/M5
+    source_config: "M5_DeployConfig"
+    description: "Minimum order quantity for deployment"
+
+  - id: "param:rv_deploy"
+    type: parameter
+    label: "Rounding Value (Deployment)"
+    module: M5
+    source_config: "M5_DeployConfig"
+    description: "Rounding value for deployment quantities"
+
+  - id: "param:push_pull_model"
+    type: parameter
+    label: "Push/Pull Model"
+    module: M5
+    source_config: "M5_PushPullModel"
+    description: "Deployment strategy (Push/Pull/SoftPush)"
+
+  - id: "param:space_capacity"
+    type: parameter
+    label: "Space Capacity"
+    module: Orchestrator/M5
+    source_config: "Global_SpaceCapacity"
+    description: "Maximum storage capacity per location (demand units)"
+
+  - id: "param:truck_type"
+    type: parameter
+    label: "Truck Type"
+    module: M6
+    source_config: "M6_TruckTypeSpecs"
+    description: "Vehicle type assigned per route per day"
+
+  - id: "param:capacity_qty_in_weight"
+    type: parameter
+    label: "Truck Weight Capacity"
+    module: M6
+    source_config: "M6_TruckTypeSpecs"
+    description: "Vehicle weight capacity"
+
+  - id: "param:capacity_qty_in_volume"
+    type: parameter
+    label: "Truck Volume Capacity"
+    module: M6
+    source_config: "M6_TruckTypeSpecs"
+    description: "Vehicle volume capacity"
+
+  - id: "param:truck_number"
+    type: parameter
+    label: "Truck Number"
+    module: M6
+    source_config: "M6_TruckCapacityPlan"
+    description: "Number of trucks available per route per day"
+
+  - id: "param:wfr"
+    type: parameter
+    label: "Weight Fill Rate Threshold"
+    module: M6
+    source_config: "M6_TruckTypeSpecs"
+    description: "Weight fill rate threshold to trigger truck release (0-1)"
+
+  - id: "param:vfr"
+    type: parameter
+    label: "Volume Fill Rate Threshold"
+    module: M6
+    source_config: "M6_TruckTypeSpecs"
+    description: "Volume fill rate threshold to trigger truck release (0-1)"
+
+  - id: "param:max_wait_days"
+    type: parameter
+    label: "Max Wait Days"
+    module: M6
+    source_config: "M6_TruckTypeSpecs"
+    description: "Maximum days to wait before force-releasing truck without hitting WFR/VFR threshold"
+
+  - id: "param:ptf"
+    type: parameter
+    label: "Planning Time Fence"
+    module: M4
+    source_config: "M4_MaterialLocationLineCfg"
+    description: "Days within which production plan is frozen. High PTF = stable but demand-unresponsive; Low PTF = responsive but causes frequent plan changes and changeovers."
+
+  - id: "param:mct"
+    type: parameter
+    label: "Microbiological Control Time"
+    module: M4
+    source_config: "M4_MaterialLocationLineCfg"
+    description: "Days produced goods are quarantined before becoming shippable. Extends effective replenishment lead time from the production side."
+
+  - id: "param:lsk"
+    type: parameter
+    label: "Lot Size Key"
+    module: M4
+    source_config: "M4_MaterialLocationLineCfg"
+    description: "Production planning review frequency in days. Longer LSK = fewer but larger production runs per period = higher batch inventory, less demand responsiveness."
+
+  # ============================================================
+  # Process Nodes — intermediate effects
+  # ============================================================
+  - id: "proc:inventory_level"
+    type: process
+    label: "Inventory Level"
+    module: Orchestrator
+    description: "Stock level at each material-location node"
+
+  - id: "proc:production_flexibility"
+    type: process
+    label: "Production Flexibility"
+    module: M4
+    description: "Ability to switch production between materials with smaller batches"
+
+  - id: "proc:batch_inventory"
+    type: process
+    label: "Batch Inventory"
+    module: M4
+    description: "Excess inventory resulting from batch production rounding"
+
+  - id: "proc:delivery_lead_time"
+    type: process
+    label: "Delivery Lead Time"
+    module: M6
+    description: "Transport time component of replenishment (OTD portion of PDT)"
+
+  - id: "proc:demand_allocation"
+    type: process
+    label: "Demand Allocation"
+    module: M1
+    description: "How demand is split and timed (DPS vs DC, AO timing, order calendar)"
+
+  - id: "proc:production_output"
+    type: process
+    label: "Production Output"
+    module: M4
+    description: "Actual production volume per line per day"
+
+  - id: "proc:effective_capacity"
+    type: process
+    label: "Effective Capacity"
+    module: M4
+    description: "Available production capacity after deducting changeover losses"
+
+  - id: "proc:demand_uncertainty"
+    type: process
+    label: "Demand Uncertainty"
+    module: M1
+    description: "Variability in actual demand vs forecast"
+
+  - id: "proc:vehicle_loading"
+    type: process
+    label: "Vehicle Loading"
+    module: M6
+    description: "How fully trucks are loaded (driven by WFR/VFR thresholds)"
+
+  - id: "proc:deployment_timing"
+    type: process
+    label: "Deployment Timing"
+    module: M5
+    description: "When deployment orders are triggered (push=proactive, pull=reactive)"
+
+  - id: "proc:deployment_batch_size"
+    type: process
+    label: "Deployment Batch Size"
+    module: M5
+    description: "Size of each deployment order (rounded up by MOQ/RV)"
+
+  - id: "proc:storage_limit"
+    type: process
+    label: "Storage Limit"
+    module: Orchestrator/M5
+    description: "Maximum inventory that can be held at a location"
+
+  - id: "proc:transport_capacity"
+    type: process
+    label: "Transport Capacity"
+    module: M6
+    description: "Total transport throughput per route (truck_number * per-truck capacity)"
+
+  - id: "proc:waiting_time"
+    type: process
+    label: "Waiting Time"
+    module: M6
+    description: "Days waiting for truck to reach WFR/VFR threshold before release"
+
+  - id: "proc:forced_dispatch_penalty"
+    type: process
+    label: "Forced Dispatch Penalty"
+    module: M6
+    description: "Cost penalty when truck is force-released below WFR/VFR target due to max_wait_days cap. Represents fixed cost spread over underloaded payload, driving up unit transport cost."
+
+  - id: "proc:total_replenishment_lead_time"
+    type: process
+    label: "Total Replenishment Lead Time"
+    module: M6/Orchestrator
+    description: "Aggregate lead time node. For MVP, retained as backward-compatible bridge. Post-MVP: decompose into planned vs actual perspectives."
+
+  - id: "proc:planned_lead_time"
+    type: process
+    label: "Planned Replenishment Lead Time"
+    module: M3/M5/M6
+    description: "Static configured lead time = pdt + GR. Input to replenishment planning."
+
+  - id: "proc:actual_lead_time"
+    type: process
+    label: "Actual Replenishment Lead Time"
+    module: Orchestrator
+    description: "Observed lead time from simulation runs. Includes variability from demand, waiting, transit, and GR processing."
+
+  - id: "proc:production_plan_freeze"
+    type: process
+    label: "Production Plan Freeze Horizon"
+    module: M4
+    description: "Length of the frozen planning horizon during which the production plan cannot change. High PTF = long freeze = stable schedule but unresponsive to demand; Low PTF = short freeze = frequent plan revisions causing changeovers and capacity erosion."
+
+  - id: "proc:production_gr_delay"
+    type: process
+    label: "Production GR Delay (MCT)"
+    module: M4
+    description: "Delay between production completion and goods becoming available as unrestricted inventory, driven by the MCT quarantine period."
+
+  - id: "proc:demand_volume"
+    type: process
+    label: "Demand Volume"
+    module: M1
+    description: "Aggregate production demand volume at plant level"
+
+  - id: "proc:dc_handling_touches"
+    type: process
+    label: "DC Handling Touches"
+    module: M6/M1
+    description: "Number of physical inbound + outbound handling operations at DC per unit. DPS bypasses DC entirely, reducing this to zero for DPS portion."
+
+  - id: "proc:transport_volume_f2dc"
+    type: process
+    label: "Transport Volume Factory→DC"
+    module: M6
+    description: "Total shipment volume on Factory-to-DC lanes. Decreases as DPS percent increases."
+
+  - id: "proc:transport_volume_dc2cust"
+    type: process
+    label: "Transport Volume DC→Customer"
+    module: M6
+    description: "Total shipment volume on DC-to-Customer lanes. Decreases as DPS percent increases."
+
+  - id: "proc:transport_volume_f2cust"
+    type: process
+    label: "Transport Volume Factory→Customer (DPS)"
+    module: M6
+    description: "Total direct shipment volume on Factory-to-Customer DPS lanes. Increases as DPS percent increases."
+
+  # ============================================================
+  # Metric Nodes (9) — from ontology Metric instances
+  # ============================================================
+  - id: "metric:fill_rate"
+    type: metric
+    label: "Fill Rate"
+    category: service
+    unit: "%"
+    description: "Percentage of demand fulfilled from stock (shipment_qty / order_qty)"
+
+  - id: "metric:dfc"
+    type: metric
+    label: "Days Forward Coverage"
+    category: cash
+    unit: "days"
+    description: "How many days current inventory can cover future demand"
+
+  - id: "metric:production_capacity_utilization"
+    type: metric
+    label: "Production Capacity Utilization"
+    category: cost
+    unit: "%"
+    description: "Production line usage rate (planned_qty / line_capacity)"
+
+  - id: "metric:changeover_frequency"
+    type: metric
+    label: "Changeover Frequency"
+    category: cost
+    unit: "count"
+    description: "Number of production switches"
+
+  - id: "metric:on_time_delivery_rate"
+    type: metric
+    label: "On-Time Delivery Rate"
+    category: service
+    unit: "%"
+    description: "Delivery performance (on_time_deliveries / total_deliveries)"
+
+  - id: "metric:truck_fill_rate"
+    type: metric
+    label: "Truck Fill Rate"
+    category: cost
+    unit: "%"
+    description: "Vehicle loading efficiency (loaded_weight / truck_capacity)"
+
+  - id: "metric:total_inventory_holding_cost"
+    type: metric
+    label: "Total Inventory Holding Cost"
+    category: cash
+    unit: "currency"
+    description: "Cash impact of inventory (inventory * holding cost rate)"
+
+  - id: "metric:space_capacity_requirement"
+    type: metric
+    label: "Space Capacity Requirement"
+    category: cost
+    unit: "demand_units"
+    description: "Peak storage capacity per location per month — drives rental cost"
+
+  - id: "metric:rental_cost"
+    type: metric
+    label: "Rental Cost"
+    category: cost
+    unit: "currency"
+    description: "Warehousing cost from storage capacity needs"
+
+  - id: "metric:ctd"
+    type: metric
+    label: "CtD (Capacity to Demand)"
+    category: service
+    unit: "ratio"
+    description: "Capacity to Demand ratio — production capacity sufficiency indicator"
+
+  - id: "metric:changeover_cost"
+    type: metric
+    label: "Changeover Cost (MOE)"
+    category: cost
+    unit: "currency"
+    description: "Manufacturing changeover cost (MOE component) — total cost of production line switches"
+
+  - id: "metric:handling_cost"
+    type: metric
+    label: "Handling Cost"
+    category: cost
+    unit: "currency"
+    description: "DC inbound and outbound handling cost per unit shipped through DC (receiving, put-away, pick, despatch)"
+
+  - id: "metric:transportation_cost"
+    type: metric
+    label: "Transportation Cost"
+    category: cost
+    unit: "currency"
+    description: "Total freight cost across all lanes (F→DC, DC→Customer, F→Customer DPS). Net effect of DPS change depends on lane distances and load factors — must be validated via simulation."
+
+edges:
+  # ============================================================
+  # Chain 1: Safety Stock → Cash
+  # ============================================================
+  - source: "param:safety_stock_qty"
+    target: "proc:inventory_level"
+    type: influences
+    polarity: "+"
+    description: "Higher safety stock increases inventory held at each node"
+
+  - source: "proc:inventory_level"
+    target: "metric:dfc"
+    type: influences
+    polarity: "+"
+    description: "Higher inventory level increases days forward coverage"
+
+  - source: "proc:inventory_level"
+    target: "metric:total_inventory_holding_cost"
+    type: influences
+    polarity: "+"
+    description: "Higher inventory level increases holding cost"
+
+  # ============================================================
+  # Chain 2: Batch Size → Cost / Cash
+  # ============================================================
+  - source: "param:min_batch"
+    target: "proc:production_flexibility"
+    type: influences
+    polarity: "-"
+    description: "Larger minimum batch reduces ability to switch between materials"
+
+  - source: "proc:production_flexibility"
+    target: "metric:changeover_frequency"
+    type: influences
+    polarity: "+"
+    description: "More flexibility enables more frequent changeovers"
+
+  - source: "param:min_batch"
+    target: "proc:batch_inventory"
+    type: influences
+    polarity: "+"
+    description: "Larger batches produce more excess inventory"
+
+  - source: "param:rv"
+    target: "proc:batch_inventory"
+    type: influences
+    polarity: "+"
+    description: "Rounding up production quantities increases batch inventory"
+
+  - source: "proc:batch_inventory"
+    target: "metric:dfc"
+    type: influences
+    polarity: "+"
+    description: "Batch-driven excess inventory increases days forward coverage"
+
+  # ============================================================
+  # Chain 3: Lead Time → Service
+  # ============================================================
+  - source: "param:pdt"
+    target: "proc:delivery_lead_time"
+    type: influences
+    polarity: "+"
+    description: "Longer planning delivery time increases delivery lead time"
+
+  - source: "param:gr_days"
+    target: "proc:delivery_lead_time"
+    type: influences
+    polarity: "+"
+    description: "More GR processing days increases delivery lead time"
+
+  - source: "proc:delivery_lead_time"
+    target: "proc:total_replenishment_lead_time"
+    type: influences
+    polarity: "+"
+    description: "Delivery lead time is a component of total replenishment lead time"
+
+  - source: "proc:total_replenishment_lead_time"
+    target: "metric:on_time_delivery_rate"
+    type: influences
+    polarity: "-"
+    description: "Longer total replenishment lead time reduces on-time delivery performance"
+
+  # ============================================================
+  # Chain 4: Demand Allocation → Service
+  # ============================================================
+  - source: "param:dps_percent"
+    target: "proc:demand_allocation"
+    type: influences
+    polarity: null
+    description: "DPS percentage determines plant-direct vs DC shipment split"
+
+  - source: "param:ao_percent"
+    target: "proc:demand_allocation"
+    type: influences
+    polarity: null
+    description: "AO percentage pre-places a portion of demand as advance orders"
+
+  - source: "param:advance_days"
+    target: "proc:demand_allocation"
+    type: influences
+    polarity: null
+    description: "Controls how far ahead advance orders are placed"
+
+  - source: "param:order_calendar"
+    target: "proc:demand_allocation"
+    type: influences
+    polarity: null
+    description: "Defines which days orders are generated — affects demand timing"
+
+  - source: "proc:demand_allocation"
+    target: "metric:fill_rate"
+    type: influences
+    polarity: null
+    description: "Demand split and timing pattern affects overall fill rate"
+
+  # ============================================================
+  # Chain 5: Production → Capacity / Service
+  # ============================================================
+  - source: "param:prd_rate"
+    target: "proc:production_output"
+    type: influences
+    polarity: "+"
+    description: "Higher production rate increases daily output"
+
+  - source: "param:changeover_time"
+    target: "proc:effective_capacity"
+    type: influences
+    polarity: "-"
+    description: "Longer changeover time reduces available production capacity"
+
+  - source: "param:line_capacity"
+    target: "proc:effective_capacity"
+    type: influences
+    polarity: "+"
+    description: "More available hours per line increases effective capacity"
+
+  - source: "param:delegate_line"
+    target: "proc:effective_capacity"
+    type: constrains
+    polarity: null
+    description: "Line assignment determines which capacity pool is used for each material"
+
+  - source: "proc:effective_capacity"
+    target: "proc:production_output"
+    type: constrains
+    polarity: null
+    description: "Effective capacity constrains maximum production output"
+
+  - source: "proc:production_output"
+    target: "metric:production_capacity_utilization"
+    type: influences
+    polarity: "+"
+    description: "Higher output increases capacity utilization"
+
+  - source: "param:error_std_percent"
+    target: "proc:demand_uncertainty"
+    type: influences
+    polarity: "+"
+    description: "Higher forecast error increases demand uncertainty"
+
+  - source: "proc:demand_uncertainty"
+    target: "metric:fill_rate"
+    type: influences
+    polarity: "-"
+    description: "Higher demand uncertainty reduces fill rate"
+
+  # ============================================================
+  # Chain 6: Logistics → Cost
+  # ============================================================
+  - source: "param:wfr"
+    target: "proc:vehicle_loading"
+    type: influences
+    polarity: "+"
+    description: "Higher WFR threshold forces better weight utilization per truck"
+
+  - source: "param:vfr"
+    target: "proc:vehicle_loading"
+    type: influences
+    polarity: "+"
+    description: "Higher VFR threshold forces better volume utilization per truck"
+
+  - source: "proc:vehicle_loading"
+    target: "metric:truck_fill_rate"
+    type: influences
+    polarity: "+"
+    description: "Better vehicle loading increases truck fill rate"
+
+  - source: "param:truck_number"
+    target: "proc:transport_capacity"
+    type: influences
+    polarity: "+"
+    description: "More trucks increases total transport throughput"
+
+  - source: "param:capacity_qty_in_weight"
+    target: "proc:transport_capacity"
+    type: influences
+    polarity: "+"
+    description: "Higher per-truck weight capacity increases transport throughput"
+
+  - source: "param:capacity_qty_in_volume"
+    target: "proc:transport_capacity"
+    type: influences
+    polarity: "+"
+    description: "Higher per-truck volume capacity increases transport throughput"
+
+  - source: "param:truck_type"
+    target: "proc:transport_capacity"
+    type: constrains
+    polarity: null
+    description: "Truck type determines the capacity specs available on each route"
+
+  - source: "proc:transport_capacity"
+    target: "proc:vehicle_loading"
+    type: constrains
+    polarity: null
+    description: "Transport capacity constrains how much can be loaded"
+
+  # ============================================================
+  # Chain 7: Deployment Strategy → Service / Cost
+  # ============================================================
+  - source: "param:push_pull_model"
+    target: "proc:deployment_timing"
+    type: influences
+    polarity: null
+    description: "Push=proactive deployment, Pull=reactive. Effect depends on demand stability — stable SKUs may benefit from push for better consolidation and pre-positioning"
+
+  - source: "proc:deployment_timing"
+    target: "metric:fill_rate"
+    type: influences
+    polarity: null
+    description: "Deployment timing affects inventory availability at demand points"
+
+  - source: "param:moq"
+    target: "proc:deployment_batch_size"
+    type: influences
+    polarity: "+"
+    description: "Higher MOQ increases deployment order size"
+
+  - source: "param:rv_deploy"
+    target: "proc:deployment_batch_size"
+    type: influences
+    polarity: "+"
+    description: "Rounding up deployment quantities increases batch size"
+
+  - source: "proc:deployment_batch_size"
+    target: "metric:dfc"
+    type: influences
+    polarity: "+"
+    description: "Larger deployment batches increase inventory at receiving locations"
+
+  - source: "param:space_capacity"
+    target: "proc:storage_limit"
+    type: influences
+    polarity: "+"
+    description: "Higher space capacity raises the storage ceiling"
+
+  - source: "proc:storage_limit"
+    target: "metric:space_capacity_requirement"
+    type: constrains
+    polarity: null
+    description: "Storage limit constrains how much inventory can be held"
+
+  - source: "metric:space_capacity_requirement"
+    target: "metric:rental_cost"
+    type: influences
+    polarity: "+"
+    description: "Higher storage requirement drives higher rental cost"
+
+  # ============================================================
+  # Chain 8: WFR/VFR Side Effects → Lead Time (from feedback)
+  # ============================================================
+  - source: "param:wfr"
+    target: "proc:waiting_time"
+    type: influences
+    polarity: "+"
+    description: "Higher WFR threshold means longer wait to accumulate enough weight to release truck"
+
+  - source: "param:vfr"
+    target: "proc:waiting_time"
+    type: influences
+    polarity: "+"
+    description: "Higher VFR threshold means longer wait to accumulate enough volume to release truck"
+
+  - source: "param:max_wait_days"
+    target: "proc:waiting_time"
+    type: constrains
+    polarity: null
+    description: "Max wait days caps the waiting time — force-releases truck even if WFR/VFR not met"
+
+  - source: "proc:waiting_time"
+    target: "proc:total_replenishment_lead_time"
+    type: influences
+    polarity: "+"
+    description: "Longer waiting time extends total replenishment lead time"
+
+  # ============================================================
+  # Chain 9: DPS → Handling Cost
+  # ============================================================
+  - source: "param:dps_percent"
+    target: "proc:dc_handling_touches"
+    type: influences
+    polarity: "-"
+    description: "Higher DPS percentage means more shipments bypass DC entirely, reducing DC inbound+outbound handling touches"
+
+  - source: "proc:dc_handling_touches"
+    target: "metric:handling_cost"
+    type: influences
+    polarity: "+"
+    description: "More DC handling touches increases total handling cost"
+
+  - source: "param:dps_percent"
+    target: "proc:inventory_level"
+    type: influences
+    polarity: "-"
+    description: "Higher DPS reduces inventory held at DC layer, lowering network inventory level"
+
+  # ============================================================
+  # Chain 10: DPS Percent → Transportation Cost (three-lane effect)
+  # ============================================================
+  - source: "param:dps_percent"
+    target: "proc:transport_volume_f2dc"
+    type: influences
+    polarity: "-"
+    description: "Higher DPS reduces volume shipped on Factory→DC lanes as more orders go direct"
+
+  - source: "param:dps_percent"
+    target: "proc:transport_volume_dc2cust"
+    type: influences
+    polarity: "-"
+    description: "Higher DPS reduces volume shipped on DC→Customer lanes as more orders are fulfilled direct from factory"
+
+  - source: "param:dps_percent"
+    target: "proc:transport_volume_f2cust"
+    type: influences
+    polarity: "+"
+    description: "Higher DPS increases volume on Factory→Customer direct lanes"
+
+  - source: "proc:transport_volume_f2dc"
+    target: "metric:transportation_cost"
+    type: influences
+    polarity: "+"
+    description: "Higher F→DC volume increases transportation cost on that lane"
+
+  - source: "proc:transport_volume_dc2cust"
+    target: "metric:transportation_cost"
+    type: influences
+    polarity: "+"
+    description: "Higher DC→Customer volume increases transportation cost on that lane"
+
+  - source: "proc:transport_volume_f2cust"
+    target: "metric:transportation_cost"
+    type: influences
+    polarity: "+"
+    description: "Higher F→Customer DPS volume increases transportation cost on that lane (typically longer distance than DC→Customer)"
+
+  # ============================================================
+  # Chain 11: Forced Dispatch Cost (from feedback 2026-04-04)
+  # ============================================================
+  - source: "param:max_wait_days"
+    target: "proc:forced_dispatch_penalty"
+    type: influences
+    polarity: "-"
+    description: "Lower max_wait_days increases likelihood of forced dispatch before reaching WFR/VFR target, raising penalty cost."
+
+  - source: "param:wfr"
+    target: "proc:forced_dispatch_penalty"
+    type: influences
+    polarity: "+"
+    description: "Higher WFR target raises the threshold that, if unmet due to max_wait_days cap, triggers forced dispatch penalty."
+
+  - source: "param:vfr"
+    target: "proc:forced_dispatch_penalty"
+    type: influences
+    polarity: "+"
+    description: "Higher VFR target raises the threshold that, if unmet due to max_wait_days cap, triggers forced dispatch penalty."
+
+  - source: "proc:forced_dispatch_penalty"
+    target: "metric:truck_fill_rate"
+    type: influences
+    polarity: "-"
+    description: "Forced dispatch reduces actual fill rate below WFR/VFR target, increasing unit transport cost."
+
+  # ============================================================
+  # Chain 12: Planned Lead Time (from feedback 2026-04-04)
+  # ============================================================
+  - source: "param:pdt"
+    target: "proc:planned_lead_time"
+    type: influences
+    polarity: "+"
+    description: "PDT is a direct component of planned lead time."
+
+  - source: "param:gr_days"
+    target: "proc:planned_lead_time"
+    type: influences
+    polarity: "+"
+    description: "GR days is a direct component of planned lead time."
+
+  - source: "proc:planned_lead_time"
+    target: "metric:on_time_delivery_rate"
+    type: influences
+    polarity: "-"
+    description: "Longer planned lead time reduces OTD performance by extending promised delivery times."
+
+  # ============================================================
+  # Chain 13: Actual Lead Time + Feedback (from feedback 2026-04-04)
+  # ============================================================
+  - source: "proc:waiting_time"
+    target: "proc:actual_lead_time"
+    type: influences
+    polarity: "+"
+    description: "Actual waiting time (driven by demand variability and WFR/VFR dynamics) affects observed lead time."
+
+  - source: "proc:demand_uncertainty"
+    target: "proc:actual_lead_time"
+    type: influences
+    polarity: "+"
+    description: "Demand variability causes shipment volume fluctuation, which affects waiting time and actual lead time."
+
+  - source: "proc:delivery_lead_time"
+    target: "proc:actual_lead_time"
+    type: influences
+    polarity: "+"
+    description: "Actual transit time variation contributes to observed lead time."
+
+  - source: "param:gr_days"
+    target: "proc:actual_lead_time"
+    type: influences
+    polarity: "+"
+    description: "GR processing time variability affects observed lead time."
+
+  - source: "proc:actual_lead_time"
+    target: "metric:on_time_delivery_rate"
+    type: influences
+    polarity: "-"
+    description: "Longer actual lead time relative to promise degrades OTD performance."
+
+  # Feedback loop (post-MVP placeholder)
+  - source: "proc:actual_lead_time"
+    target: "proc:planned_lead_time"
+    type: influences
+    polarity: null
+    description: "Feedback loop: persistent deviation between actual and planned lead time triggers pdt/GR recalibration (post-MVP)."
+
+  # ============================================================
+  # Cross-chain links
+  # ============================================================
+  - source: "proc:inventory_level"
+    target: "metric:space_capacity_requirement"
+    type: influences
+    polarity: "+"
+    description: "Higher inventory levels increase peak storage needs"
+
+  - source: "proc:inventory_level"
+    target: "metric:fill_rate"
+    type: influences
+    polarity: "+"
+    description: "Higher inventory levels improve stock availability and increase fill rate"
+
+  - source: "proc:deployment_batch_size"
+    target: "proc:inventory_level"
+    type: influences
+    polarity: "+"
+    description: "Larger deployment batches increase inventory at receiving locations"
+
+  - source: "proc:production_output"
+    target: "proc:inventory_level"
+    type: influences
+    polarity: "+"
+    description: "Higher production output increases inventory at producing locations"
+
+  - source: "proc:demand_allocation"
+    target: "proc:inventory_level"
+    type: influences
+    polarity: null
+    description: "Demand allocation pattern affects inventory distribution across network"
+
+  # ============================================================
+  # Chain 14: PTF — plan stability vs responsiveness tradeoff (D1)
+  # ============================================================
+  - source: "param:ptf"
+    target: "proc:production_plan_freeze"
+    type: influences
+    polarity: "+"
+    description: "Higher PTF = longer frozen planning horizon = more plan stability"
+
+  - source: "proc:production_plan_freeze"
+    target: "metric:fill_rate"
+    type: influences
+    polarity: "-"
+    description: "Longer plan freeze reduces ability to react to demand changes — production cannot adjust within the frozen window, risking fill rate when demand spikes occur"
+
+  - source: "proc:production_plan_freeze"
+    target: "metric:changeover_frequency"
+    type: influences
+    polarity: "-"
+    description: "Longer plan freeze prevents unplanned mid-cycle changeovers, reducing changeover frequency (stability benefit of high PTF)"
+
+  - source: "proc:production_plan_freeze"
+    target: "proc:effective_capacity"
+    type: influences
+    polarity: "+"
+    description: "More stable production plan reduces disruptive within-horizon changeovers, increasing usable effective capacity; conversely low PTF causes frequent revisions and changeovers that erode available production time"
+
+  # ============================================================
+  # Chain 15: MCT — quarantine delay effects on inventory and lead time (D2)
+  # ============================================================
+  - source: "param:mct"
+    target: "proc:production_gr_delay"
+    type: influences
+    polarity: "+"
+    description: "Longer MCT quarantine period increases the delay before produced goods become available as unrestricted inventory"
+
+  - source: "proc:production_gr_delay"
+    target: "proc:inventory_level"
+    type: influences
+    polarity: "-"
+    description: "MCT quarantine delays when production GR hits unrestricted inventory, reducing available stock at the producing location during the quarantine window"
+
+  - source: "proc:production_gr_delay"
+    target: "proc:delivery_lead_time"
+    type: influences
+    polarity: "+"
+    description: "MCT delay extends the effective replenishment lead time — goods cannot be deployed until quarantine is released, adding to the total time from production to arrival at receiving location"
+
+  # ============================================================
+  # Chain 16: LSK — review cycle effects on batch inventory and flexibility (D3)
+  # ============================================================
+  - source: "param:lsk"
+    target: "proc:batch_inventory"
+    type: influences
+    polarity: "+"
+    description: "Longer review cycle means fewer but larger production runs per period, increasing batch inventory buildup between review cycles"
+
+  - source: "param:lsk"
+    target: "proc:production_flexibility"
+    type: influences
+    polarity: "-"
+    description: "Longer review cycle reduces frequency of production re-planning, limiting responsiveness to demand changes between review events"
+
+  # ============================================================
+  # Chain 17: Push/Pull deployment timing → vehicle loading (D4)
+  # ============================================================
+  - source: "proc:deployment_timing"
+    target: "proc:vehicle_loading"
+    type: influences
+    polarity: null
+    description: "Push mode enables proactive demand consolidation ahead of actual need, providing better conditions for load buildup toward WFR/VFR thresholds. Pull mode reacts to actual demand which may fragment shipment volumes, but actual fill rate effect still depends on wfr/vfr thresholds, max_wait_days, and MOQ — not a direct fill rate trade-off."
+
+  # ============================================================
+  # Chain 18: CtD (Capacity to Demand) — SE6
+  # ============================================================
+  - source: "proc:demand_allocation"
+    target: "proc:demand_volume"
+    type: influences
+    polarity: "+"
+    description: "Demand pattern determines aggregated production demand volume at plant level"
+
+  - source: "proc:effective_capacity"
+    target: "metric:ctd"
+    type: influences
+    polarity: "+"
+    description: "More effective capacity raises CtD ratio (more headroom)"
+
+  - source: "proc:demand_volume"
+    target: "metric:ctd"
+    type: influences
+    polarity: "-"
+    description: "More demand volume lowers CtD ratio (capacity becomes tighter)"
+
+  - source: "metric:changeover_frequency"
+    target: "proc:effective_capacity"
+    type: influences
+    polarity: "-"
+    description: "More changeovers consume production time, reducing usable effective capacity"
+
+  # ============================================================
+  # Chain 19: Changeover Cost (MOE) — SE7
+  # ============================================================
+  - source: "metric:changeover_frequency"
+    target: "metric:changeover_cost"
+    type: influences
+    polarity: "+"
+    description: "More changeovers increase total changeover cost (frequency × unit changeover cost)"

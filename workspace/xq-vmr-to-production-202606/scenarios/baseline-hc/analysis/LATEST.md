@@ -1,0 +1,5 @@
+current: 20260703-1815-baseline-hc-tof-changeover-dfc-prodtime-apq-msu
+
+## Run log
+- **20260703-1815-baseline-hc-tof-changeover-dfc-prodtime-apq-msu** - scenario `baseline-hc`, run_id `db_baseline-hc_20260617_203548` | KPIs: TOF by category x line x month, changeover count & cost by line x month x id, month-end DFC by category x line x month, production total time by category x line x month, APQ by line & material, wash count / MSU by line, MOQ/APQ coverage by SKU/line/category | category: databricks 81.6% + line-inferred 18.4% + unmapped 0.0% | generated 2026-07-03 18:15
+- **20260618-1115-baseline-hc-tof-changeover-dfc-prodtime-apq-msu** - scenario `baseline-hc`, run_id `db_baseline-hc_20260617_203548` | KPIs: TOF by category x line x month, changeover count & cost by line x month x id, month-end DFC by category x line x month, production total time by category x line x month, APQ by line & material, wash count / MSU by line | category: databricks 81.6% + line-inferred 18.4% + unmapped 0.0% | generated 2026-06-18 11:15

@@ -1,0 +1,14 @@
+id: "csmeta:chainsight-databricks-connection"
+type: "csmeta:Skill"
+name: ChainSight Databricks Connection
+description: "Open a read-only connection to the P&G Databricks SQL warehouse and run SQL from the ChainSight workspace (credentials from config/.env)."
+skill_file: .agents/skills/chainsight-databricks-connection/SKILL.md
+covers_classes:
+  - Material
+  - Location
+used_by_agents: []
+derived_from:
+  decisions: []
+  design_section: "data-access"
+tags: [databricks, sql, master-data, connection]
+status: active

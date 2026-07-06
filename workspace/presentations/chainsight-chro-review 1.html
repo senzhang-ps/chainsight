@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ChainSight CHRO Review</title>
+<style>
+:root{
+  --bg:#f5f7fb;
+  --paper:#ffffff;
+  --ink:#111827;
+  --text:#334155;
+  --muted:#64748b;
+  --line:#d9e2ec;
+  --blue:#2563eb;
+  --navy:#172554;
+  --teal:#0f766e;
+  --green:#059669;
+  --amber:#d97706;
+  --slate:#475569;
+  --soft-blue:#eef5ff;
+  --soft-teal:#edfdfb;
+  --soft-amber:#fff7ed;
+  --shadow:0 22px 52px rgba(15,23,42,.13),0 3px 12px rgba(15,23,42,.05);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;font-family:Aptos,Inter,"Segoe UI",system-ui,sans-serif;color:var(--ink);background:linear-gradient(135deg,#f8fafc 0%,#eef3f9 52%,#f5f7fb 100%)}
+body{overflow:hidden}
+button{font:inherit}
+.app{height:100vh;padding:18px 24px 24px;display:flex;flex-direction:column;gap:14px}
+.topbar{height:54px;border:1px solid rgba(203,213,225,.8);background:rgba(255,255,255,.82);display:flex;align-items:center;justify-content:space-between;border-radius:12px;padding:10px 14px;box-shadow:0 4px 18px rgba(15,23,42,.06)}
+.brand{display:flex;align-items:center;gap:10px;font-weight:800;color:#0f172a}
+.mark{width:28px;height:28px;border-radius:7px;background:linear-gradient(135deg,var(--blue),var(--teal))}
+.meta{font-size:12px;color:var(--muted);font-weight:700}
+.deck{flex:1;min-height:0;display:grid;grid-template-columns:54px minmax(0,1fr) 54px;gap:14px;align-items:center}
+.stage{height:100%;min-width:0;display:flex;align-items:center;justify-content:center;position:relative}
+.slide{display:none;width:min(100%,1440px);aspect-ratio:16/9;max-height:100%;background:var(--paper);border:1px solid rgba(203,213,225,.9);border-radius:16px;box-shadow:var(--shadow);overflow:hidden;position:relative}
+.slide.active{display:block}
+.slide-inner{height:100%;padding:34px 46px;display:flex;flex-direction:column;position:relative}
+.section-label{font-size:12px;text-transform:uppercase;color:var(--blue);font-weight:850;letter-spacing:0;margin-bottom:10px}
+h1{font-size:74px;line-height:1.02;letter-spacing:0;font-weight:900;color:#0f172a}
+h2{font-size:34px;line-height:1.12;letter-spacing:0;font-weight:860;color:#0f172a;max-width:1120px}
+h3{font-size:21px;line-height:1.2;letter-spacing:0;color:#111827}
+p,li{font-size:15px;line-height:1.38;color:var(--text)}
+.key-message{font-size:19px;line-height:1.3;color:#172554;font-weight:800;max-width:1040px;margin-top:10px}
+.body-copy{font-size:14.5px;line-height:1.42;color:#475569}
+.nav{height:86px;width:54px;border:1px solid rgba(203,213,225,.9);border-radius:12px;background:rgba(255,255,255,.82);color:#1e3a8a;font-size:34px;cursor:pointer;box-shadow:0 8px 20px rgba(15,23,42,.08)}
+.nav:hover{background:#fff}
+.dots{position:absolute;left:50%;bottom:20px;transform:translateX(-50%);display:flex;gap:8px;z-index:6}
+.dot{width:8px;height:8px;border:0;border-radius:99px;background:#cbd5e1;cursor:pointer}
+.dot.active{width:24px;background:var(--blue)}
+.page-num{position:absolute;right:30px;bottom:20px;color:#64748b;font-size:12px;font-weight:750}
+.arrow{display:flex;align-items:center;justify-content:center;color:#64748b;font-size:24px;font-weight:300}
+
+/* Page 1 */
+.cover{justify-content:center;background:linear-gradient(135deg,#ffffff 0%,#f8fafc 55%,#ecfeff 100%)}
+.cover-title{max-width:1080px}
+.cover h1{font-size:92px;margin-bottom:18px}
+.cover .subtitle{font-size:34px;line-height:1.2;color:#1e3a8a;font-weight:800;max-width:1020px}
+.cover-line{width:116px;height:5px;border-radius:99px;background:linear-gradient(90deg,var(--blue),var(--teal),var(--amber));margin-top:30px}
+
+/* Page 2 */
+.definition-layout{display:grid;grid-template-columns:.68fr 1.32fr;gap:26px;align-items:center;flex:1;margin-top:18px;min-height:0}
+.concept-visual{align-self:center;height:318px;border-radius:12px;border:1px solid var(--line);overflow:hidden;background:#f8fafc;min-height:0}
+.concept-visual img{width:100%;height:100%;object-fit:cover;display:block}
+.definition-panel{display:flex;flex-direction:column;justify-content:center;gap:17px;min-width:0}
+.definition-panel .key-message{font-size:21px;line-height:1.34;margin-top:0}
+.definition-panel .body-copy{font-size:15.5px;line-height:1.5}
+.definition-copy{display:grid;gap:13px}
+.flow-stack{display:grid;grid-template-columns:1fr 22px 1fr 22px 1fr 22px 1fr;gap:6px;align-items:stretch;margin-top:2px;min-width:0}
+.flow-card{border:1px solid var(--line);border-radius:8px;background:#fff;padding:10px;min-height:116px;box-shadow:0 10px 24px rgba(15,23,42,.06);min-width:0;overflow-wrap:break-word}
+.flow-card b{display:block;font-size:12px;color:var(--muted);font-weight:850;text-transform:uppercase;margin-bottom:8px}
+.flow-card h3{font-size:16px;margin-bottom:6px}
+.flow-card p{font-size:12.5px;color:#475569}
+.chip-row{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.chip{border-radius:99px;background:#f1f5f9;border:1px solid #dbe3ee;color:#334155;padding:5px 8px;font-size:12px;font-weight:800}
+.evidence-pack{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:5px;margin-top:9px;min-width:0}
+.evidence-pack span{min-width:0;border-radius:7px;background:var(--soft-blue);border:1px solid #bfdbfe;color:#1e3a8a;padding:5px;text-align:center;font-size:10.5px;font-weight:850;line-height:1.1;overflow-wrap:anywhere}
+
+/* Page 3 */
+.diagnostic-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;flex:1;margin-top:12px;min-height:0}
+.diag-card{border:1px solid var(--line);border-radius:8px;background:#fff;padding:10px;box-shadow:0 12px 28px rgba(15,23,42,.06);display:grid;grid-template-rows:auto 1fr auto;gap:6px;min-height:0}
+.diag-card h3{font-size:16.5px}
+.diag-card p{font-size:12.2px;line-height:1.25;color:#475569}
+.timeline{display:grid;gap:8px;margin:4px 0 0}
+.month-track{height:42px;border-radius:8px;background:#f8fafc;border:1px solid #dbe3ee;display:grid;grid-template-columns:repeat(12,1fr);gap:3px;align-items:center;padding:0 10px;position:relative}
+.month-track:before{content:"";position:absolute;left:18px;right:18px;top:50%;height:2px;background:#cbd5e1}
+.month{position:relative;z-index:2;width:12px;height:12px;border-radius:50%;background:#cbd5e1;margin:auto}
+.month.active{width:28px;height:28px;background:#2563eb;color:#fff;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:950;box-shadow:0 7px 14px rgba(37,99,235,.22)}
+.time-note{border-radius:8px;background:var(--soft-amber);border:1px solid #fed7aa;color:#9a3412;font-size:11px;font-weight:850;padding:6px;text-align:center}
+.prep-timeline{display:grid;grid-template-columns:auto 1fr auto;gap:7px;align-items:center;border-radius:8px;background:#f8fafc;border:1px solid #dbe3ee;padding:6px 8px;margin-bottom:6px}
+.prep-timeline span{font-size:10.5px;color:#64748b;font-weight:850}
+.prep-bar{height:12px;border-radius:99px;background:linear-gradient(90deg,#bfdbfe,#2563eb);display:flex;align-items:center;justify-content:center}
+.prep-bar strong{font-size:10px;color:#fff;font-weight:950;white-space:nowrap}
+.process-bar{display:grid;grid-template-columns:repeat(5,1fr);gap:6px;align-items:end;margin-top:2px}
+.process-step{height:42px;border-radius:8px;background:#eff6ff;border:1px solid #bfdbfe;color:#1e3a8a;display:flex;align-items:center;justify-content:center;text-align:center;font-size:10.5px;font-weight:850;padding:4px}
+.silo-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;align-items:center;margin-top:2px}
+.silo{border:1px solid #dbe3ee;border-radius:8px;background:#f8fafc;padding:8px;text-align:center;min-height:54px}
+.silo b{display:block;color:#0f172a;margin-bottom:6px;font-size:12.5px}
+.local-line{height:6px;border-radius:99px;background:#94a3b8;margin:4px auto;width:70%}
+.split-bar{height:44px;border-radius:8px;border:1px solid #dbe3ee;display:grid;grid-template-columns:74% 26%;overflow:hidden;margin-top:4px}
+.split-a,.split-b{display:flex;align-items:center;justify-content:center;text-align:center;padding:6px;font-size:11.5px;font-weight:850;line-height:1.15}
+.split-a{background:#e2e8f0;color:#334155}
+.split-b{background:#dcfce7;color:#166534}
+.transition-band{margin-top:10px;border-radius:10px;background:linear-gradient(135deg,#172554,#0f766e);color:#fff;padding:12px 18px;box-shadow:0 18px 34px rgba(15,23,42,.18);border:1px solid rgba(191,219,254,.26)}
+.transition-band p{color:#fff;font-weight:850;font-size:16.5px;line-height:1.25}
+
+/* Page 4 */
+.work-layout{display:grid;grid-template-columns:1.05fr .9fr 1.05fr;gap:14px;align-items:stretch;flex:1;margin-top:22px;min-height:0}
+.human-card,.engine-card,.output-card{border-radius:8px;border:1px solid var(--line);background:#fff;padding:18px;box-shadow:0 12px 28px rgba(15,23,42,.06)}
+.human-card,.output-card{padding:22px;border-width:2px;box-shadow:0 18px 38px rgba(37,99,235,.13)}
+.human-card{background:linear-gradient(180deg,#ffffff,#eff6ff);border-color:#93c5fd}
+.output-card{background:linear-gradient(180deg,#ffffff,#ecfdf5);border-color:#86efac;box-shadow:0 18px 38px rgba(5,150,105,.13)}
+.human-card h3,.output-card h3{font-size:25px}
+.engine-card{align-self:center;background:#f8fafc;border-color:#cbd5e1;color:#334155;box-shadow:0 8px 18px rgba(15,23,42,.05);padding:16px}
+.engine-card h3{font-size:19px;color:#0f172a}
+.engine-card p{color:#475569;font-size:13.3px}
+.engine-card .step-pill{background:#fff;border-color:#dbe3ee;color:#334155}
+.work-kicker{font-size:12px;color:#64748b;text-transform:uppercase;font-weight:850;margin-bottom:8px}
+.engine-card .work-kicker{color:#64748b}
+.work-list{display:grid;gap:10px;margin-top:16px}
+.work-item{border-radius:8px;border:1px solid #dbe3ee;background:#fff;padding:13px}
+.work-item b{display:block;font-size:16px;margin-bottom:4px}
+.work-item span{font-size:13.5px;color:#64748b;line-height:1.35}
+.engine-card .work-item{background:rgba(255,255,255,.08);border-color:rgba(191,219,254,.18)}
+.engine-card .work-item span{color:#cbd5e1}
+.engine-steps{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:16px}
+.step-pill{border-radius:8px;border:1px solid #dbe3ee;background:#f8fafc;padding:12px;text-align:center;font-size:13px;font-weight:850;color:#334155}
+.architecture-strip{margin-top:16px;border:1px solid var(--line);border-radius:8px;background:#fff;padding:12px 14px;display:grid;grid-template-columns:1fr 28px 1.2fr 28px 1fr;gap:8px;align-items:center}
+.arch-node{text-align:center}
+.arch-node b{display:block;font-size:12px;color:#64748b;text-transform:uppercase;margin-bottom:4px}
+.arch-node span{font-size:15px;font-weight:850;color:#0f172a}
+.official-flow{margin-top:10px;border-radius:8px;background:#f8fafc;border:1px solid #dbe3ee;padding:10px 12px;display:grid;grid-template-columns:repeat(5,1fr);gap:8px}
+.official-flow span{font-size:11.5px;color:#475569;text-align:center;font-weight:800}
+
+/* Page 5 */
+.talent-layout{display:grid;grid-template-columns:.92fr 1.08fr;gap:24px;flex:1;margin-top:18px;align-items:center;min-height:0}
+.talent-copy{display:flex;flex-direction:column;justify-content:center;gap:16px}
+.talent-copy .key-message{font-size:21px;line-height:1.34;margin-top:0}
+.talent-copy .body-copy{font-size:15.5px;line-height:1.5}
+.cycle-canvas{border:1px solid var(--line);border-radius:8px;background:#fff;padding:14px;box-shadow:0 12px 28px rgba(15,23,42,.06);display:flex;flex-direction:column;gap:10px;justify-content:space-between}
+.cycle-diagram{position:relative;min-height:318px;border-radius:10px;border:1px solid #dbe3ee;background:radial-gradient(circle at 50% 50%,#f8fafc 0,#fff 56%,#eef2ff 100%);overflow:hidden}
+.cycle-node{position:absolute;width:190px;min-height:92px;border-radius:10px;border:1px solid #dbe3ee;background:#fff;padding:11px;box-shadow:0 10px 22px rgba(15,23,42,.06)}
+.cycle-node h3{font-size:16.5px;margin-bottom:6px}
+.cycle-node p{font-size:12.2px;color:#475569;line-height:1.28}
+.cycle-node.operations{left:18px;top:18px;background:#eff6ff;border-color:#bfdbfe}
+.cycle-node.aims{right:18px;top:18px;background:#ecfdf5;border-color:#bbf7d0}
+.cycle-node.asset{right:18px;bottom:18px;background:#fff7ed;border-color:#fed7aa}
+.cycle-node.org{left:18px;bottom:18px;background:#f8fafc;border-color:#cbd5e1}
+.cycle-center{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:178px;min-height:108px;border-radius:14px;background:#0f172a;color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:15px;box-shadow:0 18px 36px rgba(15,23,42,.24)}
+.cycle-center b{font-size:12px;color:#bfdbfe;text-transform:uppercase;margin-bottom:7px}
+.cycle-center span{font-size:17px;line-height:1.18;font-weight:900;color:#fff}
+.cycle-arrow{position:absolute;color:#2563eb;font-size:27px;font-weight:300}
+.cycle-arrow.top{left:50%;top:58px;transform:translateX(-50%)}
+.cycle-arrow.right{right:105px;top:50%;transform:translateY(-50%)}
+.cycle-arrow.bottom{left:50%;bottom:58px;transform:translateX(-50%)}
+.cycle-arrow.left{left:105px;top:50%;transform:translateY(-50%)}
+.hybrid-definition{margin-top:10px;border-radius:8px;background:#0f172a;padding:13px}
+.hybrid-definition b{display:block;color:#bfdbfe;font-size:14px;text-transform:uppercase;margin-bottom:8px}
+.hybrid-definition p{color:#fff;font-size:17px;font-weight:800;line-height:1.3}
+.capability-tags{display:flex;flex-wrap:wrap;gap:7px;margin-top:8px}
+.capability-tags span{border-radius:99px;background:#f1f5f9;border:1px solid #dbe3ee;color:#334155;padding:6px 9px;font-size:12px;font-weight:800}
+
+@media(max-width:1100px){
+  body{overflow:auto}
+  .app{height:auto;min-height:100vh}
+  .deck{grid-template-columns:1fr}
+  .nav{display:none}
+  .slide{aspect-ratio:auto;min-height:840px}
+  .definition-layout,.diagnostic-grid,.work-layout,.talent-layout{grid-template-columns:1fr}
+  .cycle-diagram{min-height:620px}
+  .flow-stack,.architecture-strip,.official-flow{grid-template-columns:1fr}
+  .arrow{display:none}
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="brand"><div class="mark"></div><span>ChainSight CHRO Review</span></div>
+    <div class="meta">5-page review | AI + M&amp;S | Decisions, work, workforce</div>
+  </header>
+
+  <main class="deck">
+    <button class="nav" id="prev" aria-label="Previous slide">&lsaquo;</button>
+    <div class="stage">
+      <section class="slide active">
+        <div class="slide-inner cover">
+          <div class="cover-title">
+            <h1>ChainSight</h1>
+            <div class="subtitle">How AI + Modeling &amp; Simulation Transform Decisions, Work, and Workforce</div>
+            <div class="cover-line"></div>
+          </div>
+        </div>
+        <div class="page-num">01 / 05</div>
+      </section>
+
+      <section class="slide">
+        <div class="slide-inner">
+          <div class="section-label">What ChainSight Is</div>
+          <h2>Quantifying the consequences of supply chain strategy choices</h2>
+          <div class="definition-layout">
+            <div class="concept-visual">
+              <img src="assets/chainsight-strategy-paths.png" alt="Abstract strategy paths through a supply chain network">
+            </div>
+            <div class="definition-panel">
+              <p class="key-message">ChainSight is an AI + M&amp;S capability that quantifies the future consequences of different supply chain strategy choices.</p>
+              <div class="definition-copy">
+                <p class="body-copy">Supply chain decisions are complex because choices are made for the future under uncertainty, while service, cost, cash often trade off with each other.</p>
+                <p class="body-copy">ChainSight turns a business intent into comparable strategy options, runs simulation under explicit assumptions and scope, and translates the results into quantified evidence for goal decisions.</p>
+              </div>
+              <div class="flow-stack">
+                <div class="flow-card">
+                  <b>Input</b>
+                  <h3>Business intent</h3>
+                  <p>What outcome are we trying to achieve?</p>
+                </div>
+                <div class="arrow">&rarr;</div>
+                <div class="flow-card">
+                  <b>Choices</b>
+                  <h3>Strategy choices</h3>
+                  <div class="chip-row"><span class="chip">Cost</span><span class="chip">Cash</span><span class="chip">Service</span><span class="chip">Balanced</span></div>
+                </div>
+                <div class="arrow">&rarr;</div>
+                <div class="flow-card">
+                  <b>Evidence</b>
+                  <h3>Simulation evidence</h3>
+                  <div class="evidence-pack"><span>Numbers</span><span>Context</span><span>Assumptions</span><span>Scope</span></div>
+                </div>
+                <div class="arrow">&rarr;</div>
+                <div class="flow-card">
+                  <b>Output</b>
+                  <h3>Goal decision</h3>
+                  <p>Preferred goal / policy, based on quantified trade-offs.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="page-num">02 / 05</div>
+      </section>
+
+      <section class="slide">
+        <div class="slide-inner">
+          <div class="section-label">Current Strategic Decision Setup</div>
+          <h2>How strategic supply chain decisions are made today</h2>
+          <p class="key-message">Strategic supply chain decisions are often reviewed in fixed planning cycles and quantified through silo domain views, making E2E consequence comparison difficult.</p>
+          <div class="diagnostic-grid">
+            <div class="diag-card">
+              <h3>Low review frequency</h3>
+              <div>
+                <div class="timeline">
+                  <div class="month-track" aria-label="Sparse annual strategy review timeline">
+                    <span class="month active">Jan</span><span class="month"></span><span class="month"></span><span class="month"></span><span class="month"></span><span class="month"></span><span class="month active">Jul</span><span class="month"></span><span class="month"></span><span class="month"></span><span class="month"></span><span class="month"></span>
+                  </div>
+                </div>
+                <div class="time-note">Yearly / semi-annually</div>
+              </div>
+              <p>Category, market, and plant operating strategy are often reviewed yearly or semi-annually.</p>
+            </div>
+            <div class="diag-card">
+              <h3>Expert-heavy preparation</h3>
+              <div class="prep-timeline"><span>Start</span><div class="prep-bar"><strong>4-6 weeks</strong></div><span>Decision</span></div>
+              <div class="process-bar">
+                <div class="process-step">Data</div>
+                <div class="process-step">Definition</div>
+                <div class="process-step">Assumption</div>
+                <div class="process-step">Analysis</div>
+                <div class="process-step">Recommendation</div>
+              </div>
+              <p>Multiple teams align data, definitions, assumptions, and recommendations before a decision.</p>
+            </div>
+            <div class="diag-card">
+              <h3>Silo quantification</h3>
+              <div class="silo-row">
+                <div class="silo"><b>MFG</b><div class="local-line"></div><div class="local-line"></div></div>
+                <div class="silo"><b>Planning</b><div class="local-line"></div><div class="local-line"></div></div>
+                <div class="silo"><b>PD</b><div class="local-line"></div><div class="local-line"></div></div>
+              </div>
+              <p>Domain models are valuable, but often answer local questions rather than integrated E2E consequences.</p>
+            </div>
+            <div class="diag-card">
+              <h3>Low achievement work experience</h3>
+              <div class="split-bar">
+                <div class="split-a">Preparation / calculation / deck building</div>
+                <div class="split-b">Design options / decide future</div>
+              </div>
+              <p>The work can feel like completing repeated analysis tasks, rather than designing options and deciding the future.</p>
+            </div>
+          </div>
+          <div class="transition-band"><p>The opportunity is to shift expert capacity from repeated preparation to E2E consequence comparison and higher-impact decisions.</p></div>
+        </div>
+        <div class="page-num">03 / 05</div>
+      </section>
+
+      <section class="slide">
+        <div class="slide-inner">
+          <div class="section-label">How ChainSight Changes Decision Work</div>
+          <h2>People stay at the highest-impact points</h2>
+          <p class="key-message">People define business intent and make final trade-offs. AI + M&amp;S carries the heavy work of structuring options, running simulations, and translating results into evidence.</p>
+          <div class="work-layout">
+            <div class="human-card">
+              <div class="work-kicker">Human high-impact work</div>
+              <h3>Define business intent</h3>
+              <div class="work-list">
+                <div class="work-item"><b>Value orientation</b><span>What matters most: service, cash, cost, capacity, or risk?</span></div>
+                <div class="work-item"><b>Business boundary</b><span>What scope, constraints, and assumptions should frame the question?</span></div>
+              </div>
+            </div>
+            <div class="engine-card">
+              <div class="work-kicker">AI + M&amp;S heavy lifting</div>
+              <h3>Turn intent into quantified evidence</h3>
+              <p>ChainSight structures intent into options, turns options into explicit scenarios, runs modeling and simulation, and translates results into evidence for goal decisions.</p>
+              <div class="engine-steps">
+                <div class="step-pill">Structure options</div>
+                <div class="step-pill">Build scenarios</div>
+                <div class="step-pill">Run simulation</div>
+                <div class="step-pill">Translate evidence</div>
+              </div>
+            </div>
+            <div class="output-card">
+              <div class="work-kicker">Human high-impact work</div>
+              <h3>Make final trade-off</h3>
+              <div class="work-list">
+                <div class="work-item"><b>Preferred goal / policy</b><span>Select the business path based on quantified trade-offs.</span></div>
+                <div class="work-item"><b>Decision context</b><span>Capture rationale and evidence so future teams can reuse it.</span></div>
+              </div>
+            </div>
+          </div>
+          <div class="architecture-strip">
+            <div class="arch-node"><b>Input</b><span>Business Intent</span></div>
+            <div class="arrow">&rarr;</div>
+            <div class="arch-node"><b>Goal Simulation Layer</b><span>ChainSight</span></div>
+            <div class="arrow">&rarr;</div>
+            <div class="arch-node"><b>Execution Layer</b><span>Supply Chain OS Agents</span></div>
+          </div>
+          <div class="official-flow">
+            <span>Intent to options</span>
+            <span>Options to explicit scenarios</span>
+            <span>Modeling &amp; simulation</span>
+            <span>Data to insight</span>
+            <span>Insight to goal</span>
+          </div>
+        </div>
+        <div class="page-num">04 / 05</div>
+      </section>
+
+      <section class="slide">
+        <div class="slide-inner">
+          <div class="section-label">Future Talent And Organization</div>
+          <h2>What this means for future talent and organization</h2>
+          <div class="talent-layout">
+            <div class="talent-copy">
+              <p class="key-message">The boundary between business and technology becomes thinner. Future competitive talent will combine domain depth, AI + M&amp;S fluency, and the ability to design, model, and prototype decision workflows.</p>
+              <p class="body-copy">ChainSight shows a broader shift: AI can accelerate the path from business idea to working prototype, while M&amp;S helps test whether the idea creates better outcomes.</p>
+              <p class="body-copy">The highest-impact people will not only execute existing processes; they will learn from real operations, frame better questions, design new decision workflows, model them, prototype them, and validate them with evidence.</p>
+              <div class="capability-tags">
+                <span>Domain depth</span>
+                <span>AI fluency</span>
+                <span>M&amp;S thinking</span>
+                <span>Prototype mindset</span>
+                <span>Decision translation</span>
+              </div>
+            </div>
+            <div class="cycle-canvas">
+              <div class="cycle-diagram">
+                <div class="cycle-node operations">
+                  <h3>From operations</h3>
+                  <p>Learn from real business pain, operating constraints, decision moments, and repeated patterns.</p>
+                </div>
+                <div class="cycle-arrow top">&rarr;</div>
+                <div class="cycle-node aims">
+                  <h3>AI + M&amp;S</h3>
+                  <p>Prototype ideas, simulate consequences, test assumptions, and compare options.</p>
+                </div>
+                <div class="cycle-arrow right">&darr;</div>
+                <div class="cycle-node asset">
+                  <h3>Business insight</h3>
+                  <p>Convert decision context, assumptions, and results into reusable intellectual assets.</p>
+                </div>
+                <div class="cycle-arrow bottom">&larr;</div>
+                <div class="cycle-node org">
+                  <h3>Back to organization</h3>
+                  <p>Redesign roles, decision rhythm, governance, and reusable business knowledge.</p>
+                </div>
+                <div class="cycle-arrow left">&uarr;</div>
+                <div class="cycle-center"><b>Emerging hybrid talent</b><span>Design, model, and prototype decision workflows</span></div>
+              </div>
+              <div class="hybrid-definition">
+                <b>Emerging hybrid talent</b>
+                <p>Absorbs from operations, prototypes with AI, validates with M&amp;S, and translates insight into action.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="page-num">05 / 05</div>
+      </section>
+
+      <div class="dots" id="dots"></div>
+    </div>
+    <button class="nav" id="next" aria-label="Next slide">&rsaquo;</button>
+  </main>
+</div>
+
+<script>
+const slides=[...document.querySelectorAll(".slide")];
+const dots=document.getElementById("dots");
+let idx=0;
+
+slides.forEach((_,i)=>{
+  const dot=document.createElement("button");
+  dot.className="dot"+(i===0?" active":"");
+  dot.setAttribute("aria-label","Go to slide "+(i+1));
+  dot.addEventListener("click",()=>show(i));
+  dots.appendChild(dot);
+});
+
+function show(i){
+  idx=(i+slides.length)%slides.length;
+  slides.forEach((slide,n)=>slide.classList.toggle("active",n===idx));
+  [...dots.children].forEach((dot,n)=>dot.classList.toggle("active",n===idx));
+}
+
+document.getElementById("prev").addEventListener("click",()=>show(idx-1));
+document.getElementById("next").addEventListener("click",()=>show(idx+1));
+document.addEventListener("keydown",event=>{
+  if(event.key==="ArrowLeft")show(idx-1);
+  if(event.key==="ArrowRight")show(idx+1);
+});
+</script>
+</body>
+</html>

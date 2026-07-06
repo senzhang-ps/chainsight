@@ -1,0 +1,7 @@
+id: R3
+description: BOP/LBE forecast queries must specify a forecast version date to produce meaningful results
+condition: Querying ps_psc_bop_lbe_fcst for forecast data without specifying frcst_vers_date
+action: 'Always include a frcst_vers_date filter (BOP: one version per month; LBE: one version per week); reject or warn on
+  unversioned aggregations'
+applies_to: ps_psc_bop_lbe_fcst
+status: active

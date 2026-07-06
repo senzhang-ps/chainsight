@@ -1,0 +1,14 @@
+id: "csmeta:chainsight-db-connection-windows"
+type: "csmeta:Skill"
+name: ChainSight DB Connection (Windows)
+description: "Connect to the ChainSight simulation-result PostgreSQL database and run queries when the agent runs natively on Windows PowerShell (direct localhost:5432)."
+skill_file: .agents/skills/chainsight-db-connection-windows/SKILL.md
+covers_classes:
+  - Metric
+  - Plan
+used_by_agents: []
+derived_from:
+  decisions: []
+  design_section: "data-access"
+tags: [postgresql, results, windows, connection]
+status: active

@@ -1,0 +1,35 @@
+project: xq-vmr-to-production-202606
+scenario: baseline-hc
+intent: hc_only_reference_derived_from_baseline_by_removing_all_pcc_config
+derived_from: baseline
+time_window:
+  start: 2026-06-29
+  end: 2026-11-01
+network_scope:
+  anchor_plant:
+    code: "1864"
+    name: XQ
+  categories:
+    - HC
+  process_scope: VMR_to_production
+material_scope:
+  mode: filtered_from_baseline
+  rule: keep_HC_and_non_PCC_remove_all_confirmed_PCC
+  hc_definition: >-
+    HC = material in 'SUF for XQ HC ChainSight.xlsx' OR cached category_en == 'Hair'
+    OR manual 'missing category manual input.xlsx' category_en == 'Hair'
+    OR delegate_line == 'XQHK'.
+  pcc_removed: confirmed_pcc_materials_removed_from_all_config_tables
+  materials: []
+parameter_changes:
+  type: scope_filter
+  changes:
+    - remove all rows referencing confirmed-PCC materials across every config table
+    - drop line-keyed config for production lines left with no HC material
+focus_metrics:
+  - MOE
+  - national_inventory
+  - service
+config_status:
+  source: derived_from_baseline_config
+  readiness: pending_validation

@@ -1,0 +1,31 @@
+links:
+- fqn: cdl_ps_hana_prd.sl.ps_psc_customer_order_delivery
+  ontology_refs:
+  - cs:CustomerOrder
+  - cs:CustomerShipment
+  - cs:DataRetrieval
+  source_episodes:
+  - 47
+  - 79
+  - 80
+  - 81
+  - 83
+  updated_at: '2026-05-08T11:47:35+00:00'
+- fqn: cdl_ps_hana_prd.ods.psdh_dp_inventory_plant_dim
+  ontology_refs:
+  - cs:DataRetrieval
+  source_episodes:
+  - 82
+  updated_at: '2026-05-08T11:47:32+00:00'
+- fqn: cdl_ps_hana_prd.ods.psdh_pdp_ibpi_ibp_sap_full_horizon_weekly_cn
+  ontology_refs:
+  - cs:SafetyStock
+  source_episodes:
+  - 49
+  updated_at: '2026-05-08T11:47:35+00:00'
+- fqn: cdl_ps_hana_prd.sl.ps_psc_transportation_lanes_current_future
+  ontology_refs:
+  - cs:TransportationLane
+  source_episodes:
+  - 50
+  updated_at: '2026-05-08T11:47:35+00:00'

@@ -1,0 +1,12 @@
+id: "csmeta:chainsight-configure-validation"
+type: "csmeta:Skill"
+name: ChainSight Configure Validation
+description: "Workflow guidance for preparing and validating ChainSight configuration outputs."
+skill_file: .agents/skills/chainsight-configure-validation/SKILL.md
+covers_classes: []
+used_by_agents: []
+derived_from:
+  decisions: []
+  design_section: "config"
+tags: [config, validation, workflow]
+status: active

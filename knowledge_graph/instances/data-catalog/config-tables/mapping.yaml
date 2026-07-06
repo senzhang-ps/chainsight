@@ -1,0 +1,207 @@
+# ChainSight Config Table — Target Schema Definition
+# Auto-generated from BC_S5.xlsx reference config (2026-04-06)
+# Simplified (D20): source mapping removed — LLM generates SQL dynamically
+# See docs/design/module-spec/data-pipeline.md (LLM-Native Pipeline) for rationale
+#
+# Each entry defines:
+#   config_table: ChainSight config sheet name (Excel/CSV tab name)
+#   db_table: PostgreSQL result-DB table name (always cfg_<lowercased base>; sheet name != db table name)
+#   ontology_class: corresponding ontology entity (for LLM context)
+#   required: true = must be present for simulation to run
+#   schema.columns: expected column names in output config
+
+version: '2.1'
+configs:
+- config_table: Global_seed
+  db_table: cfg_global_seed
+  ontology_class: null
+  required: false
+  schema:
+    columns: [seed]
+
+- config_table: Global_Network
+  db_table: cfg_global_network
+  ontology_class: cs:Location
+  required: true
+  schema:
+    columns: [material, location, sourcing, location_type, eff_from, eff_to]
+
+- config_table: Global_SpaceCapacity
+  db_table: cfg_global_spacecapacity
+  ontology_class: cs:SpaceCapacity
+  required: false
+  schema:
+    columns: [location, eff_from, eff_to, capacity]
+
+- config_table: Global_LeadTime
+  db_table: cfg_global_leadtime
+  ontology_class: cs:TransportationLane
+  required: true
+  schema:
+    columns: [sending, receiving, PDT, GR, MCT, OTD]
+
+- config_table: Global_DemandPriority
+  db_table: cfg_global_demandpriority
+  ontology_class: cs:DemandPriority
+  required: false
+  schema:
+    columns: [demand_element, priority]
+
+- config_table: M1_InitialInventory
+  db_table: cfg_m1_initialinventory
+  ontology_class: cs:InitialInventory
+  required: true
+  schema:
+    columns: [material, location, quantity]
+
+- config_table: M1_DemandForecast
+  db_table: cfg_m1_demandforecast
+  ontology_class: cs:DemandForecast
+  required: true
+  schema:
+    columns: [week, material, location, quantity]
+
+- config_table: M1_ForecastError
+  db_table: cfg_m1_forecasterror
+  ontology_class: cs:ForecastError
+  required: false
+  schema:
+    columns: [material, location, order_type, error_std_percent]
+
+- config_table: M1_OrderCalendar
+  db_table: cfg_m1_ordercalendar
+  ontology_class: cs:Calendar
+  required: false
+  schema:
+    columns: [date, order_day_flag]
+
+- config_table: M1_AOConfig
+  db_table: cfg_m1_aoconfig
+  ontology_class: cs:TunableParameter
+  required: false
+  schema:
+    columns: [material, location, advance_days, ao_percent]
+
+- config_table: M1_DPSConfig
+  db_table: cfg_m1_dpsconfig
+  ontology_class: cs:TunableParameter
+  required: false
+  schema:
+    columns: [material, location, dps_location, dps_percent]
+
+- config_table: M1_SupplyChoiceConfig
+  db_table: cfg_m1_supplychoiceconfig
+  ontology_class: cs:TunableParameter
+  required: false
+  schema:
+    columns: [material, location, week, adjust_quantity]
+
+- config_table: M3_SafetyStock
+  db_table: cfg_m3_safetystock
+  ontology_class: cs:SafetyStock
+  required: true
+  schema:
+    columns: [material, location, date, safety_stock_qty]
+
+- config_table: M4_MaterialLocationLineCfg
+  db_table: cfg_m4_materiallocationlinecfg
+  ontology_class: cs:MaterialLocationLine
+  required: false
+  source_route: true  # prd_rate source differs by path — see ../../rules/m4_source_route.yaml
+  schema:
+    columns: [material, location, delegate_line, prd_rate, min_batch, rv, ptf, lsk, day, MCT]
+  notes: |
+    prd_rate: Path B reads from ps_psc_sip_recipe (includes CO loss).
+    Path A/C: prd_rate from separate source (no CO loss embedded).
+
+- config_table: M4_LineCapacity
+  db_table: cfg_m4_linecapacity
+  ontology_class: cs:ProductionLine
+  required: false
+  schema:
+    columns: [location, line, date, capacity]
+
+- config_table: M4_ChangeoverDefinition
+  db_table: cfg_m4_changeoverdefinition
+  ontology_class: cs:TunableParameter
+  required: false
+  source_route: true  # Path A/B/C — see ../../rules/m4_source_route.yaml
+  schema:
+    columns: [changeover_id, line, time, cost, mu_loss]
+  notes: |
+    Path B (recipe): time=0 for all rows (CO loss folded into prd_rate).
+    Path A/C: real changeover time in hours.
+
+- config_table: M4_ChangeoverMatrix
+  db_table: cfg_m4_changeovermatrix
+  ontology_class: cs:TunableParameter
+  required: false
+  source_route: true  # Path A/B/C — see ../../rules/m4_source_route.yaml
+  schema:
+    columns: [from_material, to_material, changeover_id]
+  notes: |
+    Maps material-pair transitions to changeover_id.
+    Required by ChainSight runtime even if Path B (time=0).
+
+- config_table: M4_ProductionReliability
+  db_table: cfg_m4_productionreliability
+  ontology_class: cs:ProductionReliability
+  required: false
+  schema:
+    columns: [location, line, pr]
+
+- config_table: M5_PushPullModel
+  db_table: cfg_m5_pushpullmodel
+  ontology_class: cs:TunableParameter
+  required: false
+  schema:
+    columns: [material, sending, model]
+
+- config_table: M5_DeployConfig
+  db_table: cfg_m5_deployconfig
+  ontology_class: cs:TunableParameter
+  required: false
+  schema:
+    columns: [material, sending, receiving, moq, rv, lsk, day]
+
+- config_table: M6_TruckReleaseCon
+  db_table: cfg_m6_truckreleasecon
+  ontology_class: cs:TruckReleaseCon
+  required: false
+  schema:
+    columns: [sending, receiving, truck_type, optimal_type, WFR, VFR, MDQ]
+
+- config_table: M6_MaterialMD
+  db_table: cfg_m6_materialmd
+  ontology_class: cs:Material
+  required: false
+  schema:
+    columns: [material, weight, volume, priority, demand_unit_to_weight, demand_unit_to_volume]
+
+- config_table: M6_DeliveryDelayDistribution
+  db_table: cfg_m6_deliverydelaydistribution
+  ontology_class: cs:DeliveryDelay
+  required: false
+  schema:
+    columns: [date, sending, receiving, delay_days, probability]
+
+- config_table: M6_MDQBypassRules
+  db_table: cfg_m6_mdqbypassrules
+  ontology_class: cs:MDQBypass
+  required: false
+  schema:
+    columns: [sending, receiving, truck_type, demand_element, condition_logic, rule_id]
+
+- config_table: M6_TruckTypeSpecs
+  db_table: cfg_m6_trucktypespecs
+  ontology_class: cs:Vehicle
+  required: false
+  schema:
+    columns: [truck_type, max_weight, max_volume, capacity_qty_in_weight, capacity_qty_in_volume]
+
+- config_table: M6_TruckCapacityPlan
+  db_table: cfg_m6_truckcapacityplan
+  ontology_class: cs:TruckCapacity
+  required: false
+  schema:
+    columns: [date, sending, receiving, truck_type, truck_number]

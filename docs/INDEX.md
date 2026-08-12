@@ -64,6 +64,7 @@
 
 | 文档 | 用途 |
 |---|---|
+| [testing/tests_framework_design.md](./testing/tests_framework_design.md) | 当前 pytest、数据库隔离、数据对比与性能回归框架设计 |
 | [testing/oc_algorithm_test_report.md](./testing/oc_algorithm_test_report.md) | OC 算法优化测试报告 |
 | [testing/bc_algorithm_test_report.md](./testing/bc_algorithm_test_report.md) | BC 算法优化测试报告 |
 

@@ -167,6 +167,113 @@ class Module3OutputNetdemand(Base, ModuleOutputBase):
 
 
 # ════════════════════════════════════════════════════════════════════
+# module5 输出表（部署规划）
+# ════════════════════════════════════════════════════════════════════
+
+class Module5OutputDeploymentplan(Base, ModuleOutputBase):
+    """module5 部署计划。"""
+    __tablename__ = "module5_output_deploymentplan"
+
+    run_id = Column(Text)
+    sim_date = Column(Text)
+    config_name = Column(Text)
+    db_write_time = Column(DateTime)
+    date = Column(DateTime)
+    material = Column(Text)
+    sending = Column(Text)
+    receiving = Column(Text)
+    demand_qty = Column(Float)
+    demand_element = Column(Text)
+    planned_qty = Column(Float)
+    deployed_qty_invCon = Column(Float)
+    deploy_qty_with_plan_order = Column(Float)
+    deploy_from_in_transit = Column(Float)
+    deploy_from_open_deployment_inbound = Column(Float)
+    deploy_from_future_production = Column(Float)
+    planned_delivery_date = Column(DateTime)
+    orig_location = Column(Text)
+    leadtime = Column(Integer)
+    is_cross_node = Column(Text)
+    deployed_qty = Column(Float)
+    quota = Column(Float)
+
+    __mapper_args__ = {
+        "primary_key": [
+            run_id, sim_date, date, material, sending, receiving,
+            demand_element, planned_delivery_date, orig_location,
+        ]
+    }
+
+
+class Module5OutputUnfulfilledlog(Base, ModuleOutputBase):
+    """module5 未满足需求日志。"""
+    __tablename__ = "module5_output_unfulfilledlog"
+
+    run_id = Column(Text)
+    sim_date = Column(Text)
+    config_name = Column(Text)
+    db_write_time = Column(DateTime)
+    date = Column(DateTime)
+    sending = Column(Text)
+    receiving = Column(Text)
+    demand_qty = Column(Float)
+    demand_element = Column(Text)
+    unfulfilled_qty = Column(Float)
+    reason = Column(Text)
+
+    __mapper_args__ = {
+        "primary_key": [
+            run_id, sim_date, date, sending, receiving, demand_element, reason,
+        ]
+    }
+
+
+class Module5OutputStockonhandlog(Base, ModuleOutputBase):
+    """module5 库存滚动日志。"""
+    __tablename__ = "module5_output_stockonhandlog"
+
+    run_id = Column(Text)
+    sim_date = Column(Text)
+    config_name = Column(Text)
+    db_write_time = Column(DateTime)
+    date = Column(DateTime)
+    material = Column(Text)
+    location = Column(Text)
+    beginning_soh = Column(Float)
+    production = Column(Float)
+    in_transit = Column(Float)
+    delivery_gr = Column(Float)
+    today_shipment = Column(Float)
+    deployed_qty = Column(Float)
+    ending_soh = Column(Float)
+
+    __mapper_args__ = {
+        "primary_key": [run_id, sim_date, date, material, location]
+    }
+
+
+class Module5OutputValidation(Base, ModuleOutputBase):
+    """module5 校验日志。"""
+    __tablename__ = "module5_output_validation"
+
+    run_id = Column(Text)
+    sim_date = Column(Text)
+    config_name = Column(Text)
+    db_write_time = Column(DateTime)
+    sheet = Column(Text)
+    row = Column(Text)
+    issue = Column(Text)
+    severity = Column(Text)
+    impact = Column(Text)
+    shipment_qty = Column(Float)
+    deployed_qty = Column(Float)
+
+    __mapper_args__ = {
+        "primary_key": [run_id, sim_date, sheet, row, issue]
+    }
+
+
+# ════════════════════════════════════════════════════════════════════
 # 注册表（保留向后兼容）
 # ════════════════════════════════════════════════════════════════════
 
@@ -249,4 +356,8 @@ __all__ = [
     "Module1OutputSupplydemandlog",
     "Module1OutputSummary",
     "Module3OutputNetdemand",
+    "Module5OutputDeploymentplan",
+    "Module5OutputUnfulfilledlog",
+    "Module5OutputStockonhandlog",
+    "Module5OutputValidation",
 ]

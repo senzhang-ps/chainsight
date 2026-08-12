@@ -68,6 +68,7 @@ from .validation import validate_config_before_run, log_outputs
 
 # 主函数
 from .main import run_daily_deployment_planning
+from .integration_refactor import ModuleFive
 
 __all__ = [
     # 数据加载函数
@@ -107,4 +108,6 @@ __all__ = [
     'log_outputs',
     # 主函数
     'run_daily_deployment_planning',
+    # 重构集成入口
+    'ModuleFive',
 ]

@@ -13,11 +13,13 @@ from pathlib import Path
 
 # Windows UTF-8 编码设置 - 解决emoji和中文输出问题
 if sys.platform == 'win32':
-    # 设置stdout/stderr为UTF-8编码
-    if hasattr(sys.stdout, 'buffer'):
-        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
-    if hasattr(sys.stderr, 'buffer'):
-        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+    # 不要用 TextIOWrapper 重新包装流：pytest 的捕获流可能仍被包装对象持有，
+    # 包装对象析构会关闭底层 buffer，导致测试结束时报 closed file。
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding='utf-8', errors='replace')
+        except (AttributeError, OSError, ValueError):
+            pass
 
 from .simulation_file import run_integrated_simulation
 from .resume import check_resume_capability

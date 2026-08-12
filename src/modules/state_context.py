@@ -67,6 +67,8 @@ class StateContext(Module):
         self.delivery_shipment_log: List[Dict] = []
         self.production_plan_backlog: List[Dict] = []
         self.space_capacity: pd.DataFrame = pd.DataFrame()
+        self.deployment_supply_demand_by_date: Dict[str, pd.DataFrame] = {}
+        self.deployment_order_log_by_date: Dict[str, pd.DataFrame] = {}
 
         # M4 跨天状态（按日期字符串索引，与 RuntimeState 数据结构对齐）
         self.m4_line_states: Dict[str, dict] = {}           # {date_str: {line: state_dict}}
@@ -469,6 +471,55 @@ class StateContext(Module):
             ])
         return df
 
+    def _deployment_supply_demand_view(self, date: str) -> pd.DataFrame:
+        """返回 M5 当日消费的 M1 供需事实快照。"""
+        date_str = pd.to_datetime(date).strftime('%Y-%m-%d')
+        return self.deployment_supply_demand_by_date.get(date_str, pd.DataFrame()).copy()
+
+    def _deployment_order_log_view(self, date: str) -> pd.DataFrame:
+        """返回 M5 当日消费的 M1 订单事实快照。"""
+        date_str = pd.to_datetime(date).strftime('%Y-%m-%d')
+        return self.deployment_order_log_by_date.get(date_str, pd.DataFrame()).copy()
+
+    def _deployment_production_view(self, date: str) -> pd.DataFrame:
+        """返回部署规划当日可用的生产事实。
+
+        当日已确认 GR 是库存账本的唯一生产输入；只有当天不存在 GR 时，
+        才将生产计划 backlog 中未来可用的计划作为部署规划的生产输入。
+        这个门控属于状态视图语义，调用模块不应自行拼接 GR 和 M4 输出。
+        """
+        columns = ['material', 'location', 'available_date', 'quantity']
+        date_obj = pd.to_datetime(date).normalize()
+
+        today_gr = self._production_gr_view(date)
+        if not today_gr.empty:
+            today_gr = today_gr.rename(columns={'date': 'available_date'})
+            return (
+                today_gr.loc[:, columns]
+                .groupby(['material', 'location', 'available_date'], as_index=False)
+                .agg({'quantity': 'sum'})
+            )
+
+        future = pd.DataFrame(self.production_plan_backlog)
+        if future.empty:
+            return pd.DataFrame(columns=columns)
+
+        for column in columns:
+            if column not in future.columns:
+                future[column] = pd.NA
+        future['available_date'] = pd.to_datetime(
+            future['available_date'], errors='coerce'
+        ).dt.normalize()
+        future['quantity'] = pd.to_numeric(
+            future['quantity'], errors='coerce'
+        ).fillna(0)
+        future = future.loc[future['available_date'].gt(date_obj), columns]
+        if future.empty:
+            return pd.DataFrame(columns=columns)
+        return future.groupby(
+            ['material', 'location', 'available_date'], as_index=False
+        ).agg({'quantity': 'sum'})
+
     def _delivery_gr_view(self, date: str) -> pd.DataFrame:
         """源: views.py:363-388 get_delivery_gr_view()"""
         date_str = pd.to_datetime(date).strftime('%Y-%m-%d')
@@ -691,6 +742,27 @@ class StateContext(Module):
             logger.info("🚚 已扣减 %d 个 shipment 的库存", len(daily_shipments))
             self._log_event("M1_SHIPMENTS", f"Processed {len(daily_shipments)} shipments")
 
+    def apply_deployment_demand_inputs(
+        self,
+        supply_demand_df: Optional[pd.DataFrame],
+        order_log_df: Optional[pd.DataFrame],
+        date: str,
+    ):
+        """保存 M1 交给 M5 的当日需求与订单事实。
+
+        这些 DataFrame 是仿真期内的动态模块输出，而非 M5 的构造参数；
+        由 StateContext 按日期持有，使 M5 只读取状态视图。
+        """
+        date_str = pd.to_datetime(date).strftime('%Y-%m-%d')
+        self.deployment_supply_demand_by_date[date_str] = (
+            supply_demand_df.copy()
+            if supply_demand_df is not None else pd.DataFrame()
+        )
+        self.deployment_order_log_by_date[date_str] = (
+            order_log_df.copy()
+            if order_log_df is not None else pd.DataFrame()
+        )
+
     def apply_production(self, production_df: pd.DataFrame, date: str):
         """处理 Module4 生产数据。
 
@@ -795,17 +867,30 @@ class StateContext(Module):
         """处理 Module5 部署计划。
 
         源: processors.py:248-330 OrchestratorProcessorsMixin.process_module5_deployment()
+
+        M5 的内存输出使用 ``date`` 表示计划部署日；早期处理器接口
+        使用 ``planned_deployment_date``。两种命名在此边界统一，避免
+        重构 M5 为了兼容状态写回而复制或重命名整个输出表。
         """
         if deployment_df is None or deployment_df.empty:
             return
 
         date_obj = pd.to_datetime(date).normalize()
+        deployment_date_col = (
+            'planned_deployment_date'
+            if 'planned_deployment_date' in deployment_df.columns
+            else 'date'
+        )
+        if deployment_date_col not in deployment_df.columns:
+            raise ValueError(
+                "Module5 部署计划缺少 planned_deployment_date 或 date 列"
+            )
 
         # 为保证可复现，稳定排序
         sort_cols = [
             col for col in [
                 'material', 'sending', 'receiving',
-                'planned_deployment_date', 'demand_element', 'deployed_qty',
+                deployment_date_col, 'demand_element', 'deployed_qty',
             ]
             if col in deployment_df.columns
         ]
@@ -817,7 +902,7 @@ class StateContext(Module):
         for row in deployment_df.itertuples():
             self.uid_sequence += 1
             pdd = pd.to_datetime(
-                row.planned_deployment_date
+                getattr(row, deployment_date_col)
             ).strftime('%Y-%m-%d')
             uid_obj = DeploymentUID(
                 material=str(row.material),
@@ -1052,6 +1137,16 @@ class StateContext(Module):
 
     def get_production_gr_view(self, date: str) -> pd.DataFrame:
         return self._production_gr_view(date)
+
+    def get_deployment_supply_demand_view(self, date: str) -> pd.DataFrame:
+        return self._deployment_supply_demand_view(date)
+
+    def get_deployment_order_log_view(self, date: str) -> pd.DataFrame:
+        return self._deployment_order_log_view(date)
+
+    def get_deployment_production_view(self, date: str) -> pd.DataFrame:
+        """返回 Module 5 使用的部署生产视图。"""
+        return self._deployment_production_view(date)
 
     def get_delivery_gr_view(self, date: str) -> pd.DataFrame:
         return self._delivery_gr_view(date)

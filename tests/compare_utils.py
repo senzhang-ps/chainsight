@@ -4,7 +4,197 @@
 """
 from __future__ import annotations
 
+import numbers
+
 import pandas as pd
+
+
+DEFAULT_KEY_PRIORITY = [
+    "simulation_date", "production_plan_date", "available_date", "date",
+    "requirement_date", "material", "location", "line", "sending",
+    "receiving", "demand_element", "changeover_id", "changeover_type",
+]
+
+
+def _normalize_key_series(series: pd.Series, column: str) -> pd.Series:
+    """将业务关联键标准化为可稳定比较的字符串。"""
+    if "date" in column.lower():
+        parsed = pd.to_datetime(series, errors="coerce")
+        return parsed.dt.strftime("%Y-%m-%d").fillna("<NA>")
+    return series.astype("string").fillna("<NA>").str.strip()
+
+
+def _select_join_keys(left: pd.DataFrame, right: pd.DataFrame) -> list[str]:
+    """选择两侧共有且最适合业务关联的列集合。"""
+    shared = set(left.columns) & set(right.columns)
+    keys = [column for column in DEFAULT_KEY_PRIORITY if column in shared]
+    if keys:
+        return keys
+    return sorted(shared)
+
+
+def compare_dataframes_by_key(
+    left: pd.DataFrame,
+    right: pd.DataFrame,
+    *,
+    label: str = "",
+    key_columns: list[str] | None = None,
+    float_tolerance: float = 1e-6,
+    sample_limit: int = 5,
+) -> dict:
+    """按业务键关联两个 DataFrame，并输出逐列差异统计。
+
+    当业务键不唯一时，函数为每个键组追加稳定序号，确保不会产生多对多
+    笛卡尔匹配。绝对差不大于 ``float_tolerance``（含零附近数值）单列为
+    ``precision_differences``，不会与业务数值差异混在一起。
+    """
+    left = pd.DataFrame() if left is None else left.copy()
+    right = pd.DataFrame() if right is None else right.copy()
+    keys = key_columns or _select_join_keys(left, right)
+    keys = [column for column in keys if column in left.columns and column in right.columns]
+    result = {
+        "label": label,
+        "left_rows": len(left),
+        "right_rows": len(right),
+        "key_columns": keys,
+        "left_only_keys": 0,
+        "right_only_keys": 0,
+        "matched_rows": 0,
+        "column_differences": {},
+        "precision_differences": {},
+        "schema": {
+            "left_only_columns": sorted(set(left.columns) - set(right.columns)),
+            "right_only_columns": sorted(set(right.columns) - set(left.columns)),
+        },
+    }
+    if not keys:
+        result["error"] = "无可用的共有业务关联键"
+        return result
+    if left.empty and right.empty:
+        return result
+    if left.empty:
+        result["right_only_keys"] = len(right)
+        return result
+    if right.empty:
+        result["left_only_keys"] = len(left)
+        return result
+
+    def prepare(frame: pd.DataFrame) -> pd.DataFrame:
+        prepared = frame.copy()
+        for column in keys:
+            prepared[column] = _normalize_key_series(prepared[column], column)
+        sort_columns = keys + sorted(column for column in prepared.columns if column not in keys)
+        prepared = prepared.sort_values(sort_columns, kind="mergesort", na_position="last")
+        prepared["__duplicate_ordinal"] = prepared.groupby(keys, dropna=False).cumcount()
+        return prepared
+
+    left = prepare(left)
+    right = prepare(right)
+    join_keys = keys + ["__duplicate_ordinal"]
+    merged = left.merge(
+        right,
+        on=join_keys,
+        how="outer",
+        suffixes=("__left", "__right"),
+        indicator=True,
+    )
+    result["left_only_keys"] = int((merged["_merge"] == "left_only").sum())
+    result["right_only_keys"] = int((merged["_merge"] == "right_only").sum())
+    matched = merged[merged["_merge"] == "both"].copy()
+    result["matched_rows"] = len(matched)
+    sample_columns = [column for column in merged.columns if column != "_merge"]
+    result["left_only_samples"] = (
+        merged.loc[merged["_merge"] == "left_only", sample_columns]
+        .head(sample_limit)
+        .to_dict("records")
+    )
+    result["right_only_samples"] = (
+        merged.loc[merged["_merge"] == "right_only", sample_columns]
+        .head(sample_limit)
+        .to_dict("records")
+    )
+
+    common_columns = sorted((set(left.columns) & set(right.columns)) - set(join_keys))
+    for column in common_columns:
+        left_value = matched[f"{column}__left"]
+        right_value = matched[f"{column}__right"]
+
+        def is_numeric_series(series: pd.Series) -> bool:
+            """兼容 DataFrame 中混入 Python int/float 的 object 列。"""
+            if pd.api.types.is_numeric_dtype(series):
+                return True
+            values = series.dropna()
+            return not values.empty and values.map(
+                lambda value: isinstance(value, numbers.Number) and not isinstance(value, bool)
+            ).all()
+
+        numeric = (
+            is_numeric_series(left_value)
+            and is_numeric_series(right_value)
+        )
+        if numeric:
+            difference = (left_value.astype(float) - right_value.astype(float)).abs()
+            both_null = left_value.isna() & right_value.isna()
+            precision = (difference > 0) & (difference <= float_tolerance) & ~both_null
+            business = (difference > float_tolerance) & ~both_null
+            if precision.any():
+                result["precision_differences"][column] = {
+                    "count": int(precision.sum()),
+                    "max_abs_difference": float(difference[precision].max()),
+                }
+        else:
+            if "date" in column.lower():
+                left_value = _normalize_key_series(left_value, column)
+                right_value = _normalize_key_series(right_value, column)
+            else:
+                left_value = left_value.astype("string").fillna("<NA>")
+                right_value = right_value.astype("string").fillna("<NA>")
+            business = left_value != right_value
+
+        if business.any():
+            samples = matched.loc[business, join_keys + [f"{column}__left", f"{column}__right"]]
+            result["column_differences"][column] = {
+                "count": int(business.sum()),
+                "samples": samples.head(sample_limit).to_dict("records"),
+            }
+    return result
+
+
+def flatten_mapping(mapping: dict | None) -> pd.DataFrame:
+    """递归摊平嵌套状态字典，以 ``path/value`` DataFrame 统一参与对比。"""
+    rows: list[dict] = []
+
+    def visit(value, path: str) -> None:
+        if isinstance(value, dict):
+            for key in sorted(value, key=str):
+                visit(value[key], f"{path}.{key}" if path else str(key))
+        elif isinstance(value, (list, tuple)):
+            for index, item in enumerate(value):
+                visit(item, f"{path}[{index}]")
+        elif isinstance(value, numbers.Number) and not isinstance(value, bool):
+            rows.append({"path": path, "value": float(value)})
+        else:
+            rows.append({"path": path, "value": value})
+
+    visit(mapping or {}, "")
+    return pd.DataFrame(rows, columns=["path", "value"])
+
+
+def compare_mappings(
+    left: dict | None,
+    right: dict | None,
+    *,
+    label: str = "",
+    float_tolerance: float = 1e-6,
+) -> dict:
+    """递归对比两个状态字典。"""
+    return compare_dataframes_by_key(
+        flatten_mapping(left),
+        flatten_mapping(right),
+        label=label,
+        key_columns=["path"],
+        float_tolerance=float_tolerance,
+    )
 
 
 def compare_dataframes(

@@ -18,18 +18,17 @@ from datetime import datetime
 from typing import Optional
 
 if sys.platform == 'win32':
-    import io
-    # 检查是否已经被包装（避免重复包装）
-    if hasattr(sys.stdout, 'buffer') and not isinstance(sys.stdout, io.TextIOWrapper):
+    # 仅重配置现有流，避免 TextIOWrapper 析构时关闭 pytest 的捕获 buffer。
+    if hasattr(sys.stdout, 'reconfigure'):
         try:
-            sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace', line_buffering=True)
-        except Exception:
-            pass  # 忽略包装失败
-    if hasattr(sys.stderr, 'buffer') and not isinstance(sys.stderr, io.TextIOWrapper):
+            sys.stdout.reconfigure(encoding='utf-8', errors='replace', line_buffering=True)
+        except (OSError, ValueError):
+            pass
+    if hasattr(sys.stderr, 'reconfigure'):
         try:
-            sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace', line_buffering=True)
-        except Exception:
-            pass  # 忽略包装失败
+            sys.stderr.reconfigure(encoding='utf-8', errors='replace', line_buffering=True)
+        except (OSError, ValueError):
+            pass
 
 # 将项目根目录加入导入路径
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))

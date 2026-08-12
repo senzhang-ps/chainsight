@@ -15,6 +15,7 @@ import pandas as pd
 
 from src.core.orchestrator import Orch
 from src.modules import module1
+from src.modules.deployment_planning.integration_refactor import ModuleFive
 from src.modules.production_planning.integration_refactor import ModuleFour
 from src.modules.mrp_planning.integration_refactor import ModuleThree
 from src.modules.state_context import StateContext
@@ -85,7 +86,15 @@ def run_integrated_simulation(
 
 
     # ── 仿真循环 ──
-    all_results = {'module1': [], 'module4': []}
+    m5 = ModuleFive(
+        simulation_date=str(start_date),
+        simulation_start_date=start_date,
+        state_context=ctx,
+        orch=orch,
+    )
+    m5.prepare()
+
+    all_results = {'module1': [], 'module4': [], 'module5': []}
     simulation_start_time = time.time()
 
     for i, current_date in orch.iter_dates():
@@ -100,6 +109,11 @@ def run_integrated_simulation(
         m1_shipments = m1_result.get('shipment_df', pd.DataFrame())
         if not m1_shipments.empty:
             ctx.apply_shipments(m1_shipments, date_str)
+        ctx.apply_deployment_demand_inputs(
+            m1_result.get('supply_demand_df', pd.DataFrame()),
+            m1_result.get('all_orders_for_next_day', m1_result.get('orders_df', pd.DataFrame())),
+            date_str,
+        )
 
         m1_result['simulation_date'] = current_date
         all_results['module1'].append(m1_result)
@@ -118,6 +132,9 @@ def run_integrated_simulation(
         # 跨天结转：当日产线状态 + 已分配产能写回 ctx
         ctx.apply_line_state(m4_result.get('current_line_states', {}), date_str)
         ctx.apply_allocated_capacity(m4_result.get('current_allocated_capacity', {}), date_str)
+        # M4 当日可用生产先入 Context，确保 M5 从 production GR view 读取的
+        # 动态库存与旧集成路径一致。
+        ctx.apply_production(m4_result.get('production_df', pd.DataFrame()), date_str)
 
         all_results['module4'].append({
             'date': date_str,
@@ -125,6 +142,20 @@ def run_integrated_simulation(
             'm4_result': m4_result,
         })
         orch.save_module_output(m4, date_str)
+
+        # ---- M5（仅消费 Context 动态视图）----
+        m5.simulation_date = current_date
+        m5.run()
+        m5_result = m5.output()
+        m5_deployment = m5_result.get('deployment_plan', pd.DataFrame())
+        if not m5_deployment.empty:
+            ctx.apply_deployment(m5_deployment, date_str)
+        all_results['module5'].append({
+            'date': date_str,
+            'n_deployment': len(m5_deployment),
+            'm5_result': m5_result,
+        })
+        orch.save_module_output(m5, date_str)
 
         ctx.day_end(date_str)
         orch.save_module_output(m1, date_str)

@@ -232,6 +232,15 @@ def dedup_issues(issues: List[dict]) -> List[dict]:
     return df.to_dict(orient='records')
 
 
+def _round_up_to_batch_legacy(quantity: float, min_batch: Any, rounding_volume: Any) -> int:
+    """复刻旧 M4 的批量取整：先截断配置值，再使用向上取整。"""
+    base = max(quantity, int(min_batch))
+    rv = int(rounding_volume)
+    if base % rv == 0:
+        return int(base)
+    return int(np.ceil(base / rv) * rv)
+
+
 # ======================================================================
 # Pandas 后端 — 直接复用现有逻辑
 # ======================================================================
@@ -310,11 +319,11 @@ class _PandasBackend:
         )
 
         grouped['uncon_planned_qty'] = grouped.apply(
-            lambda r: np.ceil(max(r['original_quantity'], r['min_batch']) / round(r['rv'])) * round(r['rv'])
-                      if max(r['original_quantity'], r['min_batch']) % round(r['rv']) != 0
-                      else int(max(r['original_quantity'], r['min_batch'])),
+            lambda row: _round_up_to_batch_legacy(
+                row['original_quantity'], row['min_batch'], row['rv'],
+            ),
             axis=1,
-        ).round().astype(int)
+        )
 
         grouped = grouped.rename(columns={'delegate_line': 'line'})
         grouped['planned_date'] = sim_date
@@ -1025,24 +1034,18 @@ class _PolarsBackend:
                 pl.lit(0).cast(pl.Int64).alias('original_quantity'),
             ])
 
-        # 4) 按 material/location/delegate_line 汇总
-        # grouped = df.group_by(["material", "location", "delegate_line"]).agg([
-        #     pl.col("quantity").sum().alias("original_quantity"),
-        #     pl.col("min_batch").first().alias("min_batch"),
-        #     pl.col("rv").first().alias("rv"),
-        # ])
-
-        grouped = df.rename({"quantity": "original_quantity"})
+        # 4) 按 material/location/delegate_line 汇总，与 pandas / 原始端一致。
+        grouped = df.group_by(["material", "location", "delegate_line"]).agg([
+            pl.col("quantity").sum().alias("original_quantity"),
+            pl.col("min_batch").first().alias("min_batch"),
+            pl.col("rv").first().alias("rv"),
+        ])
 
         # 向上取整（使用 map_elements 保 parity 与 pandas 逐行 apply 一致）
         def _round_up(row):
-            qty_or_batch = int(max(row['original_quantity'], row['min_batch']))
-            rv_rounded = round(row['rv'])
-            if rv_rounded == 0:
-                return int(qty_or_batch)
-            if qty_or_batch % rv_rounded != 0:
-                return int(np.ceil(qty_or_batch / rv_rounded) * rv_rounded)
-            return int(qty_or_batch)
+            return _round_up_to_batch_legacy(
+                row['original_quantity'], row['min_batch'], row['rv'],
+            )
 
         grouped = grouped.with_columns(
             pl.struct(["original_quantity", "min_batch", "rv"])

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import pandas as pd
 
+from src.modules.deployment_planning.backends import _PandasBackend, _PolarsBackend
 from src.models.module import (
     Module5OutputDeploymentplan,
     Module5OutputStockonhandlog,
@@ -17,10 +18,9 @@ from src.modules.state_context import StateContext
 class _Orch:
     """最小新 Orch 替身：只允许 ModuleFive 使用 load_datas 注入配置。"""
 
-    engine = "pandas"
-
-    def __init__(self, config: dict[str, pd.DataFrame]):
+    def __init__(self, config: dict[str, pd.DataFrame], engine: str = "pandas"):
         self._config = config
+        self.engine = engine
         self.load_count = 0
 
     def get_module_config(self, module_name: str) -> dict:
@@ -81,6 +81,58 @@ def test_module_five_prepare_uses_orch_data_injection_only():
     assert orch.load_count == 1
     assert module.static_config["Network"].iloc[0]["location"] == "DC01"
     assert module.location_to_layer[("100", "DC01")] == 1
+
+
+def test_module_five_selects_polars_allocation_backend_from_orch_engine():
+    """M5 遵循 Orch.engine；pandas 仍为默认兼容后端。"""
+    pandas_module = ModuleFive(
+        simulation_date="2025-01-01",
+        simulation_start_date="2025-01-01",
+        orch=_Orch(_config()),
+    )
+    polars_module = ModuleFive(
+        simulation_date="2025-01-01",
+        simulation_start_date="2025-01-01",
+        orch=_Orch(_config(), engine="polars"),
+    )
+
+    assert isinstance(pandas_module._backend, _PandasBackend)
+    assert isinstance(polars_module._backend, _PolarsBackend)
+
+
+def test_module_five_run_does_not_implicitly_prepare():
+    """Orch 独立控制 prepare/run，run 只编排 backend 的计算步骤。"""
+    module = ModuleFive(
+        simulation_date="2025-01-01",
+        simulation_start_date="2025-01-01",
+        orch=_Orch(_config()),
+    )
+    module._prepared = True
+    calls: list[str] = []
+    empty = pd.DataFrame()
+    supply = pd.DataFrame(columns=["material", "node", "qty"])
+
+    def fail_prepare():
+        raise AssertionError("run() 不得调用 prepare()")
+
+    module.prepare = fail_prepare
+    module._backend.daily_inputs = lambda day: calls.append("daily_inputs") or {"ReceivingSpace": empty}
+    module._backend.active_network = lambda config, day: calls.append("active_network") or empty
+    module._backend.validate = lambda config, active: calls.append("validate") or ({}, [])
+    module._backend.route_parameters = lambda active, config: calls.append("route_parameters") or empty
+    module._backend.supply_ledger = lambda config, day: calls.append("supply_ledger") or (supply, empty, supply, empty, empty)
+    module._backend.plan_layers = lambda *args: calls.append("plan_layers") or (empty, empty, empty)
+    module._backend.push = lambda *args: calls.append("push") or empty
+    module._backend.apply_space = lambda plan, space, priority: calls.append("apply_space") or (plan, empty)
+    module._backend.finalise_result = lambda *args: calls.append("finalise_result") or {"deployment_plan": empty}
+
+    module.run()
+
+    assert calls == [
+        "daily_inputs", "active_network", "validate", "route_parameters",
+        "supply_ledger", "plan_layers", "push", "apply_space", "finalise_result",
+    ]
+    assert module.output() is module._backend.result
 
 
 def test_state_context_owns_module_five_dynamic_demand_inputs():

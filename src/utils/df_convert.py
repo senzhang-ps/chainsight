@@ -6,6 +6,8 @@ pandas ↔ polars 的统一转换入口，列级 numpy 转换、不依赖 pyarro
 避免在各处重复实现"pandas → polars"逻辑。
 """
 
+from datetime import date, datetime
+
 import pandas as pd
 import polars as pl
 
@@ -27,6 +29,16 @@ def pandas_to_polars(df: pd.DataFrame) -> pl.DataFrame:
     converted = {}
     for col in df.columns:
         s = df[col]
+        if pd.api.types.is_datetime64_any_dtype(s):
+            converted[col] = [value.to_pydatetime() if not pd.isna(value) else None for value in s]
+            continue
+        values = s.dropna()
+        if not values.empty and values.map(lambda value: isinstance(value, (pd.Timestamp, datetime, date))).all():
+            converted[col] = [
+                value.to_pydatetime() if isinstance(value, pd.Timestamp) else value if not pd.isna(value) else None
+                for value in s
+            ]
+            continue
         try:
             # 先尝试直接转 numpy
             arr = s.to_numpy()

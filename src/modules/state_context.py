@@ -60,6 +60,7 @@ class StateContext(Module):
         # ── 全部可变状态（原 Orchestrator.__init__ 的内容） ──
         self.unrestricted_inventory: Dict[Tuple[str, str], int] = {}
         self.open_deployment: Dict[str, Dict] = {}
+        self._open_deployment_view_cache: pd.DataFrame | None = None
         self.in_transit: Dict[str, Dict] = {}
         self.production_gr: List[Dict] = []
         self.delivery_gr: List[Dict] = []
@@ -242,6 +243,8 @@ class StateContext(Module):
 
         for uid in to_delete:
             del self.open_deployment[uid]
+        if to_delete:
+            self._invalidate_open_deployment_view()
 
         # 存储清理审计结果，供 Orch 持久化到 DB
         cleanup_df = pd.DataFrame(removed)
@@ -562,27 +565,32 @@ class StateContext(Module):
 
     def _open_deployment_view(self, date: str) -> pd.DataFrame:
         """源: views.py:147-191 get_open_deployment_view()"""
-        records = []
-        for uid, rec in self.open_deployment.items():
-            records.append({
-                'material': normalize_material(rec['material']),
-                'sending': normalize_sending(rec['sending']),
-                'receiving': normalize_receiving(rec['receiving']),
-                'planned_deployment_date': pd.to_datetime(
-                    rec['planned_deployment_date']
-                ),
-                'deployed_qty': rec['deployed_qty'],
-                'demand_element': rec['demand_element'],
-                'ori_deployment_uid': uid,
-            })
-        df = pd.DataFrame(records)
-        if df.empty:
-            df = pd.DataFrame(columns=[
+        if self._open_deployment_view_cache is None:
+            records = [
+                {
+                    'material': rec['material'],
+                    'sending': rec['sending'],
+                    'receiving': rec['receiving'],
+                    'planned_deployment_date': pd.to_datetime(rec['planned_deployment_date']),
+                    'deployed_qty': rec['deployed_qty'],
+                    'demand_element': rec['demand_element'],
+                    'ori_deployment_uid': uid,
+                }
+                for uid, rec in self.open_deployment.items()
+            ]
+            self._open_deployment_view_cache = pd.DataFrame.from_records(records)
+            if self._open_deployment_view_cache.empty:
+                self._open_deployment_view_cache = pd.DataFrame(columns=[
                 'material', 'sending', 'receiving',
                 'planned_deployment_date', 'deployed_qty',
                 'demand_element', 'ori_deployment_uid',
-            ])
-        return df
+                ])
+        # 保留原 getter 的独立 DataFrame 契约，避免调用方修改缓存。
+        return self._open_deployment_view_cache.copy(deep=True)
+
+    def _invalidate_open_deployment_view(self) -> None:
+        """开放调拨状态被写入、扣减或清理后，使派生视图缓存失效。"""
+        self._open_deployment_view_cache = None
 
     def _all_production_view(self, date: str) -> pd.DataFrame:
         """源: views.py:280-336 get_all_production_view()"""
@@ -927,6 +935,7 @@ class StateContext(Module):
             }
 
         if len(deployment_df) > 0:
+            self._invalidate_open_deployment_view()
             msg = f"Added {len(deployment_df)} deployment plans"
             self._log_event("M5_DEPLOYMENT", msg)
 
@@ -963,6 +972,7 @@ class StateContext(Module):
                 self.open_deployment[uid]['deployed_qty'] = old_qty - quantity
                 if self.open_deployment[uid]['deployed_qty'] <= 0:
                     del self.open_deployment[uid]
+                self._invalidate_open_deployment_view()
 
             # 减少发货地非限制库存
             sending_key = (

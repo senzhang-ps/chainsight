@@ -4,6 +4,7 @@
 """
 from __future__ import annotations
 
+import json
 import numbers
 
 import pandas as pd
@@ -158,6 +159,160 @@ def compare_dataframes_by_key(
                 "samples": samples.head(sample_limit).to_dict("records"),
             }
     return result
+
+
+DIFFERENCE_DETAIL_COLUMNS = [
+    "difference_type", "column", "key_values", "duplicate_ordinal",
+    "left_value", "right_value", "abs_difference", "left_row", "right_row",
+]
+
+
+def dataframe_difference_details(
+    left: pd.DataFrame,
+    right: pd.DataFrame,
+    *,
+    key_columns: list[str] | None = None,
+    float_tolerance: float = 1e-6,
+) -> pd.DataFrame:
+    """返回完整的按业务键行级差异，适合直接落盘审计。
+
+    与 :func:`compare_dataframes_by_key` 使用相同的键选择、日期归一化及重复
+    键序号规则。输出包含仅存在于任一侧的整行 JSON，以及共有键下逐字段的
+    业务/精度差异，避免报告仅保留少量样例而丢失可复现明细。
+    """
+    left = pd.DataFrame() if left is None else left.copy()
+    right = pd.DataFrame() if right is None else right.copy()
+    keys = key_columns or _select_join_keys(left, right)
+    keys = [column for column in keys if column in left.columns and column in right.columns]
+    rows: list[dict] = []
+
+    if not keys:
+        return pd.DataFrame([{
+            "difference_type": "comparison_error",
+            "column": "",
+            "key_values": "{}",
+            "duplicate_ordinal": "",
+            "left_value": "",
+            "right_value": "",
+            "abs_difference": "",
+            "left_row": "",
+            "right_row": "",
+        }], columns=DIFFERENCE_DETAIL_COLUMNS)
+
+    def prepare(frame: pd.DataFrame) -> pd.DataFrame:
+        prepared = frame.copy()
+        for column in keys:
+            prepared[column] = _normalize_key_series(prepared[column], column)
+        sort_columns = keys + sorted(column for column in prepared.columns if column not in keys)
+        prepared = prepared.sort_values(sort_columns, kind="mergesort", na_position="last")
+        prepared["__duplicate_ordinal"] = prepared.groupby(keys, dropna=False).cumcount()
+        return prepared
+
+    left, right = prepare(left), prepare(right)
+    join_keys = keys + ["__duplicate_ordinal"]
+    merged = left.merge(
+        right,
+        on=join_keys,
+        how="outer",
+        suffixes=("__left", "__right"),
+        indicator=True,
+    )
+
+    def as_json(record: dict) -> str:
+        return json.dumps(record, ensure_ascii=False, default=str)
+
+    def key_values(row: pd.Series) -> str:
+        return as_json({column: row[column] for column in keys})
+
+    left_columns = [column for column in left.columns if column not in join_keys]
+    right_columns = [column for column in right.columns if column not in join_keys]
+
+    def merged_value(row: pd.Series, column: str, side: str):
+        suffix = f"{column}__{side}"
+        return row[suffix] if suffix in row else row.get(column)
+
+    for _, row in merged.loc[merged["_merge"] == "left_only"].iterrows():
+        rows.append({
+            "difference_type": "left_only_row",
+            "column": "",
+            "key_values": key_values(row),
+            "duplicate_ordinal": row["__duplicate_ordinal"],
+            "left_value": "",
+            "right_value": "",
+            "abs_difference": "",
+            "left_row": as_json({column: merged_value(row, column, "left") for column in left_columns}),
+            "right_row": "",
+        })
+    for _, row in merged.loc[merged["_merge"] == "right_only"].iterrows():
+        rows.append({
+            "difference_type": "right_only_row",
+            "column": "",
+            "key_values": key_values(row),
+            "duplicate_ordinal": row["__duplicate_ordinal"],
+            "left_value": "",
+            "right_value": "",
+            "abs_difference": "",
+            "left_row": "",
+            "right_row": as_json({column: merged_value(row, column, "right") for column in right_columns}),
+        })
+
+    matched = merged.loc[merged["_merge"] == "both"].copy()
+    common_columns = sorted((set(left.columns) & set(right.columns)) - set(join_keys))
+    for column in common_columns:
+        left_value = matched[f"{column}__left"]
+        right_value = matched[f"{column}__right"]
+        numeric = (
+            (pd.api.types.is_numeric_dtype(left_value) or _has_only_numbers(left_value))
+            and (pd.api.types.is_numeric_dtype(right_value) or _has_only_numbers(right_value))
+        )
+        if numeric:
+            difference = (left_value.astype(float) - right_value.astype(float)).abs()
+            both_null = left_value.isna() & right_value.isna()
+            null_mismatch = left_value.isna() ^ right_value.isna()
+            precision = (difference.gt(0) & difference.le(float_tolerance) & ~both_null)
+            business = (difference.gt(float_tolerance) & ~both_null) | null_mismatch
+        else:
+            if "date" in column.lower():
+                normalized_left = _normalize_key_series(left_value, column)
+                normalized_right = _normalize_key_series(right_value, column)
+            else:
+                normalized_left = left_value.astype("string").fillna("<NA>")
+                normalized_right = right_value.astype("string").fillna("<NA>")
+            precision = pd.Series(False, index=matched.index)
+            business = normalized_left != normalized_right
+            difference = pd.Series(pd.NA, index=matched.index, dtype="Float64")
+
+        for index in matched.index[business | precision]:
+            row = matched.loc[index]
+            rows.append({
+                "difference_type": "precision_difference" if bool(precision.loc[index]) else "value_difference",
+                "column": column,
+                "key_values": key_values(row),
+                "duplicate_ordinal": row["__duplicate_ordinal"],
+                "left_value": row[f"{column}__left"],
+                "right_value": row[f"{column}__right"],
+                "abs_difference": difference.loc[index],
+                "left_row": "",
+                "right_row": "",
+            })
+
+    for column in sorted(set(left.columns) - set(right.columns) - {"__duplicate_ordinal"}):
+        rows.append({"difference_type": "left_only_column", "column": column, "key_values": "{}",
+                     "duplicate_ordinal": "", "left_value": "", "right_value": "",
+                     "abs_difference": "", "left_row": "", "right_row": ""})
+    for column in sorted(set(right.columns) - set(left.columns) - {"__duplicate_ordinal"}):
+        rows.append({"difference_type": "right_only_column", "column": column, "key_values": "{}",
+                     "duplicate_ordinal": "", "left_value": "", "right_value": "",
+                     "abs_difference": "", "left_row": "", "right_row": ""})
+    return pd.DataFrame(rows, columns=DIFFERENCE_DETAIL_COLUMNS)
+
+
+def _has_only_numbers(series: pd.Series) -> bool:
+    """判断混合 object 列的非空值是否均为数值。"""
+    values = series.dropna()
+    return not values.empty and values.map(
+        lambda value: isinstance(value, numbers.Number) and not isinstance(value, bool)
+    ).all()
 
 
 def flatten_mapping(mapping: dict | None) -> pd.DataFrame:

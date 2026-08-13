@@ -51,11 +51,13 @@ from .main import (
     run_daily_physical_flow,
     run_physical_flow_module,
 )
+from .integration_refactor import ModuleSix
 
 __all__ = [
     # 入口函数
     'run_daily_physical_flow',
     'run_physical_flow_module',
+    'ModuleSix',
     # 子模块导出
     'SafeExpressionEvaluator',
     'load_standalone_config',

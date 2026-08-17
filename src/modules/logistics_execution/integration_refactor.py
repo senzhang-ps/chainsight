@@ -12,6 +12,7 @@ strict parity 前继续支撑现有集成调度。
 """
 from __future__ import annotations
 
+import logging
 from typing import Optional
 
 import pandas as pd
@@ -19,6 +20,8 @@ import pandas as pd
 from ...utils.defaults import M6_MAX_WAIT_DAYS
 from ..module import Module
 from .backends import _PandasBackend, _PolarsBackend
+
+logger = logging.getLogger("SupplyChainSimulation")
 
 
 class ModuleSix(Module):
@@ -107,6 +110,7 @@ class ModuleSix(Module):
             raise RuntimeError("ModuleSix.run() 需要 StateContext")
 
         day = pd.Timestamp(self.simulation_date).normalize()
+        logger.info("4️⃣ 运行 Module6 - 物流执行：%s", day.date())
         inputs = self.load_daily_inputs(day)
         run_params, prepared_data = self.prepare_daily_data(inputs, day)
         results = self.execute_daily_flow(run_params, prepared_data)
@@ -114,6 +118,12 @@ class ModuleSix(Module):
             run_params, results, prepared_data["validation_log"]
         )
         self._backend.result = self._result
+        logger.info(
+            "✅ Module6 完成 - 交付=%d, 车辆=%d, 未满足=%d",
+            len(self._result['delivery_plan']),
+            len(self._result['vehicle_log']),
+            len(self._result['unsatisfied_log']),
+        )
 
     def output(self):
         return self._result

@@ -1,8 +1,8 @@
-"""真实数据库配置下的主项目旧 M1 与 Decoupling M1 五日性能对比。
+"""真实历史数据下 Decoupling M1 pandas / polars 五日一致性与性能对比。
 
-旧实现必须从 ``chainsight-main`` 的数据库模式调用链执行；重构实现和全部
-报告产物均位于 ``ChainSight-Decoupling``。两端使用独立状态逐日回放，业务
-差异仅写入报告，不使测试失败。
+历史业务基线固定从 PostgreSQL ``public`` schema 的指定 ``run_id`` 读取；
+当前重构 pandas 与 polars 后端各自在独立内存状态上回放。主项目 legacy M1
+已与重构逻辑分叉，不参与测试。
 
 运行：
     conda run -n work pytest tests/test_m1_two_way_compare.py -s -q
@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
 import sys
 import time
 from pathlib import Path
@@ -21,6 +20,7 @@ import pytest
 
 from pgsql_db.db_connection import DatabaseConnection
 from pgsql_db.settings import get_database_config
+from src.models.module import OUTPUT_REGISTRY
 from src.core.main_integration.config_loader import (
     load_configuration_from_dict,
     prepare_configuration,
@@ -33,15 +33,18 @@ from tests.compare_utils import compare_dataframes_by_key
 
 
 PROJECT_ROOT = Path(__file__).parent.parent.resolve()
-MAIN_PROJECT_ROOT = PROJECT_ROOT.parent / "chainsight-main"
-CONFIG_NAME = "OC_Paste_S1_20251224_repare"
-START_DATE = "2025-12-15"
-END_DATE = "2025-12-19"
+CONFIG_NAME = os.getenv("M1_COMPARE_CONFIG_NAME", "OC_Paste_S1_20251224_repare")
+START_DATE = os.getenv("M1_COMPARE_START_DATE", "2025-12-15")
+END_DATE = os.getenv("M1_COMPARE_END_DATE", "2025-12-19")
+SIMULATION_END_DATE = os.getenv("M1_COMPARE_SIMULATION_END_DATE", END_DATE)
+HISTORICAL_RUN_ID = os.getenv(
+    "M1_COMPARE_HISTORICAL_RUN_ID",
+    "db_OC_Paste_S1_20251224_repare_20260803_105300",
+)
+DB_SCHEMA = os.getenv("M1_COMPARE_DB_SCHEMA", "public")
+CONFIG_SCHEMA = os.getenv("M1_COMPARE_CONFIG_SCHEMA", "public")
 REPORT_DIR = PROJECT_ROOT / "outputs" / "m1_two_way_compare"
 PROGRESS_PATH = REPORT_DIR / "m1_two_way_compare.progress.log"
-LEGACY_RESULT_PATH = REPORT_DIR / "m1_legacy_result.json"
-LEGACY_CONFIG_PATH = REPORT_DIR / "m1_database_config.json"
-LEGACY_RUNNER_PATH = PROJECT_ROOT / "tests" / "m1_legacy_runner.py"
 M1_FRAME_KEYS = (
     "orders_df",
     "shipment_df",
@@ -49,6 +52,13 @@ M1_FRAME_KEYS = (
     "supply_demand_df",
     "summary_df",
 )
+M1_BUSINESS_COLUMNS = {
+    "orders_df": ["simulation_date", "date", "material", "location", "demand_type", "advance_days", "quantity"],
+    "shipment_df": ["date", "material", "location", "demand_type", "quantity"],
+    "cut_df": ["date", "material", "location", "quantity"],
+    "supply_demand_df": ["date", "material", "location", "demand_element", "quantity"],
+    "summary_df": ["Total_Orders", "Total_Shipments", "Total_Cuts", "Total_SupplyDemand"],
+}
 
 
 def _progress(message: str) -> None:
@@ -61,7 +71,7 @@ def _progress(message: str) -> None:
     sys.__stdout__.flush()
 
 
-def _db() -> DatabaseConnection:
+def _db(schema: str = DB_SCHEMA) -> DatabaseConnection:
     config = get_database_config()
     return DatabaseConnection(
         host=config["host"],
@@ -69,7 +79,7 @@ def _db() -> DatabaseConnection:
         database=config["database"],
         user=config["user"],
         password=config["password"],
-        schema=config.get("default_schema", "public"),
+        schema=schema,
         auto_create_schema=False,
     )
 
@@ -81,75 +91,62 @@ def _load_prepared_config(db: DatabaseConnection) -> dict[str, pd.DataFrame]:
     return prepare_configuration(load_configuration_from_dict(raw, CONFIG_NAME))
 
 
+def _load_historical_daily_output(
+    db: DatabaseConnection, table_name: str, day: pd.Timestamp,
+) -> pd.DataFrame:
+    """从指定 run 只读加载一张 M1 输出表。"""
+    columns = [row[0] for row in db.execute_query(
+        "SELECT column_name FROM information_schema.columns "
+        "WHERE table_schema = %s AND table_name = %s ORDER BY ordinal_position",
+        (DB_SCHEMA, table_name),
+    )]
+    if not columns:
+        return pd.DataFrame()
+    if table_name == OUTPUT_REGISTRY["module1"]["orders_df"]:
+        # M1 当前日的有效订单包含此前创建、但尚未到期的订单；必须镜像
+        # merge_with_history(): simulation_date <= today AND date >= today。
+        rows = db.execute_query(
+            f'SELECT {", ".join(columns)} FROM "{DB_SCHEMA}"."{table_name}" '
+            "WHERE run_id = %s AND sim_date::date <= %s::date AND date::date >= %s::date",
+            (HISTORICAL_RUN_ID, day.strftime("%Y-%m-%d"), day.strftime("%Y-%m-%d")),
+        )
+    else:
+        rows = db.execute_query(
+            f'SELECT {", ".join(columns)} FROM "{DB_SCHEMA}"."{table_name}" '
+            "WHERE run_id = %s AND sim_date::date = %s::date",
+            (HISTORICAL_RUN_ID, day.strftime("%Y-%m-%d")),
+        )
+    return pd.DataFrame(rows, columns=columns).drop(
+        columns=["run_id", "sim_date", "config_name", "db_write_time", "file_date"],
+        errors="ignore",
+    )
+
+
+def _load_historical_m1(db: DatabaseConnection) -> dict:
+    """按日加载固定历史 run 的 M1 原始业务输出。"""
+    return {"days": [{
+        "date": day.strftime("%Y-%m-%d"),
+        "m1_result": {
+            output_key: _load_historical_daily_output(db, table_name, day)
+            for output_key, table_name in OUTPUT_REGISTRY["module1"].items()
+        },
+    } for day in pd.date_range(START_DATE, END_DATE, freq="D")]}
+
+
 def _new_context(config: dict[str, pd.DataFrame], *, engine: str) -> tuple[Orch, StateContext]:
     """为指定重构后端创建独立 Orch / StateContext，避免共享可变库存。"""
     orch = Orch(
         start_date=START_DATE,
-        end_date=END_DATE,
+        end_date=SIMULATION_END_DATE,
         config_dict={name: frame.copy() for name, frame in config.items()},
         output_path=str(REPORT_DIR / f"refactor_{engine}_scratch"),
         engine=engine,
         skip_dq=True,
+        enable_persistence=False,
     )
     context = StateContext(simulation_date=START_DATE, orch=orch)
     context.initialize(orch.all_config)
     return orch, context
-
-
-def _write_database_config(config: dict[str, pd.DataFrame]) -> None:
-    """将数据库读取并准备完成的配置快照交给主项目独立进程。"""
-    payload = {
-        name: frame.to_json(orient="split", date_format="iso", default_handler=str)
-        for name, frame in config.items()
-    }
-    LEGACY_CONFIG_PATH.write_text(
-        json.dumps(payload, ensure_ascii=False),
-        encoding="utf-8",
-    )
-
-
-def _run_main_legacy() -> dict:
-    """通过独立进程调用 chainsight-main 的 DB 模式 M1 入口。
-
-    独立解释器避免两个工作区同名 ``src`` 包相互覆盖。计时在运行器内完成，
-    因此不包含子进程启动、数据库读取和配置初始化。
-    """
-    if not MAIN_PROJECT_ROOT.is_dir():
-        pytest.skip(f"找不到主项目目录: {MAIN_PROJECT_ROOT}")
-    environment = os.environ.copy()
-    environment.update({
-        "CHAINSIGHT_MAIN_ROOT": str(MAIN_PROJECT_ROOT),
-        "M1_LEGACY_RESULT_PATH": str(LEGACY_RESULT_PATH),
-        "M1_LEGACY_CONFIG_PATH": str(LEGACY_CONFIG_PATH),
-        "M1_LEGACY_PROGRESS_PATH": str(PROGRESS_PATH),
-        "M1_COMPARE_START_DATE": START_DATE,
-        "M1_COMPARE_END_DATE": END_DATE,
-    })
-    completed = subprocess.run(
-        [sys.executable, str(LEGACY_RUNNER_PATH)],
-        cwd=MAIN_PROJECT_ROOT,
-        env=environment,
-        capture_output=True,
-        text=True,
-        timeout=300,
-        check=False,
-    )
-    if completed.returncode != 0:
-        raise RuntimeError(
-            "主项目旧 M1 执行失败：\n"
-            f"stdout:\n{completed.stdout[-4000:]}\n"
-            f"stderr:\n{completed.stderr[-4000:]}"
-        )
-    if not LEGACY_RESULT_PATH.exists():
-        raise RuntimeError("主项目旧 M1 未写出对比结果")
-
-    raw = json.loads(LEGACY_RESULT_PATH.read_text(encoding="utf-8"))
-    for day in raw["days"]:
-        day["m1_result"] = {
-            name: pd.DataFrame(records)
-            for name, records in day["m1_result"].items()
-        }
-    return raw
 
 
 def _run_refactor(config: dict[str, pd.DataFrame], *, engine: str) -> dict:
@@ -183,12 +180,37 @@ def _run_refactor(config: dict[str, pd.DataFrame], *, engine: str) -> dict:
     return {"days": days, "seconds": elapsed, "total_seconds": sum(elapsed)}
 
 
+def _business_frame(frame: pd.DataFrame, output_name: str) -> pd.DataFrame:
+    """仅保留模块间传递的业务字段，过滤不影响调度的零数量占位行。"""
+    frame = pd.DataFrame() if frame is None else frame.copy()
+    if output_name == "summary_df":
+        canonical_summary_columns = {
+            "total_orders": "Total_Orders",
+            "total_shipments": "Total_Shipments",
+            "total_cuts": "Total_Cuts",
+            "total_supplydemand": "Total_SupplyDemand",
+        }
+        frame = frame.rename(columns={
+            source: target
+            for source, target in canonical_summary_columns.items()
+            if source in frame.columns and target not in frame.columns
+        })
+    columns = [column for column in M1_BUSINESS_COLUMNS[output_name] if column in frame.columns]
+    frame = frame.loc[:, columns]
+    if output_name in {"orders_df", "shipment_df", "cut_df"} and "quantity" in frame.columns:
+        frame = frame[pd.to_numeric(frame["quantity"], errors="coerce").fillna(0) != 0]
+    if output_name == "summary_df" and not frame.empty:
+        frame.insert(0, "summary_key", "daily")
+    return frame
+
+
 def _compare_day(left: dict, right: dict, label: str) -> dict:
     return {
         name: compare_dataframes_by_key(
-            left["m1_result"].get(name, pd.DataFrame()),
-            right["m1_result"].get(name, pd.DataFrame()),
+            _business_frame(left["m1_result"].get(name), name),
+            _business_frame(right["m1_result"].get(name), name),
             label=f"{label}:{name}",
+            key_columns=["summary_key"] if name == "summary_df" else None,
         )
         for name in M1_FRAME_KEYS
     }
@@ -211,32 +233,32 @@ def _write_report(report: dict) -> Path:
     json_path = REPORT_DIR / "m1_two_way_compare.json"
     json_path.write_text(json.dumps(report, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
     lines = [
-        "# M1 主项目旧实现与 Decoupling pandas / polars 重构对比报告",
+        "# M1 历史 DB / 重构 pandas / polars 对比报告",
         "",
         f"- 配置: `{CONFIG_NAME}`",
         f"- 范围: {START_DATE} 至 {END_DATE}",
+        f"- 历史基线: PostgreSQL `{DB_SCHEMA}` schema，run_id `{HISTORICAL_RUN_ID}`。",
         "- 输入: PostgreSQL 中真实配置数据（含初始库存）；M1 不消费历史模块业务输出。",
-        "- 旧实现: 在 `chainsight-main` 以 `simulation_db.py` 同款调用参数运行。",
-        "- 重构实现: 在 `ChainSight-Decoupling` 的独立 `StateContext` 上运行 pandas / polars 后端。",
-        "- 性能: 每个实现仅执行一次完整五日对比，计时不含数据库读取、配置初始化与重构 prepare。",
+        "- 当前运行: Decoupling refactor pandas 与 polars；均为内存运行，不写数据库。",
+        "- 性能: 两个后端各执行一次完整五日回放，计时不含数据库读取、配置初始化与 prepare。",
         "",
         "## 性能",
         "",
-        "| 实现 | min(s) | median(s) | mean(s) | 每日 mean(s) | 相对旧 M1 |",
+        "| 实现 | min(s) | median(s) | mean(s) | 每日 mean(s) | 相对 pandas |",
         "|---|---:|---:|---:|---:|---:|",
     ]
     for name, value in report["performance"].items():
         lines.append(
             f"| {name} | {value['min_seconds']:.4f} | {value['median_seconds']:.4f} | "
             f"{value['mean_seconds']:.4f} | {value['per_day_mean_seconds']:.4f} | "
-            f"{value['relative_to_legacy']:.2f}x |"
+            f"{value['relative_to_pandas']:.2f}x |"
         )
     lines.extend([
         "",
         "## 差异说明",
         "",
-        "业务差异仅记录在 JSON；不作为测试失败条件。每个仿真日分别比较 OrderLog、"
-        "ShipmentLog、CutLog、SupplyDemandLog 和 Summary。",
+        "业务差异仅记录在 JSON；不作为测试失败条件。每个仿真日分别比较历史 DB、"
+        "pandas 与 polars 的 OrderLog、ShipmentLog、CutLog、SupplyDemandLog 和 Summary。",
     ])
     markdown_path = REPORT_DIR / "m1_two_way_compare.md"
     markdown_path.write_text("\n".join(lines), encoding="utf-8")
@@ -247,44 +269,45 @@ def _write_report(report: dict) -> Path:
 def comparison_data():
     REPORT_DIR.mkdir(parents=True, exist_ok=True)
     PROGRESS_PATH.write_text("", encoding="utf-8")
-    LEGACY_RESULT_PATH.unlink(missing_ok=True)
-    LEGACY_CONFIG_PATH.unlink(missing_ok=True)
-
     db = _db()
+    config_db = _db(CONFIG_SCHEMA)
     try:
         _progress("开始从数据库加载重构 M1 所需的真实配置数据")
+        config_db.connect()
+        config = _load_prepared_config(config_db)
         db.connect()
-        config = _load_prepared_config(db)
+        historical = _load_historical_m1(db)
     finally:
         db.close()
+        config_db.close()
     _progress("数据库配置加载完成")
-    _write_database_config(config)
-
-    _progress("开始主项目旧 M1 唯一一次真实对比运行并计时")
-    legacy = _run_main_legacy()
-    _progress("主项目旧 M1 运行完成")
     _progress("开始 Decoupling pandas M1 唯一一次真实对比运行并计时")
     refactor = _run_refactor(config, engine="pandas")
     _progress("开始 Decoupling polars M1 唯一一次真实对比运行并计时")
     polars = _run_refactor(config, engine="polars")
 
     performance = {
-        "legacy_main": _performance_summary(legacy),
         "refactor_pandas": _performance_summary(refactor),
         "refactor_polars": _performance_summary(polars),
     }
-    legacy_mean = performance["legacy_main"]["mean_seconds"]
+    pandas_mean = performance["refactor_pandas"]["mean_seconds"]
     for summary in performance.values():
-        summary["relative_to_legacy"] = summary["mean_seconds"] / legacy_mean
+        summary["relative_to_pandas"] = summary["mean_seconds"] / pandas_mean
     report = {
         "config_name": CONFIG_NAME,
+        "historical_run_id": HISTORICAL_RUN_ID,
+        "database_schema": DB_SCHEMA,
         "start_date": START_DATE,
         "end_date": END_DATE,
         "performance": performance,
         "comparisons": {
-            "legacy_main_vs_refactor_pandas": [
-                {"date": left["date"], "comparison": _compare_day(left, right, "legacy_main_vs_pandas")}
-                for left, right in zip(legacy["days"], refactor["days"])
+            "historical_db_vs_refactor_pandas": [
+                {"date": left["date"], "comparison": _compare_day(left, right, "historical_vs_pandas")}
+                for left, right in zip(historical["days"], refactor["days"])
+            ],
+            "historical_db_vs_refactor_polars": [
+                {"date": left["date"], "comparison": _compare_day(left, right, "historical_vs_polars")}
+                for left, right in zip(historical["days"], polars["days"])
             ],
             "refactor_pandas_vs_polars": [
                 {"date": left["date"], "comparison": _compare_day(left, right, "pandas_vs_polars")}
@@ -295,7 +318,7 @@ def comparison_data():
     report_path = _write_report(report)
     _progress(f"报告已写入: {report_path}")
     return {
-        "legacy": legacy,
+        "historical": historical,
         "refactor": refactor,
         "polars": polars,
         "report": report,
@@ -303,11 +326,11 @@ def comparison_data():
     }
 
 
-def test_m1_two_way_compare_replays_five_real_business_days(comparison_data):
-    """两个实现均使用数据库配置完成固定五日 M1 回放。"""
-    assert len(comparison_data["legacy"]["days"]) == 5
-    assert len(comparison_data["refactor"]["days"]) == 5
-    assert len(comparison_data["polars"]["days"]) == 5
+def test_m1_two_way_compare_replays_configured_business_days(comparison_data):
+    """两个实现均使用数据库配置完成指定日期范围的 M1 回放。"""
+    expected_days = len(pd.date_range(START_DATE, END_DATE, freq="D"))
+    assert len(comparison_data["refactor"]["days"]) == expected_days
+    assert len(comparison_data["polars"]["days"]) == expected_days
     assert comparison_data["report_path"].exists()
     print(f"\nM1 真实配置数据对比报告: {comparison_data['report_path']}")
 
@@ -315,5 +338,5 @@ def test_m1_two_way_compare_replays_five_real_business_days(comparison_data):
 def test_m1_two_way_compare_records_actual_execution_timing(comparison_data):
     """报告记录实际对比运行的单次端到端耗时，不重复执行计算。"""
     performance = comparison_data["report"]["performance"]
-    assert set(performance) == {"legacy_main", "refactor_pandas", "refactor_polars"}
+    assert set(performance) == {"refactor_pandas", "refactor_polars"}
     assert all(len(summary["runs"]) == 1 for summary in performance.values())

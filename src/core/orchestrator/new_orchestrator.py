@@ -22,12 +22,14 @@ class Orchestrator:
 
     def __init__(self, start_date, end_date,
                  config_path=None, output_path=None,
-                 config_dict=None, engine='pandas', skip_dq=False):
+                 config_dict=None, engine='pandas', skip_dq=False,
+                 enable_persistence=True):
         self.start_date = start_date if isinstance(start_date, date) else pd.Timestamp(start_date).date()
         self.end_date = end_date if isinstance(end_date, date) else pd.Timestamp(end_date).date()
         self.module_idx = [1, 3, 4, 5, 6]
         self.engine = engine
         self.output_path = output_path or './output'
+        self.enable_persistence = enable_persistence
 
         # ── 身份 ──
         self._config_name = None
@@ -40,7 +42,10 @@ class Orchestrator:
         self.persistence = PersistenceManager(self)
 
         # ── 配置加载 + 持久化（委托 ConfigManager） ──
-        self.config.bootstrap(config_path=config_path)
+        self.config.bootstrap(
+            config_path=config_path,
+            connect_db=enable_persistence,
+        )
 
         # ── 续跑检测（在 load 之前，以便复用 run_id + 短路 DQ）──
         # config_name 预置（DB 模式可由调用方显式赋值；config_path 模式取 stem）
@@ -73,7 +78,7 @@ class Orchestrator:
             dq_result, needs_write = self.config.load(
                 config_path, config_dict, skip_dq=skip_dq,
             )
-            if needs_write:
+            if needs_write and self.enable_persistence:
                 self.config.persist(dq_result, write_config=True)
         except Exception:
             # DQ 阻断：仍持久化检测结果（不含配置数据），供调试排查

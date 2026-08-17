@@ -61,6 +61,12 @@ class StateContext(Module):
         self.unrestricted_inventory: Dict[Tuple[str, str], int] = {}
         self.open_deployment: Dict[str, Dict] = {}
         self._open_deployment_view_cache: pd.DataFrame | None = None
+        # M5 供给账本只消费 material/sending/receiving 的数量合计；将其与
+        # M3 所需的明细 view 分离，避免跨日开放调拨明细线性增长拖慢 M5。
+        self._open_deployment_supply: Optional[Dict[Tuple[str, str, str], int]] = {}
+        # M3 还需要按计划调拨日判断 future inbound，因此保留日期粒度，
+        # 但不保留不会影响 MRP 计算的 UID 明细。
+        self._open_deployment_m3_supply: Optional[Dict[Tuple[str, str, str, str], int]] = {}
         self.in_transit: Dict[str, Dict] = {}
         self.production_gr: List[Dict] = []
         self.delivery_gr: List[Dict] = []
@@ -70,6 +76,15 @@ class StateContext(Module):
         self.space_capacity: pd.DataFrame = pd.DataFrame()
         self.deployment_supply_demand_by_date: Dict[str, pd.DataFrame] = {}
         self.deployment_order_log_by_date: Dict[str, pd.DataFrame] = {}
+        # M3 是 M4 的跨日输入：键为 M3 的产出日，而 get_previous_m3_result()
+        # 负责严格读取前一个自然日，保持原有一日 lag。
+        self.m3_net_demand_by_date: Dict[str, pd.DataFrame] = {}
+
+        # M5 → M3 当日共享规划事实。此缓存只服务同一个仿真日内的
+        # ``M5.run() → M6.run() → M3.run()`` 数据交接，不能替代任何跨日
+        # 业务状态，因而不会写入 viewcontext_* 表。
+        self._planning_facts_date: Optional[str] = None
+        self._planning_facts: Optional[dict] = None
 
         # M4 跨天状态（按日期字符串索引，与 RuntimeState 数据结构对齐）
         self.m4_line_states: Dict[str, dict] = {}           # {date_str: {line: state_dict}}
@@ -120,6 +135,8 @@ class StateContext(Module):
         if getattr(orch, '_resuming', False) and getattr(orch, '_restore_date', None):
             # 从上一完成周期（progress_date - 1）的 viewcontext 恢复 ctx；
             # 断点当天 progress_date 的 view 尚未落库，故不能用 _resume_date。
+            self._open_deployment_supply = None
+            self._open_deployment_m3_supply = None
             orch.persistence.restore_state_from_views(self, orch.run_id, orch._restore_date)
             logger.info("🔁 StateContext 已从 ViewContext 恢复，跳过 initialize 重算")
             return
@@ -183,6 +200,9 @@ class StateContext(Module):
         """
         logger.info("🌅 每日开始: %s", date_str)
         self.current_date = pd.to_datetime(date_str).normalize()
+        # 规划事实仅在产生它的当日有效；新的一天必须由 M5 按新输入重建。
+        self._planning_facts_date = None
+        self._planning_facts = None
 
         # step1: 期初快照
         # 源: persistence.py:192 OrchestratorPersistenceMixin.save_beginning_inventory()
@@ -242,6 +262,8 @@ class StateContext(Module):
                 })
 
         for uid in to_delete:
+            self._adjust_open_deployment_supply(self.open_deployment[uid], -1)
+            self._adjust_open_deployment_m3_supply(self.open_deployment[uid], -1)
             del self.open_deployment[uid]
         if to_delete:
             self._invalidate_open_deployment_view()
@@ -592,6 +614,76 @@ class StateContext(Module):
         """开放调拨状态被写入、扣减或清理后，使派生视图缓存失效。"""
         self._open_deployment_view_cache = None
 
+    def _ensure_open_deployment_supply(self) -> Dict[Tuple[str, str, str], int]:
+        """懒构建恢复场景下的 M5 开放调拨供给汇总。"""
+        if self._open_deployment_supply is None:
+            self._open_deployment_supply = {}
+            for record in self.open_deployment.values():
+                self._adjust_open_deployment_supply(record, 1)
+        return self._open_deployment_supply
+
+    def _adjust_open_deployment_supply(self, record: Dict, direction: int) -> None:
+        supply = self._ensure_open_deployment_supply()
+        key = (
+            normalize_material(record.get('material')),
+            normalize_sending(record.get('sending')),
+            normalize_receiving(record.get('receiving')),
+        )
+        quantity = self._safe_convert_to_int(record.get('deployed_qty', 0)) * direction
+        supply[key] = supply.get(key, 0) + quantity
+        if supply[key] == 0:
+            del supply[key]
+
+    def _open_deployment_supply_view(self, date: str) -> pd.DataFrame:
+        """返回 M5 账本所需的聚合开放调拨供给，而不是 UID 明细。"""
+        rows = [
+            {
+                'material': material, 'sending': sending, 'receiving': receiving,
+                'deployed_qty': quantity,
+            }
+            for (material, sending, receiving), quantity
+            in self._ensure_open_deployment_supply().items()
+            if quantity
+        ]
+        return pd.DataFrame(rows, columns=['material', 'sending', 'receiving', 'deployed_qty'])
+
+    def _ensure_open_deployment_m3_supply(self) -> Dict[Tuple[str, str, str, str], int]:
+        """懒构建恢复场景下的 M3 日期粒度开放调拨供给汇总。"""
+        if self._open_deployment_m3_supply is None:
+            self._open_deployment_m3_supply = {}
+            for record in self.open_deployment.values():
+                self._adjust_open_deployment_m3_supply(record, 1)
+        return self._open_deployment_m3_supply
+
+    def _adjust_open_deployment_m3_supply(self, record: Dict, direction: int) -> None:
+        supply = self._ensure_open_deployment_m3_supply()
+        date = pd.to_datetime(record.get('planned_deployment_date'), errors='coerce')
+        key = (
+            normalize_material(record.get('material')),
+            normalize_sending(record.get('sending')),
+            normalize_receiving(record.get('receiving')),
+            date.strftime('%Y-%m-%d') if pd.notna(date) else '',
+        )
+        quantity = self._safe_convert_to_int(record.get('deployed_qty', 0)) * direction
+        supply[key] = supply.get(key, 0) + quantity
+        if supply[key] == 0:
+            del supply[key]
+
+    def _open_deployment_m3_supply_view(self, date: str) -> pd.DataFrame:
+        """返回 M3 所需的路线/计划日聚合开放调拨；等价于 UID 明细求和。"""
+        rows = [
+            {
+                'material': material, 'sending': sending, 'receiving': receiving,
+                'planned_deployment_date': planned_date, 'deployed_qty': quantity,
+            }
+            for (material, sending, receiving, planned_date), quantity
+            in self._ensure_open_deployment_m3_supply().items()
+            if quantity
+        ]
+        return pd.DataFrame(rows, columns=[
+            'material', 'sending', 'receiving', 'planned_deployment_date', 'deployed_qty',
+        ])
+
     def _all_production_view(self, date: str) -> pd.DataFrame:
         """源: views.py:280-336 get_all_production_view()"""
         cols = ['material', 'location', 'available_date', 'quantity']
@@ -771,6 +863,74 @@ class StateContext(Module):
             if order_log_df is not None else pd.DataFrame()
         )
 
+    def apply_m3_net_demand(self, net_demand_df: Optional[pd.DataFrame], date: str):
+        """保存 M3 当日结果，供下一自然日的 M4 消费。"""
+        date_str = pd.to_datetime(date).strftime('%Y-%m-%d')
+        self.m3_net_demand_by_date[date_str] = (
+            net_demand_df.copy(deep=True)
+            if net_demand_df is not None else pd.DataFrame()
+        )
+
+    def get_previous_m3_result(self, date: str) -> dict:
+        """返回前一日 M3 输出的独立副本；首日或无结果时为空契约。"""
+        previous = (pd.to_datetime(date) - pd.Timedelta(days=1)).strftime('%Y-%m-%d')
+        result = self.m3_net_demand_by_date.get(previous, pd.DataFrame())
+        return {
+            'net_demand_df': result.copy(deep=True),
+            'net_demand_count': len(result),
+        }
+
+    # ══════════════════════════════════════════
+    # M5 → M3 共享规划事实（仅当日，不持久化）
+    # ══════════════════════════════════════════
+
+    @staticmethod
+    def _copy_planning_facts(facts: dict) -> dict:
+        """深拷贝 PlanningFacts，避免模块间通过 DataFrame 发生隐式写入。"""
+        copied = {}
+        for name, value in facts.items():
+            if isinstance(value, pd.DataFrame):
+                copied[name] = value.copy(deep=True)
+            elif isinstance(value, dict):
+                copied[name] = value.copy()
+            elif isinstance(value, list):
+                copied[name] = list(value)
+            else:
+                copied[name] = value
+        return copied
+
+    def publish_planning_facts(self, date: str, facts: dict) -> None:
+        """发布 M5 已构建的当日共享规划事实。
+
+        ``facts`` 必须带 ``version``、``simulation_date``、``active_network``、
+        ``routes``、``node_horizon``、``direct_demand``、``layer_map`` 与 ``layers``。
+        该严格契约使 M3 不会在缺失缓存时静默退回并重复计算。
+        """
+        date_str = pd.to_datetime(date).strftime('%Y-%m-%d')
+        required = {
+            'version', 'simulation_date', 'active_network', 'routes',
+            'node_horizon', 'direct_demand', 'layer_map', 'layers',
+        }
+        missing = sorted(required - set(facts))
+        if missing:
+            raise ValueError(f"PlanningFacts 缺少字段: {missing}")
+        fact_date = pd.to_datetime(facts['simulation_date']).strftime('%Y-%m-%d')
+        if fact_date != date_str:
+            raise ValueError(
+                f"PlanningFacts 日期不一致: 发布={date_str}, 事实={fact_date}"
+            )
+        self._planning_facts_date = date_str
+        self._planning_facts = self._copy_planning_facts(facts)
+
+    def get_planning_facts(self, date: str) -> dict:
+        """返回同日 M5 规划事实的独立副本；缺失时明确失败。"""
+        date_str = pd.to_datetime(date).strftime('%Y-%m-%d')
+        if self._planning_facts is None or self._planning_facts_date != date_str:
+            raise RuntimeError(
+                f"{date_str} 缺少 PlanningFacts；必须先运行 ModuleFive"
+            )
+        return self._copy_planning_facts(self._planning_facts)
+
     def apply_production(self, production_df: pd.DataFrame, date: str):
         """处理 Module4 生产数据。
 
@@ -879,8 +1039,28 @@ class StateContext(Module):
         M5 的内存输出使用 ``date`` 表示计划部署日；早期处理器接口
         使用 ``planned_deployment_date``。两种命名在此边界统一，避免
         重构 M5 为了兼容状态写回而复制或重命名整个输出表。
+
+        与 DB legacy ``simulation_db.py`` 保持同一写回契约：只有原库存
+        约束量 ``deployed_qty_invCon`` 为正、非空且发送/接收节点不同的
+        记录才进入 ``open_deployment``；保存数量采用空间约束后的
+        ``deployed_qty``。模块输出本身不在此处过滤。
         """
         if deployment_df is None or deployment_df.empty:
+            return
+
+        required = {'deployed_qty_invCon', 'sending', 'receiving'}
+        missing = required - set(deployment_df.columns)
+        if missing:
+            raise ValueError(
+                "Module5 部署计划缺少 legacy 状态写回字段: "
+                + ", ".join(sorted(missing))
+            )
+        deployment_df = deployment_df.loc[
+            pd.to_numeric(deployment_df['deployed_qty_invCon'], errors='coerce').gt(0)
+            & deployment_df['deployed_qty_invCon'].notna()
+            & deployment_df['sending'].ne(deployment_df['receiving'])
+        ].copy()
+        if deployment_df.empty:
             return
 
         date_obj = pd.to_datetime(date).normalize()
@@ -933,6 +1113,8 @@ class StateContext(Module):
                 'demand_element': str(row.demand_element),
                 'creation_date': date_obj.strftime('%Y-%m-%d'),
             }
+            self._adjust_open_deployment_supply(self.open_deployment[uid], 1)
+            self._adjust_open_deployment_m3_supply(self.open_deployment[uid], 1)
 
         if len(deployment_df) > 0:
             self._invalidate_open_deployment_view()
@@ -968,8 +1150,13 @@ class StateContext(Module):
 
             # 减少开放调拨数量
             if uid in self.open_deployment:
+                before = self.open_deployment[uid].copy()
                 old_qty = self.open_deployment[uid]['deployed_qty']
                 self.open_deployment[uid]['deployed_qty'] = old_qty - quantity
+                self._adjust_open_deployment_supply(before, -1)
+                self._adjust_open_deployment_supply(self.open_deployment[uid], 1)
+                self._adjust_open_deployment_m3_supply(before, -1)
+                self._adjust_open_deployment_m3_supply(self.open_deployment[uid], 1)
                 if self.open_deployment[uid]['deployed_qty'] <= 0:
                     del self.open_deployment[uid]
                 self._invalidate_open_deployment_view()
@@ -1166,6 +1353,14 @@ class StateContext(Module):
 
     def get_open_deployment_view(self, date: str) -> pd.DataFrame:
         return self._open_deployment_view(date)
+
+    def get_open_deployment_supply_view(self, date: str) -> pd.DataFrame:
+        """返回 Module5 账本使用的聚合开放调拨供给。"""
+        return self._open_deployment_supply_view(date)
+
+    def get_m3_open_deployment_view(self, date: str) -> pd.DataFrame:
+        """返回 Module3 使用的按路线/计划日聚合开放调拨供给。"""
+        return self._open_deployment_m3_supply_view(date)
 
     def get_open_deployment(self, current_date: pd.Timestamp) -> pd.DataFrame:
         return self._open_deployment_view(current_date.strftime('%Y-%m-%d'))

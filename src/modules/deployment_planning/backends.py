@@ -40,6 +40,7 @@ class _PandasBackend:
         self.prepared = False
         self.result: dict = {}
 
+
     _ID_COLUMNS = ("material", "location", "sending", "receiving", "sourcing")
     _DATE_COLUMNS = ("date", "simulation_date", "available_date", "actual_delivery_date", "planned_deployment_date", "eff_from", "eff_to")
 
@@ -191,11 +192,39 @@ class _PandasBackend:
         horizon = nodes.loc[:, ["material", "node", "upstream"]].copy()
         incoming = routes.rename(columns={"sending": "upstream", "receiving": "node"})
         horizon = horizon.merge(incoming.loc[:, ["material", "upstream", "node", "leadtime"]], on=["material", "upstream", "node"], how="left")
-        root_horizon = routes.groupby(["material", "sending"], as_index=False)["leadtime"].max().rename(columns={"sending": "node", "leadtime": "root_leadtime"})
+        root_horizon = routes.groupby(["material", "sending"], as_index=False)["root_leadtime"].max().rename(columns={"sending": "node"})
         horizon = horizon.merge(root_horizon, on=["material", "node"], how="left")
         horizon["horizon_days"] = horizon["leadtime"].fillna(horizon["root_leadtime"]).fillna(1).astype(int).clip(lower=1)
         horizon["horizon_end"] = day + pd.to_timedelta(horizon["horizon_days"], unit="D")
         return horizon.loc[:, ["material", "node", "horizon_end"]]
+
+    def node_horizon(self, active: pd.DataFrame, day: pd.Timestamp, routes: pd.DataFrame) -> pd.DataFrame:
+        """构建供 M3 复用的全网络节点 horizon 事实。"""
+        nodes = self._planning_nodes(active)
+        if nodes.empty or routes.empty:
+            return pd.DataFrame(columns=["material", "node", "horizon_end"])
+        return self.horizon(nodes, day, routes)
+
+    def all_direct_demand(self, active: pd.DataFrame, day: pd.Timestamp, config: dict[str, pd.DataFrame], routes: pd.DataFrame) -> pd.DataFrame:
+        """一次性构建所有层级的 M1/安全库存直接需求，避免 M3 重算。"""
+        nodes = self._planning_nodes(active)
+        if nodes.empty or routes.empty:
+            return self.empty(["material", "node", "receiving", "demand_element", "demand_qty", "requirement_date", "orig_location"])
+        return self.direct_demand(nodes, day, config, routes)
+
+    def _planning_nodes(self, active: pd.DataFrame) -> pd.DataFrame:
+        """返回含根节点的网络节点表；根节点没有 upstream。"""
+        base = pd.DataFrame(
+            list(self.layer_map), columns=["material", "node"]
+        )
+        if base.empty:
+            return self.empty(["material", "node", "upstream"])
+        upstream = active.loc[:, ["material", "node", "upstream"]]
+        return base.merge(upstream, on=["material", "node"], how="left")
+
+    @staticmethod
+    def to_pandas(frame: pd.DataFrame) -> pd.DataFrame:
+        return frame.copy(deep=True)
 
     @classmethod
     def direct_demand(cls, nodes: pd.DataFrame, day: pd.Timestamp, config: dict[str, pd.DataFrame], routes: pd.DataFrame) -> pd.DataFrame:
@@ -262,8 +291,10 @@ class _PandasBackend:
         shortage["receiving"], shortage["node"] = shortage["node"], shortage["upstream"]
         shortage["demand_element"] = "net demand for " + shortage["demand_element"].astype(str)
         shortage["demand_qty"] = shortage["residual_qty"].astype(np.int64)
-        keys = ["material", "node", "receiving", "demand_element", "requirement_date", "orig_location"]
-        return shortage.groupby(keys, as_index=False, sort=False)["demand_qty"].sum()
+        # legacy 将每条短缺分别写入 ``up_gap_buffer``，不会在跨层传递前
+        # 按业务键汇总。这里必须保留行粒度；否则同一路线/日期的 AO 缺口会
+        # 被合并，改变后续 MOQ/RV、优先级分配和计划事实数量。
+        return shortage.loc[:, columns].reset_index(drop=True)
 
     def daily_inputs(self, day: pd.Timestamp) -> dict[str, pd.DataFrame]:
         """从 StateContext 读取当日动态视图并与静态配置合并。"""
@@ -297,6 +328,9 @@ class _PandasBackend:
         delivery = load("DeliveryGR", ctx.get_delivery_gr_view)
         if "location" in delivery and "receiving" not in delivery:
             delivery = delivery.rename(columns={"location": "receiving"})
+        open_deployment_getter = getattr(
+            ctx, "get_open_deployment_supply_view", ctx.get_open_deployment_view,
+        )
         inputs = {
             **static,
             "SupplyDemandLog": sdl,
@@ -305,7 +339,7 @@ class _PandasBackend:
             "Inventory": load("Inventory", ctx.get_beginning_inventory_view),
             "InTransit": load("InTransit", ctx.get_planning_intransit_view),
             "DeliveryGR": delivery,
-            "OpenDeployment": load("OpenDeployment", ctx.get_open_deployment_view),
+            "OpenDeployment": load("OpenDeployment", open_deployment_getter),
             "Production": production,
             "ReceivingSpace": load("ReceivingSpace", ctx.get_space_quota_view),
         }
@@ -320,6 +354,20 @@ class _PandasBackend:
             "SupplyDemandLog": "M5_SupplyDemandLog", "MaterialLocation": "M4_MaterialLocationLineCfg",
         }
         static = {name: self._normalise(datas.get(source, pd.DataFrame())) for name, source in sources.items()}
+        lead = static["LeadTime"]
+        lead_aliases = {
+            column: str(column).upper()
+            for column in lead.columns
+            if str(column).casefold() in {"pdt", "gr", "mct"}
+        }
+        static["LeadTime"] = lead.rename(columns=lead_aliases)
+        # legacy M5 将 M4_MaterialLocationLineCfg 作为静态表原样读取，因而
+        # 其 PTF/LSK lookup 保留 Excel 数值地点的原始键（例如 ``386`` 不会
+        # 自动匹配网络地点 ``0386``）。为确保重构回放语义一致，此表不执行
+        # 标识符补零；它只在 route_parameters() 的 PTF/LSK 查询中使用。
+        static["MaterialLocation"] = datas.get(
+            "M4_MaterialLocationLineCfg", pd.DataFrame()
+        ).copy()
         return static
 
     @staticmethod
@@ -368,7 +416,8 @@ class _PandasBackend:
         edges = edges.loc[edges["sending"].ne("")]
         lead = config["LeadTime"].copy()
         for column in ("PDT", "GR", "MCT"):
-            lead[column] = pd.to_numeric(lead.get(column, 0), errors="coerce").fillna(0).astype(int)
+            values = lead[column] if column in lead.columns else pd.Series(0, index=lead.index)
+            lead[column] = pd.to_numeric(values, errors="coerce").fillna(0).astype(int)
         routes = edges.merge(lead.loc[:, ["sending", "receiving", "PDT", "GR", "MCT"]], on=["sending", "receiving"], how="left")
         routes[["PDT", "GR", "MCT"]] = routes[["PDT", "GR", "MCT"]].fillna(0).astype(int)
         location_type = active.loc[:, ["material", "node"]].copy()
@@ -376,7 +425,10 @@ class _PandasBackend:
         routes = routes.merge(location_type.rename(columns={"node": "sending"}), on=["material", "sending"], how="left")
         type_text = routes["location_type"].fillna("").astype(str).str.strip()
         roots = routes.apply(lambda row: self.owner.layer_map.get((str(row.material), str(row.sending)), 99) == 0, axis=1)
-        plant = type_text.str.casefold().eq("plant") | roots
+        # legacy 先读取发送节点在活动 Network 中的 ``location_type``；仅当
+        # 节点未维护且被识别为根层时，才回退视为 Plant。显式配置为 DC 的
+        # 根节点不能被强制套用 PTF/LSK，否则会扩大 direct-demand 窗口。
+        plant = type_text.str.casefold().eq("plant") | (type_text.eq("") & roots)
         ptf_source = config["MaterialLocation"].copy()
         ptf_source["ptf"] = self.number(ptf_source, "ptf" if "ptf" in ptf_source else "PTF", 0).astype(int)
         ptf_source["lsk"] = self.number(ptf_source, "lsk" if "lsk" in ptf_source else "LSK", 1).astype(int)
@@ -387,6 +439,20 @@ class _PandasBackend:
         routes["push_leadtime"] = (routes["PDT"] + routes["GR"]).clip(lower=1)
         push_plant = type_text.str.casefold().eq("plant") | (type_text.eq("") & roots)
         routes.loc[push_plant, "push_leadtime"] = np.maximum(1, np.maximum(routes.loc[push_plant, "MCT"], routes.loc[push_plant, "PDT"] + routes.loc[push_plant, "GR"]) + routes.loc[push_plant, "ptf"] + routes.loc[push_plant, "lsk"] - 1)
+        # 无上游根节点不应从任一「发往下游」的路线取得窗口。legacy 的
+        # ``build_horizon_cache()`` 对根节点始终按本地点 LeadTime 的
+        # max(MCT, PDT + GR) + PTF + LSK - 1 计算，即使其显式类型为 DC。
+        root_base = lead.groupby("sending", as_index=False)[["PDT", "GR", "MCT"]].max()
+        root_base["root_leadtime"] = np.maximum(
+            root_base["MCT"], root_base["PDT"] + root_base["GR"]
+        )
+        routes = routes.merge(
+            root_base.loc[:, ["sending", "root_leadtime"]], on="sending", how="left"
+        )
+        routes["root_leadtime"] = (
+            routes["root_leadtime"].fillna(0).astype(int)
+            + routes["ptf"] + routes["lsk"] - 1
+        ).clip(lower=1).astype(int)
         deploy = config["DeployConfig"].copy()
         deploy["moq"] = self.number(deploy, "moq", 1).clip(lower=0).astype(int)
         deploy["rv"] = self.number(deploy, "rv", 1).clip(lower=1).astype(int)
@@ -399,7 +465,7 @@ class _PandasBackend:
         routes = routes.merge(base, on=["material", "sending"], how="left")
         routes["moq"] = routes["moq"].fillna(routes["base_moq"]).fillna(1).astype(int)
         routes["rv"] = routes["rv"].fillna(routes["base_rv"]).fillna(1).astype(int)
-        return routes.loc[:, ["material", "sending", "receiving", "leadtime", "push_leadtime", "moq", "rv"]].drop_duplicates()
+        return routes.loc[:, ["material", "sending", "receiving", "leadtime", "root_leadtime", "push_leadtime", "moq", "rv"]].drop_duplicates()
 
     @staticmethod
     def apply_space(plan: pd.DataFrame, space: pd.DataFrame, priority: dict[str, int]) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -517,7 +583,10 @@ class _PandasBackend:
         transit_date = transit.get("actual_delivery_date", transit.get("available_date", pd.Series(pd.NaT, index=transit.index)))
         today_transit = transit.loc[transit_date.eq(day)].groupby(["material", "receiving"], as_index=False)["qty"].sum().rename(columns={"receiving": "node"}) if not transit.empty else self.empty(["material", "node", "qty"])
         future_transit = transit.loc[transit_date.gt(day)].groupby(["material", "receiving"], as_index=False)["qty"].sum().rename(columns={"receiving": "node", "qty": "future_intransit"}) if not transit.empty else self.empty(["material", "node", "future_intransit"])
-        opened = config["OpenDeployment"].copy(); opened["qty"] = self.quantity(opened, ("deployed_qty", "quantity"))
+        # legacy ``build_open_deployment_dict`` 读取开放调拨行的 ``quantity``。
+        # 两列同时存在于历史状态时，必须优先采用该列；优先 ``deployed_qty``
+        # 会低估发送端占用库存，进而改变同优先级需求的整数比例分配。
+        opened = config["OpenDeployment"].copy(); opened["qty"] = self.quantity(opened, ("quantity", "deployed_qty"))
         cross = opened.get("sending", pd.Series("", index=opened.index)).ne(opened.get("receiving", pd.Series("", index=opened.index)))
         outbound = opened.loc[cross].groupby(["material", "sending"], as_index=False)["qty"].sum().rename(columns={"sending": "node"}) if not opened.empty else self.empty(["material", "node", "qty"])
         inbound = opened.loc[cross].groupby(["material", "receiving"], as_index=False)["qty"].sum().rename(columns={"receiving": "node", "qty": "open_inbound"}) if not opened.empty else self.empty(["material", "node", "open_inbound"])
@@ -533,18 +602,29 @@ class _PandasBackend:
         projected["qty"] = projected["qty"] + projected["today_transit"] + projected["future_production"] - projected["shipment"]
         return available, pools, projected, today_transit, shipment
 
-    def plan_layers(self, day: pd.Timestamp, config: dict[str, pd.DataFrame], active: pd.DataFrame, routes: pd.DataFrame, priority: dict[str, int], available: pd.DataFrame, pools: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-        """Propagate residual demand from downstream layers and build deployment rows."""
+    def plan_layers(self, day: pd.Timestamp, config: dict[str, pd.DataFrame], active: pd.DataFrame, routes: pd.DataFrame, priority: dict[str, int], available: pd.DataFrame, pools: pd.DataFrame, node_horizon: Optional[pd.DataFrame] = None, direct_demand: Optional[pd.DataFrame] = None) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+        """Propagate residual demand, reusing M5→M3 shared facts when available."""
         direct_parts: list[pd.DataFrame] = []; plan_parts: list[pd.DataFrame] = []; unfulfilled_parts: list[pd.DataFrame] = []
         gap = self.empty(["material", "node", "receiving", "demand_element", "demand_qty", "requirement_date", "orig_location"]); row_id = 0
         profile: list[dict[str, int]] = []
         for layer in self.layers:
             base = pd.DataFrame([(material, node) for (material, node), value in self.layer_map.items() if value == layer], columns=["material", "node"])
             nodes = base.merge(active.loc[:, ["material", "node", "upstream"]], on=["material", "node"], how="left")
-            direct = self.direct_demand(nodes, day, config, routes); direct_parts.append(direct)
+            if direct_demand is None:
+                direct = self.direct_demand(nodes, day, config, routes)
+            else:
+                direct = direct_demand.merge(
+                    nodes.loc[:, ["material", "node"]].drop_duplicates(),
+                    on=["material", "node"], how="inner",
+                )
+            direct_parts.append(direct)
             layer_gap = gap.merge(nodes.loc[:, ["material", "node"]].drop_duplicates(), on=["material", "node"], how="inner")
             if not layer_gap.empty:
-                layer_gap = layer_gap.merge(self.horizon(nodes, day, routes), on=["material", "node"], how="left")
+                horizon = self.horizon(nodes, day, routes) if node_horizon is None else node_horizon.merge(
+                    nodes.loc[:, ["material", "node"]].drop_duplicates(),
+                    on=["material", "node"], how="inner",
+                )
+                layer_gap = layer_gap.merge(horizon, on=["material", "node"], how="left")
                 layer_gap = layer_gap.loc[layer_gap["requirement_date"].ge(day) & layer_gap["requirement_date"].le(layer_gap["horizon_end"])].drop(columns="horizon_end")
             demand = pd.concat([direct, layer_gap], ignore_index=True, sort=False)
             if demand.empty:
@@ -603,10 +683,30 @@ def _allocate_priority_pandas(demand: pd.DataFrame, stock: pd.DataFrame) -> pd.D
     priority_need["allocation"] = np.minimum(priority_need["available"], priority_need["planned_qty"])
     result = result.merge(priority_need.loc[:, priority_keys + ["allocation", "planned_qty"]], on=priority_keys, how="left", suffixes=("", "_priority"), sort=False)
     priority_total = result["planned_qty_priority"].replace(0, np.nan)
-    result["deployed_qty_invCon"] = np.minimum(
+    deployed = np.minimum(
         np.floor(result["allocation"] * result["planned_qty"] / priority_total).fillna(0).astype(np.int64),
         result["planned_qty"].astype(np.int64),
     )
+    # legacy 仅在某优先级库存不足时走比例分配：
+    # ``current_stock * (weights / group_total)``。库存充足的组会直接写入
+    # 原始整数需求，不能使用浮点公式，否则可能因 ``floor`` 少配一个单位。
+    # pandas 的标量 ``stock * qty / total`` 与 legacy NumPy 的运算顺序在
+    # 临界浮点值上不同，因此只对实际部分分配的组复现 legacy 表达式。
+    partial = result["allocation"].lt(priority_total)
+    if partial.any():
+        legacy_shares = pd.Series(
+            result.loc[partial, "allocation"].to_numpy(dtype=float)
+            * (
+                result.loc[partial, "planned_qty"].to_numpy(dtype=float)
+                / priority_total.loc[partial].to_numpy(dtype=float)
+            ),
+            index=result.index[partial],
+        )
+        deployed.loc[partial] = np.minimum(
+            np.floor(legacy_shares).fillna(0).astype(np.int64),
+            result.loc[partial, "planned_qty"].astype(np.int64),
+        )
+    result["deployed_qty_invCon"] = deployed
     return result.drop(columns=["allocation", "planned_qty_priority"])
 
 
@@ -623,16 +723,17 @@ def _allocate_pipeline_pandas(demand: pd.DataFrame, pools: pd.DataFrame) -> pd.D
     pool_data = pools.loc[:, keys + pool_columns].drop_duplicates(keys, keep="last")
     result = result.merge(pool_data, on=keys, how="left", sort=False)
     result[pool_columns] = result[pool_columns].apply(pd.to_numeric, errors="coerce").fillna(0)
-    previous_used = pd.Series(0, index=result.index, dtype=np.int64)
     for source, output in (("future_intransit", "deploy_from_in_transit"), ("open_inbound", "deploy_from_open_deployment_inbound"), ("future_production", "deploy_from_future_production")):
         remaining = (result["planned_qty"] - result["deployed_qty_invCon"] - result[["deploy_from_in_transit", "deploy_from_open_deployment_inbound", "deploy_from_future_production"]].sum(axis=1)).clip(lower=0).astype(np.int64)
         candidate = self_demand & remaining.gt(0)
-        available = (pd.to_numeric(result[source], errors="coerce").fillna(0) - previous_used).clip(lower=0)
+        # 三类 pipeline supply 是相互独立的池。旧 M5 在每个来源分配时
+        # 都从该来源的完整 pool 开始；此前 ``previous_used`` 会把前一个
+        # 来源的用量错误扣到下一个来源，导致开放调拨/未来生产覆盖不足。
+        available = pd.to_numeric(result[source], errors="coerce").fillna(0).clip(lower=0)
         need_total = remaining.where(candidate, 0).groupby([result["material"], result["node"]], sort=False).transform("sum")
         ratio = (available.astype(float) * remaining.astype(float) / need_total.replace(0, np.nan)).fillna(0)
         shares = pd.Series(np.minimum(np.floor(ratio.to_numpy()).astype(np.int64), remaining.to_numpy()), index=result.index, dtype=np.int64).where(candidate, 0).astype(np.int64)
         result[output] = shares
-        previous_used = shares.groupby([result["material"], result["node"]], sort=False).transform("sum")
     result["deploy_qty_with_plan_order"] = result[["deploy_from_in_transit", "deploy_from_open_deployment_inbound", "deploy_from_future_production"]].sum(axis=1)
     return result.drop(columns=pool_columns)
 
@@ -765,13 +866,26 @@ class _PolarsBackend:
             profile["SupplyDemandLog.normalise"] = perf_counter() - started
         delivery = load("DeliveryGR", ctx.get_delivery_gr_view)
         if "location" in delivery.columns and "receiving" not in delivery.columns: delivery = delivery.rename({"location": "receiving"})
-        inputs = {**self.static, "SupplyDemandLog": sdl, "OrderLog": load("OrderLog", ctx.get_deployment_order_log_view), "TodayShipment": load("TodayShipment", ctx.get_shipment_log_view), "Inventory": load("Inventory", ctx.get_beginning_inventory_view), "InTransit": load("InTransit", ctx.get_planning_intransit_view), "DeliveryGR": delivery, "OpenDeployment": load("OpenDeployment", ctx.get_open_deployment_view), "Production": load("Production", ctx.get_deployment_production_view), "ReceivingSpace": load("ReceivingSpace", ctx.get_space_quota_view)}
+        open_deployment_getter = getattr(ctx, "get_open_deployment_supply_view", ctx.get_open_deployment_view)
+        inputs = {**self.static, "SupplyDemandLog": sdl, "OrderLog": load("OrderLog", ctx.get_deployment_order_log_view), "TodayShipment": load("TodayShipment", ctx.get_shipment_log_view), "Inventory": load("Inventory", ctx.get_beginning_inventory_view), "InTransit": load("InTransit", ctx.get_planning_intransit_view), "DeliveryGR": delivery, "OpenDeployment": load("OpenDeployment", open_deployment_getter), "Production": load("Production", ctx.get_deployment_production_view), "ReceivingSpace": load("ReceivingSpace", ctx.get_space_quota_view)}
         self.last_daily_input_profile = profile
         return inputs
 
     def normalise_static_config(self, datas: dict[str, pd.DataFrame]) -> dict[str, pl.DataFrame]:
         sources = {"SafetyStock": "M3_SafetyStock", "Network": "Global_Network", "LeadTime": "Global_LeadTime", "DemandPriority": "Global_DemandPriority", "PushPullModel": "M5_PushPullModel", "DeployConfig": "M5_DeployConfig", "SupplyDemandLog": "M5_SupplyDemandLog", "MaterialLocation": "M4_MaterialLocationLineCfg"}
-        return {name: self._normalise(datas.get(source, pd.DataFrame())) for name, source in sources.items()}
+        static = {name: self._normalise(datas.get(source, pd.DataFrame())) for name, source in sources.items()}
+        lead_aliases = {
+            column: str(column).upper()
+            for column in static["LeadTime"].columns
+            if str(column).casefold() in {"pdt", "gr", "mct"}
+        }
+        if lead_aliases:
+            static["LeadTime"] = static["LeadTime"].rename(lead_aliases)
+        # 与 pandas/legacy 相同：M4 的 PTF/LSK lookup 使用 Excel 原始地点键。
+        static["MaterialLocation"] = self._pl(
+            datas.get("M4_MaterialLocationLineCfg", pd.DataFrame())
+        )
+        return static
 
     @staticmethod
     def validate_static_network(static: dict[str, pl.DataFrame]) -> pl.DataFrame:
@@ -856,8 +970,43 @@ class _PolarsBackend:
     @staticmethod
     def horizon(nodes: pl.DataFrame, day: pd.Timestamp, routes: pl.DataFrame) -> pl.DataFrame:
         incoming = routes.rename({"sending": "upstream", "receiving": "node"}).select(["material", "upstream", "node", "leadtime"])
-        roots = routes.group_by(["material", "sending"]).agg(pl.col("leadtime").max().alias("root_leadtime")).rename({"sending": "node"})
+        roots = routes.group_by(["material", "sending"]).agg(pl.col("root_leadtime").max()).rename({"sending": "node"})
         return nodes.select(["material", "node", "upstream"]).join(incoming, on=["material", "upstream", "node"], how="left").join(roots, on=["material", "node"], how="left").with_columns(pl.coalesce([pl.col("leadtime"), pl.col("root_leadtime"), pl.lit(1)]).cast(pl.Int64).clip(lower_bound=1).alias("horizon_days")).with_columns((pl.lit(day.date()) + pl.duration(days=pl.col("horizon_days"))).alias("horizon_end")).select(["material", "node", "horizon_end"])
+
+    def node_horizon(self, active: pl.DataFrame, day: pd.Timestamp, routes: pl.DataFrame) -> pl.DataFrame:
+        if active.is_empty() or routes.is_empty():
+            return pl.DataFrame(schema={"material": pl.Utf8, "node": pl.Utf8, "horizon_end": pl.Date})
+        return self.horizon(
+            self._planning_nodes(active),
+            day,
+            routes,
+        )
+
+    def all_direct_demand(self, active: pl.DataFrame, day: pd.Timestamp, config: dict[str, pl.DataFrame], routes: pl.DataFrame) -> pl.DataFrame:
+        if active.is_empty() or routes.is_empty():
+            return self._empty(["material", "node", "receiving", "demand_element", "demand_qty", "requirement_date", "orig_location"])
+        return self.direct_demand(
+            self._planning_nodes(active),
+            day,
+            config,
+            routes,
+        )
+
+    def _planning_nodes(self, active: pl.DataFrame) -> pl.DataFrame:
+        if not self.layer_map:
+            return pl.DataFrame(schema={"material": pl.Utf8, "node": pl.Utf8, "upstream": pl.Utf8})
+        base = pl.DataFrame(
+            [(material, node) for material, node in self.layer_map],
+            schema=["material", "node"], orient="row",
+        )
+        return base.join(
+            active.select(["material", "node", "upstream"]),
+            on=["material", "node"], how="left",
+        )
+
+    @staticmethod
+    def to_pandas(frame: pl.DataFrame) -> pd.DataFrame:
+        return frame.to_pandas()
 
     def route_parameters(self, active: pl.DataFrame, config: dict[str, pl.DataFrame]) -> pl.DataFrame:
         edge_columns = ["material", pl.col("upstream").alias("sending"), pl.col("node").alias("receiving")]
@@ -878,16 +1027,22 @@ class _PolarsBackend:
         lead = config["LeadTime"]
         for c in ("PDT", "GR", "MCT"):
             lead = lead.with_columns((pl.col(c).cast(pl.Int64, strict=False).fill_null(0) if c in lead.columns else pl.lit(0)).alias(c))
+        root_base = lead.group_by("sending").agg([
+            pl.col("PDT").max().alias("_root_pdt"),
+            pl.col("GR").max().alias("_root_gr"),
+            pl.col("MCT").max().alias("_root_mct"),
+        ])
         routes = edges.join(location_types, on=["material", "sending"], how="left").join(
             lead.select(["sending", "receiving", "PDT", "GR", "MCT"]), on=["sending", "receiving"], how="left"
-        ).with_columns([pl.col(c).fill_null(0) for c in ("PDT", "GR", "MCT")])
+        ).join(root_base, on="sending", how="left").with_columns([pl.col(c).fill_null(0) for c in ("PDT", "GR", "MCT", "_root_pdt", "_root_gr", "_root_mct")])
         ml = config["MaterialLocation"]
         for c, default in (("ptf", 0), ("lsk", 1)):
             source = c if c in ml.columns else c.upper()
             ml = ml.with_columns((pl.col(source).cast(pl.Int64, strict=False).fill_null(default) if source in ml.columns else pl.lit(default)).alias(c))
         routes = routes.join(ml.select(["material", pl.col("location").alias("sending"), "ptf", "lsk"]), on=["material", "sending"], how="left").with_columns([pl.col("ptf").fill_null(0), pl.col("lsk").fill_null(1)])
         type_text = pl.col("location_type").cast(pl.Utf8, strict=False).fill_null("").str.strip_chars().str.to_lowercase()
-        plant = type_text.eq("plant") | pl.col("_is_root")
+        # 与 pandas/legacy 相同：有明确类型时优先配置，未维护的根节点才是 Plant。
+        plant = type_text.eq("plant") | (type_text.eq("") & pl.col("_is_root"))
         push_plant = type_text.eq("plant") | (type_text.eq("") & pl.col("_is_root"))
         plant_leadtime = pl.max_horizontal([pl.col("MCT"), pl.col("PDT") + pl.col("GR")]) + pl.col("ptf") + pl.col("lsk") - 1
         deploy = config["DeployConfig"]
@@ -901,7 +1056,8 @@ class _PolarsBackend:
             pl.coalesce([pl.col("rv"), pl.col("base_rv"), pl.lit(1)]).cast(pl.Int64).alias("rv"),
             pl.when(plant).then(plant_leadtime).otherwise(pl.col("PDT") + pl.col("GR")).clip(lower_bound=1).cast(pl.Int64).alias("leadtime"),
             pl.when(push_plant).then(plant_leadtime).otherwise(pl.col("PDT") + pl.col("GR")).clip(lower_bound=1).cast(pl.Int64).alias("push_leadtime"),
-        ]).select(["material", "sending", "receiving", "leadtime", "push_leadtime", "moq", "rv"]).unique(maintain_order=True)
+            (pl.max_horizontal([pl.col("_root_mct"), pl.col("_root_pdt") + pl.col("_root_gr")]) + pl.col("ptf") + pl.col("lsk") - 1).clip(lower_bound=1).cast(pl.Int64).alias("root_leadtime"),
+        ]).select(["material", "sending", "receiving", "leadtime", "root_leadtime", "push_leadtime", "moq", "rv"]).unique(maintain_order=True)
 
     def direct_demand(self, nodes, day, config, routes):
         columns = ["material", "node", "receiving", "demand_element", "demand_qty", "requirement_date", "orig_location"]
@@ -1015,16 +1171,27 @@ class _PolarsBackend:
     def next_gap(self, demand, active):
         shortage = demand.filter(pl.col("residual_qty") > 0).join(active.select(["material", "node", "upstream"]), on=["material", "node"], how="left").filter(pl.col("upstream").is_not_null() & (pl.col("upstream") != ""))
         if shortage.is_empty(): return self._empty(["material", "node", "receiving", "demand_element", "demand_qty", "requirement_date", "orig_location"])
-        return shortage.select(["material", pl.col("upstream").alias("node"), pl.col("node").alias("receiving"), pl.concat_str([pl.lit("net demand for "), pl.col("demand_element")]).alias("demand_element"), pl.col("residual_qty").alias("demand_qty"), "requirement_date", "orig_location"]).group_by(["material", "node", "receiving", "demand_element", "requirement_date", "orig_location"], maintain_order=True).agg(pl.col("demand_qty").sum())
+        # 与 pandas/legacy 对齐：跨层 GAP 是逐条业务事实，不得在传递前汇总。
+        return shortage.select(["material", pl.col("upstream").alias("node"), pl.col("node").alias("receiving"), pl.concat_str([pl.lit("net demand for "), pl.col("demand_element")]).alias("demand_element"), pl.col("residual_qty").alias("demand_qty"), "requirement_date", "orig_location"])
 
-    def plan_layers(self, day, config, active, routes, priority, available, pools):
+    def plan_layers(self, day, config, active, routes, priority, available, pools,
+                    node_horizon=None, direct_demand=None):
         gap = self._empty(["material", "node", "receiving", "demand_element", "demand_qty", "requirement_date", "orig_location"]); plans=[]; directs=[]; unmet=[]; row_id=0; profile=[]; self.last_direct_demand_diagnostics=[]
         for layer in self.layers:
             base = pl.DataFrame([(m, n) for (m, n), value in self.layer_map.items() if value == layer], schema=["material", "node"], orient="row")
-            nodes = base.join(active.select(["material", "node", "upstream"]), on=["material", "node"], how="left"); direct = self.direct_demand(nodes, day, config, routes); directs.append(direct)
+            nodes = base.join(active.select(["material", "node", "upstream"]), on=["material", "node"], how="left")
+            direct = self.direct_demand(nodes, day, config, routes) if direct_demand is None else direct_demand.join(
+                nodes.select(["material", "node"]).unique(maintain_order=True),
+                on=["material", "node"], how="inner",
+            )
+            directs.append(direct)
             layer_gap = gap.join(nodes.select(["material", "node"]), on=["material", "node"], how="inner")
             if not layer_gap.is_empty():
-                layer_gap = layer_gap.join(self.horizon(nodes, day, routes), on=["material", "node"], how="left").filter(
+                horizon = self.horizon(nodes, day, routes) if node_horizon is None else node_horizon.join(
+                    nodes.select(["material", "node"]).unique(maintain_order=True),
+                    on=["material", "node"], how="inner",
+                )
+                layer_gap = layer_gap.join(horizon, on=["material", "node"], how="left").filter(
                     (pl.col("requirement_date") >= day.date()) & (pl.col("requirement_date") <= pl.col("horizon_end"))
                 ).drop("horizon_end")
             demand = pl.concat([direct, layer_gap], how="diagonal_relaxed")

@@ -1033,7 +1033,6 @@ class ModuleDataWriter:
                 if self.config_name and not combined_df.empty:
                     combined_df['config_name'] = self.config_name
                 # 添加写入时间
-                from datetime import datetime
                 if not combined_df.empty:
                     combined_df['db_write_time'] = datetime.now()
                 else:

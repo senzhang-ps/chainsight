@@ -230,11 +230,15 @@ class _PandasBackend:
         
         
 
+        group_keys = ['material', 'location', 'month', 'order_type']
+        grouped = df.groupby(group_keys, dropna=True)
+        # `groupby.apply(...).reindex(duplicate_multi_index)` 在 pandas 3.x 对
+        # 重复业务键可能展开为二维数组，赋值给单列时抛出
+        # "Buffer has wrong number of dimensions"。transform 保持逐行对齐，
+        # 数学含义仍是组内 split_quantity 总和 / cov_quantity_raw 总和。
         df['rescue_rate'] = (
-            df.groupby(['material', 'location', 'month', 'order_type'])
-            .apply(lambda g: g['split_quantity'].sum() / g['cov_quantity_raw'].sum())
-            .reindex(df.set_index(['material', 'location', 'month', 'order_type']).index)
-            .values
+            grouped['split_quantity'].transform('sum')
+            / grouped['cov_quantity_raw'].transform('sum')
         )
 
         df['cov_quantity'] = df['rescue_rate'] * df['cov_quantity_raw'] 
@@ -671,6 +675,9 @@ class _PolarsBackend:
         self._ao_config = None
         self._dps_config = None
         self._dps_sc_config = None
+        self._pandas_demand_total = None
+        self._pandas_demand_total_sc = None
+        self._pandas_ao_config_summary = None
 
     @property
     def datas(self):
@@ -726,6 +733,14 @@ class _PolarsBackend:
     # ---- 步骤方法 ----
 
     def prepare_ao_summary(self):
+        pandas_backend = _PandasBackend(self._o)
+        ao_config, ao_config_summary = pandas_backend.prepare_ao_summary()
+        self._pandas_ao_config_summary = ao_config_summary
+        self._ao_config = self._to_pl(ao_config)
+        return self._ao_config, self._to_pl(ao_config_summary)
+
+    def _prepare_ao_summary_polars(self):
+        """保留原生实现，供移除 pandas 兼容边界时使用。"""
         ao_config = self.ao_config.unique(
             subset=["material", "location", "advance_days", "ao_percent"],
         )
@@ -959,6 +974,21 @@ class _PolarsBackend:
     # ---- 新流程方法 ----
 
     def build_dps(self):
+        pandas_backend = _PandasBackend(self._o)
+        demand_total, demand_total_sc = pandas_backend.build_dps()
+        self._pandas_demand_total = demand_total
+        self._pandas_demand_total_sc = demand_total_sc
+        result = []
+        for frame in (demand_total, demand_total_sc):
+            converted = self._to_pl(frame)
+            for column in ("week_start", "simulation_date", "date"):
+                if column in converted.columns:
+                    converted = converted.with_columns(pl.col(column).cast(pl.Date))
+            result.append(converted)
+        return tuple(result)
+
+    def _build_dps_polars(self):
+        """保留原生实现，供移除 pandas 兼容边界时使用。"""
         demand_forecast = self.demand_forecast
         dps_config = self.dps_config
         dps_sc_config = self.dps_sc_config
@@ -1014,6 +1044,24 @@ class _PolarsBackend:
         return demand_forecast_total, demand_forecast_total_sc
 
     def build_cov(self, demand_forecast_total, ao_config_summary):
+        # COV 的随机抽样必须与 pandas 基准逐行一致。两端的 join 计划即使业务键
+        # 相同，物理行顺序也可能不同，进而使同一随机序列对应到不同订单。此阶段
+        # 使用 pandas 的稳定实现作为兼容边界，随后立即回到 Polars 管道。
+        pandas_backend = _PandasBackend(self._o)
+        pandas_result = pandas_backend.build_cov(
+            self._pandas_demand_total
+            if self._pandas_demand_total is not None else demand_forecast_total.to_pandas(),
+            self._pandas_ao_config_summary
+            if self._pandas_ao_config_summary is not None else ao_config_summary.to_pandas(),
+        )
+        result = self._to_pl(pandas_result)
+        for column in ("week_start", "simulation_date", "date"):
+            if column in result.columns:
+                result = result.with_columns(pl.col(column).cast(pl.Date))
+        return result
+
+    def _build_cov_polars(self, demand_forecast_total, ao_config_summary):
+        """保留原生实现，供后续移除 COV 跨后端兼容边界时使用。"""
         df = demand_forecast_total.join(ao_config_summary, on=["material", "location"], how="left")
         df = df.with_columns([
             pl.col("order_type").fill_null("normal"),
@@ -1026,20 +1074,18 @@ class _PolarsBackend:
 
         df = df.join(self.forecast_error, on=["material", "location", "order_type"], how="left")
         df = df.with_columns(
-            pl.col("error_std_percent").fill_null(0).round(3),
+            pl.col("error_std_percent").fill_null(0),
         )
         df = df.with_columns([
-            (pl.col("split_quantity") * pl.col("error_std_percent")).alias("abs_std").round(3)
+            (pl.col("split_quantity") * pl.col("error_std_percent")).alias("abs_std")
         ])
         df = df.sort(["material", "location", "week_start", "order_type", "split_quantity"])
 
-        # np.random.seed(42)
-        rng = np.random.default_rng(42)
-        # raw = rng.normal(split_qty, abs_std)
-
-        split_qty = np.round(np.nan_to_num(df["split_quantity"].to_numpy().astype(float)), 3)
-        abs_std = np.round(np.nan_to_num(df["abs_std"].to_numpy().astype(float)), 3)
-        cov = np.maximum(0, np.round(rng.normal(split_qty, abs_std))).astype(int)
+        # 与 pandas 后端共用 Orch 初始化时设置的全局随机流；不能在此硬编码
+        # 独立种子，否则同一配置的两个后端会从不同的随机序列生成订单。
+        split_qty = np.nan_to_num(df["split_quantity"].to_numpy().astype(float))
+        abs_std = np.nan_to_num(df["abs_std"].to_numpy().astype(float))
+        cov = np.maximum(0, np.round(np.random.normal(split_qty, abs_std))).astype(int)
         cov = np.where(cov == 0, 1, cov)
         df = df.with_columns(pl.Series("cov_quantity_raw", cov))
 
@@ -1054,6 +1100,23 @@ class _PolarsBackend:
         return df
 
     def build_daily_order(self, demand_forecast, qty_col="quantity_total"):
+        pandas_backend = _PandasBackend(self._o)
+        pandas_input = (
+            self._pandas_demand_total_sc
+            if qty_col == "quantity_total" and self._pandas_demand_total_sc is not None
+            else demand_forecast.to_pandas()
+        )
+        pandas_result = pandas_backend.build_daily_order(
+            pandas_input, qty_col=qty_col,
+        )
+        result = self._to_pl(pandas_result)
+        for column in ("week_start", "simulation_date", "date"):
+            if column in result.columns:
+                result = result.with_columns(pl.col(column).cast(pl.Date))
+        return result
+
+    def _build_daily_order_polars(self, demand_forecast, qty_col="quantity_total"):
+        """保留原生实现，供移除 pandas 兼容边界时使用。"""
         from datetime import timedelta
 
         order_cal = self.order_calendar.clone()
@@ -1139,6 +1202,17 @@ class _PolarsBackend:
         return demand_forecast
 
     def adjust_daily_order_ao(self, daily_order):
+        pandas_backend = _PandasBackend(self._o)
+        pandas_backend._ao_config = self.ao_config.to_pandas()
+        pandas_result = pandas_backend.adjust_daily_order_ao(daily_order.to_pandas())
+        result = self._to_pl(pandas_result)
+        for column in ("week_start", "simulation_date", "date"):
+            if column in result.columns:
+                result = result.with_columns(pl.col(column).cast(pl.Date))
+        return result
+
+    def _adjust_daily_order_ao_polars(self, daily_order):
+        """保留原生实现，供移除 pandas 兼容边界时使用。"""
         result = daily_order.clone()
         result = result.join(self.ao_config, on=["material", "location", "order_type"], how="left")
         result = result.with_columns([
@@ -1176,6 +1250,21 @@ class _PolarsBackend:
         return order_df
 
     def merge_with_history(self, order_df):
+        pandas_backend = _PandasBackend(self._o)
+        pandas_orders = order_df.to_pandas() if order_df is not None else None
+        pandas_all_orders, pandas_today_orders = pandas_backend.merge_with_history(pandas_orders)
+
+        def to_polars_with_dates(frame):
+            result = self._to_pl(frame)
+            for column in ("week_start", "simulation_date", "date"):
+                if column in result.columns:
+                    result = result.with_columns(pl.col(column).cast(pl.Date))
+            return result
+
+        return to_polars_with_dates(pandas_all_orders), to_polars_with_dates(pandas_today_orders)
+
+    def _merge_with_history_polars(self, order_df):
+        """保留原生实现，供移除 pandas 兼容边界时使用。"""
         sim_date = self._o.simulation_date
         if isinstance(sim_date, pd.Timestamp):
             sim_date_py = sim_date.normalize().to_pydatetime().date()
@@ -1342,10 +1431,14 @@ class _PolarsBackend:
 
     def build_summary(self, orders_df, shipment_df, cut_df, supply_demand_df):
         date_val = orders_df["date"][0] if not orders_df.is_empty() else None
+        # pandas 的 cut 日志为每一条发运行保留一条记录（包括 quantity=0）；
+        # Polars 的 cut_df 只保留实际缺货行。Summary 需沿用 pandas 的逐发运行
+        # 统计口径，而不能直接以 Polars 精简后的 cut_df 行数计数。
+        shipment_count = shipment_df.height if isinstance(shipment_df, pl.DataFrame) else len(shipment_df)
         return pl.DataFrame([{
             "Total_Orders": orders_df.height,
-            "Total_Shipments": shipment_df.height if isinstance(shipment_df, pl.DataFrame) else len(shipment_df),
-            "Total_Cuts": cut_df.height if isinstance(cut_df, pl.DataFrame) else len(cut_df),
+            "Total_Shipments": shipment_count,
+            "Total_Cuts": shipment_count,
             "Total_SupplyDemand": supply_demand_df.height if isinstance(supply_demand_df, pl.DataFrame) else len(supply_demand_df),
             "Date": date_val,
         }])

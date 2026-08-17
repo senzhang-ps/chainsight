@@ -308,8 +308,14 @@ class _PolarsBackend:
         }
 
     @staticmethod
+    def _normalise(frame: pd.DataFrame | None) -> pd.DataFrame:
+        if frame is None:
+            return pd.DataFrame()
+        return normalize_identifiers(frame.copy()) if not frame.empty else frame.copy()
+
+    @staticmethod
     def _pl(frame: pd.DataFrame | None) -> pl.DataFrame:
-        return pandas_to_polars(normalize_identifiers(frame.copy())) if frame is not None and not frame.empty else pl.DataFrame()
+        return pandas_to_polars(frame) if frame is not None and not frame.empty else pl.DataFrame()
 
     @staticmethod
     def _pd(frame: pl.DataFrame) -> pd.DataFrame:
@@ -322,15 +328,26 @@ class _PolarsBackend:
             "DeliveryDelayDistribution": "M6_DeliveryDelayDistribution", "MDQBypassRules": "M6_MDQBypassRules",
             "DemandPriority": "Global_DemandPriority", "LeadTime": "Global_LeadTime",
         }
-        self.static_polars = {name: self._pl(datas.get(source)) for name, source in mapping.items()}
+        static_pandas = {
+            name: self._normalise(datas.get(source))
+            for name, source in mapping.items()
+        }
+        # Excel 日期经 ConfigReader 后可能仍是混合字符串/时间戳。先在 pandas 边界
+        # 统一解析，再转换为 Polars，避免 Polars 对字符串格式作猜测而中止整个调度。
+        for name, columns in {
+            "TruckCapacityPlan": ("date", "eff_from", "eff_to"),
+            "DeliveryDelayDistribution": ("date",),
+        }.items():
+            frame = static_pandas[name]
+            for column in columns:
+                if column in frame.columns:
+                    frame[column] = pd.to_datetime(frame[column], errors="coerce")
+
+        self.static_polars = {
+            name: self._pl(frame) for name, frame in static_pandas.items()
+        }
         # 公开静态属性仍维持 pandas 契约；计算所用 canonical 表为 static_polars。
         self.static = {name: self._pd(frame) for name, frame in self.static_polars.items()}
-        for name in ("TruckCapacityPlan", "DeliveryDelayDistribution"):
-            for column in ("date", "eff_from", "eff_to"):
-                if column in self.static_polars[name].columns:
-                    self.static_polars[name] = self.static_polars[name].with_columns(
-                        pl.col(column).cast(pl.String).str.to_datetime(strict=False).alias(column)
-                    )
         return self.static
 
     def validate_static_config(self, static: dict[str, pd.DataFrame]) -> None:

@@ -821,6 +821,22 @@ class PersistenceManager:
                 }
             restored.append(f"m4_allocated_capacity({len(ctx.m4_allocated_capacity)} days)")
 
+        # 7) M3 净需求：它本来就是 module3_output_netdemand 正式输出，
+        # 不复制到 viewcontext。恢复时按同一 run 的上一完成日读取，供下一日
+        # M4 保持一日 lag 消费。
+        m3_table = 'module3_output_netdemand'
+        if hasattr(ctx, 'm3_net_demand_by_date') and self.db.table_exists(m3_table):
+            try:
+                m3_df = self.db.read(m3_table, run_id=run_id, sim_date=sim_date)
+                if m3_df is not None:
+                    ctx.m3_net_demand_by_date[str(sim_date)[:10]] = m3_df.drop(
+                        columns=['run_id', 'sim_date', 'config_name', 'db_write_time'],
+                        errors='ignore',
+                    ).copy(deep=True)
+                    restored.append(f"m3_net_demand({len(m3_df)})")
+            except Exception as exc:
+                logger.warning("恢复 M3 净需求失败（将由首日空输入保护）: %s", exc)
+
         if restored:
             logger.info(
                 f"🔄 ctx 状态已从 ViewContext 恢复: run_id={run_id}, sim_date={sim_date} "

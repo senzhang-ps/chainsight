@@ -133,11 +133,43 @@ class ModuleFive(Module):
     def build_route_parameters(self, active, config):
         return self._backend.route_parameters(active, config)
 
+    def build_node_horizon(self, active, day, routes):
+        return self._backend.node_horizon(active, day, routes)
+
+    def build_direct_demand(self, active, day, config, routes):
+        return self._backend.all_direct_demand(active, day, config, routes)
+
+    def publish_planning_facts(self, day, active, routes, node_horizon, direct_demand):
+        if self.state_context is None:
+            return
+        # 保持 M5 的最小独立单元测试契约：不具备 StateContext 发布接口的
+        # fake state 仅用于验证 M5 本身的计算，不参与 M3 日内调度。
+        if not hasattr(self.state_context, "publish_planning_facts"):
+            return
+        self.state_context.publish_planning_facts(day, {
+            "version": 1,
+            "simulation_date": day,
+            "active_network": self._backend.to_pandas(active),
+            "routes": self._backend.to_pandas(routes),
+            "node_horizon": self._backend.to_pandas(node_horizon),
+            "direct_demand": self._backend.to_pandas(direct_demand),
+            "layer_map": dict(self._backend.layer_map),
+            "layers": list(self._backend.layers),
+        })
+
     def build_supply_ledger(self, config, day):
         return self._backend.supply_ledger(config, day)
 
-    def build_layer_plan(self, day, config, active, routes, priority, available, pools):
-        return self._backend.plan_layers(day, config, active, routes, priority, available, pools)
+    def build_layer_plan(self, day, config, active, routes, priority, available, pools,
+                         node_horizon=None, direct_demand=None):
+        if node_horizon is None and direct_demand is None:
+            return self._backend.plan_layers(
+                day, config, active, routes, priority, available, pools,
+            )
+        return self._backend.plan_layers(
+            day, config, active, routes, priority, available, pools,
+            node_horizon=node_horizon, direct_demand=direct_demand,
+        )
 
     def build_push_plan(self, plan, direct, active, routes, config, available, projected, day):
         return self._backend.push(plan, direct, active, routes, config, self._backend.available_supply(available), self._backend.projected_supply(projected), day)
@@ -177,14 +209,21 @@ class ModuleFive(Module):
             raise RuntimeError("ModuleFive.run() 需要 Orch 先调用 prepare()")
 
         day = pd.Timestamp(self.simulation_date).normalize()
-        logger.info("5️⃣ 运行 Module5 - 部署计划：%s", day.date())
+        logger.info("3️⃣ 运行 Module5 - 部署计划：%s", day.date())
         config = self.load_daily_inputs(day)
         active = self.build_active_network(config, day)
         priority, validation = self.validate_config(config, active)
         routes = self.build_route_parameters(active, config)
+        node_horizon = self.build_node_horizon(active, day, routes)
+        direct_demand = self.build_direct_demand(active, day, config, routes)
+        self.publish_planning_facts(
+            day, active, routes, node_horizon, direct_demand
+        )
         available, pools, projected, today_transit, shipment = self.build_supply_ledger(config, day)
         plan, direct, unfulfilled = self.build_layer_plan(
-            day, config, active, routes, priority, available, pools
+            day, config, active, routes, priority, available, pools,
+            node_horizon=node_horizon if self.state_context is not None else None,
+            direct_demand=direct_demand if self.state_context is not None else None,
         )
         push = self.build_push_plan(plan, direct, active, routes, config, available, projected, day)
         plan = self.append_plan(plan, push)
@@ -194,6 +233,11 @@ class ModuleFive(Module):
             plan, unfulfilled, available, today_transit, shipment, validation, day
         )
         self._backend.result = self._result
+        logger.info(
+            "✅ Module5 完成 - 部署=%d, 未满足=%d",
+            len(self._result.get('deployment_plan', pd.DataFrame())),
+            len(self._result.get('unfulfilled_log', pd.DataFrame())),
+        )
 
     # ------------------------------------------------------------------
     # 输出

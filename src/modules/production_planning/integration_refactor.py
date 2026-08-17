@@ -213,6 +213,8 @@ class ModuleFour(Module):
         self._prepare_allocator_inputs()
 
     def run(self):
+        day = pd.Timestamp(self.simulation_date).normalize()
+        logger.info("2️⃣ 运行 Module4 - 生产计划：%s", day.date())
         try:
             # ── 逐日准备（每日 run 时执行，prepare 只做一次性静态准备）──
             self.issues = []                          # 逐日重置问题清单
@@ -268,9 +270,16 @@ class ModuleFour(Module):
                 'current_allocated_capacity': current_allocated_capacity,
                 'unconstrained_plan': self._to_pandas(unconstrained_plan),
             }
-        except Exception:
+            logger.info(
+                "✅ Module4 完成 - 生产计划=%d, 产能超限=%d, 换产=%d",
+                len(self._result['production_df']),
+                len(self._result['exceed_log']),
+                len(self._result['changeover_log']),
+            )
+        except Exception as error:
             import traceback
             traceback.print_exc()
+            logger.exception("❌ Module4 失败: %s", error)
             self._empty_result()
 
     # ------------------------------------------------------------------

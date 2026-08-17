@@ -194,10 +194,14 @@ def _new_context(
     orch = Orch(
         start_date=START_DATE,
         end_date=END_DATE,
-        config_dict={name: frame.copy() for name, frame in config.items()},
+        config_dict={
+            name: value.copy() if isinstance(value, pd.DataFrame) else value
+            for name, value in config.items()
+        },
         output_path=str(REPORT_DIR / output_name),
         engine=engine,
         skip_dq=True,
+        enable_persistence=False,
     )
     context = StateContext(simulation_date=START_DATE, orch=orch)
     context.initialize(orch.all_config)
@@ -283,7 +287,7 @@ def _run_refactor(
         simulation_start_date=START_DATE,
         state_context=context,
         orch=orch,
-        verbose=True,
+        verbose=False,
     )
     module.prepare()
     days, elapsed = [], []
@@ -357,7 +361,7 @@ def _run_polars_against_pandas_state_baseline(
             simulation_start_date=START_DATE,
             state_context=_M5StateViewSnapshot(baseline_day["state_views"]),
             orch=orch,
-            verbose=True,
+            verbose=False,
         )
         module.prepare()
         _progress(f"refactor polars 缓存 Context 计时: {day:%Y-%m-%d} 开始")
@@ -400,7 +404,7 @@ def _run_refactor_steps_against_snapshot(
         simulation_start_date=START_DATE,
         state_context=_M5StateViewSnapshot(baseline_day["state_views"]),
         orch=orch,
-        verbose=True,
+        verbose=False,
     )
     module.prepare()
     inputs = module.load_daily_inputs(day)

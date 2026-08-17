@@ -33,7 +33,13 @@ def pandas_to_polars(df: pd.DataFrame) -> pl.DataFrame:
             converted[col] = [value.to_pydatetime() if not pd.isna(value) else None for value in s]
             continue
         values = s.dropna()
-        if not values.empty and values.map(lambda value: isinstance(value, (pd.Timestamp, datetime, date))).all():
+        # Arrow extension array 的全列 ``Series.map`` 会逐元素回调 Python；
+        # M1 的大日期列会在 prepare 阶段因此停滞。日期列是同质列，只抽样
+        # 有效值即可判定，并保留下面原来的逐值日期转换语义。
+        date_sample = values.iloc[:256]
+        if not date_sample.empty and date_sample.map(
+            lambda value: isinstance(value, (pd.Timestamp, datetime, date))
+        ).all():
             converted[col] = [
                 value.to_pydatetime() if isinstance(value, pd.Timestamp) else value if not pd.isna(value) else None
                 for value in s

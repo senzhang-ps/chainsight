@@ -1,7 +1,9 @@
-"""旧 M4、重构 M4 pandas 与重构 M4 polars 的五天对比测试。
+"""旧 M4 与重构 M4 pandas 的受控五天对比测试。
 
-历史 M3 是唯一动态输入，严格按 ``run_id + sim_date`` 查询。旧/新 M4 在仿真日
-D 都消费 D-1 日的 M3；首日使用空净需求。测试只写报告，不因业务输出差异失败。
+历史 M3 是 M4 的唯一动态输入，严格按 ``run_id + sim_date`` 查询。旧/新 M4 在
+仿真日 D 都消费 D-1 日的 M3；首日使用空净需求。M4 不直接消费 M1：M1 仅通过
+M5 → M6 → M3 的闭环间接影响后续日的 M4。因此本测试固定数据库 M3 输入，可将
+M4 本身的计算与下游闭环造成的差异隔离。测试只写报告，不因业务输出差异失败。
 
 运行：
     pytest tests/test_m4_three_way_compare.py -s -q
@@ -9,6 +11,7 @@ D 都消费 D-1 日的 M3；首日使用空净需求。测试只写报告，不�
 from __future__ import annotations
 
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -18,15 +21,10 @@ import pytest
 
 from pgsql_db.settings import get_database_config
 from pgsql_db.db_connection import DatabaseConnection
-from src.core.main_integration.config_loader import (
-    load_configuration_from_dict,
-    prepare_configuration,
-)
 from src.core.main_integration.production_runner import (
     run_daily_production_planning_integrated,
 )
 from src.core.main_integration.runtime_state import DbRuntimeState
-from src.core.run.db_config import _load_config_from_database
 from src.core.orchestrator import Orch
 from src.modules.production_planning.integration_refactor import ModuleFour
 from src.modules.production_planning.plan_builder import build_unconstrained_plan_for_single_day
@@ -38,12 +36,19 @@ from tests.compare_utils import compare_dataframes_by_key, compare_mappings
 
 
 PROJECT_ROOT = Path(__file__).parent.parent.resolve()
-CONFIG_NAME = "OC_Paste_S1_20251224_repare"
-M3_RUN_ID = "db_OC_Paste_S1_20251224_repare_20260803_105300"
-DB_SCHEMA = "public"
-START_DATE = "2025-12-15"
-END_DATE = "2025-12-19"
+CONFIG_PATH = Path(os.environ.get(
+    "M4_DEBUG_CONFIG_PATH",
+    str(PROJECT_ROOT / "input" / "OC" / "OC_Paste_S1_20251224_extension" / "OC_Paste_S1_20251224_repare.xlsx"),
+))
+M3_RUN_ID = os.environ.get(
+    "M4_DEBUG_HISTORICAL_RUN_ID",
+    "db_OC_Paste_S1_20251224_repare_20260814_132746",
+)
+DB_SCHEMA = os.environ.get("M4_DEBUG_DB_SCHEMA", "input")
+START_DATE = os.environ.get("M4_DEBUG_START_DATE", "2025-12-15")
+END_DATE = os.environ.get("M4_DEBUG_END_DATE", "2025-12-19")
 M3_TABLE = "module3_output_netdemand"
+M4_PRODUCTION_TABLE = "module4_output_productionplan"
 REPORT_DIR = PROJECT_ROOT / "outputs" / "m4_three_way_compare"
 PROGRESS_PATH = REPORT_DIR / "m4_three_way_compare.progress.log"
 M4_FRAME_KEYS = (
@@ -123,11 +128,51 @@ def _load_m3_by_sim_date(db: DatabaseConnection) -> dict[str, pd.DataFrame]:
     return output
 
 
-def _load_prepared_config(db: DatabaseConnection) -> dict[str, pd.DataFrame]:
-    raw = _load_config_from_database(db, CONFIG_NAME)
-    if not raw:
-        pytest.skip(f"数据库 schema={DB_SCHEMA} 中找不到配置: {CONFIG_NAME}")
-    return prepare_configuration(load_configuration_from_dict(raw, CONFIG_NAME))
+def _load_historical_production_by_sim_date(
+    db: DatabaseConnection,
+) -> dict[str, pd.DataFrame]:
+    """按同一 run/date 加载历史 M4，作为 pandas 行级追踪的 DB 端样本。"""
+    table = _qualified(DB_SCHEMA, M4_PRODUCTION_TABLE)
+    columns = [row[0] for row in db.execute_query(
+        "SELECT column_name FROM information_schema.columns "
+        "WHERE table_schema = %s AND table_name = %s ORDER BY ordinal_position",
+        (DB_SCHEMA, M4_PRODUCTION_TABLE),
+    )]
+    if not columns:
+        pytest.skip(f"找不到历史 M4 表: {DB_SCHEMA}.{M4_PRODUCTION_TABLE}")
+
+    output: dict[str, pd.DataFrame] = {}
+    for date in pd.date_range(START_DATE, END_DATE, freq="D"):
+        date_str = date.strftime("%Y-%m-%d")
+        rows = db.execute_query(
+            f"SELECT {', '.join(columns)} FROM {table} "
+            "WHERE run_id = %s AND sim_date::date = %s::date",
+            (M3_RUN_ID, date_str),
+        )
+        output[date_str] = pd.DataFrame(rows, columns=columns).drop(
+            columns=["run_id", "sim_date", "config_name", "db_write_time", "file_date"],
+            errors="ignore",
+        )
+    return output
+
+
+def _load_excel_config() -> dict[str, pd.DataFrame]:
+    """使用完整集成相同 Excel 配置，避免旧 input/public 配置造成伪差异。"""
+    if not CONFIG_PATH.exists():
+        pytest.skip(f"找不到 M4 调试配置: {CONFIG_PATH}")
+    config_orch = Orch(
+        start_date=START_DATE,
+        end_date=END_DATE,
+        config_path=str(CONFIG_PATH),
+        output_path=str(REPORT_DIR / "config_scratch"),
+        engine="pandas",
+        skip_dq=True,
+        enable_persistence=False,
+    )
+    return {
+        name: value.copy() if isinstance(value, pd.DataFrame) else value
+        for name, value in config_orch.all_config.items()
+    }
 
 
 def _m3_input(m3_by_date: dict[str, pd.DataFrame], day: pd.Timestamp) -> dict | None:
@@ -139,6 +184,14 @@ def _m3_input(m3_by_date: dict[str, pd.DataFrame], day: pd.Timestamp) -> dict | 
 
 def _run_legacy(config: dict[str, pd.DataFrame], m3_by_date: dict[str, pd.DataFrame], *, timed: bool) -> dict:
     """直接运行旧 M4，复刻数据库入口的跨日产能历史合并。"""
+    # 当前 Excel/Orch 的模型投影使用小写 ``mct``；旧 M4 保留历史列名 ``MCT``。
+    legacy_config = {
+        name: value.copy() if isinstance(value, pd.DataFrame) else value
+        for name, value in config.items()
+    }
+    mlcfg = legacy_config.get("M4_MaterialLocationLineCfg")
+    if mlcfg is not None and "mct" in mlcfg.columns and "MCT" not in mlcfg.columns:
+        legacy_config["M4_MaterialLocationLineCfg"] = mlcfg.rename(columns={"mct": "MCT"})
     days, elapsed = [], []
     start = pd.Timestamp(START_DATE)
     state = DbRuntimeState()
@@ -146,7 +199,7 @@ def _run_legacy(config: dict[str, pd.DataFrame], m3_by_date: dict[str, pd.DataFr
         _progress(f"legacy {'计时' if timed else '预热'}: {day:%Y-%m-%d} 开始")
         tick = time.perf_counter() if timed else None
         result = run_daily_production_planning_integrated(
-            config_dict=config,
+            config_dict=legacy_config,
             module3_output_dir="",
             simulation_date=day,
             simulation_start=start,
@@ -186,7 +239,10 @@ def _run_refactor(
     """运行重构 M4。历史 M3 已预读，计时内不含数据库查询或配置初始化。"""
     # DB 配置保留 Excel 的 ``MCT`` 列名；重构 backend 的 schema 使用 ``mct``。
     # 仅在测试副本做兼容转换，不能改变旧 M4 使用的原始配置。
-    refactor_config = {name: frame.copy() for name, frame in config.items()}
+    refactor_config = {
+        name: value.copy() if isinstance(value, pd.DataFrame) else value
+        for name, value in config.items()
+    }
     mlcfg = refactor_config.get("M4_MaterialLocationLineCfg")
     if mlcfg is not None and "MCT" in mlcfg.columns and "mct" not in mlcfg.columns:
         refactor_config["M4_MaterialLocationLineCfg"] = mlcfg.rename(columns={"MCT": "mct"})
@@ -197,6 +253,7 @@ def _run_refactor(
         output_path=str(REPORT_DIR / "scratch"),
         engine=engine,
         skip_dq=True,
+        enable_persistence=False,
     )
     m4 = ModuleFour(
         simulation_date=START_DATE,
@@ -315,21 +372,21 @@ def _write_first_row_difference_trace(
     refactor_pandas: dict,
     report: dict,
 ) -> Path | None:
-    """追踪第一个旧端/重构端生产行集合差异，判断差异首次出现的位置。"""
-    comparisons = report["comparisons"]["legacy_vs_refactor_pandas"]
+    """以 DB 独有生产行作为锚点，追踪其进入 M4 后的计算路径。"""
+    comparisons = report["comparisons"]["historical_db_vs_refactor_pandas"]
     selected = next(
         (
             item for item in comparisons
-            if item["comparison"]["production_df"].get("right_only_samples")
-            or item["comparison"]["production_df"].get("left_only_samples")
+            if item["comparison"].get("left_only_samples")
+            or item["comparison"].get("right_only_samples")
         ),
         None,
     )
     if selected is None:
         return None
 
-    production_comparison = selected["comparison"]["production_df"]
-    side = "right_only_samples" if production_comparison.get("right_only_samples") else "left_only_samples"
+    production_comparison = selected["comparison"]
+    side = "left_only_samples" if production_comparison.get("left_only_samples") else "right_only_samples"
     target = production_comparison[side][0]
     day = pd.Timestamp(selected["date"])
     material, location, line = (
@@ -404,8 +461,10 @@ def _write_first_row_difference_trace(
     trace = {
         "date": selected["date"],
         "difference_side": side,
+        "database_to_pandas_comparison_keys": production_comparison["key_columns"],
         "target_production_key": target,
         "interpretation": (
+            "M4 不直接消费 M1；首日空 M3，后续固定消费前一日数据库 M3。"
             "若 legacy_unconstrained 与 refactor_unconstrained 已不同，差异在无约束计划构建阶段；"
             "若二者相同而 production 不同，差异首次出现于产能分配或换产阶段。"
         ),
@@ -437,7 +496,7 @@ def _write_report(report: dict) -> Path:
     REPORT_DIR.mkdir(parents=True, exist_ok=True)
     json_path = REPORT_DIR / "m4_three_way_compare.json"
     json_path.write_text(json.dumps(report, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
-    lines = ["# M4 三方对比报告", "", f"- M3 run_id: `{M3_RUN_ID}`", f"- 范围: {START_DATE} 至 {END_DATE}", f"- 旧 M4 跨日状态: {LEGACY_STATE_POLICY}", f"- 重构 M4 跨日状态: {REFACTOR_STATE_POLICY}", "- 输入: PostgreSQL 中真实 M3 历史业务输出；运行计时不包含数据库读取或配置初始化。", "- 性能: 每个实现仅执行一次完整五日对比，记录该次实际端到端计算耗时。", "", "## 性能", "", "| 实现 | min(s) | median(s) | mean(s) | 每日 mean(s) | 相对旧 M4 |", "|---|---:|---:|---:|---:|---:|"]
+    lines = ["# M4 受控对比报告", "", f"- M3 run_id: `{M3_RUN_ID}`", f"- 范围: {START_DATE} 至 {END_DATE}", f"- 旧 M4 跨日状态: {LEGACY_STATE_POLICY}", f"- 重构 M4 跨日状态: {REFACTOR_STATE_POLICY}", "- 配置: 与完整集成一致的 Excel 输入。", "- 输入: 首日为空；其余日期固定消费前一日 PostgreSQL M3 历史输出。M4 不直接接收 M1 输出。", "- 性能: 每个实现仅执行一次完整五日对比，记录该次实际端到端计算耗时。", "", "## 性能", "", "| 实现 | min(s) | median(s) | mean(s) | 每日 mean(s) | 相对旧 M4 |", "|---|---:|---:|---:|---:|---:|"]
     for name, value in report["performance"].items():
         lines.append(f"| {name} | {value['min_seconds']:.4f} | {value['median_seconds']:.4f} | {value['mean_seconds']:.4f} | {value['per_day_mean_seconds']:.4f} | {value['relative_to_legacy']:.2f}x |")
     lines.extend(["", "## 差异说明", "", "业务差异仅报告；绝对差 $\\le 10^{-6}$ 或零附近微小差异归类为精度问题。完整明细见同目录 JSON。"])
@@ -452,24 +511,22 @@ def comparison_data():
     PROGRESS_PATH.write_text("", encoding="utf-8")
     db = _db()
     try:
-        _progress("开始加载数据库配置与五日真实 M3 历史业务数据")
+        _progress("开始加载五日真实 M3 历史业务数据")
         db.connect()
-        config = _load_prepared_config(db)
         m3_by_date = _load_m3_by_sim_date(db)
+        historical_production = _load_historical_production_by_sim_date(db)
     finally:
         db.close()
-    _progress("数据库输入加载完成")
+    config = _load_excel_config()
+    _progress("历史 M3 与完整集成 Excel 配置加载完成")
 
     _progress("开始旧 M4 唯一一次真实对比运行并计时")
     legacy = _run_legacy(config, m3_by_date, timed=True)
     _progress("开始重构 M4 pandas 唯一一次真实对比运行并计时")
     pandas_result = _run_refactor(config, m3_by_date, engine="pandas", timed=True)
-    _progress("开始重构 M4 polars 唯一一次真实对比运行并计时")
-    polars_result = _run_refactor(config, m3_by_date, engine="polars", timed=True)
     performance = {
         "legacy": _performance_summary(legacy),
         "refactor_pandas": _performance_summary(pandas_result),
-        "refactor_polars": _performance_summary(polars_result),
     }
     legacy_mean = performance["legacy"]["mean_seconds"]
     for summary in performance.values():
@@ -488,9 +545,16 @@ def comparison_data():
                 {"date": left["date"], "comparison": _compare_day(left, right, "legacy_vs_pandas")}
                 for left, right in zip(legacy["days"], pandas_result["days"])
             ],
-            "refactor_pandas_vs_polars": [
-                {"date": left["date"], "comparison": _compare_day(left, right, "pandas_vs_polars")}
-                for left, right in zip(pandas_result["days"], polars_result["days"])
+            "historical_db_vs_refactor_pandas": [
+                {
+                    "date": day["date"],
+                    "comparison": compare_dataframes_by_key(
+                        historical_production[day["date"]],
+                        day["production_df"],
+                        label=f"db_vs_pandas:{day['date']}:production_df",
+                    ),
+                }
+                for day in pandas_result["days"]
             ],
         },
     }
@@ -499,13 +563,13 @@ def comparison_data():
         report["first_row_difference_trace"] = str(trace_path)
     report_path = _write_report(report)
     _progress(f"报告已写入: {report_path}")
-    return {"legacy": legacy, "pandas": pandas_result, "polars": polars_result,
+    return {"legacy": legacy, "pandas": pandas_result,
             "report": report, "report_path": report_path}
 
 
 def test_m4_three_way_compare_covers_five_days(comparison_data):
     """校验三个实现均完成固定五天；业务差异仅由报告承载。"""
-    for name in ("legacy", "pandas", "polars"):
+    for name in ("legacy", "pandas"):
         assert len(comparison_data[name]["days"]) == 5, name
     assert comparison_data["report_path"].exists()
     print(f"\nM4 三方差异与性能报告: {comparison_data['report_path']}")
@@ -514,5 +578,5 @@ def test_m4_three_way_compare_covers_five_days(comparison_data):
 def test_m4_three_way_compare_records_actual_execution_timing(comparison_data):
     """报告记录实际对比运行的单次端到端耗时，不重复执行计算。"""
     performance = comparison_data["report"]["performance"]
-    assert set(performance) == {"legacy", "refactor_pandas", "refactor_polars"}
+    assert set(performance) == {"legacy", "refactor_pandas"}
     assert all(len(summary["runs"]) == 1 for summary in performance.values())

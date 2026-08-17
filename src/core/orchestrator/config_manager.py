@@ -88,7 +88,12 @@ class ConfigManager:
         logger.info(f"系统配置已加载: {list(sys_cfg.keys())}")
         return sys_cfg
 
-    def bootstrap(self, config_path: str | None = None) -> None:
+    def bootstrap(
+        self,
+        config_path: str | None = None,
+        *,
+        connect_db: bool = True,
+    ) -> None:
         """从 yaml 建 DB 连接 + 设 sys_config + migrate 建表。
 
         读取 ``config/defaults.yaml`` 的 database 节，创建 DB 实例并 migrate；
@@ -105,7 +110,9 @@ class ConfigManager:
 
         self._sys_config = sys_cfg
         db_cfg = sys_cfg.get('database')
-        if not db_cfg:
+        if not db_cfg or not connect_db:
+            if not connect_db:
+                logger.info("ConfigManager: 持久化已禁用，跳过数据库连接与表迁移")
             return
 
         # path → project → schema（纯 --config / config_dict 无路径时回退 default_schema）

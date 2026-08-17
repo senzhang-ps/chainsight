@@ -87,7 +87,8 @@ def _load_plans(db: DatabaseConnection) -> dict[str, pd.DataFrame]:
 
 def _new_context(config: dict[str, pd.DataFrame], name: str) -> tuple[Orch, StateContext]:
     orch = Orch(START_DATE, END_DATE, config_dict={key: value.copy() for key, value in config.items()},
-                output_path=str(REPORT_DIR / name), engine="pandas", skip_dq=True)
+                output_path=str(REPORT_DIR / name), engine="pandas", skip_dq=True,
+                enable_persistence=False)
     context = StateContext(START_DATE, orch=orch)
     context.initialize(orch.all_config)
     return orch, context

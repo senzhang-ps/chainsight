@@ -22,6 +22,8 @@ from typing import TYPE_CHECKING, Any
 
 import pandas as pd
 
+from ..utils.normalization import normalize_identifiers
+
 if TYPE_CHECKING:
     from ..core.run.config_dir import ConfigDir
 
@@ -99,6 +101,13 @@ class ConfigReader:
                 continue
 
             df = self._project_to_model(df, reg[1])
+            # ``M4_MaterialLocationLineCfg`` 同时由 M4 和 M5 消费。Excel 中
+            # 工厂地点常以数值单元格保存（例如 ``386``），而 Global_Network
+            # 使用四位业务键 ``0386``。M5 的 PTF/LSK 查找按该地点键关联；若
+            # 此处不统一，文件配置路径会静默漏掉 PTF，缩短 route horizon。
+            # 这是配置输入的标识符契约，不属于模块业务清洗。
+            if reg[0] == "M4_MaterialLocationLineCfg":
+                df = normalize_identifiers(df)
             config_dict[reg[0]] = df  # 用 registry 规范名作 key
 
         self._cache = config_dict

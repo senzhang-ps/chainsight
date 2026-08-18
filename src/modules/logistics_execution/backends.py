@@ -89,6 +89,16 @@ class _PandasBackend:
             "LeadTime": "Global_LeadTime",
         }
         static = {name: self._normalise(datas.get(source)) for name, source in mapping.items()}
+        for name, columns in {
+            "TruckReleaseCon": {"wfr": "WFR", "vfr": "VFR"},
+            "LeadTime": {"pdt": "PDT", "gr": "GR", "otd": "OTD"},
+        }.items():
+            frame = static[name]
+            static[name] = frame.rename(columns={
+                source: target
+                for source, target in columns.items()
+                if source in frame and target not in frame
+            })
         for frame_name, columns in {
             "TruckCapacityPlan": ("date", "eff_from", "eff_to"),
             "DeliveryDelayDistribution": ("date",),
@@ -332,6 +342,16 @@ class _PolarsBackend:
             name: self._normalise(datas.get(source))
             for name, source in mapping.items()
         }
+        for name, columns in {
+            "TruckReleaseCon": {"wfr": "WFR", "vfr": "VFR"},
+            "LeadTime": {"pdt": "PDT", "gr": "GR", "otd": "OTD"},
+        }.items():
+            frame = static_pandas[name]
+            static_pandas[name] = frame.rename(columns={
+                source: target
+                for source, target in columns.items()
+                if source in frame and target not in frame
+            })
         # Excel 日期经 ConfigReader 后可能仍是混合字符串/时间戳。先在 pandas 边界
         # 统一解析，再转换为 Polars，避免 Polars 对字符串格式作猜测而中止整个调度。
         for name, columns in {

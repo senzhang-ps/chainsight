@@ -68,7 +68,8 @@ def _config() -> dict[str, pd.DataFrame]:
 def _deployment() -> pd.DataFrame:
     return pd.DataFrame([{
         "ori_deployment_uid": "D1", "material": "100", "sending": "PL01", "receiving": "DC01",
-        "planned_deployment_date": "2025-01-01", "deployed_qty": 60, "demand_element": "normal",
+        "planned_deployment_date": "2025-01-01", "deployed_qty_invCon": 60, "deployed_qty": 60,
+        "demand_element": "normal",
     }])
 
 
@@ -90,6 +91,19 @@ def test_module_six_prepare_uses_orch_data_injection_once():
 def test_module_six_selects_backend_from_orch_engine():
     assert isinstance(ModuleSix("2025-01-01", state_context=_Context(), orch=_Orch(_config()))._backend, _PandasBackend)
     assert isinstance(ModuleSix("2025-01-01", state_context=_Context(), orch=_Orch(_config(), "polars"))._backend, _PolarsBackend)
+
+
+@pytest.mark.parametrize("engine", ["pandas", "polars"])
+def test_module_six_normalises_lowercase_file_config_columns(engine):
+    config = _config()
+    config["M6_TruckReleaseCon"] = config["M6_TruckReleaseCon"].rename(columns={"WFR": "wfr", "VFR": "vfr"})
+    config["Global_LeadTime"] = config["Global_LeadTime"].rename(columns={"PDT": "pdt", "GR": "gr", "OTD": "otd"})
+    module = ModuleSix("2025-01-01", state_context=_Context(), orch=_Orch(config, engine))
+
+    module.prepare()
+
+    assert {"WFR", "VFR"}.issubset(module._backend.static["TruckReleaseCon"].columns)
+    assert {"PDT", "GR", "OTD"}.issubset(module._backend.static["LeadTime"].columns)
 
 
 def test_module_six_polars_path_executes_independently():

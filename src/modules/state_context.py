@@ -370,7 +370,9 @@ class StateContext(Module):
         源: simulation_db.py:368-398 循环体内联逻辑。
 
         StateContext 维护 backlog 在内存中，无需文件系统访问。
-        只处理 available_date == today 的记录，处理后从 backlog 中移除。
+        只处理 available_date == today 的记录。为与 legacy 编排的 M3
+        ``get_all_production_view()`` 口径一致，已处理记录仍保留在 backlog；
+        legacy 会在同日将 production GR 与该 backlog 计划共同提供给 M3。
         """
         date_obj = pd.to_datetime(date_str).normalize()
 
@@ -409,12 +411,6 @@ class StateContext(Module):
             if ds not in self.production_gr_by_date:
                 self.production_gr_by_date[ds] = []
             self.production_gr_by_date[ds].append(record)
-
-        # 移除已处理的记录
-        remaining = backlog_df[~mask]
-        self.production_plan_backlog = (
-            remaining.to_dict('records') if not remaining.empty else []
-        )
 
         msg = f"Processed {len(arriving)} backlog production arrivals"
         self._log_event("BACKLOG_GR", msg)
@@ -792,7 +788,41 @@ class StateContext(Module):
             if col not in backlog_df.columns:
                 backlog_df[col] = ''
 
-        return backlog_df[cols]
+        backlog_view = backlog_df[cols].copy()
+        backlog_view['available_date'] = pd.to_datetime(
+            backlog_view['available_date'], errors='coerce'
+        ).dt.normalize()
+        backlog_view['material'] = backlog_view['material'].map(normalize_material)
+        backlog_view['location'] = backlog_view['location'].map(normalize_location)
+        backlog_view['quantity'] = pd.to_numeric(
+            backlog_view['quantity'], errors='coerce'
+        ).fillna(0)
+
+        # input 历史运行在计划可用日的 backlog 快照保留原计划，并累计同日
+        # 由该计划转入生产 GR 的数量。只对同时存在于 backlog 和当日 GR 的
+        # ML/可用日组合补计，避免把 M4 当日新产出误计入未来 backlog。
+        date_obj = pd.to_datetime(date).normalize()
+        today_gr = self._production_gr_view(date)
+        if not today_gr.empty:
+            arrived = today_gr.copy()
+            arrived['material'] = arrived['material'].map(normalize_material)
+            arrived['location'] = arrived['location'].map(normalize_location)
+            arrived['available_date'] = date_obj
+            arrived['quantity'] = pd.to_numeric(
+                arrived['quantity'], errors='coerce'
+            ).fillna(0)
+            arrived = arrived.groupby(
+                ['material', 'location', 'available_date'], as_index=False
+            )['quantity'].sum().rename(columns={'quantity': '_arrived_quantity'})
+            backlog_view = backlog_view.merge(
+                arrived,
+                on=['material', 'location', 'available_date'],
+                how='left',
+            )
+            backlog_view['quantity'] += backlog_view['_arrived_quantity'].fillna(0)
+            backlog_view = backlog_view.drop(columns=['_arrived_quantity'])
+
+        return backlog_view[cols]
 
     # ══════════════════════════════════════════
     # Processor（模块运行后写回状态）
@@ -1074,11 +1104,13 @@ class StateContext(Module):
                 "Module5 部署计划缺少 planned_deployment_date 或 date 列"
             )
 
-        # 为保证可复现，稳定排序
+        # 必须与 legacy Orchestrator.process_module5_deployment() 使用相同
+        # 的稳定排序。该边界生成 ori_deployment_uid；增加额外排序键会改变
+        # 同一业务组内的序号，进而改变 M6 的部署单—车辆关联。
         sort_cols = [
             col for col in [
-                'material', 'sending', 'receiving',
-                deployment_date_col, 'demand_element', 'deployed_qty',
+                'material', 'sending', 'receiving', deployment_date_col,
+                'demand_element', 'deployed_qty',
             ]
             if col in deployment_df.columns
         ]

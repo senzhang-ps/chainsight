@@ -196,6 +196,12 @@ def _convert_db_config_frame(df: pd.DataFrame) -> pd.DataFrame:
     for column in cols_before:
         if column not in df_copy.columns:
             df_copy[column] = pd.NA
+    # ``ConfigReader`` / cfg model 的运行时契约使用 DB 列名 ``mct``；
+    # 旧 DB 加载映射曾将 MCT 复原为 Excel 展示名 ``MCT``，导致直接传入
+    # prepared config_dict 时 M4 backend 无法读取 ``mct``。数据库配置和
+    # 文件配置应在此公共边界使用同一列名。
+    if "MCT" in df_copy.columns and "mct" not in df_copy.columns:
+        df_copy = df_copy.rename(columns={"MCT": "mct"})
     return df_copy
 
 

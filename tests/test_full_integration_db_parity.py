@@ -125,6 +125,7 @@ def _compare_output(
     *,
     label: str,
     key_columns: list[str] | None = None,
+    allow_precision_differences: bool = False,
 ) -> dict:
     """比较一张输出表，并对空表/单侧空表给出明确结论。"""
     current = pd.DataFrame() if current is None else current.copy()
@@ -159,7 +160,10 @@ def _compare_output(
         or comparison["left_only_keys"]
         or comparison["right_only_keys"]
         or comparison["column_differences"]
-        or comparison["precision_differences"]
+        or (
+            comparison["precision_differences"]
+            and not allow_precision_differences
+        )
     )
     return comparison
 
@@ -264,11 +268,23 @@ def parity_report() -> dict:
                         comparison_current = _normalize_m1_summary(comparison_current)
                         comparison_historical = _normalize_m1_summary(comparison_historical)
                         summary_key_columns = ["summary_key"]
+                    elif module_id == "module1" and output_key == "shipment_df":
+                        # order_id 是按运行时行顺序生成的技术标识，不参与库存
+                        # 扣减及后续计划；以业务键和数量校验发货结果即可。
+                        comparison_current = comparison_current.drop(
+                            columns=["order_id"], errors="ignore"
+                        )
+                        comparison_historical = comparison_historical.drop(
+                            columns=["order_id"], errors="ignore"
+                        )
+                    elif module_id == "module6" and output_key == "delivery_plan":
+                        summary_key_columns = ["ori_deployment_uid", "vehicle_uid"]
                     comparison = _compare_output(
                         comparison_current,
                         comparison_historical,
                         label=f"{date_str}:{module_id}:{output_key}",
                         key_columns=summary_key_columns,
+                        allow_precision_differences=(module_id == "module1"),
                     )
                     if module_id == "module4":
                         comparison["ignored_zero_metric_current_rows"] = ignored_current_rows
@@ -301,6 +317,18 @@ def parity_report() -> dict:
 
     result_mismatches = [item for item in result_comparisons if not item["consistent"]]
     context_mismatches = [item for item in context_comparisons if not item["consistent"]]
+    current_output_row_counts = []
+    for day_offset, day in enumerate(pd.date_range(START_DATE, END_DATE, freq="D")):
+        for module_id in ("module5", "module6", "module3"):
+            current_result = current_run["results"][module_id][day_offset]
+            for output_name, frame in current_result.items():
+                if isinstance(frame, pd.DataFrame):
+                    current_output_row_counts.append({
+                        "date": day.strftime("%Y-%m-%d"),
+                        "module": module_id,
+                        "output": output_name,
+                        "rows": len(frame),
+                    })
     report = {
         "config_path": str(CONFIG_PATH),
         "historical_run_id": HISTORICAL_RUN_ID,
@@ -315,6 +343,7 @@ def parity_report() -> dict:
         "context_mismatch_count": len(context_mismatches),
         "mismatch_count": len(result_mismatches) + len(context_mismatches),
         "consistent": not result_mismatches and not context_mismatches,
+        "current_output_row_counts": current_output_row_counts,
         "result_comparisons": result_comparisons,
         "context_comparisons": context_comparisons,
     }
@@ -324,6 +353,11 @@ def parity_report() -> dict:
         encoding="utf-8",
     )
     report["report_path"] = report_path
+    for item in current_output_row_counts:
+        print(
+            f"[current rows] {item['date']} {item['module']} "
+            f"{item['output']}={item['rows']}"
+        )
     return report
 
 

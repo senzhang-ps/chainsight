@@ -63,21 +63,23 @@ def _load_plans(db: DatabaseConnection) -> dict[str, pd.DataFrame]:
     history: dict[str, pd.DataFrame] = {}
     for day in pd.date_range(START_DATE, END_DATE, freq="D"):
         rows = db.execute_query(
-            f"SELECT {', '.join(columns)} FROM public.{TABLE} "
+            f"SELECT * FROM public.{TABLE} "
             "WHERE run_id = %s AND sim_date::date = %s::date",
             (HISTORICAL_RUN_ID, day.strftime("%Y-%m-%d")),
         )
         frame = pd.DataFrame(rows, columns=columns).drop(
             columns=["run_id", "sim_date", "config_name", "db_write_time"], errors="ignore",
         )
-        quantity_col = "deployed_qty" if "deployed_qty" in frame else "deployed_qty_invCon"
-        if not frame.empty and quantity_col in frame:
+        inv_constraint_col = "deployed_qty_invCon" if "deployed_qty_invCon" in frame else "deployed_qty"
+        deployed_qty_col = "deployed_qty" if "deployed_qty" in frame else inv_constraint_col
+        if not frame.empty and inv_constraint_col in frame:
             frame = frame.copy()
-            frame["deployed_qty"] = pd.to_numeric(frame[quantity_col], errors="coerce").fillna(0)
-            frame = frame.loc[(frame["deployed_qty"] > 0) & (frame["sending"] != frame["receiving"])].copy()
+            frame["deployed_qty_invCon"] = pd.to_numeric(frame[inv_constraint_col], errors="coerce").fillna(0)
+            frame["deployed_qty"] = pd.to_numeric(frame[deployed_qty_col], errors="coerce").fillna(0)
+            frame = frame.loc[(frame["deployed_qty_invCon"] > 0) & (frame["sending"] != frame["receiving"])].copy()
             frame = frame.rename(columns={"date": "planned_deployment_date"})
             frame = frame.loc[:, [
-                "material", "sending", "receiving", "planned_deployment_date", "deployed_qty", "demand_element",
+                "material", "sending", "receiving", "planned_deployment_date", "deployed_qty_invCon", "deployed_qty", "demand_element",
             ]]
         history[day.strftime("%Y-%m-%d")] = frame
     if all(frame.empty for frame in history.values()):

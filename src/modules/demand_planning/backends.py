@@ -264,7 +264,9 @@ class _PandasBackend:
 
         demand_forecast = pd.merge(demand_forecast,date_df,how='left',on='week_start')
         demand_forecast = pd.merge(demand_forecast, order_cal, how='left', left_on='simulation_date', right_on='date')
-        demand_forecast['order_day_flag'] = demand_forecast['order_day_flag'].fillna(1)
+        demand_forecast['order_day_flag'] = pd.to_numeric(
+            demand_forecast['order_day_flag'], errors='coerce'
+        ).fillna(1).astype(int)
         demand_forecast.sort_values(by=['material','location','simulation_date'],inplace=True, ascending=True)
 
         bins = week_starts.tolist() + [week_starts.iloc[-1] + pd.Timedelta(days=7)]
@@ -276,6 +278,11 @@ class _PandasBackend:
         flag_summary["week_start"] = pd.to_datetime(flag_summary["week_start"])
 
         demand_forecast = demand_forecast.merge(flag_summary, on="week_start", how="left")
+        # Polars → pandas 时缺失数值可能保留为 pd.NA；np.where 无法将
+        # pd.NA 解释为布尔值。没有日历配置的周沿用订单日默认值 1。
+        demand_forecast['flag_count'] = pd.to_numeric(
+            demand_forecast['flag_count'], errors='coerce'
+        ).fillna(1).astype(int)
 
         demand_forecast["_qty_int"] = demand_forecast[qty_col].round().astype(int)
         demand_forecast["base_qty"] = np.where(
@@ -590,7 +597,9 @@ class _PandasBackend:
         return pd.DataFrame([{
             "Total_Orders": len(orders_df),
             "Total_Shipments": len(shipment_df),
-            "Total_Cuts": len(cut_df),
+            # 历史 Summary 将每个发货计算粒度都计为一条 cut 处理记录，
+            # 即使 CutLog 仅落库实际缺货行也保持此统计口径。
+            "Total_Cuts": len(shipment_df),
             "Total_SupplyDemand": len(supply_demand_df),
             "Date": date_val,
         }])
@@ -648,9 +657,16 @@ class _PandasBackend:
         if orch is None or orch.shipment_valid == 0:
             return pd.DataFrame(), pd.DataFrame()
         from .shipment import generate_shipment_with_inventory_check
-        return generate_shipment_with_inventory_check(
+        shipment_df, cut_df = generate_shipment_with_inventory_check(
             orders_df, self._o.simulation_date, orch, daily_detail, None,
         )
+        # legacy 发货函数保留零数量的内部 cut 占位行；重构 M1 的对外
+        # CutLog 仅输出真实短缺，和 input schema 历史记录的落库口径一致。
+        if not cut_df.empty and "quantity" in cut_df.columns:
+            cut_df = cut_df.loc[
+                pd.to_numeric(cut_df["quantity"], errors="coerce").fillna(0) != 0
+            ].copy()
+        return shipment_df, cut_df
 
     def get_order_day_flag(self, order_cal):
         filtered = order_cal.loc[

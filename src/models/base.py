@@ -54,6 +54,10 @@ class ViewContextBase:
     """Marker mixin — 标识 viewcontext 输出表（viewcontext_*）。不是 SA mapped class。"""
 
 
+class SummaryBase:
+    """Marker mixin — 标识全周期汇总表（summary_*）。不是 SA mapped class。"""
+
+
 class ModuleOutputBase:
     """Marker mixin — 标识模块输出表（module*_output_*），有固定列的 SA 模型。不是 SA mapped class。"""
 
@@ -99,6 +103,7 @@ __all__ = [
     "OrchBase",
     "ModuleBase",
     "ViewContextBase",
+    "SummaryBase",
     "ModuleOutputBase",
     "ResumeBase",
     "map_db_type",

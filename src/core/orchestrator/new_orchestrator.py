@@ -23,16 +23,18 @@ class Orchestrator:
     def __init__(self, start_date, end_date,
                  config_path=None, output_path=None,
                  config_dict=None, engine='pandas', skip_dq=False,
-                 enable_persistence=True):
+                 enable_persistence=True, test_mode=False, config_name=None):
         self.start_date = start_date if isinstance(start_date, date) else pd.Timestamp(start_date).date()
         self.end_date = end_date if isinstance(end_date, date) else pd.Timestamp(end_date).date()
         self.module_idx = [1, 3, 4, 5, 6]
         self.engine = engine
         self.output_path = output_path or './output'
         self.enable_persistence = enable_persistence
+        # 测试模式强制使用独立的 PostgreSQL ``test`` schema，避免测试写入业务 schema。
+        self.test_mode = test_mode
 
         # ── 身份 ──
-        self._config_name = None
+        self._config_name = config_name
         self._run_id = None
 
         # ── 协作者 ──
@@ -45,6 +47,7 @@ class Orchestrator:
         self.config.bootstrap(
             config_path=config_path,
             connect_db=enable_persistence,
+            test_mode=test_mode,
         )
 
         # ── 续跑检测（在 load 之前，以便复用 run_id + 短路 DQ）──
@@ -61,17 +64,16 @@ class Orchestrator:
                 self._run_id = pending['run_id']            # 复用，绕过惰性生成
                 self._resume_date = pending['current_date']  # 断点日期
                 self._total_days = pending.get('total_days')
-                # progress_date 在每日 day_end(save_daily_state) 与每日迭代起点(save_checkpoint)
-                # 都会写，故中断时 progress_date=被中断当天，而该天的 viewcontext/快照尚未落库。
-                # 续跑恢复 ctx/m1 应读上一完成周期 = progress_date - 1。
+                # progress_date 只在某个自然日的全部模块输出和 StateContext 状态
+                # 都成功提交后写入，因此它表示「最后完整完成日」。续跑从其下一天
+                # 的 M1 开始，而 ctx/m1 快照正是从该日恢复。
                 if self._resume_date is not None:
-                    self._restore_date = (
-                        pd.Timestamp(self._resume_date) - pd.Timedelta(days=1)
-                    ).strftime('%Y-%m-%d')
+                    self._restore_date = pd.Timestamp(self._resume_date).strftime('%Y-%m-%d')
                 self._resuming = True
                 logger.info(
                     f"🔁 检测到未完成运行 {pending['run_id']}，"
-                    f"从 {self._resume_date} 续跑（恢复快照取 {self._restore_date}）"
+                    f"最后完成日为 {self._resume_date}，"
+                    f"将从下一天续跑（恢复快照取 {self._restore_date}）"
                 )
 
         try:
@@ -198,8 +200,8 @@ class Orchestrator:
         """日期迭代器。
 
         actual_start_date : 重新设定仿真起点（保留原义，total 随之变化 → 1/96 语义）。
-        resume_date       : 续跑断点 —— total 仍按完整范围（首次记录的 total_days），
-                            序号从断点位置开始，进度显示 (n/100)。
+        resume_date       : 最后完整完成日 —— total 仍按完整范围（首次记录的
+                    total_days），迭代从下一天开始。
         两者不可同时指定。orch 续跑检测设过 _resume_date 时，resume_date 可省略自动复用。
         """
         if actual_start_date is not None and resume_date is not None:
@@ -212,15 +214,17 @@ class Orchestrator:
         total = self._total_days or len(full_dates)
 
         if resume_date is not None:
-            # ── 续跑：分母=完整范围，序号=断点位置，initial=断点前已完天数 ──
+            # ── 续跑：progress_date 是最后完成日，下一天才是恢复首日。 ──
             self.sim_dates = full_dates
-            rts = pd.Timestamp(resume_date)
+            completed = pd.Timestamp(resume_date)
+            rts = completed + pd.Timedelta(days=1)
             mask = full_dates >= rts
             start_idx = int(mask.argmax()) if mask.any() else len(full_dates)
             iterate_dates = full_dates[start_idx:]
             start_count, initial_done = start_idx + 1, start_idx
             logger.info(
-                f"续跑：从第 {start_count}/{total} 天 ({rts:%Y-%m-%d}) 恢复"
+                f"续跑：最后完成日 {completed:%Y-%m-%d}，"
+                f"从第 {start_count}/{total} 天 ({rts:%Y-%m-%d}) 恢复"
             )
         else:
             # ── 全新运行（actual_start_date 保留原义）──
@@ -269,6 +273,25 @@ class Orchestrator:
     def save_module_output(self, module, sim_date: str):
         """委托到 PersistenceManager 写 DB。"""
         self.persistence.save_module_output(module, sim_date)
+
+    def save_summary_outputs(self, ctx, start_date: str, end_date: str) -> dict[str, int]:
+        """在全部日度状态落库后，委托生成并写入全周期 ``summary_*`` 表。"""
+        return self.persistence.save_summary_outputs(ctx, start_date, end_date)
+
+    def finalize_simulation(self, ctx) -> dict[str, int]:
+        """持久化全周期 Summary 后标记本次运行完成。
+
+        调用方必须在每个仿真日的模块输出和 StateContext 状态都已成功写入后
+        才调用本方法。Summary 写入若抛异常，``finish()`` 不会执行，运行可安全
+        保持为 running 以便诊断或重试。
+        """
+        summary_rows = self.save_summary_outputs(
+            ctx,
+            start_date=str(self.start_date),
+            end_date=str(self.end_date),
+        )
+        self.finish()
+        return summary_rows
 
     def restore_state(self, ctx, run_id: str, sim_date: str):
         """委托到 PersistenceManager 从 ViewContext 表恢复状态。"""

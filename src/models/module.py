@@ -185,7 +185,9 @@ class Module5OutputDeploymentplan(Base, ModuleOutputBase):
     demand_qty = Column(Float)
     demand_element = Column(Text)
     planned_qty = Column(Float)
-    deployed_qty_invCon = Column(Float)
+    # PostgreSQL COPY 写入层统一将 DataFrame 列名规范化为小写；模型列名也必须
+    # 使用相同的物理名称，避免 quoted camelCase 列与写入列名不一致。
+    deployed_qty_invcon = Column(Float)
     deploy_qty_with_plan_order = Column(Float)
     deploy_from_in_transit = Column(Float)
     deploy_from_open_deployment_inbound = Column(Float)

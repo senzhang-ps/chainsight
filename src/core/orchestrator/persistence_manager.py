@@ -17,6 +17,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 import pandas as pd
+from psycopg import sql
 
 if TYPE_CHECKING:
     from ...modules.state_context import StateContext
@@ -278,6 +279,82 @@ class PersistenceManager:
                 module_config, written,
             )
 
+    def save_summary_outputs(
+        self,
+        ctx: 'StateContext',
+        start_date: str,
+        end_date: str,
+    ) -> dict[str, int]:
+        """从 StateContext 保存全周期 Summary 到既有 ``summary_*`` 表。
+
+        Summary 只应在全部日度模块输出和状态保存成功后调用。每张表按
+        ``run_id`` 整体替换，避免重跑时保留旧周期汇总行；表名完全由
+        ``SUMMARY_REGISTRY`` 提供，禁止回退至旧 ``summary_output_*`` 命名。
+        """
+        if self.db is None:
+            logger.debug("无 DB 连接，跳过 StateContext Summary 持久化")
+            return {}
+
+        from src.models.viewcontext import SUMMARY_REGISTRY
+        from ...utils.normalization import normalize_identifiers
+
+        outputs = ctx.build_summary_outputs(
+            start_date=start_date,
+            end_date=end_date,
+            config_dict=self._orch.all_config,
+        )
+        run_id = self._run_id
+        sim_date = pd.Timestamp(end_date).strftime('%Y-%m-%d')
+        now = datetime.now()
+        written: dict[str, int] = {}
+
+        for output_name, table_name in SUMMARY_REGISTRY.items():
+            # 无行的 Summary 仍是有效计算结果。动态 DataFrame 建表路径不能
+            # 从空表推断列，故仅删除当前 run 的旧行并返回 0。
+            self.writer.delete(table_name, {'run_id': run_id})
+            frame = outputs.get(output_name, pd.DataFrame())
+            if not isinstance(frame, pd.DataFrame) or frame.empty:
+                written[table_name] = 0
+                continue
+            frame = normalize_identifiers(frame.copy())
+            frame = self._inject_meta(frame, run_id, sim_date, now)
+            self._ensure_summary_columns(table_name, frame)
+            self.writer.write(table_name, frame)
+            written[table_name] = len(frame)
+
+        logger.info(
+            "🗄️ 已写入 StateContext Summary: %d 张表, %d 行",
+            len(written), sum(written.values()),
+        )
+        return written
+
+    def _ensure_summary_columns(self, table_name: str, frame: pd.DataFrame) -> None:
+        """为迁移预建的 Summary 表补齐 DataFrame 中新增的业务列。
+
+        Summary 没有稳定的统一业务 schema。迁移仅预建四个元数据列；此处在
+        首次写入前将其余列以 TEXT 幂等加入，配合 DB.write_df 的表列对齐逻辑
+        保留所有业务字段而非静默丢弃。运行元数据的日期/数值类型不受影响。
+        """
+        if self.db is None or not hasattr(self.db, 'execute'):
+            return
+        expected = [str(column).strip().lower() for column in frame.columns]
+        try:
+            with self.db.get_cursor(commit=True) as cursor:
+                existing = self.db._get_table_columns(cursor, table_name)
+                for column in expected:
+                    if column in existing:
+                        continue
+                    cursor.execute(
+                        sql.SQL("ALTER TABLE {} ADD COLUMN IF NOT EXISTS {} TEXT").format(
+                            self.db._qualified(table_name), sql.Identifier(column)
+                        )
+                    )
+            self.db._col_type_cache.pop(table_name, None)
+        except Exception as exc:
+            raise RuntimeError(
+                f"Summary 表 {table_name} 扩展业务列失败"
+            ) from exc
+
     # ════════════════════════════════════════
     # 配置写入（独立于 DQ，仅 DQ 通过时调用）
     # ════════════════════════════════════════
@@ -501,9 +578,11 @@ class PersistenceManager:
             logger.warning(f"update_orch_status 失败: {e}")
 
     def find_unfinished(self, config_name: str | None) -> dict | None:
-        """按 config_name 查最近一条可续跑的 run（DQ 已过、orch 未完成、确实跑过至少一天）。
+        """按 config_name 查最近一条可续跑的 run（orch 未完成且确实跑过至少一天）。
 
         返回 ``{run_id, current_date, total_days}`` 或 None。
+        续跑资格仅由 ``orch_run_event.status`` 和 ``progress_date`` 判断，与
+        ``dq_status`` 无关：DQ 决定新配置是否写回，运行状态决定是否继续既有 run。
         仅当 progress_date 不为 NULL 时才续跑（progress_date=NULL 说明刚 start 还没跑任何一天，
         是当前正在跑的全新运行，不应误续跑）。
         """
@@ -514,7 +593,6 @@ class PersistenceManager:
             rows = self.db.execute_query(
                 f"SELECT runid, progress_date, total_days FROM {_evt} "
                 "WHERE config_name = %s AND status <> 'finished' "
-                "AND dq_status IN ('passed', 'cached') "
                 "AND progress_date IS NOT NULL "
                 "ORDER BY started_at DESC NULLS LAST LIMIT 1",
                 (config_name,),
@@ -649,7 +727,11 @@ class PersistenceManager:
         Returns:
             注入元数据列后的 DataFrame。
         """
-        if 'config_name' not in df.columns:
+        # 配置身份由本次运行显式传入，不能沿用 Excel/CSV 中可能存在的旧
+        # ``config_name`` 列；否则并行测试或场景副本会把 cfg_* 写到错误身份。
+        if 'config_name' in df.columns:
+            df['config_name'] = config_name
+        else:
             df.insert(0, 'config_name', config_name)
         if 'db_write_time' not in df.columns:
             df['db_write_time'] = now

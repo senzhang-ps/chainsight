@@ -19,6 +19,8 @@ def main():
     parser.add_argument("--config", required=True, help="配置文件路径 (xlsx)")
     parser.add_argument("--start-date", required=True, help="仿真开始日期 (YYYY-MM-DD)")
     parser.add_argument("--end-date", required=True, help="仿真结束日期 (YYYY-MM-DD)")
+    parser.add_argument("--test", action="store_true", help="启用测试隔离模式（数据库 schema 固定为 test）")
+    parser.add_argument("--no-persist", action="store_true", help="禁用数据库持久化，仅在内存中运行")
     args = parser.parse_args()
 
     # 使用与 run_main.py 相同的输出目录逻辑: outputs/<config_stem>/run_YYYYMMDD_HHMMSS/
@@ -34,6 +36,8 @@ def main():
         start_date=args.start_date,
         end_date=args.end_date,
         output_base_dir=str(output_base_dir),
+        test_mode=args.test,
+        enable_persistence=not args.no_persist,
     )
     assert result is not None, "仿真返回 None"
     assert result.get('simulation_completed') is True, f"仿真未完成: {result}"

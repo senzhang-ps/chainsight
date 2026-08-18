@@ -93,6 +93,7 @@ class ConfigManager:
         config_path: str | None = None,
         *,
         connect_db: bool = True,
+        test_mode: bool = False,
     ) -> None:
         """从 yaml 建 DB 连接 + 设 sys_config + migrate 建表。
 
@@ -100,7 +101,7 @@ class ConfigManager:
         如果数据库不存在，会尝试自动建库并重试连接；
         其他连接异常将直接抛出，避免回退到文件模式。
 
-        schema 隔离：从 ``config_path`` 经 ``ConfigDir.project`` →
+        schema 隔离：测试模式固定使用 ``test``；其他模式从 ``config_path`` 经 ``ConfigDir.project`` →
         ``resolve_project_schema`` 解析目标 schema（复用 run 层逻辑，不在 db.py
         内重写）；解析失败优雅回退到 ``default_schema`` / ``public``，不阻断 orchestrator。
         """
@@ -115,22 +116,26 @@ class ConfigManager:
                 logger.info("ConfigManager: 持久化已禁用，跳过数据库连接与表迁移")
             return
 
-        # path → project → schema（纯 --config / config_dict 无路径时回退 default_schema）
-        from ..run.schema_resolver import resolve_project_schema
-        from ..run.config_dir import ConfigDir
-        project = None
-        if config_path:
+        if test_mode:
+            schema = "test"
+            logger.info("ConfigManager: 测试模式已启用，数据库 schema 固定为 test")
+        else:
+            # path → project → schema（纯 --config / config_dict 无路径时回退 default_schema）
+            from ..run.schema_resolver import resolve_project_schema
+            from ..run.config_dir import ConfigDir
+            project = None
+            if config_path:
+                try:
+                    project = ConfigDir.from_excel_path(config_path).project
+                except (ValueError, FileNotFoundError) as e:
+                    logger.warning(f"无法从配置路径解析 project，回退 default_schema：{e}")
             try:
-                project = ConfigDir.from_excel_path(config_path).project
-            except (ValueError, FileNotFoundError) as e:
-                logger.warning(f"无法从配置路径解析 project，回退 default_schema：{e}")
-        try:
-            schema = resolve_project_schema(
-                project, default_schema=db_cfg.get('default_schema')
-            )
-        except ValueError as e:
-            logger.warning(f"schema 解析失败，回退 public：{e}")
-            schema = "public"
+                schema = resolve_project_schema(
+                    project, default_schema=db_cfg.get('default_schema')
+                )
+            except ValueError as e:
+                logger.warning(f"schema 解析失败，回退 public：{e}")
+                schema = "public"
 
         self._db = DB(
             host=db_cfg.get('host', 'localhost'),
@@ -194,7 +199,8 @@ class ConfigManager:
             logger.warning("ConfigManager: 未提供 config_path 或 config_dict，配置为空")
             return None, False
 
-        self._orch.config_name = Path(config_path).stem
+        if self._orch.config_name is None:
+            self._orch.config_name = Path(config_path).stem
 
         # ── 续跑短路：从 DB cfg_* 读已校验配置（DQ 已通过、配置已写入），跳过 DQ + run 事件 ──
         if getattr(self._orch, '_resuming', False) and self._db is not None:
@@ -211,12 +217,11 @@ class ConfigManager:
         reader = ConfigReader(config_path)
         self._all_config = reader.load_all()
 
-        if skip_dq:
-            logger.warning("ConfigManager: skip_dq=True，跳过数据质量检测")
-            return None, True
-
-        # 无 DB 连接：直接跑 DQ（不做缓存/事件）
+        # 无 DB 连接：跳过 DQ 时直接返回；否则在内存中运行 DQ（不做运行事件）。
         if self._db is None:
+            if skip_dq:
+                logger.warning("ConfigManager: skip_dq=True，跳过数据质量检测")
+                return None, True
             dq_result = self._run_data_quality_check()
             cleaned = dq_result.get("cleaned_tables", {})
             if cleaned:
@@ -231,6 +236,13 @@ class ConfigManager:
             run_id, self._orch.config_name, config_hash,
             total_days=self._orch.total_days,
         )
+
+        # 即使跳过 DQ，也必须先创建 orch_run_event。否则后续 persist() 的
+        # finalize_run_event()/save_checkpoint()/mark_finished() 都只是 UPDATE
+        # 一个不存在的 runid，导致实际仿真没有任何运行记录。
+        if skip_dq:
+            logger.warning("ConfigManager: skip_dq=True，跳过数据质量检测")
+            return None, True
 
         # 3. 检查 hash 缓存（排除当前 runid，找历史 passed + 同 hash）
         if self._is_dq_cached(self._orch.config_name, config_hash, run_id):
@@ -257,6 +269,8 @@ class ConfigManager:
             raise RuntimeError("_load_calc_datas 需要 db 连接")
 
         from src.models.cfg import CONFIG_TABLE_REGISTRY
+        from src.io.reader import ConfigReader
+        from src.utils.normalization import normalize_identifiers
 
         # 逆向映射：cfg_* 表名 → sheet_name（从 Model.__tablename__ 派生）
         reverse_map = {}
@@ -275,12 +289,27 @@ class ConfigManager:
                 continue
             db_key = table_name[4:]
             sheet_name = reverse_map.get(db_key, db_key)
+            model_cls = CONFIG_TABLE_REGISTRY.get(sheet_name)
             try:
                 df = self._db.read(table_name, config_name=self._orch.config_name)
             except Exception as e:
                 logger.warning(f"读取配置表 {table_name} 失败: {e}")
                 continue
-            config_dict[sheet_name] = df if df is not None else pd.DataFrame()
+            if df is None:
+                config_dict[sheet_name] = pd.DataFrame()
+                continue
+
+            # DB 读回的 object / None 列必须恢复到与 ConfigReader.load_all()
+            # 完全相同的模型 dtype，否则 Polars 会把全空 object 推断为 Null，
+            # 并在 M4/M5 的 join key 上与文件模式的 Utf8 发生 SchemaError。
+            # 同时剥离 config 元数据，避免它进入模块计算输入。
+            if model_cls is not None:
+                df = ConfigReader._project_to_model(df, model_cls)
+            else:
+                df = self._clean_db_columns(df)
+            if sheet_name == "M4_MaterialLocationLineCfg" and not df.empty:
+                df = normalize_identifiers(df)
+            config_dict[sheet_name] = df
 
         # 补齐必要表
         required = ['M1_InitialInventory', 'Global_SpaceCapacity',

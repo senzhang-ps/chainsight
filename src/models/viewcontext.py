@@ -12,9 +12,9 @@ migrate() 会统一建表；其余表仍走 write_df 动态建。
 """
 from __future__ import annotations
 
-from sqlalchemy import Column, DateTime, Float, Integer, Text
+from sqlalchemy import Column, DateTime, Float, Integer, Table, Text
 
-from .base import Base, ViewContextBase
+from .base import Base, SummaryBase, ViewContextBase
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -172,6 +172,23 @@ SUMMARY_REGISTRY: dict[str, str] = {
     "full_truck_usage_report": "summary_full_truck_usage_report",
     "full_exceed_capacity_report": "summary_full_exceed_capacity_report",
 }
+
+# Summary 的业务列随模块输出扩展；为避免把它们错误固化在迁移中，仅声明
+# 所有 Summary 共用的运行元数据列。PersistenceManager 会在首次写入某个
+# 业务列前以幂等 ALTER 补齐该列，从而既保证 migrate 可预建八张表，也保留
+# DataFrame 输出的完整列集。不要为这些表配置 run_id/sim_date 主键：一份
+# Summary 会包含多行业务记录，主键由其业务列决定且各表不相同。
+for _summary_table_name in SUMMARY_REGISTRY.values():
+    if _summary_table_name not in Base.metadata.tables:
+        Table(
+            _summary_table_name,
+            Base.metadata,
+            Column('run_id', Text),
+            Column('sim_date', Text),
+            Column('config_name', Text),
+            Column('db_write_time', DateTime),
+            info={'marker': SummaryBase},
+        )
 
 
 def get_viewcontext_tables() -> list[str]:

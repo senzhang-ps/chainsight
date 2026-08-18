@@ -67,6 +67,7 @@ def migrate(db: "DB") -> None:
 
     # ── 表结构演进（幂等 ALTER；CREATE TABLE IF NOT EXISTS 不会改已存在的表）──
     _evolve_orch_run_event(db)
+    _evolve_module5_deploymentplan(db)
 
     # 保留清理：drop 旧 cfg_dq_check_result
     try:
@@ -97,6 +98,23 @@ def _evolve_orch_run_event(db: "DB") -> None:
             db.execute(ddl)
         except Exception as e:
             logger.warning(f"migrate: orch_run_event 演进失败 ({ddl}): {e}")
+
+
+def _evolve_module5_deploymentplan(db: "DB") -> None:
+    """统一 M5 部署计划的库存约束量列名为小写物理列。"""
+    table_name = "module5_output_deploymentplan"
+    if not db.table_exists(table_name):
+        return
+
+    try:
+        db.execute(
+            "ALTER TABLE {table} RENAME COLUMN \"deployed_qty_invCon\" "
+            "TO deployed_qty_invcon".format(table=db.qualified_name(table_name))
+        )
+        logger.info("migrate: 已统一 module5 部署计划列 deployed_qty_invcon")
+    except Exception as e:
+        # 正常幂等场景（旧列已改名或从未存在）均会进入这里，不影响后续运行。
+        logger.debug(f"migrate: module5 部署计划列演进跳过: {e}")
 
 
 __all__ = [

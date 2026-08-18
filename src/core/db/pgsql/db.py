@@ -411,12 +411,12 @@ class DB:
             s = df[c]
             if dtype in self._INT_DB_TYPES:
                 s = pd.to_numeric(s, errors="coerce").astype("Int64")
-                arr = s.to_numpy(dtype=object)
+                arr = s.to_numpy(dtype=object).copy()
                 arr[pd.isna(s)] = None
                 col_arrays.append(arr)
             elif dtype in self._FLOAT_DB_TYPES:
                 s = pd.to_numeric(s, errors="coerce")
-                arr = s.to_numpy(dtype=object)
+                arr = s.to_numpy(dtype=object).copy()
                 arr[pd.isna(s)] = None
                 col_arrays.append(arr)
             elif dtype in self._DATETIME_DB_TYPES:
@@ -429,7 +429,9 @@ class DB:
                 col_arrays.append(arr)
             else:
                 # 文本/布尔等：保持字符串
-                arr = s.to_numpy(dtype=object)
+                # 某些 pandas ExtensionArray 返回只读 object 数组；后续需就地
+                # 标准化空值和文本，因此显式复制为可写数组。
+                arr = s.to_numpy(dtype=object).copy()
                 mask = pd.isna(s)
                 arr[mask] = None
                 arr[~mask] = [str(v) for v in arr[~mask]]

@@ -24,6 +24,10 @@ from src.utils.defaults import M6_MAX_WAIT_DAYS, M6_RANDOM_SEED
 logger = logging.getLogger("SupplyChainSimulation")
 
 
+class SimulatedInterruption(RuntimeError):
+    """仅用于 resume 集成测试的受控日内中断。"""
+
+
 _MODULE_ORDER = ("module1", "module4", "module5", "module6", "module3")
 _RESULT_DATAFRAMES = {
     "module1": (
@@ -126,6 +130,10 @@ def run_integrated_simulation(
     end_date: str,
     output_base_dir: str = "./integrated_output",
     engine: str = "polars",
+    test_mode: bool = False,
+    enable_persistence: bool = True,
+    interrupt_after: tuple[str, str] | None = None,
+    config_name: str | None = None,
 ):
     """使用 StateContext + Orch 的集成仿真入口。
 
@@ -135,9 +143,10 @@ def run_integrated_simulation(
     3. ModuleOne 通过 orchestrator=ctx 获取状态视图
     4. 仿真循环：ctx.day_start → M1 → M4 → M5 → M6 → M3 → ctx.day_end
 
-    注意：这是正式入库前的调度验证入口。所有模块结果均收集到返回值，
-    但不调用任何 ``Orch.save_*``、``save_checkpoint()`` 或 ``finish()`` 方法，
-    以免写入正式数据库。
+    ``test_mode`` 仅决定数据库 schema（固定为 ``test``），不决定是否写库；
+    默认持久化配置、日度状态与模块输出，可通过 ``enable_persistence=False`` 关闭。
+    ``interrupt_after`` 仅供集成测试使用，格式为 ``(YYYY-MM-DD, module_id)``；
+    模块完成后、当日日末状态提交前抛出 :class:`SimulatedInterruption`。
     """
     # ── 日志配置 ──
     logging.basicConfig(
@@ -154,7 +163,9 @@ def run_integrated_simulation(
         output_path=output_base_dir,
         engine=engine,
         skip_dq=True,
-        enable_persistence=False,
+        enable_persistence=enable_persistence,
+        test_mode=test_mode,
+        config_name=config_name,
     )
     ctx = StateContext(simulation_date=start_date, orch=orch)
     ctx.initialize(orch.all_config)
@@ -209,8 +220,12 @@ def run_integrated_simulation(
     context_snapshots = []
     simulation_start_time = time.time()
 
-    # 不使用 orch.iter_dates()：该方法会在每个仿真日开始时写入 checkpoint。
-    sim_dates = pd.date_range(start_date, end_date, freq='D')
+    # progress_date 表示最后完整完成日；续跑须从下一天 M1 开始。
+    actual_start_date = pd.Timestamp(start_date)
+    if orch._resuming and orch._resume_date is not None:
+        actual_start_date = pd.Timestamp(orch._resume_date) + pd.Timedelta(days=1)
+        logger.info("🔁 测试集成入口从 %s 续跑", actual_start_date.strftime('%Y-%m-%d'))
+    sim_dates = pd.date_range(actual_start_date, end_date, freq='D')
     for i, current_date in enumerate(sim_dates, 1):
         date_str = current_date.strftime('%Y-%m-%d')
 
@@ -231,7 +246,14 @@ def run_integrated_simulation(
             _validate_module_result(module_id, result, date_str)
             result["simulation_date"] = current_date
             _apply_module_result(module_id, result, ctx, date_str)
+            ctx.record_summary_module_result(module_id, result, date_str)
             all_results[module_id].append(result)
+
+            if interrupt_after == (date_str, module_id):
+                raise SimulatedInterruption(
+                    f"受控中断：{date_str} 的 {module_id} 完成后，"
+                    "当日日末数据尚未提交"
+                )
 
             if module_id == "module3":
                 # 保留显式局部变量，确保 M3 的结果先经过统一校验和记录，
@@ -240,6 +262,13 @@ def run_integrated_simulation(
                 m4.module3_result = m3_result
 
         ctx.day_end(date_str)
+        if enable_persistence:
+            # 按日原子落库；测试模式下 Orchestrator 固定使用 ``test`` schema。
+            with orch.persistence.batch_transaction():
+                for module in modules.values():
+                    orch.save_module_output(module, date_str)
+                orch.save_daily_state(ctx, date_str)
+                orch.save_checkpoint(orch.run_id, current_date=date_str)
         context_snapshots.append({
             "simulation_date": current_date,
             "views": _snapshot_context_views(ctx, date_str),
@@ -247,6 +276,14 @@ def run_integrated_simulation(
         logger.info("✅ 第 %d/%d 天完整调度与结果校验完成: %s", i, len(sim_dates), date_str)
 
     # ── 完成报告 ──
+    summary_outputs = ctx.build_summary_outputs(
+        start_date=start_date,
+        end_date=end_date,
+        config_dict=orch.all_config,
+    )
+    final_stats = ctx.get_summary_statistics(end_date)
+    if enable_persistence:
+        orch.finalize_simulation(ctx)
     total_seconds = time.time() - simulation_start_time
     hours, rem = divmod(total_seconds, 3600)
     minutes, seconds = divmod(rem, 60)
@@ -268,8 +305,11 @@ def run_integrated_simulation(
 
     return {
         'simulation_completed': True,
+        'run_id': orch.run_id,
         'dates_processed': len(sim_dates),
         'output_directory': output_base_dir,
         'results': all_results,
         'context_snapshots': context_snapshots,
+        'summary_outputs': summary_outputs,
+        'final_stats': final_stats,
     }

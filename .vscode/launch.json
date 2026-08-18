@@ -9,26 +9,11 @@
             "program": "${workspaceFolder}/run.py",
             "console": "integratedTerminal",
             "args": [
-                "--config", "D:\\chainsight\\input\\OC\\OC_Paste_S1_20251224_extension\\OC_Paste_S1_20251224_repare.xlsx",
+                "--config", "${workspaceFolder}\\input\\OC\\OC_Paste_S1_20251224_extension\\OC_Paste_S1_20251224_repare.xlsx",
                 "--start-date", "2025-12-15",
                 "--end-date", "2026-01-19",
-                "--use-db"
-            ],
-            "justMyCode": true,
-            "env": {},
-            "cwd": "${workspaceFolder}"
-        },
-        {
-            "name": "Python: test_run_refactor.py in work env",
-            "type": "python",
-            "request": "launch",
-            "python": "C:\\Users\\lin.hn\\AppData\\Local\\miniforge3\\envs\\work\\python.exe",
-            "program": "${workspaceFolder}/test/test_run_refactor.py",
-            "console": "integratedTerminal",
-            "args": [
-                "--config", "D:\\chainsight\\input\\OC\\OC_Paste_S1_20251224_extension\\OC_Paste_S1_20251224_repare.xlsx",
-                "--start-date", "2025-12-16",
-                "--end-date", "2026-03-15"
+                "--use-db",
+                "--test"
             ],
             "justMyCode": true,
             "env": {},
@@ -39,10 +24,27 @@
             "type": "python",
             "request": "launch",
             "python": "C:\\Users\\lin.hn\\AppData\\Local\\miniforge3\\envs\\work\\python.exe",
+            "program": "${workspaceFolder}/test/test_run.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--config", "${workspaceFolder}\\input\\OC\\OC_Paste_S1_20251224_extension\\OC_Paste_S1_20251224_repare.xlsx",
+                "--start-date", "2025-12-16",
+                "--end-date", "2026-03-15",
+                "--test"
+            ],
+            "justMyCode": true,
+            "env": {},
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "name": "Python: test_m4_refactor_integration.py in work env",
+            "type": "python",
+            "request": "launch",
+            "python": "C:\\Users\\lin.hn\\AppData\\Local\\miniforge3\\envs\\work\\python.exe",
             "program": "${workspaceFolder}/tests/test_m4_refactor_integration.py",
             "console": "integratedTerminal",
             "args": [
-                "--config", "D:\\chainsight\\input\\OC\\OC_Paste_S1_20251224_extension\\OC_Paste_S1_20251224_repare.xlsx",
+                "--config", "${workspaceFolder}\\input\\OC\\OC_Paste_S1_20251224_extension\\OC_Paste_S1_20251224_repare.xlsx",
                 "--start", "2025-12-15",
                 "--end", "2025-12-19"
             ],

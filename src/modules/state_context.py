@@ -32,6 +32,7 @@ from ..utils.normalization import (
     normalize_receiving,
     normalize_sending,
 )
+from ..utils.deterministic_sort import stable_sort_for_output
 
 logger = logging.getLogger("SupplyChainSimulation")
 
@@ -118,6 +119,14 @@ class StateContext(Module):
 
         # views dict — 每日 day_start 后计算
         self.views: Dict[str, pd.DataFrame] = {}
+
+        # 全周期 Summary 的内存归档。Summary 是运行结束时的派生输出，
+        # 不参与跨日业务计算，也不作为断点恢复状态。
+        self.summary_module_results: Dict[str, List[Dict]] = {
+            'module1': [], 'module4': [], 'module5': [], 'module6': [],
+        }
+        self.summary_state_snapshots: Dict[str, Dict[str, pd.DataFrame]] = {}
+        self.summary_outputs: Dict[str, pd.DataFrame] = {}
 
     # ══════════════════════════════════════════
     # 初始化（仿真开始前调用一次）
@@ -1293,7 +1302,272 @@ class StateContext(Module):
         self.daily_ending_inventory[date_str] = (
             self.unrestricted_inventory.copy()
         )
+        # 历史库存 Summary 需要日末在途快照；不能在全周期结束后只读取
+        # 最后一天的 ctx.in_transit。其余日度业务流水已由 *_by_date 索引保存。
+        self.summary_state_snapshots[date_str] = {
+            'unrestricted_inventory': self.get_unrestricted_inventory_view(date_str).copy(deep=True),
+            'planning_intransit': self.get_planning_intransit_view(date_str).copy(deep=True),
+        }
         logger.info("📋 %s 当日处理完成", date_str)
+
+    # ══════════════════════════════════════════
+    # 全周期 Summary（仅派生输出，不改变业务状态）
+    # ══════════════════════════════════════════
+
+    def record_summary_module_result(
+        self, module_id: str, result: dict, date_str: str,
+    ) -> None:
+        """归档生成全周期 Summary 所需的每日模块输出。
+
+        调度器在结果契约校验通过后调用。本方法只保留 DataFrame 深拷贝，
+        防止模块实例在下一日复用或调用方修改结果对象后污染 Summary。
+        """
+        if module_id not in self.summary_module_results:
+            return
+        if not isinstance(result, dict):
+            raise TypeError(f"{module_id} Summary 归档要求 dict 结果")
+
+        frames = {
+            key: value.copy(deep=True)
+            for key, value in result.items()
+            if isinstance(value, pd.DataFrame)
+        }
+        self.summary_module_results[module_id].append({
+            'simulation_date': pd.Timestamp(date_str).strftime('%Y-%m-%d'),
+            'frames': frames,
+        })
+
+    @staticmethod
+    def _summary_concat(entries: List[Dict], frame_name: str) -> pd.DataFrame:
+        """合并某个模块输出，并保留其产出日作为 ``simulation_date``。"""
+        frames = []
+        for entry in entries:
+            frame = entry['frames'].get(frame_name)
+            if frame is None or frame.empty:
+                continue
+            frame = frame.copy(deep=True)
+            frame['simulation_date'] = entry['simulation_date']
+            frames.append(frame)
+        return pd.concat(frames, ignore_index=True, sort=False) if frames else pd.DataFrame()
+
+    @staticmethod
+    def _summary_filter_to_end_date(
+        frame: pd.DataFrame, end_date: pd.Timestamp, columns: List[str],
+    ) -> pd.DataFrame:
+        """保持旧 Summary 的语义：指定日期列为空或不晚于结束日时保留。"""
+        if frame.empty:
+            return frame
+        result = frame.copy(deep=True)
+        mask = pd.Series(True, index=result.index)
+        for column in columns:
+            if column not in result.columns:
+                continue
+            result[column] = pd.to_datetime(result[column], errors='coerce')
+            mask &= result[column].isna() | (result[column] <= end_date)
+        return result.loc[mask].reset_index(drop=True)
+
+    @staticmethod
+    def _summary_sort(frame: pd.DataFrame, columns: List[str]) -> pd.DataFrame:
+        actual_columns = [column for column in columns if column in frame.columns]
+        return stable_sort_for_output(frame, actual_columns) if actual_columns else frame
+
+    @staticmethod
+    def _summary_quantities_by_key(
+        frame: pd.DataFrame,
+        *,
+        date: pd.Timestamp,
+        location_column: str,
+        date_column: str = 'date',
+    ) -> Dict[Tuple[str, str], float]:
+        """按物料/地点聚合指定业务日的 quantity。"""
+        required = {'material', location_column, 'quantity'}
+        if frame is None or frame.empty or not required.issubset(frame.columns):
+            return {}
+        work = frame.copy(deep=True)
+        if date_column in work.columns:
+            work[date_column] = pd.to_datetime(work[date_column], errors='coerce').dt.normalize()
+            work = work[work[date_column] == date]
+        if work.empty:
+            return {}
+        work = normalize_identifiers(work)
+        work['quantity'] = pd.to_numeric(work['quantity'], errors='coerce').fillna(0.0)
+        grouped = work.groupby(['material', location_column], dropna=False)['quantity'].sum()
+        return {(str(material), str(location)): float(quantity)
+                for (material, location), quantity in grouped.items()}
+
+    def _build_historical_inventory_summary(
+        self,
+        start_date: pd.Timestamp,
+        end_date: pd.Timestamp,
+        config_dict: Optional[dict],
+    ) -> pd.DataFrame:
+        columns = [
+            'date', 'material', 'location', 'ending_inventory', 'in_transit',
+            'production_gr', 'delivery_gr', 'order', 'shipment', 'delivery_ship',
+            'supply_demand', 'safety_stock',
+        ]
+        safety_stock: Dict[Tuple[str, str], float] = {}
+        safety_stock_df = (config_dict or {}).get('M3_SafetyStock')
+        if isinstance(safety_stock_df, pd.DataFrame) and not safety_stock_df.empty:
+            work = normalize_identifiers(safety_stock_df.copy())
+            if {'material', 'location'}.issubset(work.columns):
+                if 'safety_stock_qty' not in work.columns:
+                    work['safety_stock_qty'] = 0.0
+                work['safety_stock_qty'] = pd.to_numeric(
+                    work['safety_stock_qty'], errors='coerce'
+                ).fillna(0.0)
+                safety_stock = {
+                    (str(row.material), str(row.location)): float(row.safety_stock_qty)
+                    for row in work.itertuples(index=False)
+                }
+
+        m1_entries = self.summary_module_results['module1']
+        records = []
+        for day in pd.date_range(start_date, end_date, freq='D'):
+            date_str = day.strftime('%Y-%m-%d')
+            snapshots = self.summary_state_snapshots.get(date_str, {})
+            inventory = self._summary_quantities_by_key(
+                snapshots.get('unrestricted_inventory', pd.DataFrame()),
+                date=day, location_column='location',
+            )
+            in_transit = self._summary_quantities_by_key(
+                snapshots.get('planning_intransit', pd.DataFrame()),
+                date=day, location_column='receiving', date_column='__no_filter__',
+            )
+            production_gr = self._summary_quantities_by_key(
+                pd.DataFrame(self.production_gr_by_date.get(date_str, [])),
+                date=day, location_column='location',
+            )
+            delivery_gr = self._summary_quantities_by_key(
+                pd.DataFrame(self.delivery_gr_by_date.get(date_str, [])),
+                date=day, location_column='receiving',
+            )
+            shipment = self._summary_quantities_by_key(
+                pd.DataFrame(self.shipment_log_by_date.get(date_str, [])),
+                date=day, location_column='location',
+            )
+            delivery_ship = self._summary_quantities_by_key(
+                pd.DataFrame(self.delivery_shipment_log_by_date.get(date_str, [])),
+                date=day, location_column='sending',
+            )
+
+            day_m1 = next((entry for entry in m1_entries if entry['simulation_date'] == date_str), None)
+            order = self._summary_quantities_by_key(
+                (day_m1 or {'frames': {}})['frames'].get('orders_df', pd.DataFrame()),
+                date=day, location_column='location',
+            )
+            supply_demand = self._summary_quantities_by_key(
+                (day_m1 or {'frames': {}})['frames'].get('supply_demand_df', pd.DataFrame()),
+                date=day, location_column='location',
+            )
+            all_keys = set().union(
+                inventory, in_transit, production_gr, delivery_gr, order, shipment,
+                delivery_ship, supply_demand, safety_stock,
+            )
+            for material, location in sorted(all_keys):
+                records.append({
+                    'date': date_str, 'material': material, 'location': location,
+                    'ending_inventory': inventory.get((material, location), 0),
+                    'in_transit': in_transit.get((material, location), 0),
+                    'production_gr': production_gr.get((material, location), 0),
+                    'delivery_gr': delivery_gr.get((material, location), 0),
+                    'order': order.get((material, location), 0),
+                    'shipment': shipment.get((material, location), 0),
+                    'delivery_ship': delivery_ship.get((material, location), 0),
+                    'supply_demand': supply_demand.get((material, location), 0),
+                    'safety_stock': safety_stock.get((material, location), 0),
+                })
+        return pd.DataFrame(records, columns=columns)
+
+    def build_summary_outputs(
+        self, start_date: str, end_date: str, config_dict: Optional[dict] = None,
+    ) -> Dict[str, pd.DataFrame]:
+        """从 StateContext 内存状态构建 `SUMMARY_REGISTRY` 所有全周期输出。"""
+        start = pd.Timestamp(start_date).normalize()
+        end = pd.Timestamp(end_date).normalize()
+        m1_entries = self.summary_module_results['module1']
+
+        order_qty: Dict[Tuple, float] = {}
+        shipment_qty: Dict[Tuple, float] = {}
+        cut_qty: Dict[Tuple, float] = {}
+        seen_orders = set()
+        for entry in m1_entries:
+            simulation_date = entry['simulation_date']
+            for frame_name, target, deduplicate in (
+                ('orders_df', order_qty, True), ('shipment_df', shipment_qty, False),
+                ('cut_df', cut_qty, False),
+            ):
+                frame = entry['frames'].get(frame_name, pd.DataFrame())
+                if frame.empty or not {'date', 'material', 'location', 'quantity'}.issubset(frame.columns):
+                    continue
+                work = normalize_identifiers(frame.copy())
+                work['date'] = pd.to_datetime(work['date'], errors='coerce')
+                work['quantity'] = pd.to_numeric(work['quantity'], errors='coerce').fillna(0.0)
+                work = work[work['date'].notna() & (work['date'] <= end)]
+                dedup_cols = ['date', 'material', 'location', 'quantity']
+                if deduplicate and 'demand_type' in work.columns:
+                    dedup_cols.append('demand_type')
+                if deduplicate:
+                    work = work.drop_duplicates(subset=dedup_cols)
+                    keep = []
+                    for row in work[dedup_cols].itertuples(index=False, name=None):
+                        key = tuple(str(value) for value in row)
+                        keep.append(key not in seen_orders)
+                        seen_orders.add(key)
+                    work = work.loc[keep]
+                for (date_value, material, location), qty in work.groupby(
+                    ['date', 'material', 'location'], dropna=False
+                )['quantity'].sum().items():
+                    key = (simulation_date, date_value, material, location)
+                    target[key] = target.get(key, 0.0) + float(qty)
+
+        order_records = []
+        for key in sorted(set(order_qty) | set(shipment_qty) | set(cut_qty), key=lambda value: tuple(map(str, value))):
+            order_records.append({
+                'simulation_date': key[0], 'date': key[1], 'material': key[2], 'location': key[3],
+                'order_qty': order_qty.get(key, 0), 'shipment_qty': shipment_qty.get(key, 0),
+                'cut_qty': cut_qty.get(key, 0),
+            })
+        order_summary = pd.DataFrame(order_records, columns=[
+            'simulation_date', 'date', 'material', 'location', 'order_qty', 'shipment_qty', 'cut_qty',
+        ])
+
+        production = self._summary_filter_to_end_date(
+            self._summary_concat(self.summary_module_results['module4'], 'production_df'), end,
+            ['available_date'],
+        )
+        changeover = self._summary_filter_to_end_date(
+            self._summary_concat(self.summary_module_results['module4'], 'changeover_log'), end,
+            ['changeover_end_date'],
+        )
+        capacity = self._summary_filter_to_end_date(
+            self._summary_concat(self.summary_module_results['module4'], 'exceed_log'), end, ['date'],
+        )
+        deployment = self._summary_filter_to_end_date(
+            self._summary_concat(self.summary_module_results['module5'], 'deployment_plan'), end,
+            ['deployment_date', 'arrival_date', 'ship_date', 'date'],
+        )
+        delivery = self._summary_filter_to_end_date(
+            self._summary_concat(self.summary_module_results['module6'], 'delivery_plan'), end,
+            ['planned_deploy_date', 'actual_ship_date'],
+        )
+        truck_usage = self._summary_filter_to_end_date(
+            self._summary_concat(self.summary_module_results['module6'], 'truck_usage'), end, ['date'],
+        )
+        outputs = {
+            'historical_inventory_record': self._build_historical_inventory_summary(start, end, config_dict),
+            'full_order_shipment_cut_report': self._summary_sort(
+                order_summary, ['simulation_date', 'date', 'material', 'location']),
+            'full_production_plan_report': production,
+            'full_changeover_report': changeover,
+            'full_deployment_plan_report': self._summary_sort(
+                deployment, ['date', 'material', 'sending', 'receiving', 'demand_element']),
+            'full_delivery_plan_report': delivery,
+            'full_truck_usage_report': truck_usage,
+            'full_exceed_capacity_report': capacity,
+        }
+        self.summary_outputs = outputs
+        return outputs
 
     # ══════════════════════════════════════════
     # M4 跨天状态托管（产线状态 + 已分配产能）

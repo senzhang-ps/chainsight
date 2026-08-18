@@ -311,18 +311,12 @@ class TestRunEventLifecycle:
         assert result is None
 
     def test_find_unfinished_returns_interrupted_run(self, persistence):
-        """中断的 run 应被 find_unfinished 找到（需 DQ 已通过）。"""
+        """中断的 run 应仅依据执行状态和进度被 find_unfinished 找到。"""
         persistence.start_run_event(
             run_id="test_run_interrupted",
             config_name="test_config_interrupted",
             config_hash="abc123",
             total_days=30,
-        )
-        # 模拟 DQ 通过（find_unfinished 要求 dq_status IN ('passed', 'cached')）
-        persistence.finalize_run_event(
-            "test_run_interrupted",
-            "test_config_interrupted",
-            dq_result={"passed": True, "issues": []},
         )
         # 模拟已跑完 5 天但中断
         persistence.update_orch_status(
@@ -335,6 +329,27 @@ class TestRunEventLifecycle:
         assert result["run_id"] == "test_run_interrupted"
         assert result["current_date"] == "2025-12-20"
         assert result["total_days"] == 30
+
+    def test_find_unfinished_allows_skipped_dq(self, persistence):
+        """跳过 DQ 不得影响按执行状态恢复未完成运行。"""
+        persistence.start_run_event(
+            run_id="test_run_skipped_dq",
+            config_name="test_config_skipped_dq",
+            config_hash="abc123",
+            total_days=5,
+        )
+        persistence.finalize_run_event(
+            "test_run_skipped_dq",
+            "test_config_skipped_dq",
+            dq_result=None,
+        )
+        persistence.update_orch_status(
+            "test_run_skipped_dq", current_date="2025-12-16",
+        )
+
+        result = persistence.find_unfinished("test_config_skipped_dq")
+        assert result is not None
+        assert result["run_id"] == "test_run_skipped_dq"
 
     def test_find_unfinished_skips_finished_runs(self, persistence):
         """已完成的 run 不应被 find_unfinished 返回。"""

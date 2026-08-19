@@ -45,9 +45,19 @@ def pandas_to_polars(df: pd.DataFrame) -> pl.DataFrame:
                 for value in s
             ]
             continue
+        if pd.api.types.is_extension_array_dtype(s.dtype):
+            # PostgreSQL 读取后经模型投影会产生 pandas nullable dtype；其
+            # 缺失标记 ``pd.NA`` 不能由 Polars 的 numpy object 构造器判断，
+            # 必须在引擎边界归一为 Python ``None``。不能保留 numpy object
+            # 数组，否则 Polars 会将整列推断为 Object，后续数值 cast 失败。
+            converted[col] = [None if pd.isna(value) else value for value in s]
+            continue
         try:
             # 先尝试直接转 numpy
             arr = s.to_numpy()
+            if arr.dtype == object and s.isna().any():
+                converted[col] = [None if pd.isna(value) else value for value in s]
+                continue
             converted[col] = arr
         except Exception:
             # 降级为 str

@@ -156,6 +156,43 @@ class TestResumeRegistry:
             assert True  # 通过 __mapper_args__ 定义，编译时不生成 PK 约束
 
 
+class TestResumeDatabaseOptimization:
+    """续跑读取优化的数据库契约。"""
+
+    def test_existing_tables_filters_requested_tables_once(self, db):
+        """批量表目录查询只返回当前 schema 中实际存在的候选表。"""
+        existing = db.existing_tables([
+            "orch_run_event",
+            "resume_m1_order_df",
+            "table_that_does_not_exist",
+        ])
+
+        assert "orch_run_event" in existing
+        assert "resume_m1_order_df" in existing
+        assert "table_that_does_not_exist" not in existing
+
+    def test_resume_tables_have_run_date_indexes(self, db):
+        """状态和 M1 快照恢复按 run_id/sim_date 查询时应有复合索引。"""
+        table_names = [
+            "viewcontext_unrestricted_inventory",
+            "resume_m1_order_df",
+        ]
+        rows = db.execute_query(
+            "SELECT tablename, indexdef FROM pg_indexes "
+            "WHERE schemaname = %s AND tablename = ANY(%s)",
+            (db.schema, table_names),
+        )
+        indexes_by_table = {}
+        for table_name, index_def in rows:
+            indexes_by_table.setdefault(table_name, []).append(index_def.lower())
+
+        for table_name in table_names:
+            assert any(
+                "(run_id, sim_date)" in index_def
+                for index_def in indexes_by_table.get(table_name, [])
+            ), f"{table_name} 缺少 (run_id, sim_date) resume 索引"
+
+
 class TestResumeMemory:
     """纯内存测试 — 不依赖数据库。"""
 

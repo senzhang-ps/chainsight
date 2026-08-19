@@ -234,6 +234,42 @@ class DB:
             data = cursor.fetchall()
             return pd.DataFrame(data, columns=columns)
 
+    def read_polars(self, table: str, run_id: str = None,
+                    sim_date: str = None, config_name: str = None,
+                    filters: dict = None):
+        """按条件直接读取为 Polars DataFrame。
+
+        主要供 resume 的百万行 M1 快照使用，避免 ``read()`` 先构造 pandas
+        DataFrame、再转换为 Polars 所造成的双份内存与逐列转换开销。
+        """
+        import polars as pl
+
+        conditions = []
+        params_list = []
+        for column, value in (
+            ('run_id', run_id), ('sim_date', sim_date),
+            ('config_name', config_name),
+        ):
+            if value is not None:
+                conditions.append(sql.SQL("{} = %s").format(sql.Identifier(column)))
+                params_list.append(value)
+        if filters:
+            for col, val in filters.items():
+                if val is None:
+                    conditions.append(sql.SQL("{} IS NULL").format(sql.Identifier(col)))
+                else:
+                    conditions.append(sql.SQL("{} = %s").format(sql.Identifier(col)))
+                    params_list.append(val)
+
+        query = sql.SQL("SELECT * FROM {} ").format(self._qualified(table))
+        if conditions:
+            query += sql.SQL("WHERE {} ").format(sql.SQL(" AND ").join(conditions))
+
+        with self.get_cursor(commit=False) as cursor:
+            cursor.execute(query, tuple(params_list) if params_list else None)
+            columns = [desc[0] for desc in cursor.description]
+            return pl.DataFrame(cursor.fetchall(), schema=columns, orient='row')
+
     # ── 写入 ─────────────────────────────────
 
     def write(self, source, run_id: str = None, sim_date: str = None,
@@ -501,6 +537,32 @@ class DB:
                 (self.schema, table_name)
             )
             return cursor.fetchone()[0]
+
+    def existing_tables(self, table_names: list[str] | None = None) -> set[str]:
+        """一次查询当前 schema 中存在的表名。
+
+        Args:
+            table_names: 可选的候选表名。传入时仅返回这些表中实际存在的项，
+                用于避免续跑恢复时为每张状态表单独访问 ``information_schema``。
+
+        Returns:
+            当前 schema 中存在的表名集合。
+        """
+        query = (
+            "SELECT table_name FROM information_schema.tables "
+            "WHERE table_schema = %s"
+        )
+        params: tuple = (self.schema,)
+        if table_names is not None:
+            candidates = list(dict.fromkeys(table_names))
+            if not candidates:
+                return set()
+            query += " AND table_name = ANY(%s)"
+            params = (self.schema, candidates)
+
+        with self.get_cursor(commit=False) as cursor:
+            cursor.execute(query, params)
+            return {row[0] for row in cursor.fetchall()}
 
     def get_all_tables(self) -> list[str]:
         """获取当前 schema 中所有用户表名。"""

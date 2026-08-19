@@ -165,7 +165,8 @@ class ModuleOne(Module):
     # ------------------------------------------------------------------
 
     def prepare(self):
-        # 续跑：从快照装载 4 属性，跳过计算
+        # 续跑：从快照装载 4 属性，跳过计算。M1 prepare 含随机采样，快照既
+        # 保证与中断前严格一致，也比当前真实数据上的确定性重建更快。
         orch = self.orchestrator  # self.orchestrator = orch（super().__init__ 存的）
         if getattr(orch, '_resuming', False) and getattr(orch, '_resume_date', None):
             # m1 快照在首次 prepare 时按 self.simulation_date（= start_date）存一次，
@@ -206,8 +207,7 @@ class ModuleOne(Module):
         self.daily_detail_sc = daily_detail_sc
         self.order_cal = self.order_calendar
 
-        # prepare 完成后存一次快照（续跑时读）
-        orch = self.orchestrator
+        # prepare 完成后存一次快照（续跑时读）。
         if getattr(orch, 'db', None) is not None:
             sim_date_str = str(self.simulation_date) if hasattr(self, 'simulation_date') else ''
             orch.persistence.save_m1_snapshot(self, sim_date_str)

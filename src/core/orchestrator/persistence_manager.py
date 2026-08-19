@@ -780,144 +780,19 @@ class PersistenceManager:
         """
         if self.db is None:
             return
-        from src.models.viewcontext import VIEWCONTEXT_REGISTRY
-        from ...utils.normalization import normalize_identifiers
-
-        def _read_view(view_key: str) -> "pd.DataFrame | None":
-            """按 view_key 读对应 viewcontext 表；表不存在则返回 None（续跑早期阶段表可能尚未建）。"""
-            tbl = VIEWCONTEXT_REGISTRY.get(view_key)
-            if not tbl:
-                return None
-            if not self.db.table_exists(tbl):
-                logger.debug(f"⏭️ viewcontext 表 {tbl} 尚不存在，跳过恢复 {view_key}")
-                return None
-            try:
-                df = self.db.read(tbl, run_id=run_id, sim_date=sim_date)
-            except Exception as e:
-                logger.warning(f"读取 viewcontext 表 {tbl} 失败（跳过 {view_key}）: {e}")
-                return None
-            if df is None or df.empty:
-                logger.debug(f"viewcontext {tbl} sim_date={sim_date} 无数据")
-                return None
-            logger.debug(
-                f"viewcontext {tbl} sim_date={sim_date} 读到 {len(df)} 行，列={df.columns.tolist()}"
+        frames = self._load_resume_frames(run_id, sim_date)
+        restored = [
+            result for result in (
+                self._restore_inventory(ctx, frames.get('unrestricted_inventory')),
+                self._restore_open_deployment(ctx, frames.get('open_deployment')),
+                self._restore_in_transit(ctx, frames.get('planning_intransit')),
+                self._restore_production_plan_backlog(ctx, frames.get('production_plan_backlog')),
+                self._restore_m4_line_states(ctx, frames.get('m4_line_states')),
+                self._restore_m4_allocated_capacity(ctx, frames.get('m4_allocated_capacity')),
+                self._restore_m3_net_demand(ctx, sim_date, frames.get('m3_net_demand')),
             )
-            return df
-
-        restored = []
-
-        # 注：normalize_identifiers 是 DataFrame 级（入参 df，默认处理 material/
-        # location/sending/receiving 等列），不可对单个标量调用。每张表先整体规范化一次。
-
-        # 1) unrestricted_inventory → ctx.unrestricted_inventory {(material, location): qty}
-        df = _read_view('unrestricted_inventory')
-        if df is not None and not df.empty:
-            df = normalize_identifiers(df)
-            qty = pd.to_numeric(df['quantity'], errors='coerce').fillna(0).astype(int)
-            ctx.unrestricted_inventory = dict(zip(zip(df['material'], df['location']), qty))
-            restored.append(f"unrestricted_inventory({len(ctx.unrestricted_inventory)})")
-
-        # 2) open_deployment → ctx.open_deployment {uid: record}
-        df = _read_view('open_deployment')
-        if df is not None and not df.empty:
-            df = normalize_identifiers(df)
-            df['deployed_qty'] = pd.to_numeric(df['deployed_qty'], errors='coerce').fillna(0.0)
-            recs = df.to_dict('records')
-            ctx.open_deployment = {
-                str(r.get('ori_deployment_uid', '')): {
-                    'material': r.get('material', ''),
-                    'sending': r.get('sending', ''),
-                    'receiving': r.get('receiving', ''),
-                    'planned_deployment_date': str(r.get('planned_deployment_date', '')),
-                    'deployed_qty': float(r['deployed_qty']),
-                    'demand_element': str(r.get('demand_element', '')),
-                }
-                for r in recs
-            }
-            restored.append(f"open_deployment({len(ctx.open_deployment)})")
-
-        # 3) planning_intransit → ctx.in_transit {uid: record}
-        df = _read_view('planning_intransit')
-        if df is not None and not df.empty:
-            df = normalize_identifiers(df)
-            df['quantity'] = pd.to_numeric(df['quantity'], errors='coerce').fillna(0.0)
-            recs = df.to_dict('records')
-            ctx.in_transit = {
-                str(r.get('transit_uid', '')): {
-                    'material': r.get('material', ''),
-                    'sending': r.get('sending', ''),
-                    'receiving': r.get('receiving', ''),
-                    'actual_ship_date': str(r.get('actual_ship_date', '')),
-                    'actual_delivery_date': str(r.get('actual_delivery_date', '')),
-                    'quantity': float(r['quantity']),
-                    'ori_deployment_uid': str(r.get('ori_deployment_uid', '')),
-                    'vehicle_uid': str(r.get('vehicle_uid', '')),
-                }
-                for r in recs
-            }
-            restored.append(f"in_transit({len(ctx.in_transit)})")
-
-        # 4) production_plan_backlog → ctx.production_plan_backlog [record...]
-        df = _read_view('production_plan_backlog')
-        if df is not None and not df.empty:
-            df = normalize_identifiers(df)
-            if 'available_date' in df.columns:
-                df['available_date'] = pd.to_datetime(df['available_date'], errors='coerce')
-            if 'quantity' in df.columns:
-                df['quantity'] = pd.to_numeric(df['quantity'], errors='coerce').fillna(0)
-            cols = ['material', 'location', 'available_date', 'quantity']
-            ctx.production_plan_backlog = df[cols].to_dict('records')
-            restored.append(f"production_plan_backlog({len(ctx.production_plan_backlog)})")
-
-        # 5) M4 line_states（展平列 → 嵌套 dict）
-        df = _read_view('m4_line_states')
-        if df is not None and not df.empty:
-            for sim_d, group in df.groupby('sim_date'):
-                d_str = str(sim_d) if hasattr(sim_d, 'strftime') else str(sim_d)
-                ctx.m4_line_states[d_str] = {}
-                for row in group.to_dict('records'):
-                    remaining = row.get('remaining_time')
-                    ci = None
-                    if remaining is not None and pd.notna(remaining) and float(remaining) > 0:
-                        ci = {
-                            'remaining_time': float(remaining),
-                            'changeover_id': row.get('changeover_id'),
-                            'to_material': row.get('to_material'),
-                        }
-                    ctx.m4_line_states[d_str][row['line']] = {
-                        'last_material': row.get('last_material'),
-                        'last_location': row.get('last_location'),
-                        'last_activity': row.get('last_activity'),
-                        'changeover_info': ci,
-                    }
-            restored.append(f"m4_line_states({len(ctx.m4_line_states)} days)")
-
-        # 6) M4 allocated_capacity（key-value → dict）
-        df = _read_view('m4_allocated_capacity')
-        if df is not None and not df.empty:
-            for sim_d, group in df.groupby('sim_date'):
-                d_str = str(sim_d) if hasattr(sim_d, 'strftime') else str(sim_d)
-                ctx.m4_allocated_capacity[d_str] = {
-                    row['capacity_key']: float(row['allocated_hours'])
-                    for row in group.to_dict('records')
-                }
-            restored.append(f"m4_allocated_capacity({len(ctx.m4_allocated_capacity)} days)")
-
-        # 7) M3 净需求：它本来就是 module3_output_netdemand 正式输出，
-        # 不复制到 viewcontext。恢复时按同一 run 的上一完成日读取，供下一日
-        # M4 保持一日 lag 消费。
-        m3_table = 'module3_output_netdemand'
-        if hasattr(ctx, 'm3_net_demand_by_date') and self.db.table_exists(m3_table):
-            try:
-                m3_df = self.db.read(m3_table, run_id=run_id, sim_date=sim_date)
-                if m3_df is not None:
-                    ctx.m3_net_demand_by_date[str(sim_date)[:10]] = m3_df.drop(
-                        columns=['run_id', 'sim_date', 'config_name', 'db_write_time'],
-                        errors='ignore',
-                    ).copy(deep=True)
-                    restored.append(f"m3_net_demand({len(m3_df)})")
-            except Exception as exc:
-                logger.warning("恢复 M3 净需求失败（将由首日空输入保护）: %s", exc)
+            if result
+        ]
 
         if restored:
             logger.info(
@@ -929,6 +804,153 @@ class PersistenceManager:
                 f"🔄 ctx 无可恢复 ViewContext 状态（表尚未落库）: "
                 f"run_id={run_id}, sim_date={sim_date}"
             )
+
+    def _load_resume_frames(self, run_id: str, sim_date: str) -> dict[str, pd.DataFrame]:
+        """一次发现并读取当前断点可恢复的状态表。
+
+        ViewContext 表按实际数据动态创建，故先批量检查存在性。缺表、空表和
+        单表读取错误均只跳过对应状态，保持早期断点续跑的兼容性。
+        """
+        from src.models.viewcontext import VIEWCONTEXT_REGISTRY
+
+        m3_key = 'm3_net_demand'
+        table_by_key = {
+            key: table for key, table in VIEWCONTEXT_REGISTRY.items()
+            if key in {
+                'unrestricted_inventory', 'open_deployment', 'planning_intransit',
+                'production_plan_backlog', 'm4_line_states', 'm4_allocated_capacity',
+            }
+        }
+        table_by_key[m3_key] = 'module3_output_netdemand'
+        existing_tables = self.db.existing_tables(list(table_by_key.values()))
+        frames = {}
+        for key, table_name in table_by_key.items():
+            if table_name not in existing_tables:
+                logger.debug("⏭️ 恢复表 %s 尚不存在，跳过 %s", table_name, key)
+                continue
+            try:
+                frame = self.db.read(table_name, run_id=run_id, sim_date=sim_date)
+            except Exception as exc:
+                logger.warning("读取恢复表 %s 失败（跳过 %s）: %s", table_name, key, exc)
+                continue
+            if frame is not None and not frame.empty:
+                frames[key] = frame
+        return frames
+
+    @staticmethod
+    def _restore_inventory(ctx, frame: pd.DataFrame | None) -> str | None:
+        if frame is None:
+            return None
+        from ...utils.normalization import normalize_identifiers
+
+        frame = normalize_identifiers(frame)
+        qty = pd.to_numeric(frame['quantity'], errors='coerce').fillna(0).astype(int)
+        ctx.unrestricted_inventory = dict(zip(zip(frame['material'], frame['location']), qty))
+        return f"unrestricted_inventory({len(ctx.unrestricted_inventory)})"
+
+    @staticmethod
+    def _restore_open_deployment(ctx, frame: pd.DataFrame | None) -> str | None:
+        if frame is None:
+            return None
+        from ...utils.normalization import normalize_identifiers
+
+        frame = normalize_identifiers(frame)
+        frame['deployed_qty'] = pd.to_numeric(frame['deployed_qty'], errors='coerce').fillna(0.0)
+        ctx.open_deployment = {
+            str(row.get('ori_deployment_uid', '')): {
+                'material': row.get('material', ''),
+                'sending': row.get('sending', ''),
+                'receiving': row.get('receiving', ''),
+                'planned_deployment_date': str(row.get('planned_deployment_date', '')),
+                'deployed_qty': float(row['deployed_qty']),
+                'demand_element': str(row.get('demand_element', '')),
+            }
+            for row in frame.to_dict('records')
+        }
+        return f"open_deployment({len(ctx.open_deployment)})"
+
+    @staticmethod
+    def _restore_in_transit(ctx, frame: pd.DataFrame | None) -> str | None:
+        if frame is None:
+            return None
+        from ...utils.normalization import normalize_identifiers
+
+        frame = normalize_identifiers(frame)
+        frame['quantity'] = pd.to_numeric(frame['quantity'], errors='coerce').fillna(0.0)
+        ctx.in_transit = {
+            str(row.get('transit_uid', '')): {
+                'material': row.get('material', ''),
+                'sending': row.get('sending', ''),
+                'receiving': row.get('receiving', ''),
+                'actual_ship_date': str(row.get('actual_ship_date', '')),
+                'actual_delivery_date': str(row.get('actual_delivery_date', '')),
+                'quantity': float(row['quantity']),
+                'ori_deployment_uid': str(row.get('ori_deployment_uid', '')),
+                'vehicle_uid': str(row.get('vehicle_uid', '')),
+            }
+            for row in frame.to_dict('records')
+        }
+        return f"in_transit({len(ctx.in_transit)})"
+
+    @staticmethod
+    def _restore_production_plan_backlog(ctx, frame: pd.DataFrame | None) -> str | None:
+        if frame is None:
+            return None
+        from ...utils.normalization import normalize_identifiers
+
+        frame = normalize_identifiers(frame)
+        if 'available_date' in frame.columns:
+            frame['available_date'] = pd.to_datetime(frame['available_date'], errors='coerce')
+        if 'quantity' in frame.columns:
+            frame['quantity'] = pd.to_numeric(frame['quantity'], errors='coerce').fillna(0)
+        ctx.production_plan_backlog = frame[
+            ['material', 'location', 'available_date', 'quantity']
+        ].to_dict('records')
+        return f"production_plan_backlog({len(ctx.production_plan_backlog)})"
+
+    @staticmethod
+    def _restore_m4_line_states(ctx, frame: pd.DataFrame | None) -> str | None:
+        if frame is None:
+            return None
+        for sim_date, group in frame.groupby('sim_date'):
+            ctx.m4_line_states[str(sim_date)] = {}
+            for row in group.to_dict('records'):
+                remaining = row.get('remaining_time')
+                changeover_info = None
+                if remaining is not None and pd.notna(remaining) and float(remaining) > 0:
+                    changeover_info = {
+                        'remaining_time': float(remaining),
+                        'changeover_id': row.get('changeover_id'),
+                        'to_material': row.get('to_material'),
+                    }
+                ctx.m4_line_states[str(sim_date)][row['line']] = {
+                    'last_material': row.get('last_material'),
+                    'last_location': row.get('last_location'),
+                    'last_activity': row.get('last_activity'),
+                    'changeover_info': changeover_info,
+                }
+        return f"m4_line_states({len(ctx.m4_line_states)} days)"
+
+    @staticmethod
+    def _restore_m4_allocated_capacity(ctx, frame: pd.DataFrame | None) -> str | None:
+        if frame is None:
+            return None
+        for sim_date, group in frame.groupby('sim_date'):
+            ctx.m4_allocated_capacity[str(sim_date)] = {
+                row['capacity_key']: float(row['allocated_hours'])
+                for row in group.to_dict('records')
+            }
+        return f"m4_allocated_capacity({len(ctx.m4_allocated_capacity)} days)"
+
+    @staticmethod
+    def _restore_m3_net_demand(ctx, sim_date: str, frame: pd.DataFrame | None) -> str | None:
+        if frame is None or not hasattr(ctx, 'm3_net_demand_by_date'):
+            return None
+        ctx.m3_net_demand_by_date[str(sim_date)[:10]] = frame.drop(
+            columns=['run_id', 'sim_date', 'config_name', 'db_write_time'],
+            errors='ignore',
+        ).copy(deep=True)
+        return f"m3_net_demand({len(frame)})"
 
     def save_m1_snapshot(self, m1, date_str: str):
         """写 m1.prepare 后 4 属性到各自独立表（由 write_df 动态建表）。"""
@@ -971,33 +993,52 @@ class PersistenceManager:
         if self.db is None:
             return None
         from src.models.resume import M1_SNAPSHOT_REGISTRY
+        existing_tables = self.db.existing_tables(
+            list(M1_SNAPSHOT_REGISTRY.values())
+        )
+        use_polars = getattr(self._orch, 'engine', 'pandas') == 'polars'
         result = {}
         for attr, table_name in M1_SNAPSHOT_REGISTRY.items():
             # 表可能尚未建（首次运行无快照，或续跑发生在快照写入之前）
-            if not self.db.table_exists(table_name):
+            if table_name not in existing_tables:
                 continue
             try:
-                df = self.db.read(table_name, run_id=run_id, sim_date=sim_date)
+                df = (
+                    self.db.read_polars(table_name, run_id=run_id, sim_date=sim_date)
+                    if use_polars else
+                    self.db.read(table_name, run_id=run_id, sim_date=sim_date)
+                )
             except Exception as e:
                 logger.warning(f"读取 m1 快照表 {table_name} 失败（跳过 {attr}）: {e}")
                 continue
-            if df is None or df.empty:
+            is_empty = df is None or (
+                df.is_empty() if use_polars else df.empty
+            )
+            if is_empty:
                 continue
             # 剥离元数据列
             meta_cols = {'run_id', 'sim_date', 'config_name', 'db_write_time'}
             keep = [c for c in df.columns if c not in meta_cols]
-            df = df[keep].copy()
-            # 恢复日期列类型
-            for col in ('date', 'available_date', 'simulation_date',
-                         'order_date', 'delivery_date', 'ship_date', 'created_date'):
-                if col in df.columns:
-                    df[col] = pd.to_datetime(df[col], errors='coerce')
-            # 读边界适配：polars 引擎下转成 polars，喂给 _PolarsBackend
-            # （db.read 恒返回 pandas；这 4 属性由 polars 后端消费，pandas 会让
-            #   merge_with_history 等处的 is_empty()/pl.col() 崩）。
-            if getattr(self._orch, 'engine', 'pandas') == 'polars':
-                from ...utils.df_convert import pandas_to_polars
-                df = pandas_to_polars(df)
+            if use_polars:
+                import polars as pl
+
+                df = df.select(keep)
+                date_cols = (
+                    'date', 'available_date', 'simulation_date', 'order_date',
+                    'delivery_date', 'ship_date', 'created_date',
+                )
+                df = df.with_columns([
+                    pl.col(col).cast(pl.String).str.to_datetime(strict=False).alias(col)
+                    for col in date_cols
+                    if col in df.columns
+                ])
+            else:
+                df = df[keep].copy()
+                # 恢复日期列类型
+                for col in ('date', 'available_date', 'simulation_date',
+                             'order_date', 'delivery_date', 'ship_date', 'created_date'):
+                    if col in df.columns:
+                        df[col] = pd.to_datetime(df[col], errors='coerce')
             result[attr] = df
         return result or None
 

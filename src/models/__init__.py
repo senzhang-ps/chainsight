@@ -68,6 +68,7 @@ def migrate(db: "DB") -> None:
     # ── 表结构演进（幂等 ALTER；CREATE TABLE IF NOT EXISTS 不会改已存在的表）──
     _evolve_orch_run_event(db)
     _evolve_module5_deploymentplan(db)
+    _ensure_resume_indexes(db)
 
     # 保留清理：drop 旧 cfg_dq_check_result
     try:
@@ -115,6 +116,62 @@ def _evolve_module5_deploymentplan(db: "DB") -> None:
     except Exception as e:
         # 正常幂等场景（旧列已改名或从未存在）均会进入这里，不影响后续运行。
         logger.debug(f"migrate: module5 部署计划列演进跳过: {e}")
+
+
+def _ensure_resume_indexes(db: "DB") -> None:
+    """为断点续跑的定位查询创建幂等索引。
+
+    状态和 M1 快照恢复均按 ``(run_id, sim_date)`` 精确过滤。ViewContext
+    中部分表由运行时动态创建，故先批量确认表存在再建索引；不存在的早期状态表
+    保持可选、不会阻断迁移。
+    """
+    from .resume import M1_SNAPSHOT_REGISTRY
+    from .viewcontext import VIEWCONTEXT_REGISTRY
+
+    resume_tables = (
+        set(VIEWCONTEXT_REGISTRY.values())
+        | set(M1_SNAPSHOT_REGISTRY.values())
+        | {'module3_output_netdemand'}
+    )
+    existing_tables = db.existing_tables(list(resume_tables | {'orch_run_event'}))
+
+    for table_name in sorted(resume_tables & existing_tables):
+        index_name = f"idx_{table_name}_run_sim"
+        try:
+            db.execute(
+                f'CREATE INDEX IF NOT EXISTS "{index_name}" '
+                f'ON {db.qualified_name(table_name)} (run_id, sim_date)'
+            )
+        except Exception as e:
+            logger.warning(
+                "migrate: 创建 resume 索引 %s 失败: %s", index_name, e
+            )
+
+    if 'orch_run_event' not in existing_tables:
+        return
+
+    event_table = db.qualified_name('orch_run_event')
+    event_indexes = (
+        (
+            'idx_orch_run_event_unfinished_resume',
+            "(config_name, started_at DESC) "
+            "WHERE status <> 'finished' AND progress_date IS NOT NULL",
+        ),
+        (
+            'idx_orch_run_event_dq_cache',
+            "(config_name, started_at DESC) WHERE dq_status = 'passed'",
+        ),
+    )
+    for index_name, definition in event_indexes:
+        try:
+            db.execute(
+                f'CREATE INDEX IF NOT EXISTS "{index_name}" '
+                f'ON {event_table} {definition}'
+            )
+        except Exception as e:
+            logger.warning(
+                "migrate: 创建运行事件索引 %s 失败: %s", index_name, e
+            )
 
 
 __all__ = [

@@ -13,6 +13,10 @@ import time
 import pandas as pd
 
 from src.core.orchestrator import Orch
+from src.core.orchestrator.models import (
+    MODULE_EXECUTION_ORDER,
+    validate_module_result,
+)
 from src.modules import module1
 from src.modules.deployment_planning.integration_refactor import ModuleFive
 from src.modules.logistics_execution.integration_refactor import ModuleSix
@@ -20,109 +24,6 @@ from src.modules.mrp_planning.integration_refactor import ModuleThree
 from src.modules.production_planning.integration_refactor import ModuleFour
 from src.modules.state_context import StateContext
 from src.utils.defaults import M6_MAX_WAIT_DAYS, M6_RANDOM_SEED
-
-logger = logging.getLogger("SupplyChainSimulation")
-
-
-class SimulatedInterruption(RuntimeError):
-    """仅用于 resume 集成测试的受控日内中断。"""
-
-
-_MODULE_ORDER = ("module1", "module4", "module5", "module6", "module3")
-_RESULT_DATAFRAMES = {
-    "module1": (
-        "orders_df", "shipment_df", "cut_df", "supply_demand_df", "summary_df",
-    ),
-    "module3": ("net_demand_df",),
-    "module4": (
-        "production_df", "exceed_log", "issues_df", "changeover_log",
-        "unconstrained_plan",
-    ),
-    "module5": (
-        "deployment_plan", "unfulfilled_log", "stock_on_hand_log", "validation_log",
-    ),
-    "module6": (
-        "delivery_plan", "vehicle_log", "truck_usage", "unsatisfied_log",
-        "validation_log", "bypass_log",
-    ),
-}
-_CONTEXT_VIEW_GETTERS = {
-    "unrestricted_inventory": "get_unrestricted_inventory_view",
-    "open_deployment": "get_open_deployment_view",
-    "planning_intransit": "get_planning_intransit_view",
-    "space_quota": "get_space_quota_view",
-    "delivery_gr": "get_delivery_gr_view",
-    "production_gr": "get_production_gr_view",
-    "production_plan_backlog": "get_production_plan_backlog_view",
-    "shipment_log": "get_shipment_log_view",
-    "delivery_shipment_log": "get_delivery_shipment_log_view",
-    "inventory_change_log": "generate_inventory_change_log",
-}
-
-
-def _bind_simulation_date(modules: dict[str, object], simulation_date: pd.Timestamp) -> None:
-    """将同一个仿真日期注入所有模块，避免逐模块重复赋值。"""
-    for module in modules.values():
-        module.simulation_date = simulation_date
-
-
-def _validate_module_result(module_id: str, result: dict, date_str: str) -> None:
-    """校验每日模块输出的统一结果契约，避免状态写回时静默丢失数据。"""
-    if not isinstance(result, dict):
-        raise TypeError(f"{date_str} {module_id} 输出必须为 dict，实际为 {type(result).__name__}")
-
-    missing = [key for key in _RESULT_DATAFRAMES[module_id] if key not in result]
-    if missing:
-        raise ValueError(f"{date_str} {module_id} 输出缺少结果字段: {missing}")
-
-    invalid = [
-        key for key in _RESULT_DATAFRAMES[module_id]
-        if not isinstance(result[key], pd.DataFrame)
-    ]
-    if invalid:
-        raise TypeError(f"{date_str} {module_id} 结果字段不是 DataFrame: {invalid}")
-
-
-def _apply_module_result(
-    module_id: str,
-    result: dict,
-    context: StateContext,
-    date_str: str,
-) -> None:
-    """按模块标识统一将每日结果写回 StateContext。
-
-    Context 仍保留细粒度 ``apply_*`` 业务接口；调度器只负责把模块结果
-    映射到正确的状态写回动作，从而消除循环中零散的 ``result.get()`` 调用。
-    M3 在 ``ModuleThree.run()`` 内部已经调用 ``apply_m3_net_demand()``，此处不重复写回。
-    """
-    if module_id == "module1":
-        context.apply_shipments(result["shipment_df"], date_str)
-        context.apply_deployment_demand_inputs(
-            result["supply_demand_df"],
-            result.get("all_orders_for_next_day", result["orders_df"]),
-            date_str,
-        )
-    elif module_id == "module4":
-        context.apply_line_state(result.get("current_line_states", {}), date_str)
-        context.apply_allocated_capacity(
-            result.get("current_allocated_capacity", {}), date_str
-        )
-        context.apply_production(result["production_df"], date_str)
-    elif module_id == "module5":
-        context.apply_deployment(result["deployment_plan"], date_str)
-    elif module_id == "module6":
-        context.apply_delivery(result["delivery_plan"], date_str)
-    elif module_id != "module3":
-        raise ValueError(f"未知模块结果: {module_id}")
-
-
-def _snapshot_context_views(context: StateContext, date_str: str) -> dict[str, pd.DataFrame]:
-    """深拷贝日末 Context 视图，供外部集成对比而不依赖数据库持久化。"""
-    return {
-        view_name: getattr(context, getter_name)(date_str).copy(deep=True)
-        for view_name, getter_name in _CONTEXT_VIEW_GETTERS.items()
-    }
-
 
 def run_integrated_simulation(
     config_path: str,
@@ -146,8 +47,9 @@ def run_integrated_simulation(
     ``test_mode`` 仅决定数据库 schema（固定为 ``test``），不决定是否写库；
     默认持久化配置、日度状态与模块输出，可通过 ``enable_persistence=False`` 关闭。
     ``interrupt_after`` 仅供集成测试使用，格式为 ``(YYYY-MM-DD, module_id)``；
-    模块完成后、当日日末状态提交前抛出 :class:`SimulatedInterruption`。
+    模块完成后、当日日末状态提交前抛出 ``RuntimeError``。
     """
+    logger = logging.getLogger("SupplyChainSimulation")
     # ── 日志配置 ──
     logging.basicConfig(
         level=logging.INFO,
@@ -162,7 +64,7 @@ def run_integrated_simulation(
         config_path=config_path,
         output_path=output_base_dir,
         engine=engine,
-        skip_dq=True,
+        skip_dq=False,
         enable_persistence=enable_persistence,
         test_mode=test_mode,
         config_name=config_name,
@@ -216,7 +118,7 @@ def run_integrated_simulation(
     for module in modules.values():
         module.prepare()
 
-    all_results = {module_id: [] for module_id in _MODULE_ORDER}
+    all_results = {module_id: [] for module_id in MODULE_EXECUTION_ORDER}
     context_snapshots = []
     simulation_start_time = time.time()
 
@@ -231,8 +133,9 @@ def run_integrated_simulation(
 
         ctx.day_start(date_str)
 
-        _bind_simulation_date(modules, current_date)
-        for module_id in _MODULE_ORDER:
+        for module in modules.values():
+            module.simulation_date = current_date
+        for module_id in MODULE_EXECUTION_ORDER:
             if module_id == "module4":
                 # M4 严格消费前一个自然日 M3 的输出，保持一日 lag。
                 m4.module3_result = ctx.get_previous_m3_result(date_str)
@@ -243,14 +146,14 @@ def run_integrated_simulation(
 
             modules[module_id].run()
             result = modules[module_id].output()
-            _validate_module_result(module_id, result, date_str)
+            validate_module_result(module_id, result, date_str)
             result["simulation_date"] = current_date
-            _apply_module_result(module_id, result, ctx, date_str)
+            ctx.apply_module_result(module_id, result, date_str)
             ctx.record_summary_module_result(module_id, result, date_str)
             all_results[module_id].append(result)
 
             if interrupt_after == (date_str, module_id):
-                raise SimulatedInterruption(
+                raise RuntimeError(
                     f"受控中断：{date_str} 的 {module_id} 完成后，"
                     "当日日末数据尚未提交"
                 )
@@ -271,7 +174,7 @@ def run_integrated_simulation(
                 orch.save_checkpoint(orch.run_id, current_date=date_str)
         context_snapshots.append({
             "simulation_date": current_date,
-            "views": _snapshot_context_views(ctx, date_str),
+            "views": ctx.snapshot_integration_views(date_str),
         })
         logger.info("✅ 第 %d/%d 天完整调度与结果校验完成: %s", i, len(sim_dates), date_str)
 

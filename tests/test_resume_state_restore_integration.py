@@ -15,7 +15,7 @@ import pytest
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / "test"))
 
-from test_integration import SimulatedInterruption, run_integrated_simulation
+from test_integration import run_integrated_simulation
 from pgsql_db.settings import resolve_database_config
 from src.core.db.pgsql.db import DB
 
@@ -63,7 +63,7 @@ def test_second_day_interruption_restores_first_day_state(tmp_path):
     db = _db()
     _clear_unfinished_events(db, config_name)
 
-    with pytest.raises(SimulatedInterruption, match="2025-12-16 的 module1"):
+    with pytest.raises(RuntimeError, match="2025-12-16 的 module1"):
         run_integrated_simulation(
             str(CONFIG_PATH), START_DATE, END_DATE, str(tmp_path / "interrupted"),
             engine="polars", test_mode=True, enable_persistence=True,

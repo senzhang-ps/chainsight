@@ -16,7 +16,7 @@ import pytest
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / "test"))
 
-from test_integration import SimulatedInterruption, run_integrated_simulation
+from test_integration import run_integrated_simulation
 from pgsql_db.settings import resolve_database_config
 from src.core.db.pgsql.db import DB
 
@@ -131,7 +131,7 @@ def test_five_day_interruption_resume_matches_continuous_run(tmp_path):
     prior_run_id = None
     for index, interruption in enumerate(INTERRUPTION_CASES, start=1):
         day, module = interruption
-        with pytest.raises(SimulatedInterruption, match=f"{day} 的 {module}"):
+        with pytest.raises(RuntimeError, match=f"{day} 的 {module}"):
             interrupted = run_integrated_simulation(
                 str(CONFIG_PATH), START_DATE, END_DATE,
                 str(tmp_path / f"stage_{index}_{day}_{module}"),

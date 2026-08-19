@@ -24,7 +24,10 @@ from typing import Dict, List, Optional, Tuple
 import pandas as pd
 
 from .module import Module
-from ..core.orchestrator.models import DeploymentUID
+from ..core.orchestrator.models import (
+    DeploymentUID,
+    INTEGRATION_CONTEXT_VIEW_GETTERS,
+)
 from ..utils.normalization import (
     normalize_identifiers,
     normalize_location,
@@ -1336,6 +1339,35 @@ class StateContext(Module):
             'simulation_date': pd.Timestamp(date_str).strftime('%Y-%m-%d'),
             'frames': frames,
         })
+
+    def apply_module_result(self, module_id: str, result: dict, date_str: str) -> None:
+        """将通过集成契约校验的模块输出写回可变状态。"""
+        if module_id == "module1":
+            self.apply_shipments(result["shipment_df"], date_str)
+            self.apply_deployment_demand_inputs(
+                result["supply_demand_df"],
+                result.get("all_orders_for_next_day", result["orders_df"]),
+                date_str,
+            )
+        elif module_id == "module4":
+            self.apply_line_state(result.get("current_line_states", {}), date_str)
+            self.apply_allocated_capacity(
+                result.get("current_allocated_capacity", {}), date_str
+            )
+            self.apply_production(result["production_df"], date_str)
+        elif module_id == "module5":
+            self.apply_deployment(result["deployment_plan"], date_str)
+        elif module_id == "module6":
+            self.apply_delivery(result["delivery_plan"], date_str)
+        elif module_id != "module3":
+            raise ValueError(f"未知模块结果: {module_id}")
+
+    def snapshot_integration_views(self, date_str: str) -> Dict[str, pd.DataFrame]:
+        """深拷贝供集成回归对比使用的日末状态视图。"""
+        return {
+            view_name: getattr(self, getter_name)(date_str).copy(deep=True)
+            for view_name, getter_name in INTEGRATION_CONTEXT_VIEW_GETTERS.items()
+        }
 
     @staticmethod
     def _summary_concat(entries: List[Dict], frame_name: str) -> pd.DataFrame:

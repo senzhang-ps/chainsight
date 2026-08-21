@@ -132,15 +132,6 @@ MULTISET_PAIRS = {
     ("summary_output_fulldeploymentplan", "summary_full_deployment_plan_report"),
 }
 
-# Deployment Summary 缺少能区分同一完整业务行重复明细的稳定顺序列；其
-# 原始 M5 DeploymentPlan 已按全业务字段去重验证一致。Summary 的业务
-# 一致性应继承该已验证源表，而不是由任意重复序号配对决定。
-SUMMARY_SOURCE_TABLES = {
-    ("summary_output_fulldeploymentplan", "summary_full_deployment_plan_report"): (
-        "module5_output_deploymentplan", "module5_output_deploymentplan",
-    ),
-}
-
 # DeploymentPlan 没有稳定的明细顺序列。同一完整业务行的重复是运行输出
 # 结构的一部分，不代表可区分的业务事实；先以全部共同业务字段去重，再比较。
 FULL_ROW_DEDUP_PAIRS = {
@@ -464,21 +455,6 @@ def _write_markdown(path: Path, report: dict[str, Any]) -> None:
             f"| {item['table']} | {item['reason']} |"
             for item in report["excluded_tables"]
         )
-    semantic = [item for item in comparisons if item.get("semantic_equivalent_via")]
-    if semantic:
-        lines.extend([
-            "", "## 语义验证的 Summary", "",
-            "以下 Summary 因重复明细缺少稳定顺序列，按其已验证的模块源表确认业务一致。",
-            "",
-            "| Legacy Summary | Refactor Summary | 已验证源表 |",
-            "|---|---|---|",
-        ])
-        lines.extend(
-            f"| {item['legacy_table']} | {item['refactor_table']} | "
-            f"{item['semantic_equivalent_via']['legacy_table']} → "
-            f"{item['semantic_equivalent_via']['refactor_table']} |"
-            for item in semantic
-        )
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
@@ -542,27 +518,6 @@ def main() -> int:
                 or comparison["right_only_keys"]
                 or comparison["column_differences"]
             )
-            source_pair = SUMMARY_SOURCE_TABLES.get(
-                (pair["legacy_table"], pair["refactor_table"])
-            )
-            semantic_equivalent_via = None
-            if source_pair:
-                source_item = next(
-                    (
-                        item for item in comparisons
-                        if (item["legacy_table"], item["refactor_table"]) == source_pair
-                    ),
-                    None,
-                )
-                if source_item and source_item["business_consistent"]:
-                    semantic_equivalent_via = {
-                        "legacy_table": source_pair[0],
-                        "refactor_table": source_pair[1],
-                    }
-                    comparison["summary_projection_comparison"] = (
-                        "重复明细缺少稳定顺序列；业务一致性由已验证的 M5 原始 DeploymentPlan 继承"
-                    )
-                    business_consistent = True
             item = {
                 **pair,
                 "legacy_raw_rows": int(len(legacy_raw)),
@@ -577,8 +532,6 @@ def main() -> int:
                 "business_consistent": business_consistent,
                 "comparison": comparison,
             }
-            if semantic_equivalent_via:
-                item["semantic_equivalent_via"] = semantic_equivalent_via
             comparisons.append(item)
             for side, frame in (("legacy", legacy_raw), ("refactor", refactor_raw)):
                 for daily in _daily_counts(frame):

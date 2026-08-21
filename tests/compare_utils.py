@@ -20,7 +20,7 @@ DEFAULT_KEY_PRIORITY = [
 _NUMERIC_KEY_HINTS = (
     "qty", "quantity", "amount", "volume", "capacity", "inventory", "stock",
     "demand", "supply", "shipment", "delivery", "production", "cut", "hours",
-    "count", "utilization", "rate", "value", "cost", "weight", "leadtime",
+    "count", "utilization", "rate", "value", "cost", "weight", "leadtime", "deploy",
     "quota", "pct", "wfr", "vfr", "time", "loss",
 )
 

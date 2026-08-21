@@ -1,255 +1,200 @@
-# src/modules/logistics_execution 模块详细文档
+# `src/modules/logistics_execution` 模块详细文档（Refactor Preview）
 
 ## 文档信息
 
 | 项 | 内容 |
 |---|---|
-| 文档版本 | v1.2 |
-| 最后更新 | 2026-04-10 |
-| 编写人 | 陈显跃 |
-| 适用范围 | `src/modules/logistics_execution/` 目录（共 12 个文件） |
+| 维护者 | 林宏南 |
+| 文档版本 | Preview v2.0 |
+| 最后更新 | 2026-08-21 |
+| 文档状态 | Preview，随重构实现更新 |
+| 适用范围 | `src/modules/logistics_execution/` 当前重构链路 |
 | 目标读者 | 算法工程师、测试工程师、业务分析师 |
 
-> **第三阶段更新说明**（2026-04-10）：  
-> 本目录经过结构重构，将原 `module6.py` 中的物流执行入口迁移到子包内，新增了 `main.py`、`output_writer.py`、`simulation.py` 等拆分文件。
+> **当前实现**：本文以 `integration_refactor.py` 的 `ModuleSix` 和 `backends.py` 为事实源。M6 在 M5 后、M3 前执行；它读取 `StateContext` 的开放调拨和库存 View，计算物流结果，但不直接变更业务状态。
 >
-> **当前目录完整文件清单**（12 个）：  
-> `__init__.py`、`capacity_manager.py`、`config_loader.py`、`delivery_processor.py`、`duckdb_batch_calculator.py`、`expression_evaluator.py`、`inventory_manager.py`、`main.py`、`output_writer.py`、`simulation.py`、`validators.py`、`vehicle_packer.py`
+> **边界**：不存在独立本地版模块路径；`--no-persist` 仅禁用持久化。模块不自行读写 Excel、CSV 或 PostgreSQL；旧 `main.py` 和旧文件输出接口不构成当前主路径。
 
 ---
 
 ## 目录
 
 1. [模块概述](#1-模块概述)
-2. [主要类与函数列表](#2-主要类与函数列表)
-3. [核心数据结构](#3-核心数据结构)
-4. [依赖关系](#4-依赖关系)
+2. [主要文件说明](#2-主要文件说明)
+3. [核心函数详解](#3-核心函数详解)
+4. [辅助函数说明](#4-辅助函数说明)
+5. [数据流](#5-数据流)
 
 ---
 
 ## 1. 模块概述
 
-**模块路径**: `src/modules/logistics_execution/`
+**模块路径**：`src/modules/logistics_execution/`
 
-**主要职责**:
-- Module 6 物流执行与运输计算
-- 调拨计划的发运处理
-- 在途订单跟踪
-- 延迟采样与到货计算
-- 车辆装载与容量管理
-- 库存扣减与更新
-- 表达式求值
-- 数据验证
+**当前重构门面**：`integration_refactor.py` 中的 `ModuleSix`
 
-**核心功能点**:
-1. **调拨发运**: 从调拨计划生成发运记录
-2. **延迟采样**: 根据路线分布采样运输延迟
-3. **在途跟踪**: 跟踪已发运但未交付的订单
-4. **到货处理**: 处理到达交付，更新库存
-5. **车辆装载**: 优化车辆装载效率
-6. **容量管理**: 管理车辆容量约束
-7. **库存管理**: 扣减/增加库存
-8. **DuckDB 加速**: 批量计算优化
+M6 将 M5 创建的开放调拨转化为车辆、发运、到货日期、未满足物流需求和校验记录。M6 负责计算“可执行什么物流动作”；`StateContext` 负责将实际发运写入库存、开放调拨、在途和收货状态。
+
+**核心功能点**：
+
+1. 在 `prepare()` 中加载、规范化和校验静态物流配置；
+2. 读取当日开放调拨和可用库存；
+3. 预处理优先级、物料转换、车辆规格和调拨 UID；
+4. 执行路线、车型、MDQ、旁路、装载与延迟计算；
+5. 输出交付、车辆、车型使用、未满足、校验和旁路记录；
+6. 由状态层统一处理实际发运、在途和到货。
 
 ---
 
-## 2. 主要类与函数列表
+## 2. 主要文件说明
 
-### 2.1 capacity_manager.py - 容量管理
+| 文件名 | 当前定位 | 核心功能 |
+|---|---|---|
+| `integration_refactor.py` | **当前重构门面** | `ModuleSix` 生命周期、后端委托和结果合同 |
+| `backends.py` | **当前后端实现** | `_PandasBackend` / `_PolarsBackend`，物流配置、调拨预处理、模拟执行和结果生成 |
 
-**主要类**:
-- `CapacityManager`
-
-**主要功能**:
-- 管理车辆容量配置
-- 容量约束检查
-- 装载优化
-
-**核心方法**:
-
-| 方法名 | 功能 |
-|---|---|
-| `get_vehicle_capacity()` | 获取车辆容量 |
-| `check_capacity_constraint()` | 检查容量约束 |
-| `optimize_loading()` | 优化装载 |
-
-### 2.2 config_loader.py - 配置加载
-
-**主要函数**:
-- 加载物流配置参数
-
-### 2.3 delivery_processor.py - 交付处理
-
-**主要类**:
-- `DeliveryProcessor`
-
-**核心方法**:
-
-| 方法名 | 功能 |
-|---|---|
-| `process_delivery_plan()` | 处理交付计划 |
-| `process_in_transit()` | 处理在途订单 |
-| `process_arrival()` | 处理到货 |
-| `update_inventory()` | 更新库存 |
-
-### 2.4 duckdb_batch_calculator.py - DuckDB 批量计算
-
-**主要函数**:
-- DuckDB 批量计算优化
-- 向量化延迟采样
-- 批量到货处理
-
-**核心方法**:
-
-| 方法名 | 功能 |
-|---|---|
-| `batch_sample_delays()` | 批量采样延迟 |
-| `batch_process_arrivals()` | 批量处理到货 |
-
-### 2.5 expression_evaluator.py - 表达式求值
-
-**主要功能**:
-- 支持动态表达式求值
-- 支持复杂表达式解析
-
-### 2.6 inventory_manager.py - 库存管理
-
-**主要类**:
-- `InventoryManager`
-
-**核心方法**:
-
-| 方法名 | 功能 |
-|---|---|
-| `deduct_inventory()` | 扣减库存 |
-| `add_inventory()` | 增加库存 |
-| `get_inventory()` | 获取库存 |
-| `sync_with_orchestrator()` | 与 Orchestrator 同步 |
-
-### 2.7 validators.py - 数据验证
-
-**主要函数**:
-- 数据完整性验证
-- 业务规则验证
-- 约束检查
-
-### 2.8 main.py - 模块入口
-
-**主要函数**:
-
-| 函数名 | 功能 |
-|---|---|
-| `run_daily_physical_flow()` | Module6 日度物流执行主入口，供 `src/core/main_integration/simulation_file.py` 按日调用 |
-
-**主要职责**:
-- 组织调拨发运、到货处理、库存扣减等环节
-- 提供与 `src/modules/__init__.py` 中 `module6` 别名兼容的公开入口
-
-### 2.9 output_writer.py - 输出写入
-
-**主要职责**:
-- 将 Module6 生成的交付计划 / 在途更新 / 车辆使用日志等写入 Excel/CSV
-- 保留与 Module1~M5 一致的输出目录与命名规范
-
-### 2.10 simulation.py - 仿真主流程
-
-**主要职责**:
-- 实现单日物流仿真循环（调拨出库 → 延迟采样 → 到货入库）
-- 与 `src/core/orchestrator/` 的状态对接
-
-### 2.11 vehicle_packer.py - 车辆装载
-
-**主要类**:
-- `VehiclePacker`
-
-**核心功能**:
-- 车辆装载优化
-- 3D装箱算法
-- 容量约束处理
-
-**核心方法**:
-
-| 方法名 | 功能 |
-|---|---|
-| `pack_orders()` | 订单装箱 |
-| `optimize_vehicle_usage()` | 车辆使用优化 |
-| `calculate_remaining_capacity()` | 计算剩余容量 |
+静态配置由 `Orch.load_datas()` 注入；动态开放调拨和库存从 `StateContext` 读取。模块不直接操作数据库，也不应自行变更 `StateContext` 容器。
 
 ---
 
-## 3. 核心数据结构
+## 3. 核心函数详解
 
-### 3.1 Delivery 数据结构
+### 3.1 `integration_refactor.py`：`ModuleSix`
 
-```python
-{
-    'delivery_uid': str,              # 交付唯一标识
-    'material': str,                # 物料编码
-    'sending': str,                 # 发送地
-    'receiving': str,               # 接收地
-    'planned_deploy_date': str,    # 计划部署日期
-    'actual_ship_date': str,         # 实际发运日期
-    'actual_delivery_date': str,      # 实际到货日期
-    'delivery_qty': int,             # 交付数量
-    'vehicle_uid': str,              # 车辆标识
-}
-```
+#### 3.1.1 配置 schema
 
-### 3.2 InTransit 数据结构
+| 配置表 | 业务作用 |
+|---|---|
+| `M6_TruckReleaseCon` | 路线/车型的发车触发参数 WFR/VFR |
+| `M6_TruckCapacityPlan` | 日期和路线可用车型/容量计划 |
+| `M6_TruckTypeSpecs` | 车型重量、体积等规格 |
+| `M6_MaterialMD` | 物料需求单位到重量/体积的换算 |
+| `M6_DeliveryDelayDistribution` | 路线延迟分布 |
+| `M6_MDQBypassRules` | MDQ 旁路规则 |
+| `Global_DemandPriority` | 需求元素优先级 |
+| `Global_LeadTime` | 路线前置期 |
 
-```python
-{
-    'transit_uid': str,             # 在途唯一标识
-    'material': str,                # 物料编码
-    'sending': str,                 # 发送地
-    'receiving': str,               # 接收地
-    'actual_ship_date': str,         # 实际发运日期
-    'actual_delivery_date': str,      # 实际到货日期
-    'quantity': int,                # 运输数量
-    'ori_deployment_uid': str,       # 原始调拨标识
-    'vehicle_uid': str,              # 车辆标识
-}
-```
+#### 3.1.2 `prepare()`：静态物流准备
 
-### 3.3 Vehicle 车辆数据结构
+**功能**：一次性加载、规范化、验证并缓存静态物流配置。
 
-```python
-{
-    'vehicle_uid': str,              # 车辆唯一标识
-    'capacity': int,                # 车辆容量
-    'type': str,                   # 车辆类型
-    'length': int,                  # 车厢长度
-    'width': int,                   # 车厢宽度
-    'height': int                   # 车厢高度
-}
-```
+**处理步骤**：
+
+1. `load_static_data()` 通过 `Orch.load_datas()` 获取 schema 配置；
+2. `normalise_static_config()` 规范化标识符，将读取层可能小写化的 `wfr/vfr`、`pdt/gr/otd` 恢复为业务列名，并解析日期列；
+3. `validate_static_config()` 检查必需物流配置集合；
+4. `store_static_state()` 缓存静态表。
+
+`prepare()` 不读取每日开放调拨，不变更库存，且 `run()` 不会隐式调用它。
+
+#### 3.1.3 `load_daily_inputs()`：读取当日调拨与库存
+
+**功能**：从 `StateContext` 获取当前开放调拨与可用库存 View。
+
+**输入**：`get_open_deployment_view()`、`get_unrestricted_inventory_view()`。
+
+**返回值**：标准化后的 `DeploymentPlan` 与 `Inventory`。M6 不直接读取 M5 的内存结果字典，确保其输入是状态层已确认的可执行开放调拨。
+
+#### 3.1.4 `prepare_daily_data()`：调拨和物流参数预处理
+
+**功能**：将当日 View 和静态配置转换为物流模拟所需的运行参数与准备数据。
+
+**处理步骤**：
+
+1. 校验开放调拨、车型触发配置及车辆规格；
+2. 构建需求优先级、物料重量/体积和车型规格映射；
+3. 对缺少物料主数据的记录写入校验日志，并使用默认单位换算；
+4. 按计划发运日、路线、物料和需求元素稳定排序调拨；
+5. 为缺少 UID 的记录生成临时 UID，并处理重复 `ori_deployment_uid`；
+6. 构建当日车型容量映射和可用库存字典；
+7. 形成包含等待天数、随机种子和单日日期范围的运行参数。
+
+**返回值**：`run_params` 和 `prepared_data`。后者包含准备后的调拨、路线规则、延迟分布、旁路规则、容量与校验日志。
+
+#### 3.1.5 `execute_daily_flow()`：物流模拟
+
+**功能**：执行当前日路线、车型和车辆装载状态机。
+
+**处理逻辑**：
+
+1. 使用注入的随机种子，确保延迟采样可复现；
+2. 将 StateContext 库存包装为只包含必要接口的运行适配器；
+3. 根据路由、容量、MDQ 触发阈值、旁路规则和等待限制执行物流模拟；
+4. 生成车辆、发运、未满足和旁路事件。
+
+**返回值**：由物流模拟循环产生的原始结果集合。顺序敏感的车辆装载在稳定排序后的记录上运行，不应随意改变 UID 或记录顺序。
+
+#### 3.1.6 `finalise_result()`：结果合同
+
+**功能**：将模拟结果整理为统一 pandas DataFrame 合同。
+
+| 输出 | 含义 |
+|---|---|
+| `delivery_plan` | 计划/实际交付与发运明细 |
+| `vehicle_log` | 车辆装载日志 |
+| `truck_usage` | 车型使用统计 |
+| `unsatisfied_log` | MDQ、容量或等待导致的未满足需求 |
+| `validation_log` | 配置和输入数据校验日志 |
+| `bypass_log` | MDQ 旁路规则命中日志 |
+
+### 3.2 `backends.py`：pandas 与 polars 实现
+
+两套 backend 提供相同的静态配置、日度预处理、物流执行和结果收尾步骤。Polars 用于表驱动规范化、映射、过滤、排序和容量索引；车辆装载仍是顺序敏感状态机，因此遵循相同业务顺序。最终合同保持 pandas DataFrame。
+
+### 3.3 状态写回
+
+调度器校验 M6 合同后调用 `StateContext.apply_module_result("module6", result, date)`：
+
+1. 只处理实际发运日等于当前日期的交付；
+2. 扣减发送地库存和对应开放调拨；
+3. 记录 `delivery_shipment_log`；
+4. 当天到货则增加接收地库存并写入 `delivery_gr`；
+5. 未来到货则创建 `in_transit` 记录。
+
+M6 本身不直接扣库存，也不直接减少开放调拨。`ori_deployment_uid` 与 `vehicle_uid` 是关联、去重和回归的兼容性键。
 
 ---
 
-## 4. 依赖关系
+## 4. 辅助函数说明
+
+### 4.1 `_prepare_deployment_plan()` 与 `_handle_uid_duplicates()`
+
+前者按业务键稳定排序、补齐 UID、映射优先级并初始化等待天数；后者检测重复 `ori_deployment_uid`，将问题写入 `validation_log` 后保留首条记录。M5 的稳定 UID 规则与 M6 的车辆关联必须共同维护。
+
+### 4.2 物料、优先级和车型映射
+
+`_build_priority_map()`、`_build_material_map()` 和 `_build_spec_map()` 构造快速查询映射。缺失物料元数据时 `_process_material_metadata()` 记录告警并使用重量/体积 $1.0$ 的默认值，保证运行结果仍符合合同。
+
+### 4.3 空结果
+
+`empty_result()` 为全部六个结果 DataFrame 建立空结构。无开放调拨不属于异常，仍应返回完整合同。
+
+---
+
+## 5. 数据流
 
 ```mermaid
-flowchart LR
-    A["调拨计划"] --> B["交付处理"] --> C["延迟采样"] --> D["在途跟踪"] --> E["到货处理"] --> F["车辆装载"] --> G["容量管理"] --> H["库存更新"] --> I["状态同步"]
+flowchart TB
+    CFG[模型驱动配置与 DQ] --> PREP[ModuleSix.prepare]
+    PREP --> STATIC[静态物流规则]
+    OD[StateContext open_deployment] --> INPUT[load_daily_inputs]
+    INV[StateContext inventory] --> INPUT
+    STATIC --> DAILY[prepare_daily_data]
+    INPUT --> DAILY
+    DAILY --> FLOW[execute_daily_flow]
+    FLOW --> OUT[M6 结果合同]
+    OUT --> STATE[StateContext.apply_module_result]
+    STATE --> SHIP[发运日志与库存扣减]
+    STATE --> TRANSIT[在途或当天 delivery_gr]
+    STATE --> M3[M3 当日供给 View]
 ```
 
-**模块依赖**:
-- logistics_execution 依赖 deployment_planning 的调拨计划
-- 依赖 orchestrator 的库存状态
-- 依赖配置模块的物流参数
-- 可使用 DuckDB 进行批量计算优化
-
-**依赖的外部模块**:
-- `src/core/orchestrator/` - 库存状态管理（包）
-- `src/modules/deployment_planning/` - 调拨计划
-- `src/utils/duckdb_accelerator.py` - DuckDB 加速（可选）
+**状态边界**：M6 仅生成物流计算结果；库存、开放调拨、在途和收货都由状态层在合同校验后写回。
 
 ---
 
 ## 附录：相关文档
 
-- [../core.md](core.md) - Core 模块文档
-- [ARCHITECTURE.md](ARCHITECTURE.md) - 架构设计文档
-- [API.md](API.md) - API 接口文档
-
----
+- [模块总览](modules.md)
+- [模块级时序图](../architecture/module_sequence_diagrams.md)
+- [重构架构总览](../architecture/architecture.md)

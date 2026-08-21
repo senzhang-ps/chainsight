@@ -1,424 +1,303 @@
-﻿# ChainSight 模块级时序图文档
+# ChainSight 模块级时序图（Refactor Preview）
 
-## 封面信息
+## 文档信息
 
-- 文档名称：ChainSight 模块级时序图文档
-- 文档编号：CS-SEQ-20260306-001
-- 文档版本：v1.1
-- 编写日期：2026-04-10
-- 编写人：陈显跃
-- 文档状态：正式交付版
+| 项 | 内容 |
+|---|---|
+| 维护者 | 林宏南 |
+| 文档版本 | Preview v2.0 |
+| 最后更新 | 2026-08-21 |
+| 文档状态 | Preview，随重构链路持续更新 |
+| 适用范围 | `test/test_run.py`、`test/test_integration.py`、`src/modules/` |
 
-## 审批栏
+> **版本说明**：本文描述当前以 `StateContext` 为状态单一事实源的重构集成链路。legacy 的 `main_integration`、旧 `Orchestrator` 状态处理和 CSV 快照流程仍保留用于兼容与回归，但不是本文的当前运行事实。
+>
+> **当前入口**：完整链路由 `test/test_run.py` 启动，并调用 `test/test_integration.py` 的 `run_integrated_simulation()`。该入口支持测试 schema、内存运行、DQ 跳过、模块耗时日志和性能报告等调试参数。
 
-| 角色 | 姓名 | 状态 | 日期 | 备注 |
-|---|---|---|---|---|
-| 编写 | 陈显跃 | 已完成 | 2026-04-10 | 对齐第三阶段包化重构 |
-| 复核 | 待填写 | 待复核 | 待填写 |  |
-| 审批 | 待填写 | 待审批 | 待填写 |  |
+---
 
-## 修订记录
+## 1. 阅读说明
 
-| 版本 | 日期 | 修订人 | 修订说明 |
-|---|---|---|---|
-| v1.0 | 2026-03-06 | 陈显跃 | 首次形成模块级执行顺序与状态回写时序文档 |
-| v1.1 | 2026-04-10 | 陈显跃 | 对齐第三阶段重构：`run.py` / `main_integration.py` / `orchestrator.py` / `parallel_executor.py` / `module1~6.py` 全部转为包目录，时序语义不变。 |
+本文说明重构链路每天按什么顺序执行、模块如何通过结果合同写回状态，以及哪些数据可以跨日使用。模块内部算法实现位于各业务包的 `integration_refactor.py` 和 `backends.py`；本文不替代专项算法设计文档。
 
-## 文档定位
+权威模块顺序定义在 `src/core/orchestrator/models.py`：
 
-- 本文重点不是讲每个函数细节，而是讲清楚模块顺序、状态回写节点和关键时序。
-- 适合做培训、评审、交付汇报和排障入口材料。
+```text
+day_start → M1 → M4 → M5 → M6 → M3 → day_end
+```
 
-## 1. 文档目的
+---
 
-- 本文档专门解决一个问题：ChainSight 每天到底按什么顺序跑，模块之间的数据是怎么一层层传下去、再回写回来的。
-- 它适合作为交接培训材料、排障参考材料、设计评审材料。
-- 阅读时建议先看第 2 章的总时序，再看第 3 章到第 8 章的分模块时序。
-
-## 2. 每日总时序图
-
-### 2.1 总链路概览
+## 2. 启动与初始化时序
 
 ```mermaid
 sequenceDiagram
-    participant CLI as run.py / core.run
-    participant MAIN as main_integration
-    participant ORC as Orchestrator
-    participant M1 as Module1
-    participant M4 as Module4
-    participant M5 as Module5
-    participant M6 as Module6
-    participant M3 as Module3
-    participant SUM as Summary/Checker
+    participant CLI as test_run.py
+    participant INT as test_integration.py
+    participant O as Orch
+    participant CM as ConfigManager
+    participant R as ConfigReader
+    participant DQ as DataQualityChecker
+    participant S as StateContext
+    participant MOD as M1/M4/M5/M6/M3
 
-    CLI->>MAIN: 解析参数, 加载配置, 决定本次 run
-    MAIN->>ORC: 初始化或恢复状态
+    CLI->>INT: run_integrated_simulation(...)
+    INT->>O: 创建 Orch
+    O->>CM: bootstrap()
+    CM->>CM: 读取 defaults.yaml
+    opt 启用持久化
+        CM->>CM: 连接 PostgreSQL 并 migrate
+    end
+    CM->>R: load_all()
+    R-->>CM: model 投影后的 all_config
+    opt 未使用 --skip-dq 且未命中 DQ 缓存
+        CM->>DQ: validate(all_config)
+        DQ-->>CM: 模型约束驱动的 DQ 结果
+    end
+    O-->>INT: 配置、run_id 与协作者就绪
+    INT->>S: initialize(all_config)
+    S->>S: 初始库存、空间容量或续跑状态恢复
+    INT->>MOD: prepare()（每个模块仅一次）
+```
+
+### 2.1 初始化约束
+
+- `ConfigReader` 按 `src/models/cfg.py` 的模型注册表投影配置字段；同名 CSV 可覆盖 Excel sheet。
+- `ConfigInputDataQualityChecker` 从模型字段和表元数据中读取非空、枚举、范围、日期及主键约束，负责发现并记录问题；是否阻断由 `data_quality` 配置决定。
+- `prepare()` 只用于静态配置、索引和预计算；模块的 `run()` 不应隐式重复执行 `prepare()`。
+
+---
+
+## 3. 每日总时序
+
+```mermaid
+sequenceDiagram
+    participant I as 集成调度器
+    participant S as StateContext
+    participant M1 as ModuleOne
+    participant M4 as ModuleFour
+    participant M5 as ModuleFive
+    participant M6 as ModuleSix
+    participant M3 as ModuleThree
+    participant O as Orch / PersistenceManager
 
     loop 每个 simulation_date
-        MAIN->>ORC: save_beginning_inventory(date)
-        MAIN->>ORC: cleanup_past_due_open_deployments(date)
-        MAIN->>ORC: _process_delivery_arrivals(date)
-        MAIN->>ORC: load_current_date_production_gr(...)
+        I->>S: day_start(date)
+        Note over S: 期初快照、过期调拨清理、到货/生产入库、刷新 View
 
-        MAIN->>M1: run_daily_order_generation(...)
-        M1-->>MAIN: orders/shipment/cut/supply_demand
-        MAIN->>ORC: process_module1_shipments(shipment_df)
+        I->>M1: run() / output()
+        M1-->>I: M1 结果合同
+        I->>S: validate_module_result + apply_module_result(M1)
 
-        MAIN->>M4: run_daily_production_planning_integrated(...)
-        M4-->>MAIN: production/exceed/validation/changeover
-        MAIN->>ORC: process_module4_production(production_df)
+        I->>M4: 注入前一日 M3 和 M4 跨日状态
+        I->>M4: run() / output()
+        M4-->>I: M4 结果合同
+        I->>S: validate_module_result + apply_module_result(M4)
 
-        MAIN->>M5: run_daily_deployment_planning(...)
-        M5-->>MAIN: deployment/unfulfilled/soh/validation
-        MAIN->>ORC: process_module5_deployment(deployment_plan)
+        I->>M5: run() / output()
+        M5-->>I: M5 结果合同
+        I->>S: validate_module_result + apply_module_result(M5)
 
-        MAIN->>M6: run_daily_physical_flow(...)
-        M6-->>MAIN: delivery/vehicle/truck_usage/unsatisfied/validation/bypass
-        MAIN->>ORC: process_module6_delivery(delivery_plan)
+        I->>M6: run() / output()
+        M6-->>I: M6 结果合同
+        I->>S: validate_module_result + apply_module_result(M6)
 
-        MAIN->>M3: run_integrated_mode(...)
-        M3-->>MAIN: net_demand
+        I->>M3: run() / output()
+        M3-->>I: M3 结果合同
+        I->>S: validate_module_result + apply_module_result(M3)
+        I->>S: day_end(date)
 
-        MAIN->>ORC: save_ending_inventory(date)
-        MAIN->>ORC: save_daily_state(date)
-    end
-
-    MAIN->>SUM: InventoryBalanceChecker
-    MAIN->>SUM: SummaryReportGenerator
-```
-
-### 2.2 一句话理解每天在干什么
-
-- 日初先把“之前已经在路上、今天该到的货”入库。
-- 然后 M1 先看客户侧，决定今天有哪些订单、能发多少。
-- M4 再看生产，决定今天真正能排多少产。
-- M5 再看网络，决定今天各节点之间怎么调拨。
-- M6 再把调拨计划变成真实发运和在途。
-- 最后 M3 再根据今天执行后的最新状态，反推整个网络今天还缺什么。
-
-## 3. 日初状态处理时序
-
-### 3.1 日初处理图
-
-```mermaid
-sequenceDiagram
-    participant MAIN as main_integration
-    participant ORC as Orchestrator
-    participant INV as Inventory Snapshots
-    participant TRANSIT as InTransit
-    participant OPEN as OpenDeployment
-
-    MAIN->>ORC: save_beginning_inventory(date)
-    ORC->>INV: 保存期初库存快照
-
-    MAIN->>ORC: cleanup_past_due_open_deployments(date)
-    ORC->>OPEN: 清理超期开放调拨
-    ORC->>OPEN: 输出 cleanup 审计文件
-
-    MAIN->>ORC: _process_delivery_arrivals(date)
-    ORC->>TRANSIT: 找到今天到达的在途记录
-    ORC->>INV: 增加 receiving 库存
-    ORC->>ORC: 追加 delivery_gr
-    ORC->>TRANSIT: 删除已完成在途
-```
-
-### 3.2 关键说明
-
-- 这一步必须发生在 M1/M4/M5/M6 前面，否则当天看见的库存会偏小。
-- 这一步做的是“历史事务入账”，不是今天的新业务动作。
-
-## 4. M1 时序图
-
-### 4.1 M1 内部时序
-
-```mermaid
-sequenceDiagram
-    participant MAIN as main_integration
-    participant M1 as Module1
-    participant FORE as forecast/order/consume
-    participant SHIP as shipment
-    participant ORC as Orchestrator
-
-    MAIN->>M1: run_daily_order_generation(config, date, output_dir, orchestrator)
-    M1->>FORE: 校验配置
-    M1->>FORE: prepare_daily_forecasts()
-    M1->>FORE: generate_daily_orders()
-    M1->>FORE: consume_orders_vectorized()
-    M1->>ORC: get_current_unrestricted_inventory()
-    M1->>SHIP: simulate_shipment_for_single_day()
-    M1->>M1: generate_supply_demand_log_for_integration()
-    M1->>M1: 保存 OrderLog / ShipmentLog / CutLog / SupplyDemandLog / Summary
-    M1-->>MAIN: 返回: orders_df / shipment_df / cut_df / supply_demand_df
-    MAIN->>ORC: process_module1_shipments(shipment_df)
-```
-
-### 4.2 M1 处理后状态变化
-
-- 客户订单被生成。
-- 一部分订单转成真实 shipment。
-- 对应库存被从 Orchestrator 中扣掉。
-- 未满足部分进入 `CutLog`。
-- 供需日志进入后续模块视野。
-
-## 5. M4 时序图
-
-### 5.1 M4 内部时序
-
-```mermaid
-sequenceDiagram
-    participant MAIN as main_integration
-    participant M4 as Module4
-    participant M4MAIN as DailyProductionPlanner
-    participant M3OUT as M3Output
-    participant STATE as state
-    participant ORC as Orchestrator
-
-    MAIN->>M4: run_daily_production_planning_integrated(...)
-    M4->>M4MAIN: run()
-    M4MAIN->>M3OUT: load_daily_net_demand()
-    M4MAIN->>STATE: get_or_init_simulation_start()
-    M4MAIN->>STATE: load_line_state()
-    M4MAIN->>STATE: load_all_previous_capacity()
-    M4MAIN->>M4MAIN: build_unconstrained_plan_for_single_day()
-    M4MAIN->>M4MAIN: centralized_capacity_allocation_with_changeover()
-    M4MAIN->>M4MAIN: simulate_production()
-    M4MAIN->>M4MAIN: calculate_changeover_metrics()
-    M4MAIN->>STATE: save_line_state()
-    M4MAIN->>STATE: save_allocated_capacity()
-    M4MAIN->>M4MAIN: 保存 ProductionPlan / CapacityExceed / Validation / ChangeoverLog
-    M4-->>MAIN: 返回: production_df / exceed_log / issues_df / changeover_log
-    MAIN->>ORC: process_module4_production(production_df)
-```
-
-### 5.2 M4 处理后状态变化
-
-- 一部分未来生产进入 `production_plan_backlog`。
-- 当天 `available_date == date` 的实际生产入库进入 `production_gr`。
-- 可用库存被增加。
-- 产线状态和已占产能被持久化，供明天继续接着排。
-
-## 6. M5 时序图
-
-### 6.1 M5 内部时序
-
-```mermaid
-sequenceDiagram
-    participant MAIN as main_integration
-    participant M5 as Module5
-    participant LOADER as LOADER
-    participant ORC as Orchestrator
-    participant ALLOC as allocation/pipeline/push
-
-    MAIN->>M5: module5.main(...)
-    M5->>LOADER: 装配 M1/M4/Orchestrator/Config 输入
-    M5->>M5: validate_config_before_run()
-    M5->>M5: build caches/indexes
-    M5->>M5: _initialize_soh_dict()
-
-    loop 每个 layer
-        M5->>M5: _process_layer_demands()
-        M5->>ALLOC: apply_grouped_moq_rv()
-        M5->>ALLOC: apply_priority_allocation_vectorized()
-        M5->>ALLOC: _allocate_pipeline_sources()
-        M5->>ALLOC: _process_gaps_and_create_plans()
-    end
-
-    M5->>ALLOC: push_softpush_allocation()
-    M5->>M5: _update_soh_dict()
-    M5->>ALLOC: apply_receiving_space_quota()
-    M5->>M5: _validate_deployment_shipment_constraint()
-    M5->>M5: 保存 DeploymentPlan / UnfulfilledLog / StockOnHandLog / Validation
-    M5-->>MAIN: 返回: deployment_plan / unfulfilled_log / stock_on_hand_log / validation_log
-    MAIN->>ORC: process_module5_deployment(deployment_plan)
-```
-
-### 6.2 M5 处理后状态变化
-
-- 新生成的部署计划写进 `DeploymentPlan`。
-- 对应调拨需求进入 Orchestrator 的 `open_deployment`。
-- 每条部署需求都会获得稳定 `ori_deployment_uid`。
-- M5 自己的 SOH 会滚动到下一天。
-
-## 7. M6 时序图
-
-### 7.1 M6 内部时序
-
-```mermaid
-sequenceDiagram
-    participant MAIN as main_integration
-    participant M6 as Module6
-    participant PREP as PREP
-    participant ORC as Orchestrator
-    participant PACK as VehiclePacker
-
-    MAIN->>M6: run_daily_physical_flow(config, orchestrator, date)
-    M6->>PREP: load_integrated_config()
-    M6->>PREP: validate + deduplicate + build maps
-    M6->>M6: _prepare_deployment_plan()
-    M6->>M6: _handle_uid_duplicates()
-    M6->>ORC: calculate_physical_inventory()
-
-    loop 每个 sim_date
-        M6->>M6: _collect_pending_demands()
-        M6->>M6: _process_routes()
-
-        loop 每条 route
-            M6->>M6: _process_single_route()
-
-            loop 每种 truck_type
-                M6->>PACK: _first_pass_loading()
-                M6->>M6: should_bypass_mdq() / determine_trigger_cause()
-                alt 触发发车
-                    M6->>PACK: _second_pass_loading()
-                    M6->>M6: _generate_shipment_records()
-                else 不触发
-                    M6->>M6: break
-                end
-            end
-
-            M6->>M6: _handle_remaining_demands()
+        opt enable_persistence=True
+            I->>O: 单批事务写模块输出、状态和 checkpoint
         end
     end
-
-    M6->>M6: _validate_shipment_delivery_constraint()
-    M6->>M6: 保存 DeliveryPlan / VehicleLog / TruckUsageLog / UnsatisfiedMDQLog / ValidationLog / BypassRuleHitLog
-    M6-->>MAIN: 返回: delivery_plan / vehicle_log / truck_usage / unsatisfied_log / bypass_log
-    MAIN->>ORC: process_module6_delivery(delivery_plan)
 ```
 
-### 7.2 M6 处理后状态变化
+每个模块完成后，调度器先校验输出合同，再调用 `StateContext.apply_module_result()` 统一写回。模块本身不应直接修改库存、在途或开放调拨容器。
 
-- 待发运的开放调拨被实际装车并发运。
-- 发送地库存被扣减。
-- 同天到货会立即进入 `delivery_gr` 并加库存。
-- 未来到货会进入 `in_transit`。
-- 未满足 MDQ 或等待过久的需求进入 `UnsatisfiedMDQLog`。
+---
 
-## 8. M3 时序图
-
-### 8.1 M3 内部时序
+## 4. 日初状态处理
 
 ```mermaid
 sequenceDiagram
-    participant MAIN as main_integration
-    participant M3 as Module3
-    participant M1OUT as M1Output
-    participant ORC as Orchestrator
-    participant SIM as run_mrp_layered_simulation
+    participant I as 集成调度器
+    participant S as StateContext
+    participant OD as open_deployment
+    participant T as in_transit
+    participant B as production_backlog
+    participant V as 动态 Views
 
-    MAIN->>M3: run_integrated_mode(...)
-    M3->>M3: _load_static_configs()
-    M3->>M1OUT: _load_module1_data()
-    M3->>ORC: _load_orchestrator_data()
-    M3->>SIM: run_mrp_layered_simulation_daily()
-    SIM->>SIM: assign_location_layers()
-    SIM->>SIM: create_simulation_indexer()
+    I->>S: day_start(date)
+    S->>S: 保存期初 unrestricted_inventory
+    S->>OD: 清理超过宽限期的开放调拨
+    S->>T: 接收到货，生成 delivery_gr 并增加收货库存
+    S->>B: 将当日可用生产过账，生成 production_gr
+    S->>V: 从最新状态重新计算模块输入 View
+```
 
-    loop layer 0 → max
-        SIM->>SIM: _process_layer()
-        alt 节点多
-            SIM->>SIM: DuckDB 批量计算
-        else 节点少
-            SIM->>SIM: NodeProcessor 并行处理
-        end
+日初完成后，M1 至 M3 读取到的是已处理到货、生产入库和过期调拨清理后的当日状态。
+
+---
+
+## 5. M1：需求与客户发货
+
+```mermaid
+sequenceDiagram
+    participant I as 集成调度器
+    participant M1 as ModuleOne
+    participant B as demand_planning backends
+    participant S as StateContext
+
+    I->>M1: run()
+    M1->>B: 预测、订单、消耗、DPS/供给选择计算
+    M1->>S: 读取当前库存及动态 View
+    M1-->>I: orders_df / shipment_df / cut_df / supply_demand_df / summary_df
+    I->>S: apply_module_result(module1)
+    S->>S: 发货扣减库存，保存当日订单和供需事实
+```
+
+M1 的订单、发货、削减和供需日志均是结果合同的一部分。`shipment_df` 的库存影响仅在状态层受控处理。
+
+---
+
+## 6. M4：生产与严格一日滞后
+
+```mermaid
+sequenceDiagram
+    participant I as 集成调度器
+    participant S as StateContext
+    participant M4 as ModuleFour
+    participant B as production_planning backends
+
+    I->>S: get_previous_m3_result(date)
+    I->>S: 读取上一日产线状态和已分配产能
+    I->>M4: 注入上述跨日输入并 run()
+    M4->>B: 无约束计划、产能分配、换产和生产计算
+    M4-->>I: production_df / exceed_log / issues_df / changeover_log / unconstrained_plan
+    I->>S: apply_module_result(module4)
+    S->>S: 更新 production_plan_backlog、产线状态和已分配产能
+```
+
+M4 只能消费前一个自然日 M3 的净需求。首日没有前一日 M3 结果时，状态层提供空合同；M4 产生的未来生产会保存在 backlog，待可用日到达后由后续 `day_start()` 入库。
+
+---
+
+## 7. M5：部署与当日 Planning Facts
+
+```mermaid
+sequenceDiagram
+    participant I as 集成调度器
+    participant M5 as ModuleFive
+    participant B as deployment_planning backends
+    participant S as StateContext
+    participant M6 as ModuleSix
+    participant M3 as ModuleThree
+
+    I->>M5: run()
+    M5->>S: 读取库存、需求、在途、生产和空间 View
+    M5->>B: 网络分层、需求收集、分配、MOQ/RV 与校验
+    M5-->>I: deployment_plan / unfulfilled_log / stock_on_hand_log / validation_log
+    I->>S: apply_module_result(module5)
+    S->>S: 稳定排序并创建 open_deployment / DeploymentUID
+    S->>S: 发布当日 Planning Facts
+    M6->>S: 读取 open_deployment
+    M3->>S: 读取同日 Planning Facts
+```
+
+Planning Facts 只为同日 M5→M6→M3 数据交接而存在；新一天的 `day_start()` 会清空它们，且它们不会替代可恢复的跨日状态。
+
+---
+
+## 8. M6：物流执行、在途与到货
+
+```mermaid
+sequenceDiagram
+    participant I as 集成调度器
+    participant M6 as ModuleSix
+    participant B as logistics_execution backends
+    participant S as StateContext
+
+    I->>M6: run()
+    M6->>S: 读取开放调拨、库存和物流约束 View
+    M6->>B: 路线、车辆、装载、MDQ 与等待规则计算
+    M6-->>I: delivery_plan / vehicle_log / truck_usage / unsatisfied_log / validation_log / bypass_log
+    I->>S: apply_module_result(module6)
+    S->>S: 仅处理当日实际发运
+    S->>S: 扣减发货库存与开放调拨，记录 delivery_shipment_log
+    alt 当天到货
+        S->>S: 增加收货库存并记录 delivery_gr
+    else 未来到货
+        S->>S: 创建 in_transit
     end
-
-    M3->>M3: 保存 NetDemand
-    M3-->>MAIN: 返回: net_demand_df
 ```
 
-### 8.2 M3 处理后状态变化
+M6 的 `ori_deployment_uid` 与车辆关联依赖 M5 写回时的稳定排序；该排序和业务 UID 是回归兼容性边界。
 
-- 生成当天全网络的净需求结果。
-- 这些净需求中的 layer=0 会在下一天成为 M4 的直接输入。
-- 上游 gap 传递结果决定下一层物料与地点的补货压力。
+---
 
-## 9. 日末状态保存时序
-
-### 9.1 日末收尾图
+## 9. M3：净需求与次日反馈
 
 ```mermaid
 sequenceDiagram
-    participant MAIN as main_integration
-    participant ORC as Orchestrator
-    participant CSV as orchestrator/*.csv
-    participant BAL as InventoryBalanceChecker
-    participant SUM as SummaryReportGenerator
+    participant I as 集成调度器
+    participant M3 as ModuleThree
+    participant B as mrp_planning backends
+    participant S as StateContext
+    participant M4 as 次日 ModuleFour
 
-    MAIN->>ORC: save_ending_inventory(date)
-    MAIN->>ORC: save_daily_state(date)
-    ORC->>CSV: 输出 inventory / open_deployment / intransit / GR / logs / change_log
-    MAIN->>BAL: 校验库存平衡
-    MAIN->>SUM: 生成汇总报表
+    I->>M3: run()
+    M3->>S: 读取 M5 当日 Planning Facts 和 M6 写回后的供应状态
+    M3->>B: 网络层级、前置期与净需求计算
+    M3-->>I: net_demand_df
+    I->>S: apply_module_result(module3)
+    S->>S: 按产出日期保存 m3_net_demand_by_date
+    M4->>S: 次日读取 get_previous_m3_result()
 ```
 
-### 9.2 日末生成的核心文件
+这保证了同日 M3 能看到物流执行后的事实，同时 M4 仍保持严格一日滞后。
 
-- `unrestricted_inventory_YYYYMMDD.csv`
-- `open_deployment_YYYYMMDD.csv`
-- `planning_intransit_YYYYMMDD.csv`
-- `space_quota_YYYYMMDD.csv`
-- `production_plan_backlog_YYYYMMDD.csv`
-- `production_gr_YYYYMMDD.csv`
-- `delivery_gr_YYYYMMDD.csv`
-- `shipment_log_YYYYMMDD.csv`
-- `delivery_shipment_log_YYYYMMDD.csv`
-- `inventory_change_log_YYYYMMDD.csv`
-- `daily_logs_YYYYMMDD.csv`
+---
 
-## 10. DB 模式时序图
-
-### 10.1 DB 版端到端时序
+## 10. 日末、持久化与续跑
 
 ```mermaid
 sequenceDiagram
-    participant CLI as run.py / core.run
-    participant DBINIT as DatabaseInitializer
+    participant I as 集成调度器
+    participant S as StateContext
+    participant P as PersistenceManager
     participant DB as PostgreSQL
-    participant MAIN as main_integration
-    participant WRITER as ModuleDataWriter
 
-    CLI->>DBINIT: _run_with_database(...)
-    DBINIT->>DB: 检查数据库是否存在
-    DBINIT->>DB: 检查 cfg_* 表是否存在
-    opt 配置缺失
-        DBINIT->>DB: 从 Excel 导入 cfg_* 表
+    I->>S: day_end(date)
+    S->>S: 保存期末库存和汇总所需状态快照
+    opt 启用持久化
+        I->>P: batch_transaction()
+        I->>P: 保存各模块 output()
+        I->>P: 保存 StateContext Views、审计和 M4 跨日状态
+        I->>P: 保存 checkpoint（最后完整日）
+        P->>DB: 单次提交；异常时回滚
     end
-    CLI->>DB: _load_config_from_database(config_name)
-    DB-->>CLI: 返回: config_dict
-    CLI->>MAIN: run_integrated_simulation_from_dict(config_dict)
-    MAIN-->>CLI: 返回: all_results + orchestrator output dir
-    CLI->>WRITER: write_module_results_from_dict(all_results, run_id)
-    WRITER->>DB: 写 module*_output_* 表
-    CLI->>WRITER: write_orchestrator_data(orchestrator_dir, run_id)
-    WRITER->>DB: 写 orchestrator_* 表
-    CLI->>WRITER: generate_summary_reports_from_db(run_id)
-    WRITER->>DB: 写 summary_output_* 表
 ```
 
-### 10.2 DB 模式和本地模式的最大区别
+checkpoint 只表示已经完整提交的最后一个仿真日。续跑复用原 `run_id`，从该日期的下一天开始，并从已持久化 View 恢复 `StateContext`。
 
-- 算法核心还是同一套，不是两套不同算法。
-- 本地模式的主要介质是 Excel + CSV。
-- DB 模式的主要介质是 `cfg_*` 表、`module*_output_*` 表、`orchestrator_*` 表、`summary_output_*` 表。
+---
 
-## 11. 交接建议
+## 11. 调试与排障顺序
 
-- 如果你是第一次接手项目，先把第 2 章到第 8 章通读一遍，再看 `docs/api/function_dependency_matrix.md`。
-- 如果你在查某一天为什么结果变了，优先沿着“日初 -> M1 -> M4 -> M5 -> M6 -> M3 -> 日末”这个顺序追。
-- 如果你在查 UID、库存、在途或 DB 对账问题，优先看：
-  - `src/core/orchestrator/`（原 `orchestrator.py`）
-  - `src/modules/deployment_planning/main.py`（原 `module5.main`）
-  - `src/modules/logistics_execution/`（原 `module6.py`）
-  - `module_data_writer.py`
+建议用 `test/test_run.py` 的 `--no-persist`、`--test`、`--test-schema`、`--skip-dq`、`--verbose` 和 `--performance-report` 组合定位问题，并按以下路径追踪：
 
-## 12. 结论
+```text
+配置读取 / 模型驱动 DQ
+  → 日初 View
+  → 模块结果合同
+  → StateContext 写回
+  → 日末 View 和跨日状态
+  → PostgreSQL 持久化与 checkpoint
+```
 
-- ChainSight 的复杂度不是来自某一个模块，而是来自“日度顺序 + 跨模块状态回写 + 多介质输出”的组合。
-- 真正需要守住的不是某一段代码风格，而是顺序、键、状态和输出契约。
+## 12. 相关文档
 
-## 附录 A. 推荐配套文档
-
-- `docs/handover-overview/handover.md`
-- `docs/api/function_dependency_matrix.md`
-- `docs/api/function_interface_spec.md`
+- [重构架构总览](architecture.md)
+- [ChainSight 1.0 运行与维护手册](chainsight-1.0.md)
+- [Core 详细说明](core.md)

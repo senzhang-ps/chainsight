@@ -1,8 +1,22 @@
 # ChainSight 1.0：系统导览、运行架构与维护手册
 
+## 文档信息
+
+| 项 | 内容 |
+|---|---|
+| 维护者 | 林宏南 |
+| 文档版本 | Preview v1.0 |
+| 最后更新 | 2026-08-21 |
+| 文档状态 | Preview（持续重构中） |
+| 适用范围 | `ChainSight-Decoupling` 重构后的集成链路 |
+
 > **适用范围**：本文以重构后的集成链路为准，面向首次接触 ChainSight 的开发、实施和运维成员。业务模块的单项算法细节应继续参阅 `docs/modules/` 下的专项文档。
 >
 > **代码事实源**：`test/test_run.py`、`test/test_integration.py`、`src/core/orchestrator/`、`src/modules/state_context.py` 与五个模块的 `integration_refactor.py`。
+>
+> **版本说明**：当前实现以 ChainSight 1.0 为基础进行重构（refactor），重点包括集成链路性能提升，以及 M1 需求与发货逻辑调整。历史 legacy 代码仍保留，用于结果回归、问题追溯和逐步迁移；当前重构链路暂定为 Preview 版本，接口、交互方式和运行流程仍可能继续演进。
+>
+> **当前运行与调试入口**：当前重构链路通过 `test/test_run.py` 启动。该入口除执行集成仿真外，还提供测试隔离、内存运行、跳过 DQ、模块耗时日志和性能报告等调试接口，用于问题定位、性能分析与重构回归。
 
 ## 1. ChainSight 是什么
 
@@ -61,7 +75,7 @@ flowchart LR
 
 ## 3. 从命令到仿真：启动与初始化
 
-集成测试入口是 `test/test_run.py`。示例：
+当前重构链路的运行入口是 `test/test_run.py`，它同时承担集成执行与调试职责。示例：
 
 ```powershell
 conda run --no-capture-output -n work python test/test_run.py `
@@ -85,7 +99,19 @@ conda run --no-capture-output -n work python test/test_run.py `
 | `--performance-report` | 写出结构化性能 JSON 的目标路径。 |
 | `--run-mode` | 写入性能报告的运行方式标签，默认 `continuous`。 |
 
-### 3.2 初始化顺序
+### 3.2 调试接口
+
+`test/test_run.py` 当前提供以下调试能力，可按问题类型组合使用：
+
+| 调试目标 | 接口 | 用途 |
+|---|---|---|
+| 隔离数据库影响 | `--test`、`--test-schema` | 将持久化写入测试 schema，避免影响常规运行数据。 |
+| 排除持久化影响 | `--no-persist` | 仅在内存中运行，用于快速定位模块、状态流转或计算差异。 |
+| 排除 DQ 耗时 | `--skip-dq` | 在受控配置下跳过数据质量检测，便于性能基线和计算链路诊断。 |
+| 定位模块耗时 | `--verbose` | 输出模块内部逐步骤耗时日志。 |
+| 沉淀性能证据 | `--performance-report`、`--run-mode` | 输出结构化性能报告，并标识本次运行模式。 |
+
+### 3.3 初始化顺序
 
 `run_integrated_simulation()` 的初始化具有明确边界：
 
@@ -464,5 +490,4 @@ Summary 是整个模拟期结束后的派生输出，不参与后续日期的业
 - [系统架构概览](./architecture.md)
 - [模块总览](../modules/modules.md)
 - [测试框架设计](../testing/tests_framework_design.md)
-- [环境与运行交接](../handover-overview/setup.md)
-- [接口参考](../api/api.md)
+- [环境与运行交接（已过时，后续将进一步进行交互开发）](../handover-overview/setup.md)

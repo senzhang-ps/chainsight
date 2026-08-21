@@ -1,513 +1,213 @@
-# `src/modules/mrp_planning` — MRP 计划模块文档
+# `src/modules/mrp_planning` 模块详细文档（Refactor Preview）
 
 ## 文档信息
 
 | 项 | 内容 |
 |---|---|
-| 文档版本 | v1.1 |
-| 最后更新 | 2026-04-10 |
-| 编写人 | 陈显跃 |
-| 适用范围 | `src/modules/mrp_planning/` 目录（共 12 个文件） |
+| 维护者 | 林宏南 |
+| 文档版本 | Preview v2.0 |
+| 最后更新 | 2026-08-21 |
+| 文档状态 | Preview，随重构实现更新 |
+| 适用范围 | `src/modules/mrp_planning/` 当前重构链路 |
 | 目标读者 | 算法工程师、测试工程师、业务分析师 |
 
----
-
-## 模块概述
-
-`src/modules/mrp_planning/` 是 ChainSight 的 **物料需求计划 (MRP) 仿真引擎**，负责对多级供应链网络进行逐日分层净需求计算。核心设计目标：
-
-- **逐日仿真**：每天运行一次，基于当日 Module1 输出推算每个节点的净需求（GAP）
-- **分层处理**：BFS 层级分配后从 layer=0 向上逐层传递 GAP
-- **双模式计算**：节点数 ≥ `BATCH_CALCULATION_THRESHOLD(50)` 时用 DuckDB 批量，否则 ThreadPoolExecutor 并行
-- **预索引优化**：`DataIndexer` 将 O(n×m) 查找降至 O(1)
+> **当前实现**：本文以 `integration_refactor.py` 的 `ModuleThree` 和 `backends.py` 为事实源。M3 在 M6 写回状态后执行，消费 M5 同日发布的 Planning Facts 和当前供给 View，输出仅供下一自然日 M4 使用的净需求。
+>
+> **边界**：不存在独立本地版模块路径；`--no-persist` 仅关闭持久化。模块不自行读取每日 Excel/CSV 结果，也不直接写数据库；旧 `integration.py` 等文件不构成当前主路径。
 
 ---
 
-## 文件结构
+## 目录
 
-```
-src/modules/mrp_planning/
-├── __init__.py               # 公开 API 导出
-├── constants.py              # 全局常量
-├── config_loader.py          # 配置与输入数据加载
-├── data_indexer.py           # 预索引加速结构
-├── layer_assignment.py       # BFS 层级分配
-├── lead_time.py              # 前置时间与水平期推算
-├── utils.py                  # 通用工具函数
-├── net_demand.py             # 净需求计算（原始版 + 索引版）
-├── node_processor.py         # 单节点处理器（gap 传递）
-├── mrp_simulation.py         # 主仿真入口（分层 + 批量/并行）
-├── integration.py            # DuckDB 内存模式集成接口
-└── duckdb_batch_calculator.py # DuckDB/Pandas 批量净需求计算
-```
+1. [模块概述](#1-模块概述)
+2. [主要文件说明](#2-主要文件说明)
+3. [核心函数详解](#3-核心函数详解)
+4. [辅助函数说明](#4-辅助函数说明)
+5. [数据流](#5-数据流)
 
 ---
 
-## 主要文件说明
+## 1. 模块概述
 
-### `constants.py`
+**模块路径**：`src/modules/mrp_planning/`
 
-定义全局常量：
+**当前重构门面**：`integration_refactor.py` 中的 `ModuleThree`
 
-| 常量 | 类型 | 值 | 说明 |
-|---|---|---|---|
-| `USE_DUCKDB_BATCH_CALCULATION` | `bool` | `True` | 是否启用 DuckDB 批量计算开关 |
-| `BATCH_CALCULATION_THRESHOLD` | `int` | `50` | 节点数阈值：>= 此值时切换至 DuckDB 批量模式 |
+M3 对 M5 当日活动网络执行分层净需求计算。它将 AO、预测和安全库存需求与库存、在途、收货、生产、客户发货、调拨发运和开放调拨供给进行平衡，形成按物料、地点和层级组织的缺口记录。
+
+**核心功能点**：
+
+1. `prepare()` 一次性加载静态安全库存、网络、前置期和生产/部署参数；
+2. `run()` 获取版本化 Planning Facts，并读取 M6 写回后的供给 View；
+3. 从下游层向上游层计算 AO、FC、SS 三类缺口；
+4. 按路线 MOQ/RV 将总缺口拆分并传递至上游；
+5. 将 `net_demand_df` 通过受控接口保存，以供下一自然日 M4 使用。
 
 ---
 
-### `config_loader.py`
+## 2. 主要文件说明
 
-负责从 Excel 配置文件和目录加载所有输入数据。
-
-#### `load_config(config_file: str) -> dict`
-
-加载 Module3 配置 Excel 文件，返回各工作表的 DataFrame 字典。
-
-| 参数 | 类型 | 说明 |
+| 文件名 | 当前定位 | 核心功能 |
 |---|---|---|
-| `config_file` | `str` | Excel 配置文件路径 |
+| `integration_refactor.py` | **当前重构门面** | `ModuleThree` 生命周期、StateContext 读取与净需求写回 |
+| `backends.py` | **当前后端实现** | `_PandasBackend` / `_PolarsBackend`，Planning Facts、供给 View、分层缺口和结果合同 |
 
-**返回值：** `dict`，key 为工作表名，value 为 `pd.DataFrame`。常用 key：
-- `"BOM"` — 物料清单
-- `"LocationMaster"` — 地点主数据
-- `"InventoryBalance"` — 库存余额
-- `"OpenOrders"` — 未结订单
-- `"MCT"` — 最小周期时间
-- `"PDT"` — 计划交货时间
-- `"PTF"` — 计划时间围栏
-- `"LSK"` — 周期数
-- `"MOQ"` / `"RV"` — 最小订购量 / 舍入值
-
-#### `load_module1_daily_outputs(module1_output_dir: str, simulation_date: pd.Timestamp) -> dict`
-
-扫描 Module1 日度输出目录，加载仿真日期对应的各类需求文件（AO/FC/SS）。
-
-| 参数 | 类型 | 说明 |
-|---|---|---|
-| `module1_output_dir` | `str` | Module1 输出目录路径 |
-| `simulation_date` | `pd.Timestamp` | 仿真日期 |
-
-**返回值：** `dict`，包含 `"ao"`, `"fc"`, `"ss"` 三类 DataFrame。
-
-#### `load_excel_with_sheets(file_path: str, sheet_names: list) -> dict`
-
-通用 Excel 多工作表加载函数。
+静态配置由 `Orch.load_datas()` 按 schema 注入；动态网络与直接需求来自 M5 当日 Planning Facts，不依赖模块文件输出。
 
 ---
 
-### `data_indexer.py`
+## 3. 核心函数详解
 
-预构建查找索引，将热点数据访问从 O(n×m) 优化为 O(1)。
+### 3.1 `integration_refactor.py`：`ModuleThree`
 
-#### 类 `DataIndexer`
+#### 3.1.1 配置 schema
 
-```python
-class DataIndexer:
-    ml_index: Dict[tuple, Any]   # (material, location) 级别索引
-    mr_index: Dict[tuple, Any]   # (material, receiving) 级别索引
-    ms_index: Dict[str, Any]     # (material, sending) 级别索引
-```
-
-**构造方法：** `DataIndexer()`（空索引），通过 `create_simulation_indexer()` 工厂函数填充。
-
-##### `create_simulation_indexer(config: dict) -> DataIndexer`
-
-工厂函数，一键从配置 dict 构建包含 **10 个数据索引** 的完整 `DataIndexer` 对象。
-
-| 参数 | 类型 | 说明 |
-|---|---|---|
-| `config` | `dict` | `load_config()` 返回的配置字典 |
-
-**内部构建的 10 个索引：**
-
-| 索引名 | 键 | 值 | 用途 |
-|---|---|---|---|
-| `inventory_ml` | `(material, location)` | 库存量 | 快速查库存 |
-| `bom_parent` | `(material, location)` | 父节点列表 | BOM 树向上遍历 |
-| `bom_children` | `(material, location)` | 子节点列表 | BOM 树向下遍历 |
-| `open_orders_ml` | `(material, location)` | 已排期订单 | 订单供给查询 |
-| `mct_ml` | `(material, location)` | MCT 值 | 前置时间计算 |
-| `pdt_ml` | `(material, location)` | PDT 值 | 前置时间计算 |
-| `ptf_ml` | `(material, location)` | PTF 值 | 水平期计算 |
-| `lsk_ml` | `(material, location)` | LSK 值 | 水平期计算 |
-| `moq_three` | `(material, sending, receiving)` | MOQ 值 | 三键 MOQ 查找 |
-| `moq_two` | `(material, sending)` | MOQ 值 | 二键 MOQ 查找（fallback） |
-
----
-
-### `layer_assignment.py`
-
-#### `assign_location_layers(bom_df: pd.DataFrame, demand_locations: list) -> dict`
-
-使用 **BFS（广度优先搜索）** 对供应链网络节点进行层级分配。
-
-| 参数 | 类型 | 说明 |
-|---|---|---|
-| `bom_df` | `pd.DataFrame` | BOM 数据（含 sending_location / receiving_location） |
-| `demand_locations` | `list` | 有需求的地点列表（作为 layer=0 起点） |
-
-**返回值：** `dict`，key 为 `(material, location)` 元组，value 为层级整数（0 = 最终需求点，越大越上游）。
-
-**算法：**
-1. 从 demand_locations 构建 layer=0 集合
-2. BFS 向上游遍历 BOM，每层 +1
-3. 若节点在多条路径上取最大层级
-
----
-
-### `lead_time.py`
-
-前置时间与计划水平期推算。
-
-#### `compute_root_horizon(material: str, location: str, config: dict, indexer: Optional[DataIndexer]) -> int`
-
-计算 Plant 节点的计划水平期（horizon）。
-
-**公式：** `max(MCT, PDT + GR) + PTF + LSK - 1`
-
-| 参数 | 类型 | 说明 |
-|---|---|---|
-| `material` | `str` | 物料编号 |
-| `location` | `str` | 地点编号 |
-| `config` | `dict` | 配置字典 |
-| `indexer` | `Optional[DataIndexer]` | 预索引（可选，有则 O(1) 查询） |
-
-**返回值：** `int`，水平期天数。
-
-#### `determine_lead_time(material: str, sending: str, receiving: str, config: dict, indexer: Optional[DataIndexer]) -> int`
-
-确定从 sending 到 receiving 的前置时间。优先使用 PDT，fallback 到 MCT。
-
-#### `infer_sending_location_type(location: str, config: dict) -> str`
-
-从 LocationMaster 推断地点类型（`"Plant"` / `"DC"` / `"Customer"` 等）。
-
----
-
-### `utils.py`
-
-通用工具函数集合。
-
-#### `apply_moq_rv(quantity: float, moq: float, rv: float) -> int`
-
-对数量应用 MOQ（最小订购量）和 RV（舍入值）约束。
-
-| 参数 | 类型 | 说明 |
-|---|---|---|
-| `quantity` | `float` | 原始需求量 |
-| `moq` | `float` | 最小订购量 |
-| `rv` | `float` | 舍入值 |
-
-**返回值：** `int`，经 MOQ/RV 约束后的整数数量。  
-**公式：** `max(moq, ceil(max(quantity, moq) / rv) * rv)`
-
-#### `normalize_location(location: Any) -> str`
-
-标准化地点编号（去空格、统一大小写）。
-
-#### `normalize_material(material: Any) -> str`
-
-标准化物料编号（去空格、统一大小写）。
-
-#### `normalize_identifiers(df: pd.DataFrame, cols: list) -> pd.DataFrame`
-
-批量标准化 DataFrame 中指定列的标识符。
-
-#### `apportion_largest_remainder(total: int, weights: Dict[str, float]) -> Dict[str, int]`
-
-**最大余数法**，将总整数按权重比例分配，保证各部分之和恰好等于 total。
-
-| 参数 | 类型 | 说明 |
-|---|---|---|
-| `total` | `int` | 总数量（待分配） |
-| `weights` | `Dict[str, float]` | 各类型的权重（如 `{"ao": 0.5, "fc": 0.3, "ss": 0.2}`） |
-
-**返回值：** `Dict[str, int]`，各类型分配到的整数量。  
-**用途：** 将层级间传递的 gap 按 AO/FC/SS 比例精确分配，避免浮点舍入导致总量不守恒。
-
-#### `build_ptf_lsk_cache(config: dict) -> dict`
-
-预构建 PTF/LSK 缓存字典，加速后续 horizon 计算。
-
-#### `get_ptf_lsk(material: str, location: str, cache: dict) -> Tuple[int, int]`
-
-从缓存中获取指定物料/地点的 PTF 和 LSK 值。
-
-#### `lookup_moq_rv_three_keys(material: str, sending: str, receiving: str, moq_df: pd.DataFrame, rv_df: pd.DataFrame) -> Tuple[float, float]`
-
-MOQ/RV 三键查找，优先级：
-
-1. 三键 `(material, sending, receiving)` 精确匹配
-2. 二键 `(material, sending)` 匹配
-3. 默认值 `(1, 1)`
-
----
-
-### `net_demand.py`
-
-净需求计算核心逻辑（含两个版本）。
-
-#### `calculate_daily_net_demand(node: dict, date: pd.Timestamp, config: dict) -> dict`
-
-**原始版本**，基于 Pandas 逐行查找计算单节点、单日净需求。
-
-| 参数 | 类型 | 说明 |
-|---|---|---|
-| `node` | `dict` | 节点信息 `{"material": str, "location": str, "layer": int}` |
-| `date` | `pd.Timestamp` | 仿真日期 |
-| `config` | `dict` | 配置字典 |
-
-**返回值：** `dict`，包含：
-```python
-{
-    "material": str,
-    "location": str,
-    "date": pd.Timestamp,
-    "ao_gap": float,        # 实际订单缺口
-    "fc_gap": float,        # 预测缺口
-    "ss_gap": float,        # 安全库存缺口
-    "total_gap": float,     # 总缺口
-    "inventory": float,     # 当日库存
-    "supply": float,        # 当日到货
-    "demand_ao": float,     # AO 需求
-    "demand_fc": float,     # FC 需求
-    "demand_ss": float,     # SS 需求
-}
-```
-
-**GAP 优先级顺序：** AO gap → FC gap → SS gap（从总供给中依次扣除）
-
-#### `calculate_daily_net_demand_indexed(node: dict, date: pd.Timestamp, config: dict, indexer: DataIndexer) -> dict`
-
-**索引优化版本**，接口与原始版完全相同，但使用 `DataIndexer` 进行 O(1) 数据查找，大幅减少 DataFrame 查询开销。
-
----
-
-### `node_processor.py`
-
-#### 类 `NodeProcessor`
-
-单节点处理器，封装节点的完整处理逻辑（含 gap 向上传递）。
-
-```python
-class NodeProcessor:
-    node: dict
-    config: dict
-    indexer: Optional[DataIndexer]
-    parent_gap_records: List[dict]   # 待传递给父节点的 gap 记录
-```
-
-##### `process(date: pd.Timestamp, parent_gaps: Dict[tuple, dict]) -> dict`
-
-处理指定节点在指定日期的净需求，并将自身的需求 gap 传递给父节点。
-
-| 参数 | 类型 | 说明 |
-|---|---|---|
-| `date` | `pd.Timestamp` | 仿真日期 |
-| `parent_gaps` | `Dict[tuple, dict]` | 父节点接收 gap 的累积字典（会被修改） |
-
-**处理逻辑：**
-1. 调用 `calculate_daily_net_demand_indexed()`（若有索引）或原始版
-2. 用 `apportion_largest_remainder()` 按 AO/FC/SS 权重将 total_gap 分配
-3. 根据 BOM 关系，将各类型 gap 乘以 usage_rate 传递给上游父节点
-4. 返回当日净需求记录
-
----
-
-### `mrp_simulation.py`
-
-主仿真入口，协调分层处理流程。
-
-#### `run_mrp_layered_simulation_daily(config: dict, simulation_date: pd.Timestamp, indexer: Optional[DataIndexer]) -> pd.DataFrame`
-
-执行一次逐日 MRP 分层仿真。
-
-| 参数 | 类型 | 说明 |
-|---|---|---|
-| `config` | `dict` | 配置字典 |
-| `simulation_date` | `pd.Timestamp` | 仿真日期 |
-| `indexer` | `Optional[DataIndexer]` | 预索引（可选） |
-
-**返回值：** `pd.DataFrame`，所有节点的净需求结果，含列：
-`material, location, layer, date, ao_gap, fc_gap, ss_gap, total_gap, inventory, supply, demand_ao, demand_fc, demand_ss`
-
-**执行流程：**
-```
-1. assign_location_layers()       → 计算各节点层级
-2. create_simulation_indexer()    → 构建预索引（若启用）
-3. for layer in sorted(layers):   → 从 layer=0 逐层向上
-4.     _process_layer()           → 批量或并行处理本层所有节点
-5. 汇总所有层结果返回
-```
-
-#### `_process_layer(nodes: list, layer: int, date: pd.Timestamp, config: dict, indexer: Optional[DataIndexer], parent_gaps: dict) -> List[dict]`
-
-处理单层的所有节点，根据节点数量自动选择计算模式：
-
-| 条件 | 计算模式 |
+| 配置表 | 作用 |
 |---|---|
-| `len(nodes) >= BATCH_CALCULATION_THRESHOLD (50)` | DuckDB 批量计算（`batch_calculate_net_demand_duckdb()`） |
-| `len(nodes) < 50` | `ThreadPoolExecutor` 并行处理 |
+| `M3_SafetyStock` | 安全库存需求 |
+| `Global_Network` | 网络和来源关系 |
+| `Global_LeadTime` | 路线前置期 |
+| `M4_MaterialLocationLineCfg` | 根节点 PTF/LSK 规划窗口参数 |
+| `M5_DeployConfig` | 路线 MOQ/RV 参数补充 |
 
-DuckDB 批量失败时自动 fallback 到 Pandas 版本。
+#### 3.1.2 `prepare()`：静态 MRP 准备
 
----
+**功能**：加载并规范化 M3 所需静态配置。
 
-### `integration.py`
+**处理步骤**：
 
-DuckDB 内存模式集成接口，支持整个仿真在内存中端到端运行（跳过磁盘 I/O）。
+1. 通过 `Orch.load_datas()` 获取 schema 配置；
+2. `normalise_static_config()` 统一业务标识符、日期和 LeadTime 列名；
+3. `store_static_state()` 缓存静态配置；
+4. 标记模块已准备。
 
-#### `run_integrated_mode(config: dict, simulation_date: pd.Timestamp, memory_store=None) -> pd.DataFrame`
+Planning Facts 是 M5 每日运行后产生的动态数据，因此不在 `prepare()` 中读取。
 
-在 DuckDB 内存模式下运行完整 MRP 仿真：
-1. 从内存存储读取 Module1 输出（替代文件读取）
-2. 调用 `run_mrp_layered_simulation_daily()`
-3. 将结果写回内存存储（替代文件写出）
+#### 3.1.3 `run()`：当日分层净需求
 
-| 参数 | 类型 | 说明 |
-|---|---|---|
-| `config` | `dict` | 配置字典 |
-| `simulation_date` | `pd.Timestamp` | 仿真日期 |
-| `memory_store` | `optional` | DuckDB 内存存储对象 |
+**功能**：消费同日 M5 Planning Facts 和 M6 后供给状态，计算净需求。
 
----
+**处理步骤**：
 
-### `duckdb_batch_calculator.py`
+1. 从 `StateContext.get_planning_facts(day)` 获取 M5 发布的版本化事实；
+2. 使用 `planning_facts()` 校验版本、规范化 DataFrame，并补齐根节点 horizon 与安全库存直接需求；
+3. 使用 `supply_views()` 获取日初库存、在途、交付收货、生产、开放调拨、客户发货和调拨发运 View；
+4. 调用 `calculate_layers()` 由下游层向上游层计算缺口；
+5. 调用 `finalise_result()` 生成 `net_demand_df`；
+6. 通过 `StateContext.apply_m3_net_demand()` 按当前结果日期保存净需求。
 
-DuckDB 批量净需求计算的核心实现文件。
+**重要时序**：M3 可看到 M6 已写回的当日发运、在途与到货状态；但 M3 结果不得被当日 M4 消费，M4 只读取前一日结果。
 
-#### `batch_calculate_net_demand_duckdb(nodes: list, date: pd.Timestamp, config: dict, indexer: DataIndexer, parent_gaps: dict) -> List[dict]`
+#### 3.1.4 `output()`：结果合同
 
-使用 DuckDB SQL 引擎对一批节点执行向量化净需求计算。
+M3 输出合同为：
 
-| 参数 | 类型 | 说明 |
-|---|---|---|
-| `nodes` | `list` | 节点列表（每个为 `{"material", "location", "layer"}` 字典） |
-| `date` | `pd.Timestamp` | 仿真日期 |
-| `config` | `dict` | 配置字典 |
-| `indexer` | `DataIndexer` | 预构建索引 |
-| `parent_gaps` | `dict` | 父节点 gap 累积字典（会被更新） |
-
-**执行流程：**
-1. 将所有节点数据转换为 DuckDB 临时表
-2. 通过 SQL JOIN 获取库存、供给、需求数据
-3. 使用 DuckDB 向量化计算 ao_gap / fc_gap / ss_gap
-4. 将 gap 按 BOM 关系传递给父节点
-5. 失败时调用 `_batch_calculate_pandas()` fallback
-
-#### `_batch_calculate_pandas(nodes: list, date: pd.Timestamp, config: dict, indexer: DataIndexer, parent_gaps: dict) -> List[dict]`
-
-DuckDB 失败时的 Pandas fallback 版本，逐节点调用 `calculate_daily_net_demand_indexed()`。
-
----
-
-## 数据结构
-
-### 节点 (Node)
-
-```python
-{
-    "material": str,      # 物料编号
-    "location": str,      # 地点编号
-    "layer": int,         # BFS 层级（0=最终需求点）
-}
-```
-
-### 净需求记录 (Net Demand Record)
-
-```python
-{
-    "material": str,
-    "location": str,
-    "layer": int,
-    "date": pd.Timestamp,
-    "ao_gap": float,         # 实际订单缺口（负值 = 超额供给）
-    "fc_gap": float,         # 预测缺口
-    "ss_gap": float,         # 安全库存缺口
-    "total_gap": float,      # 三类缺口之和
-    "inventory": float,      # 当日期初库存
-    "supply": float,         # 当日到货量（来自订单/上层传递）
-    "demand_ao": float,      # AO 需求量
-    "demand_fc": float,      # FC 需求量
-    "demand_ss": float,      # SS 需求量
-}
-```
-
-### 父节点 Gap 传递 (Parent Gap)
-
-```python
-# parent_gaps 字典的 value 格式
-{
-    "ao": float,    # 传递给父节点的 AO gap
-    "fc": float,    # 传递给父节点的 FC gap
-    "ss": float,    # 传递给父节点的 SS gap
-}
-```
-
----
-
-## 依赖关系
-
-```
-mrp_simulation.py
-    ├── layer_assignment.py     (BFS 层级分配)
-    ├── data_indexer.py         (预索引构建)
-    ├── duckdb_batch_calculator.py  (批量计算)
-    │       └── net_demand.py   (fallback)
-    └── node_processor.py
-            ├── net_demand.py   (净需求计算)
-            ├── utils.py        (apportion_largest_remainder)
-            └── lead_time.py    (前置时间)
-
-integration.py
-    └── mrp_simulation.py
-        └── (+ memory_data_store from utils/)
-```
-
----
-
-## 数据流图
-
-```
-Module1 输出 (AO/FC/SS 文件)
-        │
-        ▼
-config_loader.load_module1_daily_outputs()
-        │
-        ▼
-data_indexer.create_simulation_indexer()  ─── 构建 10 个 O(1) 索引
-        │
-        ▼
-layer_assignment.assign_location_layers()  ─── BFS 分层
-        │
-        ▼
-mrp_simulation._process_layer()  (按层级从 0 到 max)
-    ├── [节点数 ≥ 50]  duckdb_batch_calculator  ─── SQL 向量化
-    │       └── [失败] _batch_calculate_pandas  ─── fallback
-    └── [节点数 < 50]  ThreadPoolExecutor
-            └── node_processor.NodeProcessor.process()
-                    └── net_demand.calculate_daily_net_demand_indexed()
-        │
-        ▼
-GAP 通过 apportion_largest_remainder() 按 AO/FC/SS 比例分配
-        │
-        ▼
-GAP 乘以 usage_rate 传递给上游父节点（下一层输入）
-        │
-        ▼
-最终汇总 pd.DataFrame  ─→  Module4 输入 (layer=0 净需求)
-```
-
----
-
-## 关键设计决策
-
-| 决策 | 原因 |
+| 输出 | 含义 |
 |---|---|
-| DataIndexer 预构建 10 个索引 | 避免在仿真循环中重复 DataFrame 查找，热路径 O(n×m) → O(1) |
-| BATCH_CALCULATION_THRESHOLD=50 | 经验阈值：节点数少时线程调度开销 > 并行收益，多时 DuckDB SQL 向量化优势明显 |
-| DuckDB 失败自动 fallback | 保证仿真不因 DuckDB 问题中断，生产环境稳定性优先 |
-| apportion_largest_remainder | 整数分配时浮点舍入会导致传递总量不守恒，最大余数法保证精确 |
-| GAP 优先级 AO → FC → SS | 实际订单优先于预测需求，预测优先于安全库存补充 |
-| MOQ/RV 三键 > 二键 > 默认 | 精确匹配供应商路由，兼容不完整主数据 |
+| `net_demand_df` | 按物料、地点、需求日期、需求元素和层级组织的净需求 |
+
+backend 也维护 `net_demand_count` 统计；但集成合同要求 `net_demand_df` 为 pandas DataFrame。
+
+### 3.2 `backends.py`：pandas 与 polars 实现
+
+#### 3.2.1 `normalise_static_config()` 与 `store_static_state()`
+
+**功能**：标准化 M3 schema 表，并将其缓存到 backend。
+
+**关键逻辑**：日期字段按日归一；`Global_LeadTime` 的读取列名被转换为规范业务名；静态模型不保存每日库存或 Planning Facts。
+
+#### 3.2.2 `planning_facts()`：M5 同日规划事实适配
+
+**功能**：验证并适配 M5 发布的 Planning Facts。
+
+**处理逻辑**：
+
+1. 检查 Planning Facts 版本；不支持的版本立即失败；
+2. 规范化活动网络、路线、节点时间窗和直接需求；
+3. 对无上游根节点，以 LeadTime 与 M4 PTF/LSK 重建根节点规划窗口；
+4. 保留 M5 的非安全库存直接需求，并从 M3 静态安全库存表重新构建安全库存需求。
+
+**返回值**：可用于 M3 计算的网络、路线、时间窗、直接需求、层级和日期事实。
+
+#### 3.2.3 `supply_views()`：供给事实组装
+
+**功能**：从 `StateContext` 读取净需求平衡所需的当前事实。
+
+| View | 供给平衡角色 |
+|---|---|
+| `beginning_inventory` | 日初可用库存 |
+| `planning_intransit` / `delivery_gr` | 在途与到货供给 |
+| `all_production` | 当日/未来生产供给 |
+| `open_deployment` | 已开放调拨的出库占用及未来入库 |
+| `shipment_log` | 客户发货消耗 |
+| `delivery_shipment_log` | 调拨发运消耗 |
+
+M3 优先读取日期粒度的开放调拨聚合 View，避免逐 UID 扫描，同时保留“未来接收地入库、发送地出库占用”的业务语义。
+
+#### 3.2.4 `calculate_layers()`：分层净需求计算
+
+**功能**：从下游层向上游层计算 AO、FC、SS 缺口并传递上游需求。
+
+**处理步骤**：
+
+1. 将直接需求按 `(material, node)` 聚合为 AO、FC、SS 三类；
+2. 建立节点可用供给账本：库存、在途、收货、生产减去客户/调拨发货及开放调拨出库；
+3. 对每层节点按 AO → FC → SS 的优先顺序消耗可用供给；
+4. 对每种剩余缺口生成负数量净需求记录；
+5. 若节点有上游来源，则按对应路线 MOQ/RV 对总缺口取整，并用最大余数法分配到 AO/FC/SS 后传递给上游；
+6. 重复直到所有层处理完成。
+
+**输出字段**：`material`、`location`、`requirement_date`、`quantity`、`demand_element`、`layer`、`simulation_date`、`horizon_days`。
+
+#### 3.2.5 `finalise_result()`：稳定合同输出
+
+**功能**：按业务键聚合净需求并稳定排序，返回 `net_demand_df` 与行数统计。没有缺口时返回包含标准列的空 DataFrame 合同。
+
+---
+
+## 4. 辅助函数说明
+
+### 4.1 可用供给平衡
+
+节点可用供给遵循：
+
+$$
+available = BI + InTransit + DeliveryGR + Production - Shipment - DeliveryShipment - OpenDeploymentOut + FutureOpenDeploymentIn
+$$
+
+开放调拨接收地只有在计划日期晚于当前日时作为未来入库加入；这避免将已占用的调拨数量重复视为可用库存。
+
+### 4.2 MOQ/RV 与最大余数分配
+
+上游总缺口先按路线 MOQ/RV 处理，再通过最大余数法在 AO、FC、SS 间分配，确保整数需求既符合路线批量约束，又尽量保留需求类别比例。
+
+### 4.3 空结果与兼容性
+
+`empty_result()` 返回标准空 `net_demand_df`。Planning Facts 版本、需求元素分类、层级顺序、MOQ/RV 和 M3 结果日期均属于兼容性边界，修改后必须执行多日 M3→M4 回归。
+
+---
+
+## 5. 数据流
+
+```mermaid
+flowchart TB
+    CFG[模型驱动配置与 DQ] --> PREP[ModuleThree.prepare]
+    M5[M5 当日 Planning Facts] --> FACT[planning_facts]
+    M6[M6 状态写回后供给] --> VIEW[supply_views]
+    PREP --> FACT
+    FACT --> CALC[calculate_layers]
+    VIEW --> CALC
+    CALC --> OUT[net_demand_df]
+    OUT --> STATE[StateContext.apply_m3_net_demand]
+    STATE --> NEXT[下一日 M4]
+```
+
+**状态边界**：Planning Facts 只在当前日 M5→M3 有效；`net_demand_df` 按当日保存后，只由下一日 M4 读取。
+
+---
+
+## 附录：相关文档
+
+- [模块总览](modules.md)
+- [模块级时序图](../architecture/module_sequence_diagrams.md)
+- [重构架构总览](../architecture/architecture.md)

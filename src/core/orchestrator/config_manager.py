@@ -94,6 +94,7 @@ class ConfigManager:
         *,
         connect_db: bool = True,
         test_mode: bool = False,
+        test_schema: str | None = None,
     ) -> None:
         """从 yaml 建 DB 连接 + 设 sys_config + migrate 建表。
 
@@ -101,7 +102,7 @@ class ConfigManager:
         如果数据库不存在，会尝试自动建库并重试连接；
         其他连接异常将直接抛出，避免回退到文件模式。
 
-        schema 隔离：测试模式固定使用 ``test``；其他模式从 ``config_path`` 经 ``ConfigDir.project`` →
+        schema 隔离：测试模式使用 ``test_schema`` 或默认 ``test``；其他模式从 ``config_path`` 经 ``ConfigDir.project`` →
         ``resolve_project_schema`` 解析目标 schema（复用 run 层逻辑，不在 db.py
         内重写）；解析失败优雅回退到 ``default_schema`` / ``public``，不阻断 orchestrator。
         """
@@ -117,8 +118,8 @@ class ConfigManager:
             return
 
         if test_mode:
-            schema = "test"
-            logger.info("ConfigManager: 测试模式已启用，数据库 schema 固定为 test")
+            schema = test_schema or "test"
+            logger.info("ConfigManager: 测试模式已启用，数据库 schema=%s", schema)
         else:
             # path → project → schema（纯 --config / config_dict 无路径时回退 default_schema）
             from ..run.schema_resolver import resolve_project_schema

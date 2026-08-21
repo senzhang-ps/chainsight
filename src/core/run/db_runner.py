@@ -69,14 +69,16 @@ def _build_expected_local_config(
     report_dir: str | Path | None = None,
     logger=None,
     input_func=input,
+    skip_dq: bool = False,
 ) -> dict:
     """构建本地期望配置（Excel + 同目录 CSV 无条件优先）。
 
     ``config_arg`` 是用户原始输入（名字 / 相对路径 / 绝对路径）。
-    流程：先完整执行输入数据质量检测并输出全部问题记录与报告；存在
+    流程：默认先完整执行输入数据质量检测并输出全部问题记录与报告；存在
     ERROR 时由操作员确认是否继续入库（N 则停止运行）；收到入库确认后
-    才对 M1_DemandForecast 按主键合并 quantity，最后以 schema 表名去
-    ``cfg_`` 前缀为 key 返回数据。列名/类型到数据库契约的转换留待后续。
+    才对 M1_DemandForecast 按主键合并 quantity。``skip_dq=True`` 时跳过
+    检测和交互确认，直接执行后续同步准备。最后以 schema 表名去 ``cfg_``
+    前缀为 key 返回数据。列名/类型到数据库契约的转换留待后续。
     """
     config_file = _find_local_config_file(config_arg)
     if config_file is None:
@@ -90,23 +92,26 @@ def _build_expected_local_config(
     from src.utils.data_quality import ConfigInputDataQualityChecker
 
     sheet_data = ExcelImporter.load_excel_file_with_csv_priority(str(config_file))
-    checker = ConfigInputDataQualityChecker()
-    dq_result = checker.validate(
-        sheet_data,
-        config_name=config_name or config_file.stem,
-        report_dir=report_dir,
-    )
-
-    # 检测全部完成、错误已统一输出后，由操作员确认是否继续入库。
-    if not dq_result["passed"] and not _confirm_import_after_dq(
-        dq_result,
-        report_dir=report_dir,
-        logger=logger,
-        input_func=input_func,
-    ):
-        raise RuntimeError(
-            "[DQ] 操作员未确认入库，运行已停止；问题明细见 input_quality.xlsx"
+    if skip_dq:
+        _log_or_print(logger, "warning", "[DQ] 已按 --skip-dq 跳过本地配置输入数据质量检测。")
+    else:
+        checker = ConfigInputDataQualityChecker()
+        dq_result = checker.validate(
+            sheet_data,
+            config_name=config_name or config_file.stem,
+            report_dir=report_dir,
         )
+
+        # 检测全部完成、错误已统一输出后，由操作员确认是否继续入库。
+        if not dq_result["passed"] and not _confirm_import_after_dq(
+            dq_result,
+            report_dir=report_dir,
+            logger=logger,
+            input_func=input_func,
+        ):
+            raise RuntimeError(
+                "[DQ] 操作员未确认入库，运行已停止；问题明细见 input_quality.xlsx"
+            )
 
     # 收到入库确认后才执行 M1_DemandForecast 主键合并（quantity 求和）。
     if "M1_DemandForecast" in sheet_data:
@@ -693,6 +698,7 @@ def _run_with_database(ns: argparse.Namespace) -> int:
             config_name=config_name,
             report_dir=log_dir / "input_quality",
             logger=logger,
+            skip_dq=getattr(ns, "skip_dq", False),
         )
         if not expected_config:
             logger.info(f"  ℹ️ 未找到本地配置文件 {config_name}.xlsx（输入：{_raw_config}），直接使用数据库配置")

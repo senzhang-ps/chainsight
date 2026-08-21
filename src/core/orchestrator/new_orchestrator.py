@@ -23,15 +23,16 @@ class Orchestrator:
     def __init__(self, start_date, end_date,
                  config_path=None, output_path=None,
                  config_dict=None, engine='pandas', skip_dq=False,
-                 enable_persistence=True, test_mode=False, config_name=None):
+                 enable_persistence=True, test_mode=False, test_schema=None, config_name=None):
         self.start_date = start_date if isinstance(start_date, date) else pd.Timestamp(start_date).date()
         self.end_date = end_date if isinstance(end_date, date) else pd.Timestamp(end_date).date()
         self.module_idx = [1, 3, 4, 5, 6]
         self.engine = engine
         self.output_path = output_path or './output'
         self.enable_persistence = enable_persistence
-        # 测试模式强制使用独立的 PostgreSQL ``test`` schema，避免测试写入业务 schema。
+        # 测试模式使用独立 PostgreSQL schema，默认 ``test``，避免写入业务 schema。
         self.test_mode = test_mode
+        self.test_schema = test_schema
 
         # ── 身份 ──
         self._config_name = config_name
@@ -48,6 +49,7 @@ class Orchestrator:
             config_path=config_path,
             connect_db=enable_persistence,
             test_mode=test_mode,
+            test_schema=test_schema,
         )
 
         # ── 续跑检测（在 load 之前，以便复用 run_id + 短路 DQ）──

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import pandas as pd
+import pandas.testing as pdt
 
 from src.modules.deployment_planning.backends import _PandasBackend, _PolarsBackend
 from src.models.module import (
@@ -165,3 +166,43 @@ def test_module_five_output_models_match_registered_tables():
         assert {"run_id", "sim_date", "config_name", "db_write_time"}.issubset(
             model.__table__.columns.keys()
         )
+
+
+def test_pipeline_supply_pools_are_independent_in_both_engines():
+    """Polars 不能将上一 pipeline 池的使用量扣减到下一独立池。"""
+    demand = pd.DataFrame([
+        {"material": "MAT-1", "node": "LOC-1", "receiving": "LOC-1", "planned_qty": 45, "deployed_qty_invCon": 0},
+        {"material": "MAT-1", "node": "LOC-1", "receiving": "LOC-1", "planned_qty": 19, "deployed_qty_invCon": 0},
+    ])
+    pools = pd.DataFrame([{
+        "material": "MAT-1", "node": "LOC-1",
+        "future_intransit": 0, "open_inbound": 21, "future_production": 0,
+    }])
+
+    pandas_result = _PandasBackend.allocate_pipeline(demand, pools)
+    polars_result = _PolarsBackend.allocate_pipeline(demand, pools)
+    columns = [
+        "planned_qty", "deploy_from_in_transit",
+        "deploy_from_open_deployment_inbound", "deploy_from_future_production",
+        "deploy_qty_with_plan_order",
+    ]
+    pdt.assert_frame_equal(
+        pandas_result.loc[:, columns].reset_index(drop=True),
+        polars_result.loc[:, columns].reset_index(drop=True),
+        check_dtype=False,
+    )
+
+
+def test_priority_allocation_preserves_fully_covered_integer_demand():
+    """库存足够时 Polars 不得因浮点 floor 少分一个单位。"""
+    demand = pd.DataFrame([
+        {"material": "MAT-1", "node": "LOC-1", "priority": 1, "planned_qty": 13},
+        {"material": "MAT-1", "node": "LOC-1", "priority": 1, "planned_qty": 29},
+    ])
+    stock = pd.DataFrame([{"material": "MAT-1", "node": "LOC-1", "qty": 42}])
+
+    pandas_result = _PandasBackend.allocate_priority(demand, stock)
+    polars_result = _PolarsBackend.allocate_priority(demand, stock)
+
+    assert pandas_result["deployed_qty_invCon"].tolist() == [13, 29]
+    assert polars_result["deployed_qty_invCon"].tolist() == [13, 29]

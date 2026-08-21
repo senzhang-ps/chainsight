@@ -138,6 +138,11 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         help="使用数据库模式：从数据库读取配置，输出写入数据库，本地只保存运行日志txt",
     )
     parser.add_argument(
+        "--skip-dq",
+        action="store_true",
+        help="数据库模式下临时跳过本地配置输入数据质量检测",
+    )
+    parser.add_argument(
         "--db-host",
         type=str,
         default=None,

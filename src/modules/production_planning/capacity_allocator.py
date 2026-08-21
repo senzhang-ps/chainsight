@@ -147,9 +147,18 @@ class CapacityAllocator:
         self.previously_allocated = previously_allocated_capacity or {}
         self.issues = issues if issues is not None else []
 
+        # 配置模型和 DB 加载链路统一使用 ``mct``；历史 Excel 直读路径可能
+        # 保留展示列名 ``MCT``，因此两者都兼容。此前固定索引 ``MCT`` 会使
+        # legacy DB 模式在首日 M4 运行时抛出 KeyError。
+        mct_column = "mct" if "mct" in mlcfg.columns else "MCT"
+        if mct_column not in mlcfg.columns:
+            raise KeyError(
+                "MaterialLocationLineCfg 缺少 mct/MCT 列；"
+                f"实际列={list(mlcfg.columns)}"
+            )
         self.mct_map = mlcfg.set_index(
             ['material', 'location']
-        )['MCT'].to_dict()
+        )[mct_column].to_dict()
 
         self.cap_map = self._build_capacity_map(cap_df)
         self.has_location = 'location' in cap_df.columns

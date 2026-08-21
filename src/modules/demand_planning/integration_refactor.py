@@ -251,6 +251,9 @@ class ModuleOne(Module):
             # 统一输出为 pandas（持久化由外部 Orch 负责）
             self._result = {
                 'orders_df': self._to_pandas(all_orders),
+                # ``orders_df`` 是供 M5 和下一日消费的累计有效订单；OrderLog
+                # 则必须按 sim_date 仅保存当日新建订单，避免未到期历史订单重复落库。
+                'orders_to_persist': self._to_pandas(today_orders),
                 'shipment_df': self._to_pandas(shipment_df),
                 'cut_df': self._to_pandas(cut_df),
                 'supply_demand_df': self._to_pandas(supply_demand_df),
@@ -319,6 +322,7 @@ class ModuleOne(Module):
     def _empty_result(self):
         self._result = {
             'orders_df': pd.DataFrame(),
+            'orders_to_persist': pd.DataFrame(),
             'shipment_df': pd.DataFrame(),
             'cut_df': pd.DataFrame(),
             'supply_demand_df': pd.DataFrame(),

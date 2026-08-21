@@ -3,25 +3,32 @@
     "configurations": [
         {
             "name": "Python: run.py in work env",
-            "type": "python",
+            "type": "debugpy",
             "request": "launch",
+            "purpose": [
+                "debug-in-terminal"
+            ],
             "python": "C:\\Users\\lin.hn\\AppData\\Local\\miniforge3\\envs\\work\\python.exe",
-            "program": "${workspaceFolder}/run.py",
+            "program": "${workspaceFolder}\\run.py",
             "console": "integratedTerminal",
             "args": [
                 "--config", "${workspaceFolder}\\input\\OC\\OC_Paste_S1_20251224_extension\\OC_Paste_S1_20251224_repare.xlsx",
                 "--start-date", "2025-12-15",
                 "--end-date", "2026-01-19",
-                "--use-db",
-                "--test"
+                "--use-db"
             ],
             "justMyCode": true,
-            "env": {},
+            "env": {
+                "PYTHONNOUSERSITE": "1",
+                "PYDEVD_USE_CYTHON": "NO",
+                "PYDEVD_USE_FRAME_EVAL": "NO"
+            },
+            "logToFile": true,
             "cwd": "${workspaceFolder}"
         },
         {
             "name": "Python: test_run.py in work env",
-            "type": "python",
+            "type": "debugpy",
             "request": "launch",
             "python": "C:\\Users\\lin.hn\\AppData\\Local\\miniforge3\\envs\\work\\python.exe",
             "program": "${workspaceFolder}/test/test_run.py",
@@ -33,12 +40,17 @@
                 "--test"
             ],
             "justMyCode": true,
-            "env": {},
+            "env": {
+                "PYTHONNOUSERSITE": "1",
+                "PYDEVD_USE_CYTHON": "NO",
+                "PYDEVD_USE_FRAME_EVAL": "NO"
+            },
+            "logToFile": true,
             "cwd": "${workspaceFolder}"
         },
         {
             "name": "Python: test_m4_refactor_integration.py in work env",
-            "type": "python",
+            "type": "debugpy",
             "request": "launch",
             "python": "C:\\Users\\lin.hn\\AppData\\Local\\miniforge3\\envs\\work\\python.exe",
             "program": "${workspaceFolder}/tests/test_m4_refactor_integration.py",
@@ -49,7 +61,12 @@
                 "--end", "2025-12-19"
             ],
             "justMyCode": true,
-            "env": {},
+            "env": {
+                "PYTHONNOUSERSITE": "1",
+                "PYDEVD_USE_CYTHON": "NO",
+                "PYDEVD_USE_FRAME_EVAL": "NO"
+            },
+            "logToFile": true,
             "cwd": "${workspaceFolder}"
         }
     ]

@@ -26,6 +26,22 @@ _DEMAND_ELEMENT = {
 }
 
 
+def _canonicalise_refactor_lead_time(frame: pd.DataFrame) -> pd.DataFrame:
+    """仅在重构 M3 内部恢复 legacy MRP 所需的提前期列名。
+
+    Excel 运行时配置会把 ``PDT/GR/MCT`` 规整为小写，但 legacy MRP
+    提前期公式仍读取大写列。不得修改全局 ConfigReader，否则会影响 legacy
+    入口；仅在 M3 refactor backend 的静态副本中补齐 canonical 列。
+    """
+    data = frame.copy(deep=True)
+    rename = {
+        source: target
+        for source, target in (("pdt", "PDT"), ("gr", "GR"), ("mct", "MCT"))
+        if source in data.columns and target not in data.columns
+    }
+    return data.rename(columns=rename)
+
+
 class _PandasBackend:
     """M3 pandas 实现；网络、路线、窗口需求由 M5 的 PlanningFacts 提供。"""
 
@@ -61,7 +77,14 @@ class _PandasBackend:
         return data
 
     def normalise_static_config(self, datas: dict[str, pd.DataFrame]) -> dict[str, pd.DataFrame]:
-        return {name: self._normalise(datas.get(name, pd.DataFrame())) for name in self.owner.schema}
+        static = {
+            name: self._normalise(datas.get(name, pd.DataFrame()))
+            for name in self.owner.schema
+        }
+        static["Global_LeadTime"] = _canonicalise_refactor_lead_time(
+            static.get("Global_LeadTime", pd.DataFrame())
+        )
+        return static
 
     def store_static_state(self, static: dict[str, pd.DataFrame]):
         self.static = static
@@ -379,10 +402,19 @@ class _PolarsBackend:
         return data
 
     def normalise_static_config(self, datas: dict[str, pd.DataFrame]) -> dict[str, pl.DataFrame]:
-        return {
+        static = {
             name: self._pl(self._normalise(datas.get(name, pd.DataFrame())))
             for name in self.owner.schema
         }
+        lead_time = static.get("Global_LeadTime", pl.DataFrame())
+        if "pdt" in lead_time.columns and "PDT" not in lead_time.columns:
+            lead_time = lead_time.rename({"pdt": "PDT"})
+        if "gr" in lead_time.columns and "GR" not in lead_time.columns:
+            lead_time = lead_time.rename({"gr": "GR"})
+        if "mct" in lead_time.columns and "MCT" not in lead_time.columns:
+            lead_time = lead_time.rename({"mct": "MCT"})
+        static["Global_LeadTime"] = lead_time
+        return static
 
     def store_static_state(self, static: dict[str, pl.DataFrame]):
         self.static = static

@@ -810,16 +810,16 @@ class StateContext(Module):
             backlog_view['quantity'], errors='coerce'
         ).fillna(0)
 
-        # input 历史运行在计划可用日的 backlog 快照保留原计划，并累计同日
-        # 由该计划转入生产 GR 的数量。只对同时存在于 backlog 和当日 GR 的
-        # ML/可用日组合补计，避免把 M4 当日新产出误计入未来 backlog。
-        date_obj = pd.to_datetime(date).normalize()
-        today_gr = self._production_gr_view(date)
-        if not today_gr.empty:
-            arrived = today_gr.copy()
+        # legacy 的日末 backlog 快照在计划可用日保留原计划，并持续加上
+        # 对应的 production GR。生产 GR 在产生后仍保留于全局记录中，故
+        # 不能只读取当天索引；后续日的 backlog 快照也必须保持该累计口径。
+        if self.production_gr:
+            arrived = pd.DataFrame(self.production_gr)
             arrived['material'] = arrived['material'].map(normalize_material)
             arrived['location'] = arrived['location'].map(normalize_location)
-            arrived['available_date'] = date_obj
+            arrived['available_date'] = pd.to_datetime(
+                arrived['date'], errors='coerce'
+            ).dt.normalize()
             arrived['quantity'] = pd.to_numeric(
                 arrived['quantity'], errors='coerce'
             ).fillna(0)
@@ -1298,10 +1298,15 @@ class StateContext(Module):
     # ══════════════════════════════════════════
 
     def day_end(self, date_str: str):
-        """期末快照。
+        """刷新日末视图并保存期末快照。
 
         源: persistence.py:208 OrchestratorPersistenceMixin.save_ending_inventory()
+
+        ``views`` 在 ``day_start()`` 生成；M1/M4/M5/M6 会在当日持续
+        修改状态。每日持久化发生在本方法之后，故必须在这里重算，避免
+        将日初的库存、生产 backlog、开放调拨和在途记录错误地写为日末状态。
         """
+        self.views = self._compute_views(date_str)
         self.daily_ending_inventory[date_str] = (
             self.unrestricted_inventory.copy()
         )
@@ -1525,11 +1530,17 @@ class StateContext(Module):
         seen_orders = set()
         for entry in m1_entries:
             simulation_date = entry['simulation_date']
-            for frame_name, target, deduplicate in (
-                ('orders_df', order_qty, True), ('shipment_df', shipment_qty, False),
-                ('cut_df', cut_qty, False),
+            # M1 的 ``orders_df`` 是供跨日规划使用的累计有效订单；legacy
+            # Summary 的 OrderLog 则只聚合每天新建的订单。优先读取 M1
+            # 专门发布的日粒度载荷，兼容旧测试/调用方时回退累计视图。
+            daily_orders = entry['frames'].get(
+                'orders_to_persist', entry['frames'].get('orders_df', pd.DataFrame())
+            )
+            for frame, target, deduplicate in (
+                (daily_orders, order_qty, True),
+                (entry['frames'].get('shipment_df', pd.DataFrame()), shipment_qty, False),
+                (entry['frames'].get('cut_df', pd.DataFrame()), cut_qty, False),
             ):
-                frame = entry['frames'].get(frame_name, pd.DataFrame())
                 if frame.empty or not {'date', 'material', 'location', 'quantity'}.issubset(frame.columns):
                     continue
                 work = normalize_identifiers(frame.copy())
@@ -1553,12 +1564,37 @@ class StateContext(Module):
                     key = (simulation_date, date_value, material, location)
                     target[key] = target.get(key, 0.0) + float(qty)
 
+        # legacy Summary 将跨日来源的订单/发货/截单按业务日期、物料、地点
+        # 汇总为一行；``simulation_date`` 是报表生成快照而不是来源日。保留
+        # 来源日作为上游累积保护会把同一业务行拆成多条，造成报告行数膨胀。
+        order_rollup: Dict[Tuple, Dict[str, float]] = {}
+        for source, values in (
+            ('order_qty', order_qty),
+            ('shipment_qty', shipment_qty),
+            ('cut_qty', cut_qty),
+        ):
+            for (_, date_value, material, location), quantity in values.items():
+                key = (date_value, material, location)
+                order_rollup.setdefault(key, {
+                    'order_qty': 0.0,
+                    'shipment_qty': 0.0,
+                    'cut_qty': 0.0,
+                })[source] += float(quantity)
+
+        # legacy generator writes the completed-period report with the final
+        # daily source snapshot (end_date - 1); this is metadata, not a
+        # business grouping dimension. A one-day report has no prior day.
+        report_snapshot_date = max(start, end - pd.Timedelta(days=1))
         order_records = []
-        for key in sorted(set(order_qty) | set(shipment_qty) | set(cut_qty), key=lambda value: tuple(map(str, value))):
+        for (date_value, material, location), values in sorted(
+            order_rollup.items(), key=lambda item: tuple(map(str, item[0]))
+        ):
             order_records.append({
-                'simulation_date': key[0], 'date': key[1], 'material': key[2], 'location': key[3],
-                'order_qty': order_qty.get(key, 0), 'shipment_qty': shipment_qty.get(key, 0),
-                'cut_qty': cut_qty.get(key, 0),
+                'simulation_date': report_snapshot_date,
+                'date': date_value,
+                'material': material,
+                'location': location,
+                **values,
             })
         order_summary = pd.DataFrame(order_records, columns=[
             'simulation_date', 'date', 'material', 'location', 'order_qty', 'shipment_qty', 'cut_qty',

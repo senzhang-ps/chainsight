@@ -6,23 +6,55 @@ from __future__ import annotations
 
 import json
 import numbers
+from collections import Counter
 
 import pandas as pd
 
 
 DEFAULT_KEY_PRIORITY = [
-    "simulation_date", "production_plan_date", "available_date", "date",
+    "sim_date", "simulation_date", "production_plan_date", "available_date", "date",
     "requirement_date", "material", "location", "line", "sending",
     "receiving", "demand_element", "changeover_id", "changeover_type",
 ]
 
+_NUMERIC_KEY_HINTS = (
+    "qty", "quantity", "amount", "volume", "capacity", "inventory", "stock",
+    "demand", "supply", "shipment", "delivery", "production", "cut", "hours",
+    "count", "utilization", "rate", "value", "cost", "weight", "leadtime",
+    "quota", "pct", "wfr", "vfr", "time", "loss",
+)
+
 
 def _normalize_key_series(series: pd.Series, column: str) -> pd.Series:
     """将业务关联键标准化为可稳定比较的字符串。"""
-    if "date" in column.lower():
+    if "date" in column.lower() or column.casefold() in {"week_start", "week_end"}:
         parsed = pd.to_datetime(series, errors="coerce")
         return parsed.dt.strftime("%Y-%m-%d").fillna("<NA>")
-    return series.astype("string").fillna("<NA>").str.strip()
+    if any(hint in column.casefold() for hint in _NUMERIC_KEY_HINTS):
+        values = series.dropna()
+        numeric = pd.to_numeric(values, errors="coerce")
+        if not values.empty and numeric.notna().all():
+            normalized = pd.to_numeric(series, errors="coerce")
+            return normalized.map(
+                lambda value: "<NA>" if pd.isna(value) else format(float(value), ".12g")
+            )
+    normalized = series.astype("string").fillna("<NA>").str.strip()
+    return normalized.replace({"": "<NA>", "nan": "<NA>", "None": "<NA>", "<NA>": "<NA>"})
+
+
+def _numeric_series_or_none(series: pd.Series) -> pd.Series | None:
+    """返回可完整解析的数值序列；混合文本或业务标识则返回 ``None``。
+
+    PostgreSQL 动态列可能将同一指标读回为 ``float``、``int`` 或数值字符串。
+    比较业务字段时应统一为数值，不能把 $3582.0$ 与 ``"3582"`` 误判为差异。
+    """
+    values = series.dropna()
+    if values.empty:
+        return None
+    numeric = pd.to_numeric(values, errors="coerce")
+    if numeric.isna().any():
+        return None
+    return pd.to_numeric(series, errors="coerce")
 
 
 def _select_join_keys(left: pd.DataFrame, right: pd.DataFrame) -> list[str]:
@@ -34,12 +66,67 @@ def _select_join_keys(left: pd.DataFrame, right: pd.DataFrame) -> list[str]:
     return sorted(shared)
 
 
+def _drop_excluded_columns(
+    frame: pd.DataFrame,
+    excluded_columns: list[str] | None,
+) -> pd.DataFrame:
+    """删除不应参与业务关联或差异判定的技术列。"""
+    if not excluded_columns:
+        return frame
+    excluded = {str(column).casefold() for column in excluded_columns}
+    return frame.drop(
+        columns=[column for column in frame.columns if str(column).casefold() in excluded],
+        errors="ignore",
+    )
+
+
+def compare_dataframes_as_multiset(
+    left: pd.DataFrame,
+    right: pd.DataFrame,
+    *,
+    label: str = "",
+    excluded_columns: list[str] | None = None,
+) -> dict:
+    """按完整规范化业务行的多重集比较，适用于无稳定唯一键的明细报表。"""
+    left = _drop_excluded_columns(pd.DataFrame() if left is None else left.copy(), excluded_columns)
+    right = _drop_excluded_columns(pd.DataFrame() if right is None else right.copy(), excluded_columns)
+    columns = sorted(set(left.columns) & set(right.columns))
+    result = {
+        "label": label,
+        "left_rows": len(left), "right_rows": len(right),
+        "key_columns": ["<full_business_row_multiset>"],
+        "excluded_columns": sorted({str(column) for column in excluded_columns or []}),
+        "left_only_keys": 0, "right_only_keys": 0, "matched_rows": 0,
+        "column_differences": {}, "precision_differences": {},
+        "schema": {
+            "left_only_columns": sorted(set(left.columns) - set(right.columns)),
+            "right_only_columns": sorted(set(right.columns) - set(left.columns)),
+        },
+    }
+
+    def canonical(frame: pd.DataFrame) -> Counter:
+        work = frame.reindex(columns=columns).copy()
+        for column in columns:
+            work[column] = _normalize_key_series(work[column], column)
+        return Counter(map(tuple, work.itertuples(index=False, name=None)))
+
+    left_rows, right_rows = canonical(left), canonical(right)
+    left_only, right_only = left_rows - right_rows, right_rows - left_rows
+    result["left_only_keys"] = int(sum(left_only.values()))
+    result["right_only_keys"] = int(sum(right_only.values()))
+    result["matched_rows"] = int(sum((left_rows & right_rows).values()))
+    result["left_only_samples"] = [dict(zip(columns, row)) for row in list(left_only)[:5]]
+    result["right_only_samples"] = [dict(zip(columns, row)) for row in list(right_only)[:5]]
+    return result
+
+
 def compare_dataframes_by_key(
     left: pd.DataFrame,
     right: pd.DataFrame,
     *,
     label: str = "",
     key_columns: list[str] | None = None,
+    excluded_columns: list[str] | None = None,
     float_tolerance: float = 1e-6,
     sample_limit: int = 5,
 ) -> dict:
@@ -51,6 +138,8 @@ def compare_dataframes_by_key(
     """
     left = pd.DataFrame() if left is None else left.copy()
     right = pd.DataFrame() if right is None else right.copy()
+    left = _drop_excluded_columns(left, excluded_columns)
+    right = _drop_excluded_columns(right, excluded_columns)
     keys = key_columns or _select_join_keys(left, right)
     keys = [column for column in keys if column in left.columns and column in right.columns]
     result = {
@@ -58,6 +147,7 @@ def compare_dataframes_by_key(
         "left_rows": len(left),
         "right_rows": len(right),
         "key_columns": keys,
+        "excluded_columns": sorted({str(column) for column in excluded_columns or []}),
         "left_only_keys": 0,
         "right_only_keys": 0,
         "matched_rows": 0,
@@ -120,21 +210,10 @@ def compare_dataframes_by_key(
         left_value = matched[f"{column}__left"]
         right_value = matched[f"{column}__right"]
 
-        def is_numeric_series(series: pd.Series) -> bool:
-            """兼容 DataFrame 中混入 Python int/float 的 object 列。"""
-            if pd.api.types.is_numeric_dtype(series):
-                return True
-            values = series.dropna()
-            return not values.empty and values.map(
-                lambda value: isinstance(value, numbers.Number) and not isinstance(value, bool)
-            ).all()
-
-        numeric = (
-            is_numeric_series(left_value)
-            and is_numeric_series(right_value)
-        )
-        if numeric:
-            difference = (left_value.astype(float) - right_value.astype(float)).abs()
+        left_numeric = _numeric_series_or_none(left_value)
+        right_numeric = _numeric_series_or_none(right_value)
+        if left_numeric is not None and right_numeric is not None:
+            difference = (left_numeric - right_numeric).abs()
             both_null = left_value.isna() & right_value.isna()
             precision = (difference > 0) & (difference <= float_tolerance) & ~both_null
             business = (difference > float_tolerance) & ~both_null
@@ -144,7 +223,7 @@ def compare_dataframes_by_key(
                     "max_abs_difference": float(difference[precision].max()),
                 }
         else:
-            if "date" in column.lower():
+            if "date" in column.lower() or column.casefold() in {"week_start", "week_end"}:
                 left_value = _normalize_key_series(left_value, column)
                 right_value = _normalize_key_series(right_value, column)
             else:
@@ -172,6 +251,7 @@ def dataframe_difference_details(
     right: pd.DataFrame,
     *,
     key_columns: list[str] | None = None,
+    excluded_columns: list[str] | None = None,
     float_tolerance: float = 1e-6,
 ) -> pd.DataFrame:
     """返回完整的按业务键行级差异，适合直接落盘审计。
@@ -182,6 +262,8 @@ def dataframe_difference_details(
     """
     left = pd.DataFrame() if left is None else left.copy()
     right = pd.DataFrame() if right is None else right.copy()
+    left = _drop_excluded_columns(left, excluded_columns)
+    right = _drop_excluded_columns(right, excluded_columns)
     keys = key_columns or _select_join_keys(left, right)
     keys = [column for column in keys if column in left.columns and column in right.columns]
     rows: list[dict] = []
@@ -261,18 +343,16 @@ def dataframe_difference_details(
     for column in common_columns:
         left_value = matched[f"{column}__left"]
         right_value = matched[f"{column}__right"]
-        numeric = (
-            (pd.api.types.is_numeric_dtype(left_value) or _has_only_numbers(left_value))
-            and (pd.api.types.is_numeric_dtype(right_value) or _has_only_numbers(right_value))
-        )
-        if numeric:
-            difference = (left_value.astype(float) - right_value.astype(float)).abs()
+        left_numeric = _numeric_series_or_none(left_value)
+        right_numeric = _numeric_series_or_none(right_value)
+        if left_numeric is not None and right_numeric is not None:
+            difference = (left_numeric - right_numeric).abs()
             both_null = left_value.isna() & right_value.isna()
             null_mismatch = left_value.isna() ^ right_value.isna()
             precision = (difference.gt(0) & difference.le(float_tolerance) & ~both_null)
             business = (difference.gt(float_tolerance) & ~both_null) | null_mismatch
         else:
-            if "date" in column.lower():
+            if "date" in column.lower() or column.casefold() in {"week_start", "week_end"}:
                 normalized_left = _normalize_key_series(left_value, column)
                 normalized_right = _normalize_key_series(right_value, column)
             else:

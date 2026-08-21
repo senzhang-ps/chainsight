@@ -167,6 +167,13 @@ def load_configuration_from_dict(
             continue
         sheet_name = _DB_SHEET_MAPPING.get(str(db_name).lower(), str(db_name))
         converted_df = _convert_db_config_frame(df)
+        # DB 读回时 `_convert_db_config_frame()` 将展示列 MCT 统一成模型列
+        # `mct`，这是 M4_MaterialLocationLineCfg 的运行时契约。但
+        # Global_LeadTime 的 legacy M3 提前期计算仍明确访问 `PDT`/`GR`/`MCT`。
+        # 若这里把它保留为 mct，layer 0 节点的 root horizon 会在缺少 `MCT`
+        # 时走到标量回退并触发异常；该异常此前被并行层处理静默吞掉。
+        if sheet_name == "Global_LeadTime" and "mct" in converted_df.columns:
+            converted_df = converted_df.rename(columns={"mct": "MCT"})
         config_dict[sheet_name] = converted_df
         logger.info(
             "  Loaded configuration table: %s (%d rows)",

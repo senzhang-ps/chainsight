@@ -10,10 +10,11 @@
 
 1. [handover-overview/handover.md](./handover-overview/handover.md)
 2. [handover-overview/setup.md](./handover-overview/setup.md)
-3. [architecture/architecture.md](./architecture/architecture.md)
-4. [api/api.md](./api/api.md)
-5. [legacy/modules_compat.md](./legacy/modules_compat.md)
-6. [handover-overview/cleanup_and_improvements.md](./handover-overview/cleanup_and_improvements.md)
+3. [architecture/chainsight-1.0.md](./architecture/chainsight-1.0.md)
+4. [architecture/architecture.md](./architecture/architecture.md)
+5. [api/api.md](./api/api.md)
+6. [legacy/modules_compat.md](./legacy/modules_compat.md)
+7. [handover-overview/cleanup_and_improvements.md](./handover-overview/cleanup_and_improvements.md)
 
 ## 当前最重要的文档
 
@@ -22,6 +23,7 @@
 | [handover-overview/handover.md](./handover-overview/handover.md) | 当前代码状态、三阶段收口结果、验证证据、后续建议 |
 | [handover-overview/cleanup_and_improvements.md](./handover-overview/cleanup_and_improvements.md) | **详细的清理清单** —— 删除了什么文件、创建了什么文件、改进了什么地方、验证证据 |
 | [handover-overview/setup.md](./handover-overview/setup.md) | 环境、依赖、数据库初始化与部署步骤 |
+| [architecture/chainsight-1.0.md](./architecture/chainsight-1.0.md) | **新成员运行导览**：日度集成链路、状态、持久化、恢复与维护导航 |
 | [api/api.md](./api/api.md) | 当前 `src/` 与 `pgsql_db/` 的接口参考 |
 | [architecture/architecture.md](./architecture/architecture.md) | 系统架构说明 |
 
@@ -29,6 +31,7 @@
 
 | 文档 | 用途 |
 |---|---|
+| [architecture/chainsight-1.0.md](./architecture/chainsight-1.0.md) | ChainSight 1.0 运行时架构、日度生命周期与维护手册 |
 | [architecture/architecture.md](./architecture/architecture.md) | 系统架构与模块关系说明 |
 | [architecture/core.md](./architecture/core.md) | Core 层说明 |
 | [architecture/module_sequence_diagrams.md](./architecture/module_sequence_diagrams.md) | 模块间调用时序图 |

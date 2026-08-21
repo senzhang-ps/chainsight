@@ -5,6 +5,7 @@ simulation_db.py
 """
 
 import logging
+import os
 import pandas as pd
 import time
 from datetime import datetime
@@ -21,6 +22,7 @@ from ...utils.time_manager import initialize_time_manager
 from ...services.summary_report_generator import SummaryReportGenerator
 from ...modules import module1, module3, module4, module5, module6
 from ...utils.defaults import M6_MAX_WAIT_DAYS, M6_RANDOM_SEED
+from ...utils.performance_telemetry import PerformanceTelemetry
 
 from ...utils.normalization import normalize_identifiers
 from .config_loader import load_configuration_from_dict, prepare_configuration
@@ -199,6 +201,13 @@ def run_integrated_simulation_from_dict(
     import time
     simulation_start_time = time.time()
     simulation_start_datetime = datetime.now()
+    performance_path = os.environ.get("CHAINSIGHT_PERFORMANCE_REPORT")
+    telemetry = PerformanceTelemetry(
+        "legacy",
+        os.environ.get("CHAINSIGHT_RUN_MODE", "continuous"),
+        getattr(db, "schema", "input"),
+        run_id,
+    ) if performance_path else None
 
     logger.info("\n" + "=" * 60)
     logger.info("🕐 程序时间信息")
@@ -260,9 +269,19 @@ def run_integrated_simulation_from_dict(
         # 仅当无 DB 连接的退化场景才保留文件落盘以兼容旧行为。
         persist_to_disk=(db is None),
     )
-    # 初始化新Orchestrator类
-    orch_new = Orch(start_date = start_date, end_date = end_date, config_path = 'None', output_path = output_base_dir, config_dict=config_dict,
-        engine='polars')
+    # M1 使用新 Orchestrator 的配置分发与 Polars 后端；配置已经来自 config_dict，
+    # 因此不能把字符串 'None' 作为配置路径传入（会被解析成 <cwd>/None），也无需
+    # 额外创建连接、迁移或写入其独立的持久化状态。
+    orch_new = Orch(
+        start_date=start_date,
+        end_date=end_date,
+        config_path=None,
+        output_path=output_base_dir,
+        config_dict=config_dict,
+        engine='polars',
+        enable_persistence=False,
+        config_name=config_name,
+    )
     # orch_new.load_datas('M1')
 
     # 实例化M1
@@ -481,6 +500,7 @@ def run_integrated_simulation_from_dict(
 
 
     for i, current_date in enumerate(sim_dates_to_run, 1):
+        date_str = current_date.strftime('%Y-%m-%d')
         logger.info(f"{'='*20} 第 {i}/{len(sim_dates_to_run)} 天: {current_date.strftime('%Y-%m-%d')} {'='*20}")
 
         # 🎲 注意：不在每日开始时重置种子，以匹配本地模式和ChainSight_Dev的随机数行为
@@ -488,6 +508,7 @@ def run_integrated_simulation_from_dict(
         # 全局种子只在仿真开始时设置一次 (在set_module_seeds中)
 
         # ==================== 每日开始：GR入库处理 ====================
+        day_start_timer = telemetry.start() if telemetry else 0.0
         try:
             logger.info("🌅 每日开始状态更新")
             logger.info("💾 保存期初库存快照...")
@@ -532,6 +553,8 @@ def run_integrated_simulation_from_dict(
                 logger.info(f"📦 当日需要入库的历史生产: {len(current_date_production_gr)} 条记录")
             else:
                 logger.info("📦 当日无历史生产入库")
+            if telemetry:
+                telemetry.record("day_start", day_start_timer, simulation_date=date_str)
 
         except Exception as e:
             # GR入库是核心状态变更，失败后库存不正确，
@@ -553,6 +576,7 @@ def run_integrated_simulation_from_dict(
             # ========== M1: 订单生成 ==========
             try:
                 logger.info("1️⃣ 运行 Module1 - 订单生成")
+                module_timer = telemetry.start() if telemetry else 0.0
 
                 m1.simulation_date = current_date
                 m1.run()
@@ -572,6 +596,8 @@ def run_integrated_simulation_from_dict(
                 # 🔧 修复：保存累积订单供下一天使用（DB模式不依赖文件读取历史订单）
                 m1_previous_orders = m1_result.get('all_orders_for_next_day', None)
                 logger.info(f"✅ Module1 完成 - 生成 {len(m1_result.get('orders_df', []))} 个订单, {len(m1_shipments)} 个发货")
+                if telemetry:
+                    telemetry.record("module_run", module_timer, simulation_date=date_str, module="module1")
             except Exception as e:
                 logger.error(f"❌ Module1 失败: {e}")
                 batch_failed_modules.append((current_date.strftime('%Y-%m-%d'), 'module1', str(e)))
@@ -580,6 +606,7 @@ def run_integrated_simulation_from_dict(
             # ========== M4: 生产计划 ==========
             try:
                 logger.info("2️⃣ 运行 Module4 - 生产计划")
+                module_timer = telemetry.start() if telemetry else 0.0
                 m4_result = module4.run_daily_production_planning_integrated(
                     config_dict=config_dict,
                     module3_output_dir=str(module_outputs['module3']),
@@ -623,6 +650,8 @@ def run_integrated_simulation_from_dict(
                 all_results['module4'].append(m4_result)
                 batch_results['module4'].append(m4_result)
                 logger.info(f"✅ Module4 完成 - 生成生产计划: {len(m4_production)} 条记录")
+                if telemetry:
+                    telemetry.record("module_run", module_timer, simulation_date=date_str, module="module4", rows=len(m4_production))
             except Exception as e:
                 logger.error(f"❌ Module4 失败: {e}")
                 batch_failed_modules.append((current_date.strftime('%Y-%m-%d'), 'module4', str(e)))
@@ -631,6 +660,7 @@ def run_integrated_simulation_from_dict(
             # ========== M5: 部署计划 ==========
             try:
                 logger.info("3️⃣ 运行 Module5 - 部署计划")
+                module_timer = telemetry.start() if telemetry else 0.0
                 # [DB-MEM] 传递 module4_result 内存数据，无需 M4 xlsx 文件
                 m5_result = module5.run_daily_deployment_planning(
                     config_dict=config_dict,
@@ -676,6 +706,8 @@ def run_integrated_simulation_from_dict(
                 all_results['module5'].append(m5_result)
                 batch_results['module5'].append(m5_result)
                 logger.info(f"\n  ✅ Module5 完成 - 生成 {len(valid_deployment) if 'valid_deployment' in dir() else 0} 条有效部署计划")
+                if telemetry:
+                    telemetry.record("module_run", module_timer, simulation_date=date_str, module="module5", rows=len(m5_deployment_df))
             except Exception as e:
                 logger.error(f"❌ Module5 失败: {e}")
                 batch_failed_modules.append((current_date.strftime('%Y-%m-%d'), 'module5', str(e)))
@@ -684,6 +716,7 @@ def run_integrated_simulation_from_dict(
             # ========== M6: 物流执行 ==========
             try:
                 logger.info("4️⃣ 运行 Module6 - 物流执行")
+                module_timer = telemetry.start() if telemetry else 0.0
                 m6_result = module6.run_daily_physical_flow(
                     config_dict=config_dict,
                     orchestrator=orch,
@@ -706,6 +739,8 @@ def run_integrated_simulation_from_dict(
                 all_results['module6'].append(m6_result)
                 batch_results['module6'].append(m6_result)
                 logger.info(f"\n  ✅ Module6 完成 - 生成 {len(m6_delivery_df) if 'm6_delivery_df' in dir() else 0} 条交付计划")
+                if telemetry:
+                    telemetry.record("module_run", module_timer, simulation_date=date_str, module="module6", rows=len(m6_delivery_df))
             except Exception as e:
                 logger.error(f"❌ Module6 失败: {e}")
                 batch_failed_modules.append((current_date.strftime('%Y-%m-%d'), 'module6', str(e)))
@@ -714,6 +749,7 @@ def run_integrated_simulation_from_dict(
             # ========== M3: 净需求计算 ==========
             try:
                 logger.info("5️⃣ 运行 Module3 - 净需求计算")
+                module_timer = telemetry.start() if telemetry else 0.0
                 m3_result = module3.run_integrated_mode(
                     module1_output_dir=str(module_outputs['module1']),
                     orchestrator=orch,
@@ -731,6 +767,8 @@ def run_integrated_simulation_from_dict(
                 all_results['module3'].append(m3_result)
                 batch_results['module3'].append(m3_result)
                 logger.info("  ✅ Module3 完成")
+                if telemetry:
+                    telemetry.record("module_run", module_timer, simulation_date=date_str, module="module3")
             except Exception as e:
                 logger.error(f"❌ Module3 失败: {e}")
                 batch_failed_modules.append((current_date.strftime('%Y-%m-%d'), 'module3', str(e)))
@@ -741,6 +779,7 @@ def run_integrated_simulation_from_dict(
             logger.error(f"❌ 当日模块执行失败: {e}")
         
         # ==================== 每日结束：状态保存 ====================
+        day_end_timer = telemetry.start() if telemetry else 0.0
         try:
             logger.info("💾 每日结束状态保存")
             # 保存期末库存快照
@@ -753,6 +792,8 @@ def run_integrated_simulation_from_dict(
             stats = orch.get_summary_statistics(current_date.strftime('%Y-%m-%d'))
             logger.info(f"📊 当日统计: {stats}")
             logger.info(f"✅ 第 {i} 天处理完成")
+            if telemetry:
+                telemetry.record("day_end", day_end_timer, simulation_date=date_str)
         except Exception as e:
             logger.error(f"❌ 每日状态保存失败: {e}")
 
@@ -780,6 +821,7 @@ def run_integrated_simulation_from_dict(
                 # 不更新 batch_start_date → 断点续跑将从当前失败日重新开始
             else:
                 try:
+                    persistence_timer = telemetry.start() if telemetry else 0.0
                     _flush_batch_to_db(
                         writer=writer,
                         batch_results=batch_results,
@@ -795,6 +837,14 @@ def run_integrated_simulation_from_dict(
                         m1_previous_orders=m1_previous_orders,
                         runtime_state=runtime_state,
                     )
+                    if telemetry:
+                        telemetry.run_id = run_id_override or f"db_{config_name}"
+                        telemetry.record(
+                            "persistence_and_checkpoint",
+                            persistence_timer,
+                            simulation_date=batch_end_str,
+                        )
+                        telemetry.write(performance_path)
                     # 仅在写入数据库成功后才清空 batch_results
                     batch_results = {mod: [] for mod in all_results}
                     batch_start_date = (current_date + pd.Timedelta(days=1)).strftime('%Y-%m-%d')
@@ -894,6 +944,10 @@ def run_integrated_simulation_from_dict(
     logger.info(f"⏱️  总运行时间: {runtime_str}")
     logger.info(f"📊 平均每天耗时: {total_runtime_seconds / max(len(sim_dates_to_run), 1):.2f}秒")
     logger.info("=" * 60)
+    if telemetry:
+        telemetry.run_id = run_id_override or f"db_{config_name}"
+        written = telemetry.write(performance_path)
+        logger.info(f"📈 性能报告: {written}")
     
     return {
         'validation_passed': True,
@@ -905,4 +959,5 @@ def run_integrated_simulation_from_dict(
         'summary_reports': summary_reports,
         'config_dict': config_dict,  # 返回config_dict供本地文件输出使用
         'run_id': run_id_override or f"db_{config_name}",
+        'performance_report': str(performance_path) if performance_path else None,
     }

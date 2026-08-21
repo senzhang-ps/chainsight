@@ -252,6 +252,10 @@ class PersistenceManager:
             table_name = table_map.get(key)
             if table_name is None:
                 continue
+            if db_key == 'module1' and key == 'orders_df':
+                # 累计订单只用于内存调度。legacy OrderLog 的粒度是当日创建
+                # 订单，因此在持久化边界改用单日输出，保留下游内存契约不变。
+                df = results.get('orders_to_persist', df)
             if df is None:
                 continue
             if isinstance(df, pd.DataFrame) and df.empty:
@@ -269,6 +273,10 @@ class PersistenceManager:
                 continue
 
             df = normalize_identifiers(df.copy())
+            if db_key == 'module4' and key == 'production_df' and 'changeover_id' in df.columns:
+                # legacy 使用 SQL NULL 表示无换产；标识符规范化会将缺失值
+                # 转为空字符串，导致相同生产行在审计关联时拆成两条。
+                df['changeover_id'] = df['changeover_id'].replace(r'^\s*$', pd.NA, regex=True)
             df = self._inject_meta(df, run_id, sim_date_str, now)
             self._write_idempotent(table_name, df, run_id, sim_date_str)
             written += 1
@@ -317,6 +325,17 @@ class PersistenceManager:
                 written[table_name] = 0
                 continue
             frame = normalize_identifiers(frame.copy())
+            if (
+                output_name != 'full_order_shipment_cut_report'
+                and 'simulation_date' in frame.columns
+            ):
+                # legacy Summary 的日度模块报表按源模块仿真日写入 sim_date；
+                # 将所有行标为 end_date 会丢失该维度，导致相同业务报表在
+                # 审计中无法关联。订单汇总是 run-level 报表，legacy 不以
+                # 行级 simulation_date 作为其落库 sim_date，故保留原行为。
+                frame['sim_date'] = pd.to_datetime(
+                    frame['simulation_date'], errors='coerce'
+                ).dt.strftime('%Y-%m-%d')
             frame = self._inject_meta(frame, run_id, sim_date, now)
             self._ensure_summary_columns(table_name, frame)
             self.writer.write(table_name, frame)

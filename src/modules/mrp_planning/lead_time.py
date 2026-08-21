@@ -75,10 +75,11 @@ def _get_lead_time_params(
 
 
 def _get_max_numeric(df: pd.DataFrame, col: str) -> int:
-    """获取列的最大数值。"""
-    return int(
-        pd.to_numeric(df.get(col, 0), errors='coerce').fillna(0).max()
-    )
+    """获取列的最大数值；缺列时按 0 处理。"""
+    if col not in df.columns:
+        return 0
+    values = pd.to_numeric(df[col], errors='coerce').fillna(0)
+    return int(values.max()) if not values.empty else 0
 
 
 def determine_lead_time(

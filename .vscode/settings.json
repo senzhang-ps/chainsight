@@ -1,6 +1,6 @@
 {
     "chatgpt.openOnStartup": false,
-    "python.defaultInterpreterPath": "${workspaceFolder}/.venv/Scripts/python.exe",
+    "python.defaultInterpreterPath": "C:\\Users\\lin.hn\\AppData\\Local\\miniforge3\\envs\\work\\python.exe",
     "python.terminal.activateEnvironment": true,
     "python.testing.pytestEnabled": true,
     "python.testing.unittestEnabled": false,
@@ -11,8 +11,8 @@
     "python-envs.pythonProjects": [
         {
             "path": ".",
-            "envManager": "ms-python.python:venv",
-            "packageManager": "ms-python.python:pip"
+            "envManager": "ms-python.python:conda",
+            "packageManager": "ms-python.python:conda"
         }
     ]
 }

@@ -113,6 +113,52 @@ def test_state_context_builds_all_registered_summary_outputs() -> None:
     assert first_day["safety_stock"] == 7
 
 
+def test_order_summary_prefers_m1_daily_persistence_payload() -> None:
+    """Summary 不得把 M1 累计订单视图重复计为每日新订单。"""
+    ctx = StateContext("2025-01-01")
+    old_order = {"date": "2025-01-01", "material": "MAT-1", "location": "1000", "quantity": 10}
+    new_order = {"date": "2025-01-02", "material": "MAT-2", "location": "1000", "quantity": 20}
+    ctx.record_summary_module_result("module1", _result(
+        orders_df=pd.DataFrame([old_order]),
+        orders_to_persist=pd.DataFrame([old_order]),
+    ), "2025-01-01")
+    ctx.record_summary_module_result("module1", _result(
+        orders_df=pd.DataFrame([old_order, new_order]),
+        orders_to_persist=pd.DataFrame([new_order]),
+    ), "2025-01-02")
+
+    summary = ctx.build_summary_outputs("2025-01-01", "2025-01-02")[
+        "full_order_shipment_cut_report"
+    ]
+
+    assert len(summary) == 2
+    assert summary["order_qty"].sum() == 30
+
+
+def test_order_summary_aggregates_source_days_at_legacy_business_grain() -> None:
+    """同一业务日跨来源日的指标应合并为一条 legacy 报表记录。"""
+    ctx = StateContext("2025-01-01")
+    row = {"date": "2025-01-03", "material": "MAT-1", "location": "1000", "quantity": 10}
+    ctx.record_summary_module_result("module1", _result(
+        orders_to_persist=pd.DataFrame([row]),
+        shipment_df=pd.DataFrame([row]),
+        cut_df=pd.DataFrame(),
+    ), "2025-01-01")
+    ctx.record_summary_module_result("module1", _result(
+        orders_to_persist=pd.DataFrame([row]),
+        shipment_df=pd.DataFrame([row]),
+        cut_df=pd.DataFrame(),
+    ), "2025-01-02")
+
+    summary = ctx.build_summary_outputs("2025-01-01", "2025-01-03")[
+        "full_order_shipment_cut_report"
+    ]
+
+    assert len(summary) == 1
+    assert summary.iloc[0][["order_qty", "shipment_qty"]].tolist() == [10.0, 20.0]
+    assert pd.Timestamp(summary.iloc[0]["simulation_date"]) == pd.Timestamp("2025-01-02")
+
+
 def test_summary_persistence_uses_only_registered_summary_tables() -> None:
     orch = _FakeOrchestrator()
     ctx = StateContext("2025-01-01")
@@ -128,3 +174,21 @@ def test_summary_persistence_uses_only_registered_summary_tables() -> None:
     for frame in orch.db.frames.values():
         assert frame["run_id"].eq("summary-test-run").all()
         assert frame["config_name"].eq("summary-test").all()
+
+
+def test_daily_summary_persistence_uses_source_simulation_date() -> None:
+    """模块日度 Summary 的 DB ``sim_date`` 应保留来源仿真日。"""
+    orch = _FakeOrchestrator()
+    ctx = StateContext("2025-01-01")
+    ctx.record_summary_module_result("module4", _result(
+        changeover_log=pd.DataFrame([{
+            "date": "2025-01-02", "location": "1000", "line": "L1",
+            "changeover_type": "Change", "count": 1, "time": 1, "cost": 1,
+            "mu_loss": 0,
+        }]),
+    ), "2025-01-01")
+
+    PersistenceManager(orch).save_summary_outputs(ctx, "2025-01-01", "2025-01-02")
+
+    frame = orch.db.frames["summary_full_changeover_report"]
+    assert frame["sim_date"].tolist() == ["2025-01-01"]

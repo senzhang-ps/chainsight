@@ -8,6 +8,7 @@
 """
 
 import logging
+import os
 import time
 
 import pandas as pd
@@ -24,6 +25,22 @@ from src.modules.mrp_planning.integration_refactor import ModuleThree
 from src.modules.production_planning.integration_refactor import ModuleFour
 from src.modules.state_context import StateContext
 from src.utils.defaults import M6_MAX_WAIT_DAYS, M6_RANDOM_SEED
+from src.utils.performance_telemetry import PerformanceTelemetry
+
+
+_PRIMARY_OUTPUTS = {
+    "module1": "orders_df",
+    "module4": "production_df",
+    "module5": "deployment_plan",
+    "module6": "delivery_plan",
+    "module3": "net_demand_df",
+}
+
+
+def _result_row_count(module_id: str, result: dict) -> int | None:
+    """返回模块主结果行数；没有主输出时保留为空。"""
+    primary = result.get(_PRIMARY_OUTPUTS[module_id])
+    return len(primary) if primary is not None and hasattr(primary, "__len__") else None
 
 def run_integrated_simulation(
     config_path: str,
@@ -32,9 +49,14 @@ def run_integrated_simulation(
     output_base_dir: str = "./integrated_output",
     engine: str = "polars",
     test_mode: bool = False,
+    test_schema: str | None = None,
     enable_persistence: bool = True,
     interrupt_after: tuple[str, str] | None = None,
     config_name: str | None = None,
+    skip_dq: bool = False,
+    verbose: bool = False,
+    performance_report: str | None = None,
+    run_mode: str | None = None,
 ):
     """使用 StateContext + Orch 的集成仿真入口。
 
@@ -44,12 +66,23 @@ def run_integrated_simulation(
     3. ModuleOne 通过 orchestrator=ctx 获取状态视图
     4. 仿真循环：ctx.day_start → M1 → M4 → M5 → M6 → M3 → ctx.day_end
 
-    ``test_mode`` 仅决定数据库 schema（固定为 ``test``），不决定是否写库；
+    ``test_mode`` 使用隔离数据库 schema（默认 ``test``，可由 ``test_schema`` 覆盖），
+    不决定是否写库；
     默认持久化配置、日度状态与模块输出，可通过 ``enable_persistence=False`` 关闭。
     ``interrupt_after`` 仅供集成测试使用，格式为 ``(YYYY-MM-DD, module_id)``；
     模块完成后、当日日末状态提交前抛出 ``RuntimeError``。
+
+    ``skip_dq`` 仅用于性能/集成测试时跳过配置数据质量检测；``verbose`` 默认关闭，
+    避免模块内部逐步骤耗时日志干扰性能基线。设置 ``performance_report``（或环境变量
+    ``CHAINSIGHT_PERFORMANCE_REPORT``）后，按日写出结构化性能 JSON。
     """
     logger = logging.getLogger("SupplyChainSimulation")
+    performance_path = performance_report or os.environ.get("CHAINSIGHT_PERFORMANCE_REPORT")
+    telemetry = PerformanceTelemetry(
+        "refactor",
+        run_mode or os.environ.get("CHAINSIGHT_RUN_MODE", "continuous"),
+        "test" if test_mode else "public",
+    ) if performance_path else None
     # ── 日志配置 ──
     logging.basicConfig(
         level=logging.INFO,
@@ -64,9 +97,10 @@ def run_integrated_simulation(
         config_path=config_path,
         output_path=output_base_dir,
         engine=engine,
-        skip_dq=False,
+        skip_dq=skip_dq,
         enable_persistence=enable_persistence,
         test_mode=test_mode,
+        test_schema=test_schema,
         config_name=config_name,
     )
     ctx = StateContext(simulation_date=start_date, orch=orch)
@@ -76,6 +110,7 @@ def run_integrated_simulation(
         simulation_date=str(start_date),
         orchestrator=ctx,
         orch=orch,
+        verbose=verbose,
     )
 
     # ── ModuleFour（生产计划）──
@@ -83,7 +118,8 @@ def run_integrated_simulation(
         simulation_date=str(start_date),
         simulation_start_date=start_date,
         orchestrator=ctx,
-        orch=orch
+        orch=orch,
+        verbose=verbose,
     )
 
     # ── ModuleThree（消费 M5 当日 PlanningFacts，产出供下一日 M4 使用的净需求）──
@@ -93,12 +129,14 @@ def run_integrated_simulation(
         orchestrator=ctx,
         orch=orch,
         state_context=ctx,
+        verbose=verbose,
     )
     m5 = ModuleFive(
         simulation_date=str(start_date),
         simulation_start_date=start_date,
         state_context=ctx,
         orch=orch,
+        verbose=verbose,
     )
     m6 = ModuleSix(
         simulation_date=str(start_date),
@@ -106,6 +144,7 @@ def run_integrated_simulation(
         orch=orch,
         max_wait_days=M6_MAX_WAIT_DAYS,
         random_seed=M6_RANDOM_SEED,
+        verbose=verbose,
     )
 
     modules = {
@@ -131,7 +170,10 @@ def run_integrated_simulation(
     for i, current_date in enumerate(sim_dates, 1):
         date_str = current_date.strftime('%Y-%m-%d')
 
+        day_start_timer = telemetry.start() if telemetry else 0.0
         ctx.day_start(date_str)
+        if telemetry:
+            telemetry.record("day_start", day_start_timer, simulation_date=date_str)
 
         for module in modules.values():
             module.simulation_date = current_date
@@ -144,8 +186,17 @@ def run_integrated_simulation(
                     ctx.get_all_previous_allocated_capacity(date_str)
                 )
 
+            module_timer = telemetry.start() if telemetry else 0.0
             modules[module_id].run()
             result = modules[module_id].output()
+            if telemetry:
+                telemetry.record(
+                    "module_run",
+                    module_timer,
+                    simulation_date=date_str,
+                    module=module_id,
+                    rows=_result_row_count(module_id, result),
+                )
             validate_module_result(module_id, result, date_str)
             result["simulation_date"] = current_date
             ctx.apply_module_result(module_id, result, date_str)
@@ -164,14 +215,26 @@ def run_integrated_simulation(
                 m3_result = result
                 m4.module3_result = m3_result
 
+        day_end_timer = telemetry.start() if telemetry else 0.0
         ctx.day_end(date_str)
+        if telemetry:
+            telemetry.record("day_end", day_end_timer, simulation_date=date_str)
         if enable_persistence:
+            persistence_timer = telemetry.start() if telemetry else 0.0
             # 按日原子落库；测试模式下 Orchestrator 固定使用 ``test`` schema。
             with orch.persistence.batch_transaction():
                 for module in modules.values():
                     orch.save_module_output(module, date_str)
                 orch.save_daily_state(ctx, date_str)
                 orch.save_checkpoint(orch.run_id, current_date=date_str)
+            if telemetry:
+                telemetry.record(
+                    "persistence_and_checkpoint",
+                    persistence_timer,
+                    simulation_date=date_str,
+                )
+                telemetry.run_id = orch.run_id
+                telemetry.write(performance_path)
         context_snapshots.append({
             "simulation_date": current_date,
             "views": ctx.snapshot_integration_views(date_str),
@@ -186,7 +249,10 @@ def run_integrated_simulation(
     )
     final_stats = ctx.get_summary_statistics(end_date)
     if enable_persistence:
+        finalise_timer = telemetry.start() if telemetry else 0.0
         orch.finalize_simulation(ctx)
+        if telemetry:
+            telemetry.record("finalise", finalise_timer)
     total_seconds = time.time() - simulation_start_time
     hours, rem = divmod(total_seconds, 3600)
     minutes, seconds = divmod(rem, 60)
@@ -206,6 +272,11 @@ def run_integrated_simulation(
     #     len(sim_dates), n_m4_prod, runtime_str,
     # )
 
+    if telemetry:
+        telemetry.run_id = orch.run_id
+        written_report = telemetry.write(performance_path)
+        logger.info("📈 性能报告: %s", written_report)
+
     return {
         'simulation_completed': True,
         'run_id': orch.run_id,
@@ -215,4 +286,5 @@ def run_integrated_simulation(
         'context_snapshots': context_snapshots,
         'summary_outputs': summary_outputs,
         'final_stats': final_stats,
+        'performance_report': str(performance_path) if performance_path else None,
     }

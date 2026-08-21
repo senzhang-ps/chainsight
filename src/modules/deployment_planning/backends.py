@@ -1094,7 +1094,21 @@ class _PolarsBackend:
         available = cls._pl(stock)
         if data.is_empty() or available.is_empty(): return cls._out(data) if pandas_boundary else data
         need = data.group_by(["material", "node", "priority"], maintain_order=True).agg(pl.col("planned_qty").sum().alias("_need")).join(available.select(["material", "node", "qty"]), on=["material", "node"], how="left").with_columns(pl.col("qty").fill_null(0)).sort(["material", "node", "priority"]).with_columns((pl.col("_need").cum_sum().over(["material", "node"]) - pl.col("_need")).alias("_prior")).with_columns(pl.min_horizontal([(pl.col("qty") - pl.col("_prior")).clip(lower_bound=0), pl.col("_need")]).alias("_allocation"))
-        data = data.join(need.select(["material", "node", "priority", "_need", "_allocation"]), on=["material", "node", "priority"], how="left").with_columns(pl.min_horizontal([((pl.col("_allocation") * pl.col("planned_qty") / pl.col("_need").replace(0, None)).floor().fill_null(0)).cast(pl.Int64), pl.col("planned_qty").cast(pl.Int64)]).alias("deployed_qty_invCon")).drop(["_need", "_allocation"])
+        data = data.join(need.select(["material", "node", "priority", "_need", "_allocation"]), on=["material", "node", "priority"], how="left").with_columns(
+            # 与 pandas/legacy 一致：库存覆盖整个优先级组时直接保留原始
+            # 整数需求；只有部分覆盖时才按 ``allocation * (row / total)``
+            # 的运算顺序比例向下取整。通用乘除表达式会在临界浮点值少分 1。
+            pl.when(pl.col("_allocation") >= pl.col("_need"))
+            .then(pl.col("planned_qty").cast(pl.Int64))
+            .otherwise(
+                pl.min_horizontal([
+                    (pl.col("_allocation") * (pl.col("planned_qty") / pl.col("_need").replace(0, None)))
+                    .floor().fill_null(0).cast(pl.Int64),
+                    pl.col("planned_qty").cast(pl.Int64),
+                ])
+            )
+            .alias("deployed_qty_invCon")
+        ).drop(["_need", "_allocation"])
         return cls._out(data) if pandas_boundary else data
 
     @classmethod
@@ -1105,12 +1119,12 @@ class _PolarsBackend:
         if data.is_empty() or pool.is_empty(): return cls._out(data) if pandas_boundary else data
         sources = ("future_intransit", "open_inbound", "future_production")
         data = data.join(pool.select(["material", "node", *sources]), on=["material", "node"], how="left").with_columns([pl.col(c).cast(pl.Float64, strict=False).fill_null(0) for c in sources])
-        previous = None
         for source, output in zip(sources, outputs[1:]):
             remaining = (pl.col("planned_qty") - pl.col("deployed_qty_invCon") - pl.sum_horizontal([pl.col(c) for c in outputs[1:]])).clip(lower_bound=0)
             candidate = pl.col("node") == pl.col("receiving"); total = pl.when(candidate).then(remaining).otherwise(0).sum().over(["material", "node"])
-            used = pl.col(previous).sum().over(["material", "node"]) if previous else pl.lit(0)
-            data = data.with_columns(pl.when(candidate).then(pl.min_horizontal([((pl.col(source) - used).clip(lower_bound=0) * remaining / total.replace(0, None)).floor().fill_null(0).cast(pl.Int64), remaining.cast(pl.Int64)])).otherwise(0).alias(output)); previous = output
+            # 各 pipeline supply 为独立池；严格镜像 pandas：每次分配均从
+            # 当前来源的完整 pool 出发，而不能扣减前一来源的已分配量。
+            data = data.with_columns(pl.when(candidate).then(pl.min_horizontal([(pl.col(source).clip(lower_bound=0) * remaining / total.replace(0, None)).floor().fill_null(0).cast(pl.Int64), remaining.cast(pl.Int64)])).otherwise(0).alias(output))
         data = data.with_columns(pl.sum_horizontal([pl.col(c) for c in outputs[1:]]).alias(outputs[0])).drop(list(sources))
         return cls._out(data) if pandas_boundary else data
 

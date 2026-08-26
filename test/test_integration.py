@@ -10,6 +10,7 @@
 import logging
 import os
 import time
+from collections.abc import Callable
 
 import pandas as pd
 
@@ -57,6 +58,9 @@ def run_integrated_simulation(
     verbose: bool = False,
     performance_report: str | None = None,
     run_mode: str | None = None,
+    module_result_providers: dict[str, Callable[[pd.Timestamp], dict]] | None = None,
+    module_input_observer: Callable[[str, pd.Timestamp, object, StateContext], None] | None = None,
+    module_result_observer: Callable[[str, pd.Timestamp, object, dict, StateContext], None] | None = None,
 ):
     """使用 StateContext + Orch 的集成仿真入口。
 
@@ -75,6 +79,16 @@ def run_integrated_simulation(
     ``skip_dq`` 仅用于性能/集成测试时跳过配置数据质量检测；``verbose`` 默认关闭，
     避免模块内部逐步骤耗时日志干扰性能基线。设置 ``performance_report``（或环境变量
     ``CHAINSIGHT_PERFORMANCE_REPORT``）后，按日写出结构化性能 JSON。
+
+    ``module_result_providers`` 仅用于受控集成回放：按模块和日期提供冻结结果，
+    替代该模块的 ``run()``。此模式只支持内存运行；注入 M1 时仍经过统一结果
+    校验和 StateContext 写回，M4→M5→M6→M3 保持真实日度闭环。
+
+    ``module_input_observer`` 仅供诊断测试在模块运行前只读捕获输入事实；回调不得
+    修改模块或 StateContext。
+
+    ``module_result_observer`` 在模块输出产生后、写回状态前只读观察结果及模块内部
+    诊断信息；回调不得修改其参数。
     """
     logger = logging.getLogger("SupplyChainSimulation")
     performance_path = performance_report or os.environ.get("CHAINSIGHT_PERFORMANCE_REPORT")
@@ -106,7 +120,14 @@ def run_integrated_simulation(
     ctx = StateContext(simulation_date=start_date, orch=orch)
     ctx.initialize(orch.all_config)
 
-    m1 = module1.ModuleOne(
+    module_result_providers = module_result_providers or {}
+    unknown_providers = set(module_result_providers) - set(MODULE_EXECUTION_ORDER)
+    if unknown_providers:
+        raise ValueError(f"未知模块结果提供者: {sorted(unknown_providers)}")
+    if module_result_providers and enable_persistence:
+        raise ValueError("外部模块结果提供者仅支持 enable_persistence=False")
+
+    m1 = None if "module1" in module_result_providers else module1.ModuleOne(
         simulation_date=str(start_date),
         orchestrator=ctx,
         orch=orch,
@@ -155,7 +176,8 @@ def run_integrated_simulation(
         "module3": m3,
     }
     for module in modules.values():
-        module.prepare()
+        if module is not None:
+            module.prepare()
 
     all_results = {module_id: [] for module_id in MODULE_EXECUTION_ORDER}
     context_snapshots = []
@@ -176,7 +198,8 @@ def run_integrated_simulation(
             telemetry.record("day_start", day_start_timer, simulation_date=date_str)
 
         for module in modules.values():
-            module.simulation_date = current_date
+            if module is not None:
+                module.simulation_date = current_date
         for module_id in MODULE_EXECUTION_ORDER:
             if module_id == "module4":
                 # M4 严格消费前一个自然日 M3 的输出，保持一日 lag。
@@ -187,8 +210,22 @@ def run_integrated_simulation(
                 )
 
             module_timer = telemetry.start() if telemetry else 0.0
-            modules[module_id].run()
-            result = modules[module_id].output()
+            if module_input_observer is not None and modules[module_id] is not None:
+                module_input_observer(module_id, current_date, modules[module_id], ctx)
+            provider = module_result_providers.get(module_id)
+            if provider is not None:
+                provided = provider(current_date)
+                if not isinstance(provided, dict):
+                    raise TypeError(f"{date_str} {module_id} 外部结果必须为 dict")
+                result = {
+                    key: value.copy(deep=True) if isinstance(value, pd.DataFrame) else value
+                    for key, value in provided.items()
+                }
+            else:
+                modules[module_id].run()
+                result = modules[module_id].output()
+            if module_result_observer is not None and modules[module_id] is not None:
+                module_result_observer(module_id, current_date, modules[module_id], result, ctx)
             if telemetry:
                 telemetry.record(
                     "module_run",
@@ -224,7 +261,8 @@ def run_integrated_simulation(
             # 按日原子落库；测试模式下 Orchestrator 固定使用 ``test`` schema。
             with orch.persistence.batch_transaction():
                 for module in modules.values():
-                    orch.save_module_output(module, date_str)
+                    if module is not None:
+                        orch.save_module_output(module, date_str)
                 orch.save_daily_state(ctx, date_str)
                 orch.save_checkpoint(orch.run_id, current_date=date_str)
             if telemetry:

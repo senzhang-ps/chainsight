@@ -1,9 +1,9 @@
 # OC 11 天连续运行回归测试报告
 
-**测试日期：** 2026-08-21  
+**测试日期：** 2026-08-21；补充交叉验证：2026-08-26  
 **测试范围：** 2025-12-15 至 2025-12-25（11 个仿真日）  
 **场景：** `OC_Paste_S1_20251224_repare`  
-**结论：** 业务结果整体一致；重构 Polars 实现端到端耗时为 legacy 的 **24.7%**（**4.05×** 加速）。唯一待确认项为 Full Deployment Plan 汇总表中 219 条记录的空值与零值表示差异。
+**结论：** 业务结果一致；重构 Polars 实现端到端耗时为 legacy 的 **24.7%**（**4.05×** 加速）。补充的“固定 legacy M1 输入”交叉验证确认：pandas 与 Polars 的 M4→M5→M6→M3 在 11 天内均与 legacy 完全一致。Full Deployment Plan 汇总表仍保留 219 条 `NULL` / `0` 表示差异待确认。
 
 ---
 
@@ -161,6 +161,33 @@
 - `viewcontext_delivery_shipment_log`
 - `viewcontext_shipment_log`
 
+### 4.5 固定 Legacy M1 的下游交叉验证（2026-08-26）
+
+为隔离 M1 随机数消费顺序、全零记录及订单数量差异对下游的放大影响，新增了受控交叉验证：**不执行 refactor M1**，而是把 legacy 历史 M1 的日度结果注入 refactor 状态层；随后真实执行 refactor 的 M4→M5→M6→M3，并与同一 legacy run 的下游落库结果逐日比较。
+
+固定输入来自 `test_bc` 数据库的 `input` schema：
+
+| 项目 | 值 |
+|---|---|
+| Legacy M1 / 下游 Oracle run ID | `db_OC_Paste_S1_20251224_repare_20260826_130441` |
+| 固定 M1 合同 | 当日 `OrderLog`、累计有效订单、`ShipmentLog`、`CutLog`、`SupplyDemandLog`、`Summary` |
+| 累计订单规则 | `sim_date <= D` 且订单 `date >= D` |
+| 写库 | 不写数据库；仅内存回放与本地审计报告 |
+| 比较范围 | M4、M5、M6、M3 全部已注册业务输出，以及库存、在途、开放调拨、空间配额等日末状态 |
+| 不纳入业务验收 | `module5.validation_log`；该表为实现诊断合同，虽行数相同但无稳定跨实现业务键 |
+
+#### 4.5.1 结果
+
+| Refactor 后端 | 比较项 | 业务差异 | 状态差异 | 结果 |
+|---|---:|---:|---:|---|
+| pandas | 165 张日度模块输出 | 0 | 0 / 44 | 通过 |
+| Polars | 165 张日度模块输出 | 0 | 0 / 44 | 通过 |
+
+Polars 最终审计报告：[fixed_legacy_m1_downstream_parity.json](../../outputs/fixed_legacy_m1_downstream_parity/run_20260826_162529/fixed_legacy_m1_downstream_parity.json)。
+
+该验证说明：在完全相同的 M1 外部合同和日度状态写回下，重构下游没有独立业务差异；此前完整集成中的后期差异可以归因到已修复的状态与数值语义，而非 M4–M3 的功能性重构偏离。
+
+
 ## 5. 比较器修正
 
 首次执行中，Full Deployment Plan 的 `0` 与 `0.0` 因字符串形式不同被视为不同整行。已在 [tests/compare_utils.py](../../tests/compare_utils.py) 中把部署类字段纳入数值规范化，使该表从 283,518 条全部未匹配收敛到 219 条明确的 `NULL` / `0` 差异。
@@ -170,7 +197,7 @@
 ### 回归结论
 
 - **性能：通过。** Refactor Polars 连续运行总耗时降低 75.3%，端到端加速 4.05×；M3/M4/M5 均达到显著加速。
-- **功能：条件通过。** 31 对业务表中 30 对完全一致；唯一差异表的核心计划事实一致，剩余 219 条为部署来源分量的 `NULL` / `0` 表示差异。
+- **功能：通过。** 原始数据库审计的 31 对业务表中 30 对完全一致；固定 legacy M1 的下游交叉验证进一步确认 pandas、Polars 均在 11 天内实现 M4→M5→M6→M3 的业务与状态一致。唯一仍待确认项是 Full Deployment Plan 汇总的 219 条 `NULL` / `0` 表示差异。
 
 ### 建议后续动作
 
@@ -192,4 +219,12 @@ conda run --no-capture-output -n work python test/test_run.py --config input/OC/
 
 # input 与 refactor 落库审计
 conda run --no-capture-output -n work python tests/_compare_legacy_refactor_schema_runs.py --legacy-schema input --refactor-schema refactor
+
+# 固定 legacy M1 的下游交叉验证（pandas；Polars 时将 ENGINE 改为 polars）
+$env:RUN_FIXED_LEGACY_M1_DOWNSTREAM='1'
+$env:FIXED_LEGACY_M1_DATABASE='test_bc'
+$env:FIXED_LEGACY_M1_SCHEMA='input'
+$env:FIXED_LEGACY_M1_RUN_ID='db_OC_Paste_S1_20251224_repare_20260826_130441'
+$env:FIXED_LEGACY_M1_REFACTOR_ENGINE='pandas'
+conda run --no-capture-output -n work pytest tests/test_fixed_legacy_m1_downstream_parity.py -s -q
 ```

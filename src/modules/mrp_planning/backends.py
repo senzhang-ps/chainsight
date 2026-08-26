@@ -51,6 +51,7 @@ class _PandasBackend:
         self.owner = owner
         self.static: dict[str, pd.DataFrame] = {}
         self.result: dict = {}
+        self.last_layer_diagnostics: list[dict[str, Any]] = []
 
     @staticmethod
     def empty(columns: list[str]) -> pd.DataFrame:
@@ -311,12 +312,15 @@ class _PandasBackend:
         available_by_node = self._available_by_node(day, supply)
         gaps = defaultdict(lambda: {"AO": 0.0, "FC": 0.0, "SS": 0.0})
         records: list[dict[str, Any]] = []
+        diagnostics: list[dict[str, Any]] = []
         for layer in sorted(facts["layers"], reverse=True):
             for material, node in sorted(nodes_by_layer[layer]):
                 demand = dict(direct_map[(material, node)])
+                inherited = dict(gaps[(material, node)])
                 for kind in demand:
-                    demand[kind] += gaps[(material, node)][kind]
+                    demand[kind] += inherited[kind]
                 available = available_by_node.get((material, node), 0.0)
+                available_before = available
                 shortages: dict[str, float] = {}
                 for kind in ("AO", "FC", "SS"):
                     shortages[kind] = max(demand[kind] - available, 0.0)
@@ -334,6 +338,8 @@ class _PandasBackend:
                         })
                 parent = upstream.get((material, node))
                 total = sum(shortages.values())
+                allocated = {"AO": 0.0, "FC": 0.0, "SS": 0.0}
+                moq = rv = None
                 if parent and total > 0:
                     moq, rv = route_map.get((material, parent, node), (1, 1))
                     split = apportion_largest_remainder(
@@ -342,6 +348,19 @@ class _PandasBackend:
                     )
                     for kind, qty in zip(("AO", "FC", "SS"), split):
                         gaps[(material, parent)][kind] += float(qty)
+                        allocated[kind] = float(qty)
+                diagnostics.append({
+                    "material": material, "node": node, "parent": parent,
+                    "layer": int(layer),
+                    "horizon_end": pd.Timestamp(horizon.get((material, node), day)).strftime("%Y-%m-%d"),
+                    "available_before": float(available_before),
+                    **{f"direct_{kind}": float(direct_map[(material, node)][kind]) for kind in ("AO", "FC", "SS")},
+                    **{f"inherited_{kind}": float(inherited[kind]) for kind in ("AO", "FC", "SS")},
+                    **{f"shortage_{kind}": float(shortages[kind]) for kind in ("AO", "FC", "SS")},
+                    "moq": moq, "rv": rv,
+                    **{f"propagated_{kind}": allocated[kind] for kind in ("AO", "FC", "SS")},
+                })
+        self.last_layer_diagnostics = diagnostics
         return records
 
     def finalise_result(self, records: list[dict[str, Any]]) -> dict:

@@ -293,6 +293,44 @@ def test_allocate_pipeline_preserves_three_pool_deduction_and_self_demand_scope(
     assert result.index.equals(demand.index)
 
 
+def test_allocate_pipeline_preserves_legacy_float_operation_order():
+    """49 单位池覆盖 5/4/4/4/3/3/26 时，三个 4 必须保留 1 单位 gap。
+
+    legacy 先计算 ``gap / total`` 再乘 pool；若先乘再除，三个 4 会因中间
+    浮点舍入变成精确 4，错误吞掉应向上游传播的三个单位。
+    """
+    demand = pd.DataFrame([
+        {"material": "A", "node": "N1", "receiving": "N1", "planned_qty": qty, "deployed_qty_invCon": 0}
+        for qty in (5, 4, 4, 4, 3, 3, 26)
+    ])
+    pools = pd.DataFrame([{
+        "material": "A", "node": "N1", "future_intransit": 49,
+        "open_inbound": 0, "future_production": 0,
+    }])
+
+    result = _PandasBackend.allocate_pipeline(demand, pools)
+
+    assert result["deploy_from_in_transit"].tolist() == [5, 3, 3, 3, 3, 3, 26]
+    assert result["deploy_qty_with_plan_order"].sum() == 46
+
+
+def test_polars_allocate_pipeline_preserves_legacy_float_operation_order():
+    """Polars 也必须保留 49 × (4 / 49) 的非精确中间结果。"""
+    demand = pd.DataFrame([
+        {"material": "A", "node": "N1", "receiving": "N1", "planned_qty": qty, "deployed_qty_invCon": 0}
+        for qty in (5, 4, 4, 4, 3, 3, 26)
+    ])
+    pools = pd.DataFrame([{
+        "material": "A", "node": "N1", "future_intransit": 49,
+        "open_inbound": 0, "future_production": 0,
+    }])
+
+    result = _PolarsBackend.allocate_pipeline(demand, pools)
+
+    assert result["deploy_from_in_transit"].tolist() == [5, 3, 3, 3, 3, 3, 26]
+    assert result["deploy_qty_with_plan_order"].sum() == 46
+
+
 def test_polars_allocate_priority_matches_pandas_baseline():
     """Polars 的优先级窗口累计与比例向下取整不得偏离 pandas 基线。"""
     demand = pd.DataFrame(

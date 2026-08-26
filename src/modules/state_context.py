@@ -381,10 +381,12 @@ class StateContext(Module):
 
         源: simulation_db.py:368-398 循环体内联逻辑。
 
-        StateContext 维护 backlog 在内存中，无需文件系统访问。
-        只处理 available_date == today 的记录。为与 legacy 编排的 M3
-        ``get_all_production_view()`` 口径一致，已处理记录仍保留在 backlog；
-        legacy 会在同日将 production GR 与该 backlog 计划共同提供给 M3。
+        StateContext 维护 backlog 在内存中，无需文件系统访问。legacy DB 调度会
+        将当天到货的 backlog 行再次传给 ``process_module4_production()``：该处理器
+        会先按新的 simulation_date 将计划追加到 backlog，再写 production GR。
+        因而 M3 同日 ``get_all_production_view()`` 同时看到 GR、原 backlog 和这次
+        重写的 backlog。这里必须复用 ``apply_production()``，不能只加 GR；否则
+        future-production 低估并在 M3 safety gap 向上游传播时产生伪差异。
         """
         date_obj = pd.to_datetime(date_str).normalize()
 
@@ -402,30 +404,10 @@ class StateContext(Module):
         if arriving.empty:
             return
 
-        for row in arriving.itertuples():
-            key = (
-                normalize_material(row.material),
-                normalize_location(row.location),
-            )
-            quantity = int(row.quantity)
-
-            old = self.unrestricted_inventory.get(key, 0)
-            self.unrestricted_inventory[key] = old + quantity
-
-            record = {
-                'date': date_obj,
-                'material': normalize_material(row.material),
-                'location': normalize_location(row.location),
-                'quantity': quantity,
-            }
-            self.production_gr.append(record)
-            ds = date_obj.strftime('%Y-%m-%d')
-            if ds not in self.production_gr_by_date:
-                self.production_gr_by_date[ds] = []
-            self.production_gr_by_date[ds].append(record)
-
-        msg = f"Processed {len(arriving)} backlog production arrivals"
-        self._log_event("BACKLOG_GR", msg)
+        arrivals_for_processor = arriving.loc[:, [
+            'material', 'location', 'available_date', 'quantity',
+        ]].rename(columns={'quantity': 'produced_qty'})
+        self.apply_production(arrivals_for_processor, date_str)
 
     def _compute_views(self, date_str: str) -> Dict[str, pd.DataFrame]:
         """计算所有 view 并返回 dict。
@@ -795,46 +777,10 @@ class StateContext(Module):
         backlog_df = pd.DataFrame(self.production_plan_backlog)
         if backlog_df.empty:
             return pd.DataFrame(columns=cols)
-
         for col in cols:
             if col not in backlog_df.columns:
                 backlog_df[col] = ''
-
-        backlog_view = backlog_df[cols].copy()
-        backlog_view['available_date'] = pd.to_datetime(
-            backlog_view['available_date'], errors='coerce'
-        ).dt.normalize()
-        backlog_view['material'] = backlog_view['material'].map(normalize_material)
-        backlog_view['location'] = backlog_view['location'].map(normalize_location)
-        backlog_view['quantity'] = pd.to_numeric(
-            backlog_view['quantity'], errors='coerce'
-        ).fillna(0)
-
-        # legacy 的日末 backlog 快照在计划可用日保留原计划，并持续加上
-        # 对应的 production GR。生产 GR 在产生后仍保留于全局记录中，故
-        # 不能只读取当天索引；后续日的 backlog 快照也必须保持该累计口径。
-        if self.production_gr:
-            arrived = pd.DataFrame(self.production_gr)
-            arrived['material'] = arrived['material'].map(normalize_material)
-            arrived['location'] = arrived['location'].map(normalize_location)
-            arrived['available_date'] = pd.to_datetime(
-                arrived['date'], errors='coerce'
-            ).dt.normalize()
-            arrived['quantity'] = pd.to_numeric(
-                arrived['quantity'], errors='coerce'
-            ).fillna(0)
-            arrived = arrived.groupby(
-                ['material', 'location', 'available_date'], as_index=False
-            )['quantity'].sum().rename(columns={'quantity': '_arrived_quantity'})
-            backlog_view = backlog_view.merge(
-                arrived,
-                on=['material', 'location', 'available_date'],
-                how='left',
-            )
-            backlog_view['quantity'] += backlog_view['_arrived_quantity'].fillna(0)
-            backlog_view = backlog_view.drop(columns=['_arrived_quantity'])
-
-        return backlog_view[cols]
+        return backlog_df[cols]
 
     # ══════════════════════════════════════════
     # Processor（模块运行后写回状态）

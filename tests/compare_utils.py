@@ -48,7 +48,13 @@ def _numeric_series_or_none(series: pd.Series) -> pd.Series | None:
     PostgreSQL 动态列可能将同一指标读回为 ``float``、``int`` 或数值字符串。
     比较业务字段时应统一为数值，不能把 $3582.0$ 与 ``"3582"`` 误判为差异。
     """
+    # bool 可被 pandas 转成 0/1，但它是业务标志而不是连续数值；将其作为
+    # 数字相减会在 numpy 中触发 ``boolean subtract``，也会掩盖语义差异。
+    if pd.api.types.is_bool_dtype(series):
+        return None
     values = series.dropna()
+    if values.map(lambda value: isinstance(value, bool)).any():
+        return None
     if values.empty:
         return None
     numeric = pd.to_numeric(values, errors="coerce")
@@ -210,26 +216,30 @@ def compare_dataframes_by_key(
         left_value = matched[f"{column}__left"]
         right_value = matched[f"{column}__right"]
 
-        left_numeric = _numeric_series_or_none(left_value)
-        right_numeric = _numeric_series_or_none(right_value)
-        if left_numeric is not None and right_numeric is not None:
-            difference = (left_numeric - right_numeric).abs()
-            both_null = left_value.isna() & right_value.isna()
-            precision = (difference > 0) & (difference <= float_tolerance) & ~both_null
-            business = (difference > float_tolerance) & ~both_null
-            if precision.any():
-                result["precision_differences"][column] = {
-                    "count": int(precision.sum()),
-                    "max_abs_difference": float(difference[precision].max()),
-                }
+        is_date_column = "date" in column.lower() or column.casefold() in {"week_start", "week_end"}
+        # Timestamp 可以被 pandas 数值化为 epoch ns，而 Polars Date 转 pandas
+        # 后可能是 Python date。二者同一天却数值尺度不同，必须优先按自然日比较。
+        if is_date_column:
+            normalized_left = _normalize_key_series(left_value, column)
+            normalized_right = _normalize_key_series(right_value, column)
+            business = normalized_left != normalized_right
         else:
-            if "date" in column.lower() or column.casefold() in {"week_start", "week_end"}:
-                left_value = _normalize_key_series(left_value, column)
-                right_value = _normalize_key_series(right_value, column)
+            left_numeric = _numeric_series_or_none(left_value)
+            right_numeric = _numeric_series_or_none(right_value)
+            if left_numeric is not None and right_numeric is not None:
+                difference = (left_numeric - right_numeric).abs()
+                both_null = left_value.isna() & right_value.isna()
+                precision = (difference > 0) & (difference <= float_tolerance) & ~both_null
+                business = (difference > float_tolerance) & ~both_null
+                if precision.any():
+                    result["precision_differences"][column] = {
+                        "count": int(precision.sum()),
+                        "max_abs_difference": float(difference[precision].max()),
+                    }
             else:
                 left_value = left_value.astype("string").fillna("<NA>")
                 right_value = right_value.astype("string").fillna("<NA>")
-            business = left_value != right_value
+                business = left_value != right_value
 
         if business.any():
             samples = matched.loc[business, join_keys + [f"{column}__left", f"{column}__right"]]

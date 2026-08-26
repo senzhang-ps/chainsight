@@ -39,6 +39,7 @@ class _PandasBackend:
         self.layers: list[int] = []
         self.prepared = False
         self.result: dict = {}
+        self.last_plan_layer_demands: list[pd.DataFrame] = []
 
 
     _ID_COLUMNS = ("material", "location", "sending", "receiving", "sourcing")
@@ -605,6 +606,7 @@ class _PandasBackend:
     def plan_layers(self, day: pd.Timestamp, config: dict[str, pd.DataFrame], active: pd.DataFrame, routes: pd.DataFrame, priority: dict[str, int], available: pd.DataFrame, pools: pd.DataFrame, node_horizon: Optional[pd.DataFrame] = None, direct_demand: Optional[pd.DataFrame] = None) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
         """Propagate residual demand, reusing M5→M3 shared facts when available."""
         direct_parts: list[pd.DataFrame] = []; plan_parts: list[pd.DataFrame] = []; unfulfilled_parts: list[pd.DataFrame] = []
+        trace_demands: list[pd.DataFrame] = []
         gap = self.empty(["material", "node", "receiving", "demand_element", "demand_qty", "requirement_date", "orig_location"]); row_id = 0
         profile: list[dict[str, int]] = []
         for layer in self.layers:
@@ -634,6 +636,8 @@ class _PandasBackend:
             demand["priority"] = demand["demand_element"].map(priority).fillna(99).astype(int)
             demand["row_id"] = np.arange(row_id, row_id + len(demand)); row_id += len(demand)
             demand = self.round_routes(demand); demand = self.allocate_priority(demand, available.loc[:, ["material", "node", "qty"]]); demand = self.allocate_pipeline(demand, pools)
+            if getattr(self.owner, "capture_plan_trace", False):
+                trace_demands.append(demand.assign(plan_layer=layer).copy(deep=True))
             demand["residual_qty"] = (demand["planned_qty"] - demand["deployed_qty_invCon"] - demand["deploy_qty_with_plan_order"]).clip(lower=0).astype(np.int64)
             shortage = demand.loc[demand["residual_qty"].gt(0)]
             direct_by_element = direct.groupby("demand_element", sort=False).size().to_dict() if not direct.empty else {}
@@ -646,6 +650,7 @@ class _PandasBackend:
         direct_all = pd.concat(direct_parts, ignore_index=True, sort=False) if direct_parts else self.empty(["material", "node", "demand_element", "demand_qty"])
         unfulfilled = pd.concat(unfulfilled_parts, ignore_index=True, sort=False) if unfulfilled_parts else pd.DataFrame()
         self.last_plan_layer_profile = profile
+        self.last_plan_layer_demands = trace_demands
         return plan, direct_all, unfulfilled
 
     def empty_result(self):
@@ -711,7 +716,13 @@ def _allocate_priority_pandas(demand: pd.DataFrame, stock: pd.DataFrame) -> pd.D
 
 
 def _allocate_pipeline_pandas(demand: pd.DataFrame, pools: pd.DataFrame) -> pd.DataFrame:
-    """与原 ModuleFive 保持完全一致的 pandas 基线实现。"""
+    """按 legacy M5 的浮点顺序分配三类 pipeline 供给。
+
+    legacy 使用 ``floor(pool * (row_gap / total_gap))``。不可代数改写为
+    ``floor(pool * row_gap / total_gap)``：两者在数学上等价，但 IEEE-754
+    中间舍入不同；例如 $49 * (4 / 49)$ 为 ``3.9999999999999996``，legacy
+    会向下取整为 3。该行级残余会继续传播到上游调拨，故必须保留原运算顺序。
+    """
     result = demand.copy()
     for column in ("deploy_qty_with_plan_order", "deploy_from_in_transit", "deploy_from_open_deployment_inbound", "deploy_from_future_production"):
         result[column] = 0
@@ -731,7 +742,10 @@ def _allocate_pipeline_pandas(demand: pd.DataFrame, pools: pd.DataFrame) -> pd.D
         # 来源的用量错误扣到下一个来源，导致开放调拨/未来生产覆盖不足。
         available = pd.to_numeric(result[source], errors="coerce").fillna(0).clip(lower=0)
         need_total = remaining.where(candidate, 0).groupby([result["material"], result["node"]], sort=False).transform("sum")
-        ratio = (available.astype(float) * remaining.astype(float) / need_total.replace(0, np.nan)).fillna(0)
+        ratio = (
+            available.astype(float)
+            * (remaining.astype(float) / need_total.replace(0, np.nan))
+        ).fillna(0)
         shares = pd.Series(np.minimum(np.floor(ratio.to_numpy()).astype(np.int64), remaining.to_numpy()), index=result.index, dtype=np.int64).where(candidate, 0).astype(np.int64)
         result[output] = shares
     result["deploy_qty_with_plan_order"] = result[["deploy_from_in_transit", "deploy_from_open_deployment_inbound", "deploy_from_future_production"]].sum(axis=1)
@@ -1122,9 +1136,11 @@ class _PolarsBackend:
         for source, output in zip(sources, outputs[1:]):
             remaining = (pl.col("planned_qty") - pl.col("deployed_qty_invCon") - pl.sum_horizontal([pl.col(c) for c in outputs[1:]])).clip(lower_bound=0)
             candidate = pl.col("node") == pl.col("receiving"); total = pl.when(candidate).then(remaining).otherwise(0).sum().over(["material", "node"])
-            # 各 pipeline supply 为独立池；严格镜像 pandas：每次分配均从
-            # 当前来源的完整 pool 出发，而不能扣减前一来源的已分配量。
-            data = data.with_columns(pl.when(candidate).then(pl.min_horizontal([(pl.col(source).clip(lower_bound=0) * remaining / total.replace(0, None)).floor().fill_null(0).cast(pl.Int64), remaining.cast(pl.Int64)])).otherwise(0).alias(output))
+            # 保持 legacy IEEE-754 运算顺序：floor(pool * (gap / total))。
+            # 不能代数改写为 floor(pool * gap / total)：当 pool=total=49、
+            # gap=4 时，前者是 3.9999999999999996（floor=3），后者可能是
+            # 精确 4，从而吞掉本应向上游传播的 1 单位残余。
+            data = data.with_columns(pl.when(candidate).then(pl.min_horizontal([(pl.col(source).clip(lower_bound=0) * (remaining / total.replace(0, None))).floor().fill_null(0).cast(pl.Int64), remaining.cast(pl.Int64)])).otherwise(0).alias(output))
         data = data.with_columns(pl.sum_horizontal([pl.col(c) for c in outputs[1:]]).alias(outputs[0])).drop(list(sources))
         return cls._out(data) if pandas_boundary else data
 

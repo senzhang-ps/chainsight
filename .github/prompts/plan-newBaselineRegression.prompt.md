@@ -50,7 +50,7 @@
 - `src/core/run/db_runner.py` — 数据库配置加载和固定 schema 运行行为。
 - `tests/_compare_legacy_refactor_schema_runs.py` — 全量数据库业务审计。
 - `tests/_compare_config_schemas.py` — `cfg_*` schema 只读比较。
-- `tests/test_m1_two_way_compare.py` — M1 历史输出与 pandas/Polars 受控对比。
+- `tests/regression/test_m1_two_way_compare.py` — M1 历史输出与 pandas/Polars 受控对比。
 - `src/modules/demand_planning/backends.py` — M1 的订单生成、随机误差和日度拆分。
 
 ## 验证

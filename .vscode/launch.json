@@ -53,7 +53,7 @@
             "type": "debugpy",
             "request": "launch",
             "python": "C:\\Users\\lin.hn\\AppData\\Local\\miniforge3\\envs\\work\\python.exe",
-            "program": "${workspaceFolder}/tests/test_m4_refactor_integration.py",
+            "program": "${workspaceFolder}/tests/integration/test_m4_refactor_integration.py",
             "console": "integratedTerminal",
             "args": [
                 "--config", "${workspaceFolder}\\input\\OC\\OC_Paste_S1_20251224_extension\\OC_Paste_S1_20251224_repare.xlsx",

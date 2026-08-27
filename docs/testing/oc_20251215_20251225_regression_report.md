@@ -226,5 +226,5 @@ $env:FIXED_LEGACY_M1_DATABASE='test_bc'
 $env:FIXED_LEGACY_M1_SCHEMA='input'
 $env:FIXED_LEGACY_M1_RUN_ID='db_OC_Paste_S1_20251224_repare_20260826_130441'
 $env:FIXED_LEGACY_M1_REFACTOR_ENGINE='pandas'
-conda run --no-capture-output -n work pytest tests/test_fixed_legacy_m1_downstream_parity.py -s -q
+conda run --no-capture-output -n work pytest tests/regression/test_fixed_legacy_m1_downstream_parity.py -s -q
 ```
